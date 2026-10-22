@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -49,21 +50,188 @@ func TestChiadoDoesNotConfigureStaticPeers(t *testing.T) {
 	require.Empty(t, network.StaticPeers)
 }
 
-func TestChiadoConfiguresSuppliedBootstrapNodes(t *testing.T) {
-	network, _ := GetConfigsByNetwork(chainspec.ChiadoChainID)
+func TestGnosisNetworksUseConfiguredBlockRequestWindow(t *testing.T) {
+	gnosis := BeaconConfigs[chainspec.GnosisChainID]
+	chiado := BeaconConfigs[chainspec.ChiadoChainID]
+	require.Equal(t, uint64(33_024), gnosis.MinEpochsForBlockRequests())
+	require.Equal(t, uint64(33_024), chiado.MinEpochsForBlockRequests())
+}
 
-	require.Subset(t, network.BootNodes, []string{
-		"/ip4/57.131.40.177/tcp/9000/p2p/16Uiu2HAm6HQoX8sEJxr58GkuM9FPWkgLdCs71vz5qcu7hyisYRLS",
-		"/ip4/45.79.214.176/tcp/9000/p2p/16Uiu2HAm7jUXmkWrC5cTwSa9bVtzeAwUXu3MZZnhcsY5QTAiNmyL",
-		"/ip4/51.210.221.124/tcp/9500/p2p/16Uiu2HAmSnLLjZfkFCythED8tQS5kP4NJKBuMdd1FYE23ZymKwL6",
-		"/ip4/57.129.122.18/tcp/9000/p2p/16Uiu2HAmALSWURS5G4Qsmm7eFbH5oXxoFJEQuVdhAZ1MMcE9XjrU",
-		"/ip4/51.210.221.124/tcp/9100/p2p/16Uiu2HAmUhn8VR7HFY7SLPqbBhnTT1yfjKBJQKSodUkWsE5adNNu",
-		"/ip4/137.74.112.3/tcp/9000/p2p/16Uiu2HAm1merr7djndkMFf2TxacP53tA6rFoU4tXD5NNPGYz6RPa",
-		"/ip4/65.21.231.153/tcp/9009/p2p/16Uiu2HAm5tjLaFaGnEwtrB7sRynYs5VpE3hjT7G4tkKhTEU2pcaf",
-		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
-		"/ip4/139.144.16.95/tcp/9000/p2p/16Uiu2HAmH5pPnGrQEq7Q6McNA24ExRKRyaRzmJ44M1kAvvHYAeer",
-		"/ip4/65.109.101.48/tcp/9000/p2p/16Uiu2HAm98ceLNE6X3mjVcsu6ZAaKZPPcqKmeofidTDy7UCHyTtY",
-	})
+func TestGnosisNetworksUseConfiguredDataColumnRequestWindow(t *testing.T) {
+	for _, id := range []NetworkType{chainspec.GnosisChainID, chainspec.ChiadoChainID} {
+		cfg := BeaconConfigs[id]
+		require.Equal(t, uint64(16_384), cfg.MinEpochsForDataColumnSidecarsRequests, cfg.ConfigName)
+		currentSlot := (cfg.FuluForkEpoch + 20_000) * cfg.SlotsPerEpoch
+		require.Equal(t, (cfg.FuluForkEpoch+20_000-16_384)*cfg.SlotsPerEpoch, cfg.DataColumnSidecarServeRangeStartSlot(currentSlot), cfg.ConfigName)
+	}
+}
+
+func TestAttestationDueMs(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		config    BeaconChainConfig
+		preGloas  uint64
+		postGloas uint64
+	}{
+		{name: "mainnet", config: MainnetBeaconConfig, preGloas: 3999, postGloas: 3000},
+		{name: "6 second slots", config: BeaconChainConfig{SecondsPerSlot: 6}, preGloas: 1999, postGloas: 1500},
+		{name: "gnosis", config: BeaconConfigs[chainspec.GnosisChainID], preGloas: 1666, postGloas: 1250},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.preGloas, test.config.AttestationDueMs(false))
+			require.Equal(t, test.postGloas, test.config.AttestationDueMs(true))
+		})
+	}
+}
+
+func TestCustomConfigReadsMaxPayloadSize(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MAX_PAYLOAD_SIZE: 20971520\n"), 0o644))
+
+	_, networkCfg, err := CustomConfig(configPath)
+	require.NoError(t, err)
+	require.Equal(t, uint64(20_971_520), networkCfg.GossipMaxSize)
+}
+
+func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
+	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
+	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MIN_EPOCHS_FOR_BLOCK_REQUESTS: 12345\n"), 0o644))
+
+	beaconCfg, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigBoundsMaxCommitteesPerSlot(t *testing.T) {
+	for _, test := range []struct {
+		committees uint64
+		wantErr    bool
+	}{
+		{committees: 64},
+		{committees: 65, wantErr: true},
+		{committees: 72, wantErr: true},
+	} {
+		t.Run(fmt.Sprint(test.committees), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			yamlContent := fmt.Sprintf("MAX_COMMITTEES_PER_SLOT: %d\n", test.committees)
+			require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if test.wantErr {
+				require.EqualError(t, err, fmt.Sprintf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > 64", test.committees))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.committees, beaconCfg.MaxCommitteesPerSlot)
+		})
+	}
+}
+
+func TestCustomConfigGasLimitSchedule(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`GLOAS_FORK_EPOCH: 10
+GAS_LIMIT_SCHEDULE:
+  - EPOCH: 20
+    GAS_LIMIT: 200000000
+  - EPOCH: 12
+    GAS_LIMIT: 100000000
+`), 0o644))
+	config, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		epoch    uint64
+		gasLimit uint64
+		active   bool
+	}{
+		{epoch: 9},
+		{epoch: 10},
+		{epoch: 11},
+		{epoch: 12, gasLimit: 100_000_000, active: true},
+		{epoch: 19, gasLimit: 100_000_000, active: true},
+		{epoch: 20, gasLimit: 200_000_000, active: true},
+		{epoch: 21, gasLimit: 200_000_000, active: true},
+	} {
+		gasLimit, active := config.GetScheduledGasLimit(test.epoch)
+		require.Equal(t, test.active, active, "epoch %d", test.epoch)
+		require.Equal(t, test.gasLimit, gasLimit, "epoch %d", test.epoch)
+	}
+}
+
+func TestScheduledGasLimitIsInactiveBeforeGloas(t *testing.T) {
+	config := BeaconChainConfig{
+		GloasForkEpoch: 10,
+		GasLimitSchedule: []GasLimitScheduleEntry{
+			{Epoch: 9, GasLimit: 60_000_000},
+		},
+	}
+
+	gasLimit, active := config.GetScheduledGasLimit(9)
+
+	require.False(t, active)
+	require.Zero(t, gasLimit)
+}
+
+func TestBlobSidecarServeRangeStartSlotUsesEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: 4_096,
+	}
+
+	require.Equal(t, uint64(9_984), cfg.BlobSidecarServeRangeStartSlot(141_087))
+}
+
+func TestBlobSidecarServeRangeStartSlotDoesNotCrossDenebFork(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: 4,
+		DenebForkEpoch:                   10,
+	}
+
+	tests := []struct {
+		name         string
+		currentEpoch uint64
+		wantEpoch    uint64
+	}{
+		{name: "before Deneb", currentEpoch: 9, wantEpoch: 0},
+		{name: "at Deneb", currentEpoch: 10, wantEpoch: 10},
+		{name: "after Deneb", currentEpoch: 11, wantEpoch: 10},
+		{name: "window reaches Deneb", currentEpoch: 14, wantEpoch: 10},
+		{name: "window starts after Deneb", currentEpoch: 15, wantEpoch: 11},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.wantEpoch*cfg.SlotsPerEpoch, cfg.BlobSidecarServeRangeStartSlot(test.currentEpoch*cfg.SlotsPerEpoch))
+		})
+	}
+}
+
+func TestBlobSidecarServeRangeStartSlotHandlesShortAndInvalidChains(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: math.MaxUint64,
+	}
+
+	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(141_087))
+	cfg.SlotsPerEpoch = 0
+	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(math.MaxUint64))
+}
+
+func TestDataColumnSidecarServeRangeStartSlotUsesFuluEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                          16,
+		FuluForkEpoch:                          100,
+		MinEpochsForDataColumnSidecarsRequests: 4_096,
+	}
+
+	require.Zero(t, cfg.DataColumnSidecarServeRangeStartSlot(99*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(100*16), cfg.DataColumnSidecarServeRangeStartSlot(100*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(904*16), cfg.DataColumnSidecarServeRangeStartSlot(5_000*cfg.SlotsPerEpoch+15))
 }
 
 func TestCaplinConfigCanSetStaticPeers(t *testing.T) {

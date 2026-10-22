@@ -19,6 +19,7 @@ package state
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -60,6 +61,15 @@ func (cr *CachedReader) ReadAccountData(address accounts.Address) (*accounts.Acc
 	return a, nil
 }
 
+func (cr *CachedReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (cr *CachedReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := cr.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 // ReadAccountDataForDebug is called when an account needs to be fetched from the state
 func (cr *CachedReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return cr.ReadAccountData(address)
@@ -84,17 +94,6 @@ func (cr *CachedReader) ReadAccountStorage(address accounts.Address, key account
 		cr.cache.SetStorageRead(addrValue[:], 1, keyValue[:], v.Bytes())
 	}
 	return v, ok, nil
-}
-
-func (cr *CachedReader) HasStorage(address accounts.Address) (bool, error) {
-	// note: theoretically we could try to use the cache here using cr.cache.StorageTree
-	// to traverse the cached storage, however that will be only useful in case of a
-	// collision (ie creating an account which already has storage as per eip-7610) which
-	// in reality is very rare; for all the other most likely situations in which we query
-	// if an account has storage (and that account is newly created and doesn't have storage)
-	// the cache will say that there is no known storage in which case we will still need to
-	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
-	return cr.r.HasStorage(address)
 }
 
 // ReadAccountCode is called when code of an account needs to be fetched from the state

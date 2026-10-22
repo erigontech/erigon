@@ -219,7 +219,8 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		return err
 	}
 	// Capella
-	return b.init()
+	b.init()
+	return nil
 }
 
 // SSZ size of the Beacon State

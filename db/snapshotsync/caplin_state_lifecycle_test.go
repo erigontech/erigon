@@ -17,12 +17,15 @@
 package snapshotsync
 
 import (
+	"fmt"
+	"math"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -47,10 +50,27 @@ func openTestCaplinStateSnapshotsWithTables(t *testing.T, dirs datadir.Dirs, tab
 	for _, table := range tables {
 		types.KeyValueGetters[table] = nil
 	}
-	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, types, logger)
 	t.Cleanup(s.Close)
 	require.NoError(t, s.OpenFolder())
 	return s
+}
+
+func openTestCaplinStateSnapshotsWithTypes(t *testing.T, dirs datadir.Dirs, types SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+	t.Helper()
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, types, logger)
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+	return s
+}
+
+func writeCaplinStateFixturesWithoutPtcWindowEpoch(t *testing.T, dirs datadir.Dirs, logger log.Logger) {
+	t.Helper()
+	for table := range MakeCaplinStateSnapshotsTypes(nil, nil).KeyValueGetters {
+		if table != kv.PtcWindowEpochTable {
+			writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+		}
+	}
 }
 
 func TestCaplinStateViewPinsVisibleSegments(t *testing.T) {
@@ -129,7 +149,17 @@ func TestCaplinStateBlocksAvailableUsesLowestTable(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PendingDepositsDump, 0, 100_000, logger)
 
 	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
-	require.Equal(t, uint64(50_000), s.BlocksAvailable())
+	available := s.BlocksAvailable()
+	require.Equal(t, uint64(49_999), available)
+
+	// Consumers read slots up to and including BlocksAvailable, so every table needs a visible
+	// segment covering it.
+	view := s.View()
+	defer view.Close()
+	for _, table := range tables {
+		_, ok := view.VisibleSegment(available, table)
+		require.True(t, ok, "table %s has no segment for BlocksAvailable()=%d", table, available)
+	}
 }
 
 func TestCaplinStateBlocksAvailableZeroWhenTableHasNoSegments(t *testing.T) {
@@ -192,6 +222,102 @@ func TestCaplinStateBlocksAvailableMainnetPublishedSubset(t *testing.T) {
 	require.Equal(t, uint64(0), s.BlocksAvailable())
 }
 
+func TestCaplinStateBlocksAvailableIgnoresLegacyPtcWindow(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	types := MakeCaplinStateSnapshotsTypes(nil, nil)
+	tables := make([]string, 0, len(types.KeyValueGetters))
+	for table := range types.KeyValueGetters {
+		tables = append(tables, table)
+		if table != kv.PtcWindowEpochTable {
+			writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+		}
+	}
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PtcWindowTable, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.Zero(t, s.BlocksAvailable())
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PtcWindowEpochTable, 0, 50_000, logger)
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, uint64(49_999), s.BlocksAvailable())
+}
+
+func TestCaplinStateBlocksAvailableBeforeUnscheduledGloasFork(t *testing.T) {
+	for _, gloasForkEpoch := range []uint64{math.MaxUint64, 1 << 59} {
+		t.Run(fmt.Sprintf("epoch_%d", gloasForkEpoch), func(t *testing.T) {
+			logger := log.New()
+			dirs := datadir.New(t.TempDir())
+			writeCaplinStateFixturesWithoutPtcWindowEpoch(t, dirs, logger)
+
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SlotsPerEpoch = 32
+			cfg.GloasForkEpoch = gloasForkEpoch
+			types := MakeCaplinStateSnapshotsTypes(nil, &cfg)
+			s := openTestCaplinStateSnapshotsWithTypes(t, dirs, types, logger)
+
+			require.Equal(t, uint64(49_999), s.BlocksAvailable())
+		})
+	}
+}
+
+func TestCaplinStateBlocksAvailableAtGloasFork(t *testing.T) {
+	tests := []struct {
+		name     string
+		ptcFiles []Range
+		want     uint64
+	}{
+		{name: "no files", want: 19_999},
+		{name: "files before fork", ptcFiles: []Range{{from: 0, to: 10_000}}, want: 19_999},
+		{name: "files past fork", ptcFiles: []Range{{from: 0, to: 10_000}, {from: 10_000, to: 30_000}}, want: 29_999},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			logger := log.New()
+			dirs := datadir.New(t.TempDir())
+			writeCaplinStateFixturesWithoutPtcWindowEpoch(t, dirs, logger)
+			for _, r := range test.ptcFiles {
+				writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PtcWindowEpochTable, r.from, r.to, logger)
+			}
+
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SlotsPerEpoch = 32
+			cfg.GloasForkEpoch = 625
+			types := MakeCaplinStateSnapshotsTypes(nil, &cfg)
+			s := openTestCaplinStateSnapshotsWithTypes(t, dirs, types, logger)
+
+			require.Equal(t, test.want, s.BlocksAvailable())
+		})
+	}
+}
+
+func TestCaplinStateBlocksAvailableRequiresPtcWindowEpochFromGenesis(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *clparams.BeaconChainConfig
+	}{
+		{name: "nil config"},
+		{name: "genesis fork", cfg: func() *clparams.BeaconChainConfig {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SlotsPerEpoch = 32
+			cfg.GloasForkEpoch = 0
+			return &cfg
+		}()},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			logger := log.New()
+			dirs := datadir.New(t.TempDir())
+			writeCaplinStateFixturesWithoutPtcWindowEpoch(t, dirs, logger)
+
+			types := MakeCaplinStateSnapshotsTypes(nil, test.cfg)
+			s := openTestCaplinStateSnapshotsWithTypes(t, dirs, types, logger)
+
+			require.Zero(t, s.BlocksAvailable())
+		})
+	}
+}
+
 func TestCaplinStateSegFileNamesReturnsExistingAbsolutePaths(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -212,7 +338,7 @@ func TestCaplinStateSegFileNamesReturnsExistingAbsolutePaths(t *testing.T) {
 func TestNewCaplinStateSnapshotsPanicsForEmptyTypes(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.PanicsWithValue(t, "caplin state snapshot KeyValueGetters is empty", func() {
-		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, SnapshotTypes{}, log.New())
+		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, SnapshotTypes{}, log.New())
 	})
 }
 
@@ -220,7 +346,7 @@ func TestNewCaplinStateSnapshotsPanicsForUnknownType(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	types := SnapshotTypes{KeyValueGetters: map[string]KeyValueGetter{"unknown-state-table": nil}}
 	require.PanicsWithValue(t, `caplin state snapshot type "unknown-state-table" is not registered`, func() {
-		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, log.New())
+		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, types, log.New())
 	})
 }
 
@@ -248,7 +374,7 @@ func TestCaplinStateBlocksAvailableStopsAtGap(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.Equal(t, uint64(50_000), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
+	require.Equal(t, uint64(49_999), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
 	require.Equal(t, uint64(49_999), s.SegmentsMax())
 	require.Equal(t, uint64(49_999), s.BlocksAvailable())
 }

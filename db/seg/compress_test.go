@@ -18,6 +18,7 @@ package seg
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -358,7 +359,8 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	}
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
-		words = append(words,
+		words = append(
+			words,
 			nil,
 			[]byte{},
 
@@ -454,4 +456,84 @@ func TestCompressorCloseReleasesWorkers(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close() returned while pattern workers are still running")
 	}
+}
+
+// newCompressorWithStoppedWorkers returns a compressor whose context is already cancelled and
+// whose pattern workers have exited, so nothing reads the superstrings channel any more.
+// It is not closed on test failure: Close would close the channel under a still-blocked sender.
+func newCompressorWithStoppedWorkers(t *testing.T) *Compressor {
+	t.Helper()
+	tmpDir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	cfg := DefaultCfg
+	cfg.SamplingFactor = 1
+	c, err := NewCompressor(ctx, t.Name(), filepath.Join(tmpDir, "compressed"), tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			c.Close()
+		}
+	})
+	c.superstringLimit = 1000
+
+	cancel()
+	c.wg.Wait()
+	return c
+}
+
+func requireReturnsWithin(t *testing.T, timeout time.Duration, f func() error) error {
+	t.Helper()
+	errCh := make(chan error, 1)
+	go func() { errCh <- f() }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(timeout):
+		t.Fatal("blocked after context cancel")
+		return nil
+	}
+}
+
+func TestCompressorAddWordReturnsAfterCancel(t *testing.T) {
+	c := newCompressorWithStoppedWorkers(t)
+	word := bytes.Repeat([]byte{'a'}, 100)
+
+	err := requireReturnsWithin(t, 10*time.Second, func() error {
+		for range 2048 {
+			if err := c.AddWord(word); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestCompressorCompressReturnsAfterCancel(t *testing.T) {
+	c := newCompressorWithStoppedWorkers(t)
+	for len(c.superstrings) < cap(c.superstrings) {
+		c.superstrings <- []uint16{1}
+	}
+	c.superstring = []uint16{1}
+
+	err := requireReturnsWithin(t, 10*time.Second, c.Compress)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestParseFileCompression(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want FileCompression
+	}{
+		{"none", CompressNone},
+		{"k", CompressKeys},
+		{"v", CompressVals},
+		{"kv", CompressKeys | CompressVals},
+	} {
+		got, err := ParseFileCompression(tc.in)
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "%q", tc.in)
+	}
+	_, err := ParseFileCompression("zstd")
+	require.Error(t, err)
 }

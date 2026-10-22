@@ -21,11 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -127,6 +129,9 @@ const balFetchShardingThreshold = 16
 // has it. The loop stops once covered or when a full-remainder round makes no
 // progress, which proves no connected peer can serve the rest.
 func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash]*types.BlockAccessListSidecar {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var mu sync.Mutex
 	out := make(map[common.Hash]*types.BlockAccessListSidecar, len(reqs))
 	if len(peerIds) == 0 {
 		return out
@@ -139,28 +144,33 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 		if shardedFetch {
 			workers = shards
 		}
-		results := make([]map[common.Hash]*types.BlockAccessListSidecar, workers)
 		var eg errgroup.Group
 		eg.SetLimit(maxParallel)
-		for i := 0; i < workers; i++ {
+		for i := 0; i < workers && ctx.Err() == nil; i++ {
 			slice := remaining
 			if shardedFetch {
 				slice = remaining[i*len(remaining)/shards : (i+1)*len(remaining)/shards]
 			}
 			peerId := peerIds[(i+round)%len(peerIds)]
 			eg.Go(func() error {
-				results[i] = fetch(ctx, slice, &peerId)
+				if ctx.Err() != nil {
+					return nil
+				}
+				got := fetch(ctx, slice, &peerId)
+				mu.Lock()
+				defer mu.Unlock()
+				for hash, bal := range got {
+					if _, ok := out[hash]; !ok {
+						out[hash] = bal
+					}
+				}
+				if len(out) == len(reqs) {
+					cancel()
+				}
 				return nil
 			})
 		}
 		_ = eg.Wait()
-		for _, got := range results {
-			for hash, bal := range got {
-				if _, ok := out[hash]; !ok {
-					out[hash] = bal
-				}
-			}
-		}
 		next := make([]BALRequest, 0, len(remaining))
 		for _, r := range remaining {
 			if _, ok := out[r.Hash]; !ok {
@@ -227,24 +237,19 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 				continue
 			}
 		}
-		bal, err := types.DecodeBlockAccessListSidecarOwned(entry)
-		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
-			continue
-		}
-		hash, err := bal.Hash()
-		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d could not hash BAL: %w", ErrBadBALResponse, i, err)
-			continue
-		}
+		hash := crypto.Keccak256Hash(entry)
 		if hash != expected {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
-		if err = bal.ValidateForBlock(reqs[i].GasLimit); err != nil {
+		bal, err := types.DecodeBlockAccessListSidecarForHeader(entry, reqs[i].GasLimit)
+		if err != nil {
+			badPeer = true
+			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
+			continue
+		}
+		if err = bal.ValidateForHeader(reqs[i].GasLimit); err != nil {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d returned invalid BAL: %w", ErrBadBALResponse, i, err)
 			continue

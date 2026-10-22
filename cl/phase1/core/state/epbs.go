@@ -64,54 +64,58 @@ func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig 
 	return withdrawalCredentials[0] == byte(beaconConfig.BuilderWithdrawalPrefix)
 }
 
-// IsValidIndexedPayloadAttestation checks if the indexed payload attestation is valid.
-// It verifies that:
-// - Indices are non-empty and sorted
-// - The aggregate signature is valid
-func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (bool, error) {
+func IndexedPayloadAttestationSignatureSet(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (signature, signingRoot, aggregatePublicKey []byte, err error) {
 	indices := attestation.AttestingIndices
 	if indices.Length() == 0 || !solid.IsUint64Sorted(indices) {
-		return false, errors.New("isValidIndexedPayloadAttestation: attesting indices are empty or not sorted")
+		return nil, nil, nil, errors.New("indexedPayloadAttestationSignatureSet: attesting indices are empty or not sorted")
 	}
 
-	// Collect public keys from validators
 	pks := make([][]byte, 0, indices.Length())
-	indices.Range(func(_ int, idx uint64, _ int) bool {
-		val, err := s.ValidatorForValidatorIndex(int(idx))
+	for i := range indices.Length() {
+		val, err := s.ValidatorForValidatorIndex(int(indices.Get(i)))
 		if err != nil {
-			return false
+			return nil, nil, nil, fmt.Errorf("indexedPayloadAttestationSignatureSet: failed to get validator public key: %w", err)
 		}
-		pk := val.PublicKeyBytes()
-		pks = append(pks, pk)
-		return true
-	})
-	if len(pks) != indices.Length() {
-		return false, errors.New("isValidIndexedPayloadAttestation: failed to get all validator public keys")
+		pks = append(pks, val.PublicKeyBytes())
 	}
 
-	// Get domain for PTC attester
 	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)
 	domain, err := s.GetDomain(s.BeaconConfig().DomainPtcAttester, epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %w", err)
+		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
-	// Compute signing root
-	signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
+	root, err := fork.ComputeSigningRoot(attestation.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %w", err)
+		return nil, nil, nil, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
-	// Verify aggregate signature
-	valid, err := bls.VerifyAggregate(attestation.Signature[:], signingRoot[:], pks)
+	aggregate, err := bls.AggregatePublickKeys(pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %w", err)
-	}
-	if !valid {
-		return false, errors.New("invalid aggregate signature")
+		return nil, nil, nil, fmt.Errorf("unable to aggregate public keys: %w", err)
 	}
 
-	return true, nil
+	return attestation.Signature[:], root[:], aggregate, nil
+}
+
+func ExecutionPayloadBidSignatureSet(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (signature, signingRoot, publicKey []byte, err error) {
+	builders := s.GetBuilders()
+	if builders == nil || signedBid.Message.BuilderIndex >= uint64(builders.Len()) {
+		return nil, nil, nil, fmt.Errorf("builder index %d out of range", signedBid.Message.BuilderIndex)
+	}
+	builder := builders.Get(int(signedBid.Message.BuilderIndex))
+
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, Epoch(s))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	root, err := fork.ComputeSigningRoot(signedBid.Message, domain)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return signedBid.Signature[:], root[:], builder.Pubkey[:], nil
 }
 
 // CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
@@ -145,14 +149,13 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 
 func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
 	cfg := s.BeaconConfig()
-	if epoch < cfg.MinSeedLookahead {
-		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	if epoch <= cfg.MinSeedLookahead {
+		if s.Slot() == 0 {
+			return s.BlockRoot()
+		}
+		return s.GetBlockRootAtSlot(0)
 	}
-	dependentEpoch := epoch - cfg.MinSeedLookahead
-	if dependentEpoch == 0 {
-		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
-	}
-	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	dependentSlot := (epoch-cfg.MinSeedLookahead)*cfg.SlotsPerEpoch - 1
 	return s.GetBlockRootAtSlot(dependentSlot)
 }
 

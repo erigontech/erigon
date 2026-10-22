@@ -18,7 +18,9 @@ package blob_storage
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -181,6 +183,7 @@ func TestBucketStorePruneBelowPropagatesReaddirError(t *testing.T) {
 	b := newBucketStore(t, fs)
 
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), ErrPruneNotStarted)
+	require.Zero(t, b.pruneFloor)
 }
 
 func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
@@ -192,6 +195,19 @@ func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), errInducedFailure)
 
 	require.Equal(t, []string{"1", "3"}, rootEntryNames(t, fs))
+}
+
+func TestBucketStoreLowerPruneRetriesTheEstablishedFloor(t *testing.T) {
+	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
+	fs.failOn["1"] = errInducedFailure
+	b := newBucketStore(t, fs)
+	makeBuckets(t, fs, "0", "1", "2")
+	require.ErrorIs(t, b.pruneBelow(2*subdivisionSlot), errInducedFailure)
+	require.Equal(t, []string{"1", "2"}, rootEntryNames(t, fs))
+
+	delete(fs.failOn, "1")
+	require.NoError(t, b.pruneBelow(subdivisionSlot))
+	require.Equal(t, []string{"2"}, rootEntryNames(t, fs))
 }
 
 func TestBucketStorePruneBelowRemovesEachExpiredBucketOnce(t *testing.T) {
@@ -492,10 +508,9 @@ func TestBucketStoreFailedSyncLeavesNothingBehind(t *testing.T) {
 	require.False(t, tmpExists)
 }
 
-func TestFacadePruneBlocksAWriteIntoTheBucketItRemoves(t *testing.T) {
-	const removeAllDelay = 150 * time.Millisecond
-
-	fs := newCountingFs(newSlowFs(afero.NewMemMapFs(), removeAllDelay))
+func TestFacadePruneRejectsAWriteIntoTheBucketItRemoves(t *testing.T) {
+	fs := newPruneRaceFs(afero.NewMemMapFs())
+	fs.removePath = "0"
 	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 	require.NoError(t, fs.MkdirAll("0", 0o755))
 
@@ -505,21 +520,19 @@ func TestFacadePruneBlocksAWriteIntoTheBucketItRemoves(t *testing.T) {
 
 	pruneDone := make(chan error, 1)
 	go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
-	require.Eventually(t, func() bool { return fs.count(opRemoveAll) > 0 }, time.Second, time.Millisecond)
+	<-fs.removeEntered
 
-	streamStarted := time.Now()
 	var streamed bytes.Buffer
 	require.NoError(t, storage.WriteStream(&streamed, liveSlot, liveRoot, 0))
-	require.Less(t, time.Since(streamStarted), removeAllDelay/2)
 
-	liveStarted := time.Now()
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{2}, 0, createTestDataColumnSidecar(liveSlot+1, 0)))
-	require.Less(t, time.Since(liveStarted), removeAllDelay/2)
 
-	prunedStarted := time.Now()
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{3}, 0, createTestDataColumnSidecar(1, 0)))
-	require.GreaterOrEqual(t, time.Since(prunedStarted), removeAllDelay/2)
+	prunedWriteExists, err := storage.ColumnSidecarExists(t.Context(), 1, common.Hash{3}, 0)
+	require.NoError(t, err)
+	require.False(t, prunedWriteExists)
 
+	close(fs.removeRelease)
 	require.NoError(t, <-pruneDone)
 }
 
@@ -776,4 +789,76 @@ func TestBucketStoreWriteSurfacesAShortWriteFromTheFinalFlush(t *testing.T) {
 	exists, err := afero.Exists(fs, file)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Zero(t, slot)
+
+	makeBuckets(t, fs, "1/sub", "2", "3", "5", "07")
+	require.NoError(t, afero.WriteFile(fs, "2/root_0"+tmpSuffix, []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "3/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "5/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
+
+	slot, err = b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(3*subdivisionSlot), slot)
+}
+
+func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+
+	makeBuckets(t, fs, "4")
+	for i := range 3 * listBatch {
+		require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("4/a_%03d%s", i, tmpSuffix), []byte{1}, 0o644))
+	}
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Zero(t, slot)
+
+	require.NoError(t, afero.WriteFile(fs, "4/z_0", []byte{1}, 0o644))
+	slot, err = b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(4*subdivisionSlot), slot)
+}
+
+type openFailingFs struct {
+	afero.Fs
+	name string
+}
+
+func (f openFailingFs) Open(name string) (afero.File, error) {
+	if name == f.name {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Open(name)
+}
+
+func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "2", "3")
+	require.NoError(t, afero.WriteFile(mem, "2/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "2"})
+
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(3*subdivisionSlot), slot)
+}
+
+func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "3")
+	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "3"})
+
+	_, err := b.EarliestStoredSlot()
+	require.ErrorIs(t, err, os.ErrPermission)
 }

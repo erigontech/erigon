@@ -83,22 +83,32 @@ type stEnvMarshaling struct {
 
 func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
 	stateReader, stateWriter := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	statedb := state.New(stateReader) //ibs
+	statedb := state.New(stateReader) // ibs
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)
-		statedb.SetCode(addr, account.Code, tracing.CodeChangeGenesis)
-		statedb.SetNonce(addr, account.Nonce, tracing.NonceChangeGenesis)
+		if err := statedb.SetCode(addr, account.Code, tracing.CodeChangeGenesis); err != nil {
+			panic(err)
+		}
+		if err := statedb.SetNonce(addr, account.Nonce, tracing.NonceChangeGenesis); err != nil {
+			panic(err)
+		}
 		var balance uint256.Int
 		_ = balance.SetFromBig(account.Balance)
-		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
+		if err := statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance); err != nil {
+			panic(err)
+		}
 		for k, v := range account.Storage {
 			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v[:])
-			statedb.SetState(addr, key, *val)
+			if err := statedb.SetState(addr, key, *val); err != nil {
+				panic(err)
+			}
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			if err := statedb.SetIncarnation(addr, state.FirstContractIncarnation); err != nil {
+				panic(err)
+			}
 		}
 	}
 	// Commit and re-open to start with a clean state. EIP-161 is disabled here
@@ -120,7 +130,8 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 // parent timestamp + difficulty.
 // Note: this method only works for ethash engine.
 func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64,
-	parentDifficulty uint256.Int, parentUncleHash common.Hash) *uint256.Int {
+	parentDifficulty uint256.Int, parentUncleHash common.Hash,
+) *uint256.Int {
 	uncleHash := parentUncleHash
 	if uncleHash == (common.Hash{}) {
 		uncleHash = empty.UncleHash

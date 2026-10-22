@@ -20,17 +20,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -38,7 +40,12 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -64,11 +71,98 @@ func TestSetupEVMTimeoutCancelsEVMStoredAfterExpiry(t *testing.T) {
 	require.True(t, evm.Cancelled())
 }
 
+func newCallManyApisForTest(m *execmoduletester.ExecModuleTester) (*APIImpl, *DebugAPIImpl) {
+	baseApi := newBaseApiForTest(m)
+	return newEthApiForTest(baseApi, m.DB, nil, nil),
+		NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+}
+
+// A state context carrying neither a block number nor a block hash is what a caller
+// sends by omitting "blockNumber" or by misspelling it.
+func TestCallManyRejectsStateContextWithoutBlockSelector(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, debugApi := newCallManyApisForTest(m)
+	ctx := context.Background()
+	var invalidParams *rpc.InvalidParamsError
+
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{}, nil, nil)
+		require.ErrorAs(t, err, &invalidParams)
+	})
+
+	t.Run("debug_traceCallMany", func(t *testing.T) {
+		err := debugApi.TraceCallMany(ctx, nil, StateContext{}, nil, jsonstream.New(io.Discard))
+		require.ErrorAs(t, err, &invalidParams)
+	})
+}
+
+// The funded account spends most of its balance in block 1, so the call is only
+// covered if block 0 is answered from genesis state.
+func TestCallManyAtGenesisReadsGenesisState(t *testing.T) {
+	const (
+		genesisBalance = 1_000_000_000_000_000_000
+		spent          = 900_000_000_000_000_000
+		transferred    = 500_000_000_000_000_000
+	)
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config:     chain.TestChainBerlinConfig,
+			Alloc:      types.GenesisAlloc{testAddr: {Balance: big.NewInt(genesisBalance)}},
+			Difficulty: uint256.NewInt(1),
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{1},
+			uint256.NewInt(spent), params.TxGas, nil, nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	to := common.Address{2}
+	args := ethapi.CallArgs{From: &testAddr, To: &to, Value: (*hexutil.U256)(uint256.NewInt(transferred))}
+	api, _ := newCallManyApisForTest(m)
+
+	res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{args}}},
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(0)}, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Len(t, res[0], 1)
+	require.NotContains(t, res[0][0], "error")
+}
+
+// A hash selector must answer for the same state as the number it resolves to.
+func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	ctx := context.Background()
+
+	target := chain.Blocks[len(chain.Blocks)-1]
+	to := common.Address{3}
+	gas := hexutil.Uint64(21_000)
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{{
+		From: &m.Address, To: &to, Gas: &gas, Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}}}}
+
+	byNumber, err := api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(target.NumberU64()))}, nil, nil)
+	require.NoError(t, err)
+
+	byHash, err := api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithHash(target.Hash(), false)}, nil, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, byNumber, byHash)
+	require.NotContains(t, byNumber[0][0], "error")
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	baseApi := newBaseApiForTest(m)
-	api := newEthApiForTest(baseApi, m.DB, nil, nil)
-	debugApi := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	api, debugApi := newCallManyApisForTest(m)
 	ctx := context.Background()
 
 	txIndex := -1
@@ -83,7 +177,7 @@ func TestCallManyEmptyBundles(t *testing.T) {
 		require.EqualError(t, err, "empty bundles", name)
 
 		var buf bytes.Buffer
-		stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		stream := jsonstream.New(&buf)
 		err = debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, stream)
 		require.EqualError(t, err, "empty bundles", name)
 	}
@@ -106,7 +200,6 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &types.Genesis{
-			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -129,7 +222,7 @@ func TestCallMany(t *testing.T) {
 	hexBytes, _ = hex.DecodeString(transferAddr2)
 	transferCallData := hexutil.Bytes(hexBytes)
 
-	//submit 3 Transactions and commit the results
+	// submit 3 Transactions and commit the results
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)
@@ -138,8 +231,10 @@ func TestCallMany(t *testing.T) {
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
-	tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
-	tokenContract.Transfer(transactOpts2, address1, big.NewInt(100))
+	_, err := tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
+	require.NoError(t, err)
+	_, err = tokenContract.Transfer(transactOpts2, address1, big.NewInt(100))
+	require.NoError(t, err)
 	contractBackend.Commit()
 
 	// set up the callargs
@@ -150,27 +245,28 @@ func TestCallMany(t *testing.T) {
 	engine := contractBackend.Engine()
 	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
 
-	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &balanceCallAddr1,
+	callArgAddr1 := ethapi.CallArgs{
+		From: &address, To: &tokenAddr, Nonce: &nonce,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &balanceCallAddr1,
 	}
-	callArgAddr2 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &secondNonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &balanceCallAddr2,
+	callArgAddr2 := ethapi.CallArgs{
+		From: &address, To: &tokenAddr, Nonce: &secondNonce,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &balanceCallAddr2,
 	}
 
-	callArgTransferAddr2 := ethapi.CallArgs{From: &address2, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &transferCallData,
+	callArgTransferAddr2 := ethapi.CallArgs{
+		From: &address2, To: &tokenAddr, Nonce: &nonce,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &transferCallData,
 	}
 
 	timeout := int64(50000)
 	txIndex := -1
 	res, err := api.CallMany(ctx, []Bundle{{
-		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
+		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2},
+	}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -183,7 +279,6 @@ func TestCallMany(t *testing.T) {
 		t.Errorf("eth_callMany: %v", err)
 	}
 	addr2Balance, err := strconv.ParseInt(addr2CalRet, 16, 64)
-
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -193,7 +288,8 @@ func TestCallMany(t *testing.T) {
 
 	txIndex = 2
 	res, err = api.CallMany(ctx, []Bundle{{
-		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &txIndex}, nil, &timeout)
+		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2},
+	}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -232,4 +328,115 @@ func TestCallMany(t *testing.T) {
 	if addr1Balance != 100 || addr2Balance != 0 {
 		t.Errorf("eth_callMany: %s", "balanceUnmatch")
 	}
+}
+
+// countingWriter counts the transport writes a stream makes, and can fail one.
+type countingWriter struct {
+	writes int
+	failAt int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.failAt > 0 && w.writes >= w.failAt {
+		return 0, errors.New("client stopped reading")
+	}
+	return len(p), nil
+}
+
+// TestTraceCallManyStreamsEachResult pins that a custom tracer's result reaches
+// the transport as each call finishes, rather than being held until the whole
+// bundle is traced, and that a transport error surfaces to the caller.
+func TestTraceCallManyStreamsEachResult(t *testing.T) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Alloc:    types.GenesisAlloc{address: {Balance: big.NewInt(9000000000000000000)}},
+		GasLimit: 10000000,
+	}
+
+	contractBackend := backends.NewSimulatedBackend(t, gspec.Alloc, gspec.GasLimit)
+	defer contractBackend.Close()
+	contractBackend.Commit()
+
+	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), contractBackend.BlockReader(), contractBackend.Engine(), &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())})
+	debugApi := NewPrivateDebugAPI(baseApi, contractBackend.DB(), nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+
+	calls := make([]ethapi.CallArgs, 4)
+	for i := range calls {
+		nonce := hexutil.Uint64(i)
+		to := address
+		calls[i] = ethapi.CallArgs{
+			From: &address, To: &to, Nonce: &nonce,
+			GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		}
+	}
+	bundles := []Bundle{{Transactions: calls}}
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	tracerName := "callTracer"
+	config := &tracersConfig.TraceConfig{Tracer: &tracerName}
+
+	w := &countingWriter{}
+	stream := jsonstream.New(w)
+	require.NoError(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
+	require.GreaterOrEqual(t, w.writes, len(calls), "each traced call must reach the transport as it is produced")
+
+	failing := &countingWriter{failAt: 2}
+	stream = jsonstream.New(failing)
+	require.Error(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
+}
+
+// A state override on a precompile applies to the bundle as it does to eth_call:
+// a code override replaces the precompile, and a moved precompile runs at its
+// new address.
+func TestCallManyStateOverridePrecompile(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api, _ := newCallManyApisForTest(m)
+
+	identity := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	revert := hexutil.Bytes(hexutil.MustDecode("0x60006000fd"))
+	input := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
+	latest := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}
+	callTo := func(to common.Address) ethapi.CallArgs {
+		return ethapi.CallArgs{
+			From:         &bankAddr,
+			To:           &to,
+			Data:         &input,
+			MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(2e9)),
+		}
+	}
+
+	t.Run("code replaces the precompile", func(t *testing.T) {
+		res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{callTo(identity)}}}, latest, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {Code: &revert},
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		require.Len(t, res[0], 1)
+		require.Equal(t, "execution reverted", res[0][0]["error"])
+	})
+
+	t.Run("moved precompile runs at the new address in every call", func(t *testing.T) {
+		// The override is applied once, so the moved set has to reach every
+		// call of every bundle.
+		bundles := []Bundle{
+			{Transactions: []ethapi.CallArgs{callTo(moveTo), callTo(moveTo)}},
+			{Transactions: []ethapi.CallArgs{callTo(moveTo)}},
+		}
+		res, err := api.CallMany(context.Background(), bundles, latest, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {MovePrecompileTo: &moveTo},
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 2)
+		require.Len(t, res[0], 2)
+		require.Len(t, res[1], 1)
+		for i, bundle := range res {
+			for j, call := range bundle {
+				require.NotContains(t, call, "error", "bundle %d, call %d", i, j)
+				require.Equal(t, "deadbeef", call["value"], "bundle %d, call %d", i, j)
+			}
+		}
+	})
 }

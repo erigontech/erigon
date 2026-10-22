@@ -19,35 +19,36 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"unsafe"
 
 	"github.com/holiman/uint256"
-	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -56,6 +57,7 @@ import (
 
 var (
 	latestNumOrHash             = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	latestExecutedNumOrHash     = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 	errPendingStateNotSupported = errors.New("pending state is not supported")
 )
 
@@ -66,10 +68,20 @@ func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
 	return nil
 }
 
-// orLatest resolves an optional block selector, defaulting to the latest block
+// requireBlockSelector rejects a block selector that carries neither a number nor a
+// hash. Used by the methods whose selector is mandatory, so it has no default to
+// fall back on.
+func requireBlockSelector(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if blockNrOrHash.BlockNumber == nil && blockNrOrHash.BlockHash == nil {
+		return &rpc.InvalidParamsError{Message: "block selector must carry a blockNumber or a blockHash"}
+	}
+	return nil
+}
+
+// blockOrLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
 // whose Block parameter is optional per execution-apis (default 'latest').
-func orLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+func blockOrLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
 	if blockNrOrHash != nil {
 		return *blockNrOrHash
 	}
@@ -87,28 +99,22 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
-	blockNrOrHash := orLatest(requestedBlock)
+	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPendingState(blockNrOrHash); err != nil {
 		return nil, err
 	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()
@@ -117,7 +123,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -125,17 +131,17 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("header not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -164,34 +170,33 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		args = *argsOrNil
 	}
 
-	dbtx, err := api.db.BeginTemporalRo(ctx)
+	dbtx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
 	defer dbtx.Rollback()
 
-	requestedSelector := orLatest(blockNrOrHash)
+	requestedSelector := blockOrLatest(blockNrOrHash)
 	stateSelector := requestedSelector
 	isPending := false
 	if number, ok := requestedSelector.Number(); ok && number == rpc.PendingBlockNumber {
-		stateSelector = latestNumOrHash
+		stateSelector = latestExecutedNumOrHash
 		isPending = true
 	}
-	// Select once so header resolution, state reads, and EVM BLOCKHASH lookups
-	// cannot observe different overlay generations.
-	stateTx := api.filters.WithTemporalOverlay(dbtx)
 
-	chainConfig, err := api.chainConfig(ctx, stateTx)
+	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
+		return 0, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return 0, err
 	}
 	engine := api.engine()
 
-	stateHeader, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, stateTx, stateSelector)
+	stateHeader, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, dbtx, stateSelector)
 	if err != nil {
 		return 0, err
 	}
-
 	if stateHeader == nil {
 		return 0, fmt.Errorf("could not find the header %s in cache or db", requestedSelector.String())
 	}
@@ -209,19 +214,20 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 
+	// Overrides change the execution environment, not the selected state block.
 	effectiveHeader := blockOverrides.OverrideHeader(header)
 
-	err = api.BaseAPI.checkPruneHistory(ctx, stateTx, stateBlockNum)
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, stateBlockNum)
 	if err != nil {
 		return 0, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(stateTx, stateBlockNum)
+	err = rpchelper.CheckBlockExecuted(dbtx, stateBlockNum)
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, stateBlockNum, isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, stateBlockNum, isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -237,7 +243,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Determine the highest gas limit can be used during the estimation.
-	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
+	if args.Gas != nil && uint64(*args.Gas) >= mdgas.MinTxGas(chainConfig.IsAmsterdam(effectiveHeader.Time)) {
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
@@ -261,25 +267,42 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = common.Big0
 	}
 
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, requestedSelector, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	if err != nil {
+		return 0, err
+	}
+	defer caller.Close()
+
+	msg := caller.Message()
+	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil() && len(msg.Authorizations()) == 0
+
+	var initialState *state.IntraBlockState
+	if feeCap.Sign() != 0 || plainTransfer {
+		initialState, _, err = caller.InitialState()
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-
-		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
+		balance, err := initialState.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
 		available := balance.ToBig()
-		if args.Value != nil {
-			value := args.Value.ToInt()
-			if value.Cmp(available) >= 0 {
-				return 0, errors.New("insufficient funds for transfer")
+		value := msg.Value().ToBig()
+		if value.Cmp(available) >= 0 {
+			return 0, errors.New("insufficient funds for transfer")
+		}
+		available.Sub(available, value)
+
+		if blobGas := msg.BlobGas(); blobGas > 0 && chainConfig.IsCancun(effectiveHeader.Time) {
+			blobFee := new(big.Int).Mul(msg.MaxFeePerBlobGas().ToBig(), new(big.Int).SetUint64(blobGas))
+			if blobFee.Cmp(available) >= 0 {
+				return 0, protocol.ErrInsufficientFunds
 			}
-			available.Sub(available, value)
+			available.Sub(available, blobFee)
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
@@ -302,26 +325,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, requestedSelector, stateTx, api._blockReader, chainConfig, api.evmCallTimeout)
-	if err != nil {
-		return 0, err
-	}
-	defer caller.Close()
-
 	// If the transaction is a plain value transfer, short circuit estimation and
 	// directly try 21000. Returning 21000 without any execution is dangerous as
 	// some tx field combos might bump the price up even for plain transfers (e.g.
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
-	if args.Data == nil && args.To != nil {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
+	if plainTransfer {
+		codeSize, err := initialState.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
-			return 0, errors.New("getCodeSize failed")
+			return 0, fmt.Errorf("get code size for %x: %w", *args.To, err)
 		}
 		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
 		// single trial at the ceiling yields the exact estimate: return its actual gas
@@ -435,13 +447,47 @@ func (s StorageKeysInfo) EncodeKey() string {
 	return u.Hex()
 }
 
+// StorageKeys are the storage keys of an eth_getProof request. The spec allows up to 64 hex
+// digits, so unlike hexutil.Bytes an odd-length key such as 0x1 is accepted and read as 0x01.
+type StorageKeys []hexutil.Bytes
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (k *StorageKeys) UnmarshalJSON(input []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return err
+	}
+	keys := make(StorageKeys, len(raw))
+	for i, key := range raw {
+		// Pad an odd number of digits on the left, so "0x1" reads as "0x01".
+		if len(key) >= 4 && key[0] == '"' && hexutil.Has0xPrefix(string(key[1:3])) && len(key)%2 == 1 {
+			key = append([]byte(`"0x0`), key[3:]...)
+		}
+		if err := keys[i].UnmarshalJSON(key); err != nil {
+			return err
+		}
+	}
+	*k = keys
+	return nil
+}
+
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys StorageKeys, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
 			Code:    rpc.ErrCodeInvalidParams,
+		}
+	}
+	// Hash.SetBytes keeps only the trailing 32 bytes, so an over-long key would silently
+	// be answered with a valid proof for a different slot.
+	for _, storageKey := range storageKeys {
+		if len(storageKey) > length.Hash {
+			return nil, &rpc.CustomError{
+				Message: fmt.Sprintf("storage key too long (max %d bytes, got %d)", length.Hash, len(storageKey)),
+				Code:    rpc.ErrCodeInvalidParams,
+			}
 		}
 	}
 	if err := rejectPendingState(blockNrOrHash); err != nil {
@@ -454,7 +500,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
+	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +512,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +535,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, roTx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, roTx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -502,9 +548,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum, err := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, err
+		}
 		if lastTxnInBlock < commitmentStartingTxNum {
-			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
+			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.ErrPruned, commitmentStartingTxNum, lastTxnInBlock)
 		}
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
@@ -513,18 +562,18 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	// touch account
 	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
+	for _, storageKey := range storageKeys {
+		sdCtx.TouchKey(kv.StorageDomain, string(address[:])+string(storageKey.Hash[:]), nil)
+	}
 
-	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof", false)
+	nodes, root, err := sdCtx.WitnessNodesByHash(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(calculatedAccountProofRoot, header.Root[:]) {
-		return nil, fmt.Errorf("root hash mismatch in account proof trie calculatedAccountProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
+	if !bytes.Equal(root, header.Root[:]) {
+		return nil, fmt.Errorf("witness root %x does not match header root %x", root, header.Root[:])
 	}
-
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
@@ -535,16 +584,22 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		StorageProof: make([]accounts.StorProofResult, len(storageKeys)),
 	}
 
-	// get account proof
-	accountProof, err := proofTrie.Prove(crypto.Keccak256(address[:]), 0, false)
+	accountProof, accountRLP, err := trie.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
 	if err != nil {
 		return nil, err
 	}
-	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
-
-	// get account data from the trie
-	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address[:]))
-	if acc == nil {
+	proof.AccountProof = toHexBytes(accountProof)
+	var acc accounts.Account
+	if accountRLP != nil {
+		if err := acc.DecodeForHashing(accountRLP); err != nil {
+			return nil, fmt.Errorf("decode account %x from its proof: %w", address, err)
+		}
+		proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
+		proof.Nonce = hexutil.Uint64(acc.Nonce)
+		proof.CodeHash = acc.CodeHash.Value()
+		proof.StorageHash = acc.Root
+	}
+	if accountRLP == nil || acc.Root == empty.RootHash {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
 				Key:   storageKey.EncodeKey(),
@@ -552,39 +607,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 				Proof: []hexutil.Bytes{},
 			}
 		}
-		err = trie.VerifyAccountProof(header.Root, proof)
-		if err != nil {
-			return nil, err
-		}
-		return proof, nil
-	}
-
-	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
-	proof.Nonce = hexutil.Uint64(acc.Nonce)
-	proof.CodeHash = acc.CodeHash.Value()
-	proof.StorageHash = acc.Root
-
-	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) != 0 && len(storageKeys) != 0 {
-		// touch storage keys
-		for _, storageKey := range storageKeys {
-			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
-		}
-
-		// generate the trie for proofs, this works by loading the merkle paths to the touched key
-		var storageProofRoot []byte
-		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof", false)
-		if err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(storageProofRoot, header.Root[:]) {
-			return nil, fmt.Errorf("root hash mismatch in storage proof trie storageProofRoot(%x)!=expectedRoot(%x)", storageProofRoot, header.Root[:])
-		}
-	}
-
-	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
-	if err != nil {
-		return nil, err
+		return proof, assertProofVerifies(header.Root, proof)
 	}
 
 	// get storage key proofs
@@ -594,54 +617,51 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, err
 		}
 		proof.StorageProof[i].Key = storageKey.EncodeKey()
-		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
-			proof.StorageProof[i].Proof = []hexutil.Bytes{}
-			proof.StorageProof[i].Value = new(hexutil.U256)
-			continue
-		}
-
-		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.Keccak256Hash(address[:])
-		keyHash := crypto.Keccak256Hash(storageKey.Hash[:])
-		fullKey := make([]byte, 0, 64)
-		fullKey = append(fullKey, addrHash[:]...)
-		fullKey = append(fullKey, keyHash[:]...)
-
-		// get proof for the given key
-		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
+		storageProof, leaf, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
 		if err != nil {
-			return nil, errors.New("cannot verify store proof")
+			return nil, err
 		}
-
-		res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(storageKey.Hash))
-		if err != nil {
-			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
+		value := new(uint256.Int)
+		if leaf != nil {
+			b, _, err := rlp.SplitString(leaf)
+			if err != nil {
+				return nil, fmt.Errorf("decode storage %x of %x from its proof: %w", storageKey.Hash, address, err)
+			}
+			value.SetBytes(b)
 		}
-		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
+		proof.StorageProof[i].Value = (*hexutil.U256)(value)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
 		if len(storageProof) != 0 {
-			proof.StorageProof[i].Proof = *(*[]hexutil.Bytes)(unsafe.Pointer(&storageProof))
+			proof.StorageProof[i].Proof = toHexBytes(storageProof)
 		}
 	}
+	return proof, assertProofVerifies(header.Root, proof)
+}
 
-	// Verify proofs before returning result to the user
-	err = trie.VerifyAccountProof(header.Root, proof)
-	if err != nil {
-		return nil, fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+// assertProofVerifies runs only under ERIGON_ASSERT: a serving node relies on the root check.
+func assertProofVerifies(stateRoot common.Hash, proof *accounts.AccProofResult) error {
+	if !dbg.AssertEnabled {
+		return nil
 	}
-
-	// verify storage proofs
+	if err := trie.VerifyAccountProof(stateRoot, proof); err != nil {
+		return fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+	}
 	for _, storageProof := range proof.StorageProof {
-		err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
-		if err != nil {
-			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key, proof, err)
+		if err := trie.VerifyStorageProof(proof.StorageHash, storageProof); err != nil {
+			return fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key, proof, err)
 		}
 	}
+	return nil
+}
 
-	return proof, nil
+func toHexBytes(in [][]byte) []hexutil.Bytes {
+	out := make([]hexutil.Bytes, len(in))
+	for i, b := range in {
+		out[i] = b
+	}
+	return out
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
@@ -663,7 +683,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -683,6 +703,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
+	if err := api.checkPruneBlocks(ctx, tx, blockNr); err != nil {
+		return nil, err
+	}
+	// Witness generation needs history before the initial system transaction,
+	// not only the pre-state of the first user transaction.
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
@@ -703,7 +728,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, nil
 	}
 
-	if !fullBlock && int(txIndex) >= len(block.Transactions()) {
+	if !fullBlock && uint64(txIndex) >= uint64(len(block.Transactions())) {
 		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 
@@ -718,7 +743,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	endTxNum := lastTxNumInBlock + 1
 	parentNum := blockNr - 1
 
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return nil, err
+	}
 	if firstTxNumInBlock < commitmentStartingTxNum {
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
@@ -750,8 +778,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
-	// The stateless verifier navigates the system address (system-call msg.sender, then its
-	// EIP-161 empty-account cleanup via DeleteSubtree), so its path must be in the witness.
+	// On AuRa the stateless verifier navigates the system address (system-call msg.sender),
+	// so its path must be in the witness.
 	// collectAccessedState drops it per EIP-7928 — a witness-content rule for the
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
@@ -788,7 +816,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		it.Close()
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -816,7 +844,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
 	// fed redundant memoizationOff nodes. leanNodes is the same set, root first, without code
 	// attached — the form the node-set self-verifier consumes.
-	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
+	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
@@ -824,7 +852,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	witness, err := witnessTrie.ExtractWitness(true, nil)
+	witness, err := witnessTrie.ExtractWitness(false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -834,43 +862,45 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
-	// Gate on the serialized op-stream we actually return: decode it back and confirm it
-	// reconstructs the parent state root. Any lossy/malformed serialization yields a
-	// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
-	// pre-serialization witness-root check above cannot.
-	decodedWitness, err := trie.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
-	if err != nil {
-		return nil, fmt.Errorf("decode produced witness: %w", err)
-	}
-	decodedTrie, err := trie.BuildTrieFromWitness(decodedWitness, false)
-	if err != nil {
-		return nil, fmt.Errorf("rebuild trie from produced witness: %w", err)
-	}
-	if decodedTrie.Hash() != expectedParentRoot {
-		return nil, fmt.Errorf("produced witness root mismatch actual(%x)!=expected(%x)", decodedTrie.Hash(), expectedParentRoot)
-	}
+	if dbg.AssertEnabled {
+		// Gate on the serialized op-stream we actually return: decode it back and confirm it
+		// reconstructs the parent state root. Any lossy/malformed serialization yields a
+		// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
+		// pre-serialization witness-root check above cannot.
+		decodedWitness, err := trie.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
+		if err != nil {
+			return nil, fmt.Errorf("decode produced witness: %w", err)
+		}
+		decodedTrie, err := trie.BuildTrieFromWitness(decodedWitness, false)
+		if err != nil {
+			return nil, fmt.Errorf("rebuild trie from produced witness: %w", err)
+		}
+		if decodedTrie.Hash() != expectedParentRoot {
+			return nil, fmt.Errorf("produced witness root mismatch actual(%x)!=expected(%x)", decodedTrie.Hash(), expectedParentRoot)
+		}
 
-	// Self-verify: re-execute the block statelessly from the lean node set (the modern,
-	// node-set verifier debug_executionWitness uses) and confirm the resulting state root
-	// matches the header. The pre-state root is already gated above, so a post-state
-	// mismatch is logged rather than failing the request.
-	_, headerByNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
-	if err != nil {
-		return nil, err
-	}
-	verifyResult := &ExecutionWitnessResult{
-		State:          make([]hexutil.Bytes, len(leanNodes)),
-		Codes:          accessed.SortedCodes,
-		headerByNumber: headerByNumber,
-	}
-	for i, node := range leanNodes {
-		verifyResult.State[i] = node
-	}
-	newStateRoot, _, err := execBlockStatelessly(verifyResult, block, chainConfig, fullEngine)
-	if err != nil {
-		logger.Warn("stateless re-execution failed for witness", "block", blockNr, "err", err)
-	} else if newStateRoot != block.Root() {
-		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
+		// Self-verify: re-execute the block statelessly from the lean node set (the modern,
+		// node-set verifier debug_executionWitness uses) and confirm the resulting state root
+		// matches the header. The pre-state root is already gated above, so a post-state
+		// mismatch is logged rather than failing the request.
+		_, headerByNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
+		if err != nil {
+			return nil, err
+		}
+		verifyResult := &ExecutionWitnessResult{
+			State:          make([]hexutil.Bytes, len(leanNodes)),
+			Codes:          accessed.SortedCodes,
+			headerByNumber: headerByNumber,
+		}
+		for i, node := range leanNodes {
+			verifyResult.State[i] = node
+		}
+		newStateRoot, _, err := execBlockStatelessly(verifyResult, block, chainConfig, fullEngine)
+		if err != nil {
+			logger.Warn("stateless re-execution failed for witness", "block", blockNr, "err", err)
+		} else if newStateRoot != block.Root() {
+			logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
+		}
 	}
 
 	return bytes.Clone(witnessBuffer.Bytes()), nil
@@ -896,6 +926,60 @@ type accessListResult struct {
 	GasUsed    hexutil.Uint64    `json:"gasUsed"`
 }
 
+// excludeAuthorities adds the message's EIP-7702 authorities to excl, which the state
+// transition pre-warms. Each one costs an ECDSA recovery, so a list that cannot cover
+// its intrinsic gas is refused before any of them runs.
+func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[common.Address]struct{}) error {
+	if err := checkIntrinsicGas(msg, chainRules); err != nil {
+		return err
+	}
+	auths := msg.Authorizations()
+	for i := range auths {
+		auth := &auths[i]
+		if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(chainRules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+			continue
+		}
+		authority, err := auth.RecoverSigner()
+		if err != nil {
+			continue
+		}
+		excl[authority] = struct{}{}
+	}
+	return nil
+}
+
+// checkIntrinsicGas rejects a message whose gas cannot cover the intrinsic cost of
+// its authorizations. It leaves out the access list, which the tracer strips of
+// excluded addresses before the executor prices it, so the figure stays at or below
+// what the executor charges and a call it would run is never refused here.
+//
+// The EIP-7825 cap the executor applies beside this comparison is gated on CheckGas,
+// which ToMessage leaves false, so enforcing it here would reject calls too.
+func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
+	contractCreation := msg.To().IsNil()
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               msg.Data(),
+		AuthorizationsLen:  uint64(len(msg.Authorizations())),
+		IsContractCreation: contractCreation,
+		IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+		HasValue:           !msg.Value().IsZero(),
+		IsEIP2:             chainRules.IsHomestead,
+		IsEIP2028:          chainRules.IsIstanbul,
+		IsEIP3860:          chainRules.IsShanghai,
+		IsEIP7623:          chainRules.IsPrague,
+		IsEIP7976:          chainRules.IsAmsterdam,
+		IsEIP7981:          chainRules.IsAmsterdam,
+		IsEIP2780:          chainRules.IsAmsterdam,
+	})
+	if overflow {
+		return protocol.ErrGasUintOverflow
+	}
+	if required := max(intrinsic.ExecutionGas, intrinsic.FloorGasCost); msg.Gas() < required {
+		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), required)
+	}
+	return nil
+}
+
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
@@ -918,9 +1002,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if err != nil {
 		return nil, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
-	header, latest, err := api.headerByNumberOrHash(ctx, tx, bNrOrHash)
+	header, latest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -938,12 +1025,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
 
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber+1)
+		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
 
-		err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
+		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
@@ -962,40 +1049,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
-	var to common.Address
-	if args.To != nil {
-		to = *args.To
-	} else {
-		// Require nonce to calculate address of created contract
-		if args.Nonce == nil {
-			var nonce uint64
-			reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-				Address: gointerfaces.ConvertAddressToH160(*args.From),
-			}, &grpc.EmptyCallOption{})
-			if err != nil {
-				return nil, err
-			}
-			if reply.Found {
-				nonce = reply.Nonce + 1
-			} else {
-				a, err := stateReader.ReadAccountData(accounts.InternAddress(*args.From))
-				if err != nil {
-					return nil, err
-				}
-				if a == nil {
-					return nil, errors.New("Account: " + args.From.Hex() + " not found")
-				}
-				nonce = a.Nonce + 1
-			}
-
-			args.Nonce = (*hexutil.Uint64)(&nonce)
-		}
-		to = types.CreateAddress(*args.From, uint64(*args.Nonce))
-	}
-
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
+	args.ZeroUnpricedBlobBaseFee(&blockCtx)
+	rules := blockCtx.Rules(chainConfig)
+	precompiles := vm.ActivePrecompiles(rules)
 	excl := make(map[common.Address]struct{})
 	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.
 	// 'to' is intentionally not excluded: its storage slots must appear in the
@@ -1007,28 +1065,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// EIP-7702: authority addresses are pre-warmed in state transition, so exclude them from the access list
 	if len(args.AuthorizationList) > 0 {
-		gasCap := api.GasCap
-		if args.Gas != nil && uint64(*args.Gas) < gasCap {
-			gasCap = uint64(*args.Gas)
+		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
+		if err != nil {
+			return nil, err
 		}
-		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
-			return nil, errors.New("insufficient gas to process all authorizations")
-		}
-		rules := blockCtx.Rules(chainConfig)
-		for i := range args.AuthorizationList {
-			jsonAuth := &args.AuthorizationList[i]
-			auth, err := jsonAuth.ToAuthorization()
-			if err != nil {
-				continue
-			}
-			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
-				continue
-			}
-			authority, err := auth.RecoverSigner()
-			if err != nil {
-				continue
-			}
-			excl[authority] = struct{}{}
+		if err := excludeAuthorities(msg, rules, excl); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1040,17 +1082,21 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Convergence re-runs the whole message, so the state is reset per iteration
 	// rather than rebuilt: Reset keeps the reader and the pooled maps behind it.
-	ibs := state.New(stateReader)
-	defer ibs.Close()
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
 
 	// One convergence iteration: a non-nil result means the access list converged,
 	// otherwise the returned tracer seeds the next iteration.
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
 		ibs.Reset()
+		transactions.VersionedCallState(ibs)
 
-		// Override the fields of specified contracts before execution.
+		// Override the fields of specified contracts before execution. Override
+		// edits the precompile set it is given, so each iteration starts fresh.
+		var activePrecompiles vm.PrecompiledContracts
 		if stateOverrides != nil {
-			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
+			activePrecompiles = vm.ActivePrecompiledContracts(rules)
+			if err := stateOverrides.Override(ibs, activePrecompiles, rules); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1078,7 +1124,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
+		evm.SetPrecompiles(activePrecompiles)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
@@ -1094,7 +1141,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		result := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
 		if args.To != nil {
-			optimizeWarmAddrAndAdjustGas(result, to)
+			optimizeWarmAddrAndAdjustGas(result, *args.To)
 		}
 		if optimizeGas != nil && *optimizeGas {
 			optimizeWarmAddrInAccessList(result, header.Coinbase)

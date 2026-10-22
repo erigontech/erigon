@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
@@ -278,7 +279,7 @@ func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *test
 	require.NoError(t, err)
 	defer freshDomains.Close()
 	freshDomains.BindStateCache(stateCache)
-	require.NoError(t, freshDomains.InitBlockOverlay(freshTx, t.TempDir()))
+	require.NoError(t, freshDomains.InitBlockOverlay(freshTx))
 
 	overlayTx := freshDomains.BlockOverlay().NewReadView(rpcTx)
 	events := shards.NewEvents()
@@ -311,7 +312,7 @@ func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
 	selectedDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
 	require.NoError(t, err)
 	defer selectedDomains.Close()
-	require.NoError(t, selectedDomains.InitBlockOverlay(rpcTx, t.TempDir()))
+	require.NoError(t, selectedDomains.InitBlockOverlay(rpcTx))
 
 	key := make([]byte, 20)
 	key[0] = 0xaa
@@ -332,11 +333,23 @@ func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
 
 	rpcCache := &execmodule.Cache{}
 	rpcCache.SetPublishedSD(events.LatestSD)
-	view, err := rpcCache.View(ctx, selectedTx)
-	require.NoError(t, err)
-	got, err := view.Get(key)
-	require.NoError(t, err)
-	require.Equal(t, selectedValue, got, "the cache view must use the state generation selected by its transaction")
+	for _, tc := range []struct {
+		name string
+		tx   kv.TemporalTx
+		want []byte
+	}{
+		{"overlay read view", selectedTx, selectedValue},
+		{"pinned overlay", rpchelper.PinToOverlay(rpcTx, selectedDomains.BlockOverlay()), selectedValue},
+		{"pinned without overlay", rpchelper.PinToOverlay(rpcTx, nil), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view, err := rpcCache.View(ctx, tc.tx)
+			require.NoError(t, err)
+			got, err := view.Get(key)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got, "the cache view must use the state generation selected by its transaction")
+		})
+	}
 }
 
 func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
@@ -583,9 +596,9 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)

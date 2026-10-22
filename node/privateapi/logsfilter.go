@@ -38,11 +38,8 @@ type LogsFilterAggregator struct {
 	events         *shards.Events
 }
 
-// LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
-// and "aggregated" log filter representing a union of all subscribers. Therefore, the values in
-// the mappings are counters (of type int) and they get deleted when counter goes back to 0
-// Also, addAddr and allTopic are int instead of bool because they are also counter, counting
-// how many subscribers have this set on
+// LogsFilter represents one subscriber or the aggregate of all subscribers.
+// Aggregate address and topic values are reference counts.
 type LogsFilter struct {
 	allAddrs  int
 	addrs     map[common.Address]int
@@ -169,7 +166,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 
 // distributeLogs receives native log notifications, filters them, and converts
 // to protobuf only when sending over gRPC.
-func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotification) error {
+func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotification) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 
@@ -216,8 +213,6 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 	for filterId, filter := range filtersToDelete {
 		a.removeLogsFilterLocked(filterId, filter)
 	}
-
-	return nil
 }
 
 func (a *LogsFilterAggregator) chooseTopicsNative(filterTopics map[common.Hash]int, logTopics []common.Hash) bool {
@@ -245,5 +240,6 @@ func logNotificationToProto(lg *notifications.LogNotification) *remoteproto.Subs
 		TransactionHash:  gointerfaces.ConvertHashToH256(lg.TxHash),
 		TransactionIndex: uint64(lg.TxIndex),
 		Removed:          lg.Removed,
+		BlockTimestamp:   lg.BlockTimestamp,
 	}
 }

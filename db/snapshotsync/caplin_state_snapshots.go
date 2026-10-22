@@ -24,7 +24,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
@@ -81,11 +83,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	return func(numId uint64) ([]byte, []byte, error) {
 		var key, value []byte
-		var err error
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
-			value, err = tx.GetOne(tableName, key)
-			value = bytes.Clone(value)
+			v, err := tx.GetOne(tableName, key)
+			value = bytes.Clone(v)
 			return err
 		}); err != nil {
 			return nil, nil, err
@@ -94,7 +95,29 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	}
 }
 
-func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
+func requirePtcWindowEpochRows(cfg *clparams.BeaconChainConfig, getter KeyValueGetter) KeyValueGetter {
+	return func(slot uint64) ([]byte, []byte, error) {
+		key, value, err := getter(slot)
+		if err != nil {
+			return nil, nil, err
+		}
+		if cfg != nil && slot%cfg.SlotsPerEpoch == 0 && slot/cfg.SlotsPerEpoch >= cfg.GloasForkEpoch && len(value) == 0 {
+			return nil, nil, fmt.Errorf("%w: %s slot %d", errIncompleteStateRange, kv.PtcWindowEpochTable, slot)
+		}
+		return key, value, nil
+	}
+}
+
+func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) SnapshotTypes {
+	ptcWindowEpochGetter := requirePtcWindowEpochRows(cfg, getKvGetterForStateTable(db, kv.PtcWindowEpochTable))
+	var gloasForkSlot uint64
+	if cfg != nil {
+		if hi, lo := bits.Mul64(cfg.GloasForkEpoch, cfg.SlotsPerEpoch); hi != 0 {
+			gloasForkSlot = math.MaxUint64
+		} else {
+			gloasForkSlot = lo
+		}
+	}
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
 			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
@@ -129,12 +152,16 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
 			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
 			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
-			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
 			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
+			kv.PtcWindowEpochTable:               ptcWindowEpochGetter,
 		},
-		Compression: map[string]bool{},
+		Compression:   map[string]bool{},
+		GloasForkSlot: gloasForkSlot,
 	}
 }
+
+// caplinDownloaderPrefix: the downloader is rooted at dirs.Snap, these live in dirs.SnapCaplin.
+const caplinDownloaderPrefix = "caplin"
 
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
@@ -153,6 +180,7 @@ type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
 type SnapshotTypes struct {
 	KeyValueGetters map[string]KeyValueGetter
 	Compression     map[string]bool
+	GloasForkSlot   uint64
 }
 
 // NewCaplinStateSnapshots - opens all snapshots. But to simplify everything:
@@ -160,7 +188,7 @@ type SnapshotTypes struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -169,7 +197,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	typeEnums := make(map[string]snaptype.Enum, len(snapshotTypes.KeyValueGetters))
 	for name := range snapshotTypes.KeyValueGetters {
 		enum, ok := snaptype.ParseEnum(name)
-		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
+		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MaxCaplinEnum {
 			panic(fmt.Sprintf("caplin state snapshot type %q is not registered", name))
 		}
 		typ := enum.Type()
@@ -229,11 +257,24 @@ func (s *CaplinStateSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
+// RemoveOverlaps re-keys the base's dir-relative names to what the downloader registered.
 func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
 	}
+	if onDelete != nil {
+		notify := onDelete
+		onDelete = func(l []string) error { return notify(downloaderKeys(l)) }
+	}
 	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
+}
+
+func downloaderKeys(names []string) []string {
+	keys := make([]string, len(names))
+	for i, name := range names {
+		keys[i] = path.Join(caplinDownloaderPrefix, filepath.ToSlash(name))
+	}
+	return keys
 }
 
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {
@@ -246,15 +287,22 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	minTo := uint64(math.MaxUint64)
 	for _, typ := range s.Types() {
 		segs := vis.segments[typ.Enum()]
-		if len(segs) == 0 {
+		var to uint64
+		if len(segs) != 0 {
+			to = segs[len(segs)-1].to
+		}
+		if typ.Enum() == snaptype.PtcWindowEpoch.Enum() {
+			to = max(to, s.snapshotTypes.GloasForkSlot)
+		}
+		if to == 0 {
 			return 0
 		}
-		minTo = min(minTo, segs[len(segs)-1].to)
+		minTo = min(minTo, to)
 	}
 	if minTo == math.MaxUint64 {
 		return 0
 	}
-	return minTo
+	return minTo - 1
 }
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
@@ -482,7 +530,7 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 
 func caplinStateFileName(snapName string, fromSlot, toSlot uint64) (string, error) {
 	enum, ok := snaptype.ParseEnum(snapName)
-	if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
+	if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MaxCaplinEnum {
 		return "", fmt.Errorf("unknown caplin state snapshot type %q", snapName)
 	}
 	typ := enum.Type()
@@ -541,6 +589,8 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 	return jobs
 }
 
+// DumpCaplinState must not run concurrently with RemoveOverlaps, which sweeps its own .tmp files in
+// the output directory. Both run on loopStates; parallelising the dump breaks that.
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
 	for name := range s.snapshotTypes.KeyValueGetters {

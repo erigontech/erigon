@@ -67,6 +67,7 @@ func caplinStateTypeExpectations() []caplinStateTypeExpectation {
 		{snaptype.BuilderPendingPaymentsTable, kv.BuilderPendingPaymentsTable},
 		{snaptype.PtcWindowTable, kv.PtcWindowTable},
 		{snaptype.LatestExecutionPayloadBidTable, kv.LatestExecutionPayloadBidTable},
+		{snaptype.PtcWindowEpoch, kv.PtcWindowEpochTable},
 	}
 }
 
@@ -96,15 +97,34 @@ func TestCaplinStateSnapshotTypes(t *testing.T) {
 		wantNames[expected.name] = struct{}{}
 	}
 
-	gotNames := make(map[string]struct{}, len(snapshotsync.MakeCaplinStateSnapshotsTypes(nil).KeyValueGetters))
-	for name := range snapshotsync.MakeCaplinStateSnapshotsTypes(nil).KeyValueGetters {
+	wantActiveNames := make(map[string]struct{}, len(want)-1)
+	for name := range wantNames {
+		if name != kv.PtcWindowTable {
+			wantActiveNames[name] = struct{}{}
+		}
+	}
+
+	gotNames := make(map[string]struct{}, len(snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil).KeyValueGetters))
+	for name := range snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil).KeyValueGetters {
 		gotNames[name] = struct{}{}
 	}
-	require.Equal(t, gotNames, wantNames)
+	require.Equal(t, wantActiveNames, gotNames)
+	require.NotContains(t, gotNames, kv.PtcWindowTable)
+	require.Contains(t, gotNames, kv.PtcWindowEpochTable)
+
+	legacyFile := snaptype.PtcWindowTable.FileName(version.ZeroVersion, 0, 50_000)
+	legacyInfo, _, ok := snaptype.ParseFileName("", legacyFile)
+	require.True(t, ok)
+	require.Equal(t, snaptype.PtcWindowTable, legacyInfo.Type)
+
+	epochFile := snaptype.PtcWindowEpoch.FileName(version.ZeroVersion, 0, 50_000)
+	epochInfo, _, ok := snaptype.ParseFileName("", epochFile)
+	require.True(t, ok)
+	require.Equal(t, snaptype.PtcWindowEpoch, epochInfo.Type)
 }
 
 func TestCaplinStateSnapshotTypeRange(t *testing.T) {
-	require.LessOrEqual(t, len(snaptype.CaplinSnapshotTypes)+len(snaptype.CaplinStateSnapshotTypes), snaptype.MinBorEnum-snaptype.MinCaplinEnum)
+	require.LessOrEqual(t, len(snaptype.CaplinSnapshotTypes)+len(snaptype.CaplinStateSnapshotTypes), snaptype.MaxCaplinEnum-snaptype.MinCaplinEnum)
 	for i, typ := range snaptype.CaplinStateSnapshotTypes {
 		require.Equal(t, snaptype.MinCaplinEnum+2+snaptype.Enum(i), typ.Enum())
 		require.True(t, snaptype.IsCaplinType(typ.Enum()))
@@ -112,7 +132,7 @@ func TestCaplinStateSnapshotTypeRange(t *testing.T) {
 	require.True(t, snaptype.IsCaplinType(snaptype.CaplinEnums.BeaconBlocks))
 	require.True(t, snaptype.IsCaplinType(snaptype.CaplinEnums.BlobSidecars))
 	require.False(t, snaptype.IsCaplinType(snaptype.MinCaplinEnum-1))
-	require.False(t, snaptype.IsCaplinType(snaptype.MinBorEnum))
+	require.False(t, snaptype.IsCaplinType(snaptype.MaxCaplinEnum))
 }
 
 func TestCaplinSnapshotTypesRemainBlockTypes(t *testing.T) {

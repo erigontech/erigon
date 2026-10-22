@@ -15,7 +15,7 @@ import (
 var _ = (*receiptMarshaling)(nil)
 
 // MarshalJSON marshals as JSON.
-func (r Receipt) MarshalJSON() ([]byte, error) {
+func (r *Receipt) MarshalJSON() ([]byte, error) {
 	type Receipt struct {
 		Type              hexutil.Uint64 `json:"type,omitempty"`
 		PostState         hexutil.Bytes  `json:"root"`
@@ -27,7 +27,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 		ContractAddress   common.Address `json:"contractAddress"`
 		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
 		BlockHash         common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
+		BlockNumber       *hexutil.U256  `json:"blockNumber,omitempty"`
 		TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
 	}
 	var enc Receipt
@@ -42,7 +42,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
 	enc.BlockHash = r.BlockHash
 	if r.BlockNumber != nil {
-		enc.BlockNumber = (*hexutil.Big)(r.BlockNumber.ToBig())
+		enc.BlockNumber = (*hexutil.U256)(r.BlockNumber)
 	}
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
 	return json.Marshal(&enc)
@@ -50,6 +50,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON unmarshals from JSON.
 func (r *Receipt) UnmarshalJSON(input []byte) error {
+	r.derivedBloom.Store(nil)
 	type Receipt struct {
 		Type              *hexutil.Uint64 `json:"type,omitempty"`
 		PostState         *hexutil.Bytes  `json:"root"`

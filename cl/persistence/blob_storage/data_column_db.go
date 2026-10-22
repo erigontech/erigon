@@ -9,9 +9,18 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/spf13/afero"
+)
+
+// SSZ sizes of a pre-Gloas DataColumnSidecar. Each blob adds a 2048-byte cell, a 48-byte commitment and a 48-byte
+// proof. The fixed part is 8 + 3*4 offsets + 208 (signed header) + 32 per inclusion proof hash: 356 with the 4-hash
+// proof, 772 with the 17-hash one. Both are below 2144, so length % 2144 tells the two layouts apart.
+const (
+	dataColumnSidecarBlobSize        = 2144
+	legacyDataColumnSidecarFixedSize = 772
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
@@ -23,6 +32,7 @@ type DataColumnStorage interface {
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error)
 	PruneBelow(slot uint64) error
+	EarliestStoredSlot() (uint64, error)
 }
 
 type dataColumnStorageImpl struct {
@@ -63,7 +73,11 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	lock := s.forSlot(slot)
 	lock.Lock()
 	defer lock.Unlock()
-	created, err := s.write(slot, blockRoot, uint64(columnIndex), columnData)
+	if !s.startWrite(slot) {
+		return nil
+	}
+	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
+	s.finishWrite()
 	if err != nil {
 		return err
 	}
@@ -111,8 +125,34 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	return firstErr
 }
 
+// WriteStream re-encodes a pre-Gloas sidecar stored with the 17-hash inclusion proof, so peers get the canonical layout,
+// and copies every other file as stored.
 func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
-	return s.stream(w, slot, blockRoot, idx)
+	_, file := s.path(slot, blockRoot, idx)
+	fh, err := s.fs.Open(file)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	version := s.beaconChainConfig.GetCurrentStateVersion(slot / s.beaconChainConfig.SlotsPerEpoch)
+	if version < clparams.GloasVersion {
+		length, err := ssz_snappy.ReadUvarint(fh)
+		if err != nil {
+			return err
+		}
+		if _, err := fh.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		if length%dataColumnSidecarBlobSize == legacyDataColumnSidecarFixedSize {
+			sidecar := &cltypes.DataColumnSidecar{}
+			if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, sidecar, version); err != nil {
+				return err
+			}
+			return ssz_snappy.EncodeAndWrite(w, sidecar)
+		}
+	}
+	_, err = io.Copy(w, fh)
+	return err
 }
 
 // GetSavedColumnIndex returns the list of saved column indices for the given slot and block root.

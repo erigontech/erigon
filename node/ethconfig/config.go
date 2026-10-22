@@ -21,7 +21,6 @@
 package ethconfig
 
 import (
-	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -46,9 +45,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
-
-// BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 // Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 60_000_000
@@ -84,14 +80,15 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
+		ExecWorkerCount:            dbg.Exec3Workers, // only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
-		//LoopBlockLimit:             100_000,
+		// LoopBlockLimit:             100_000,
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
+		PersistReceiptsCacheV2:   true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -262,10 +259,6 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
-	// PoS Single Slot finality. Read only by polygon/sync; goes with the polygon tree.
-	PolygonPosSingleSlotFinality        bool
-	PolygonPosSingleSlotFinalityBlockAt uint64
-
 	// Account Abstraction
 	AllowAA bool
 
@@ -314,11 +307,12 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                    bool
-	AlwaysGenerateChangesets       bool
-	MaxReorgDepth                  uint64
-	KeepExecutionProofs            bool
-	ExperimentalParallelCommitment bool
-	PersistReceiptsCacheV2         bool
-	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
+	MaxReorgDepth            uint64
+	KeepExecutionProofs      bool
+	PersistReceiptsCacheV2   bool
+	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+
+	SlowBlockThreshold *time.Duration
 }

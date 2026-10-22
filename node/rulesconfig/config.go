@@ -120,7 +120,6 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 			var db kv.RwDB
 
 			db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "aura", readonly, logger)
-
 			if err != nil {
 				panic(err)
 			}

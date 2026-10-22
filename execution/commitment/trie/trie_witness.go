@@ -11,26 +11,11 @@ func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 }
 
 func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecider) (*Witness, error) {
-	foundNode, _, found, _ := t.getNode(prefix, false)
+	foundNode, _, found, _ := t.getNode(prefix)
 	if !found {
 		return nil, errors.New("no data found for given prefix")
 	}
 	return extractWitnessFromRootNode(foundNode, trace, rl)
-}
-
-// ExtractWitnesses extracts witnesses for subtries starting from the specified root
-// if retainDec param is nil it will make a witness for the full subtrie,
-// if retainDec param is set to a RetainList instance, it will make a witness for only the accounts/storages that were actually touched; other paths will be hashed.
-func ExtractWitnesses(subTries SubTries, trace bool, retainDec RetainDecider) ([]*Witness, error) {
-	var witnesses []*Witness
-	for _, root := range subTries.roots {
-		witness, err := extractWitnessFromRootNode(root, trace, retainDec)
-		if err != nil {
-			return witnesses, err
-		}
-		witnesses = append(witnesses, witness)
-	}
-	return witnesses, nil
 }
 
 // extractWitnessFromRootNode extracts witness for subtrie starting from the specified root

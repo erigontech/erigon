@@ -14,12 +14,10 @@ import (
 	"github.com/erigontech/erigon/execution/blockreplay"
 )
 
-// TestWitnessPrefixOps pins that a prefix scan over the witness-backed mem batch
-// sees storage that exists only in the witness pre-state (not just exec writes):
-// HasPrefix/IteratePrefix must find it, and DomainDelPrefix must clear it. Before
-// the overlay-aware prefix methods these all missed the witness, so HasStorage
-// returned false for a stored account and a cleared account kept readable slots.
-func TestWitnessPrefixOps(t *testing.T) {
+// TestWitnessPrefixIteration pins that a prefix scan over the witness-backed mem
+// batch sees storage that exists only in the witness pre-state and that
+// DomainDelPrefix clears it.
+func TestWitnessPrefixIteration(t *testing.T) {
 	fx := loadFixture(t, "25604144")
 	ctx := context.Background()
 	logger := log.New()
@@ -57,10 +55,6 @@ func TestWitnessPrefixOps(t *testing.T) {
 	}
 	require.NotZero(t, wantSlots, "fixture must have a present account with a non-zero storage slot")
 
-	_, _, has, err := doms.HasPrefix(kv.StorageDomain, addr[:], tx)
-	require.NoError(t, err)
-	require.True(t, has, "HasPrefix must see witness-backed storage for %x", addr)
-
 	got := 0
 	require.NoError(t, doms.IteratePrefix(kv.StorageDomain, addr[:], tx, func(k, v []byte) (bool, error) {
 		require.Len(t, k, len(addr)+32, "storage key is address+slot")
@@ -71,10 +65,6 @@ func TestWitnessPrefixOps(t *testing.T) {
 	require.Equal(t, wantSlots, got, "IteratePrefix must yield every witness slot")
 
 	require.NoError(t, doms.DomainDelPrefix(kv.StorageDomain, tx, addr[:], seedTxNum))
-
-	_, _, has, err = doms.HasPrefix(kv.StorageDomain, addr[:], tx)
-	require.NoError(t, err)
-	require.False(t, has, "DomainDelPrefix must clear the witness storage")
 
 	got = 0
 	require.NoError(t, doms.IteratePrefix(kv.StorageDomain, addr[:], tx, func(k, v []byte) (bool, error) {

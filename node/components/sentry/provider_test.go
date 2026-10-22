@@ -118,11 +118,11 @@ func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 
 	first := helperGrpcServerWithProtocols(
 		p2p.Protocol{Name: "eth", Version: 71, Length: 17},
-		p2p.Protocol{Name: "wit", Version: 0, Length: 5},
+		p2p.Protocol{Name: "aux", Version: 1, Length: 5},
 	)
 	second := helperGrpcServerWithProtocols(
 		p2p.Protocol{Name: "eth", Version: 70, Length: 17},
-		p2p.Protocol{Name: "wit", Version: 0, Length: 5}, // duplicate, must be dropped
+		p2p.Protocol{Name: "aux", Version: 1, Length: 5},
 	)
 
 	p := &Provider{
@@ -142,7 +142,7 @@ func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 	t.Cleanup(func() { p.Close() })
 
 	require.NotNil(t, p.sharedP2PServer)
-	require.Len(t, cfg.Protocols, 3, "eth/71, eth/70, wit/0 — wit deduped")
+	require.Len(t, cfg.Protocols, 3)
 
 	require.Same(t, p.sharedP2PServer, first.GetP2PServer())
 	require.Same(t, p.sharedP2PServer, second.GetP2PServer())

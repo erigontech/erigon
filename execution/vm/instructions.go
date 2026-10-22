@@ -20,16 +20,17 @@
 package vm
 
 import (
-	"bytes"
 	"fmt"
 	"math"
+	"slices"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -138,8 +139,26 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.Clear()
 		}
+	case base[0]&base[1]&base[2]&base[3] == math.MaxUint64:
+		if exponent[0]&1 == 0 {
+			exponent.SetOne()
+		} else {
+			exponent.SetAllOne()
+		}
 	default:
-		exponent.Exp(base, exponent)
+		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
+			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
+			for power != 0 {
+				if power&1 != 0 {
+					result *= factor
+				}
+				factor *= factor
+				power >>= 1
+			}
+			exponent.SetUint64(result)
+		} else {
+			exponent.Exp(base, exponent)
+		}
 	}
 	return pc, nil, nil
 }
@@ -368,17 +387,28 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
+	if !ctx.addressWordsSet[index] {
+		ctx.fillAddressWord(index, address)
+	}
+	return &ctx.addressWords[index]
+}
+
+func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts.Address) {
+	value := address.Value()
+	ctx.addressWords[index].SetBytes(value[:])
+	ctx.addressWordsSet[index] = true
+}
+
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addrVal := scope.Contract.Address().Value()
-	scope.Stack.pushRef().SetBytes(addrVal[:])
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordSelf, scope.Contract.Address()))
 	return pc, nil, nil
 }
 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	address := scope.peekAddress(evm)
 	slot := scope.Stack.peek()
-	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
-	// so the system address is included when explicitly queried by user txs.
+	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
 	balance, err := evm.IntraBlockState().GetBalance(address)
 	if err != nil {
@@ -389,21 +419,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		originVal := origin.Value()
-		scope.Stack.pushRef().SetBytes(originVal[:])
-	}
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordOrigin, evm.Origin))
 	return pc, nil, nil
 }
+
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		callerValue := caller.Value()
-		scope.Stack.pushRef().SetBytes(callerValue[:])
-	}
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordCaller, scope.Contract.Caller()))
 	return pc, nil, nil
 }
 
@@ -579,7 +600,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
-// to `state.ResolveCodeHash` function to ensure the correctness.
+// to `IntraBlockState.GetCodeHash` to ensure the correctness.
 //
 //	(1) Caller tries to get the code hash of a normal contract account, state
 //
@@ -681,12 +702,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		coinbaseValue := coinbase.Value()
-		scope.Stack.pushRef().SetBytes(coinbaseValue[:])
-	}
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordCoinbase, evm.Context.Coinbase))
 	return pc, nil, nil
 }
 
@@ -706,14 +722,12 @@ func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v.SetBytes32(evm.Context.PrevRanDao[:])
+		scope.Stack.pushRef().SetBytes32(evm.Context.PrevRanDao[:])
 	} else {
-		v = evm.Context.Difficulty
+		*scope.Stack.pushRef() = evm.Context.Difficulty
 	}
-	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -734,7 +748,7 @@ func opPop(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 func opMload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	v := scope.Stack.peek()
 	offset := v.Uint64()
-	v.SetBytes(scope.Memory.GetPtr(offset, 32))
+	v.SetBytes32(scope.Memory.GetPtr(offset, 32))
 	return pc, nil, nil
 }
 
@@ -755,6 +769,15 @@ func stMstore(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d", MSTORE, mStart.Uint64(), &val)
 }
 
+// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
+func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	// These values are checked for overflow during memory expansion calculation
+	// (the memorySize function on the opcode).
+	dst, src, length := scope.Stack.pop3()
+	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+	return pc, nil, nil
+}
+
 func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	off, val := scope.Stack.pop2Uint64()
 	scope.Memory.store[off] = byte(val)
@@ -763,7 +786,24 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+	if !scope.slots.on {
+		*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+		return pc, nil, err
+	}
+	i := scope.slots.memo
+	if scope.slots.memoGen != scope.cacheGen {
+		i = scope.lookupSlot(evm)
+	}
+	if i >= 0 {
+		*loc = scope.slots.val[i]
+		return pc, nil, nil
+	}
+	ibs := evm.IntraBlockState()
+	word, key := *loc, scope.peekStorageKey(evm)
+	if *loc, err = ibs.GetState(scope.Contract.Address(), key); err == nil {
+		stamp, _ := ibs.ReadStamp()
+		scope.slots.put(stamp, word, key, *loc)
+	}
 	return pc, nil, err
 }
 
@@ -792,20 +832,11 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos := scope.Stack.pop()
-	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
-		if usedBitmap {
-			if evm.config.TraceJumpDest {
-				log.Debug("Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", evm.TxHash),
-					"block_num", evm.Context.BlockNumber,
-				)
-			} else {
-				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Debug("Code Bitmap used for detecting invalid jump",
-					"block_num", evm.Context.BlockNumber,
-				)
-			}
-		}
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
 		return pc, nil, ErrInvalidJump
 	}
 	// pc will be increased by the interpreter loop
@@ -822,26 +853,17 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos, cond := scope.Stack.pop2()
-	if !cond.IsZero() {
-		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
-			if usedBitmap {
-				if evm.config.TraceJumpDest {
-					log.Warn("Code Bitmap used for detecting invalid jump",
-						"tx", fmt.Sprintf("0x%x", evm.TxHash),
-						"block_num", evm.Context.BlockNumber,
-					)
-				} else {
-					// This is "cheaper" version because it does not require calculation of txHash for each transaction
-					log.Warn("Code Bitmap used for detecting invalid jump",
-						"block_num", evm.Context.BlockNumber,
-					)
-				}
-			}
-			return pc, nil, ErrInvalidJump
-		}
-		pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
+	if cond.IsZero() {
+		return pc, nil, nil
 	}
-	return pc, nil, nil
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
+		return pc, nil, ErrInvalidJump
+	}
+	return pos.Uint64() - 1, nil, nil // pc will be increased by the interpreter loop
 }
 
 func stJumpi(_ uint64, scope *CallContext) string {
@@ -961,7 +983,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		v, o, sz     = scope.Stack.pop3()
 		value        = *v
 		offset, size = o.Uint64(), sz.Uint64()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.Memory.GetPtr(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
 }
@@ -972,7 +994,7 @@ func stCreate(_ uint64, scope *CallContext) string {
 		value  = stack.data[stack.top-1]
 		offset = stack.data[stack.top-2]
 		size   = stack.data[stack.top-3]
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input  = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
@@ -984,8 +1006,12 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		endowment    = *v
 		offset, size = o.Uint64(), sz.Uint64()
 		salt         = scope.Stack.popCopy()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.create.initCode
 	)
+	scope.create.initCode = nil
+	if !evm.chainRules.IsAmsterdam {
+		input = scope.Memory.GetPtr(offset, size)
+	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
 
@@ -993,11 +1019,24 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
 	codeAndHash := &codeAndHash{code: input}
 	typ := CREATE
-	var address accounts.Address
 	if salt != nil {
 		typ = CREATE2
+	}
+	var address accounts.Address
+	var preparation createPreparation
+	var suberr error
+	switch {
+	case evm.chainRules.IsAmsterdam:
+		address = scope.create.address
+		codeAndHash.hash = scope.create.codeHash
+		preparation = scope.create.preparation
+		suberr = scope.create.err
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
+			return pc, nil, suberr
+		}
+	case salt != nil:
 		address = accounts.InternAddress(types.CreateAddress2(scope.Contract.Address().Value(), salt.Bytes32(), codeAndHash.Hash()))
-	} else {
+	default:
 		nonce, err := evm.intraBlockState.GetNonce(scope.Contract.Address())
 		if err != nil {
 			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -1006,54 +1045,52 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	gas := scope.Gas()
 	returnGas := gas
-	var preparation createPreparation
-	var suberr error
-	if evm.chainRules.IsAmsterdam {
-		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
-			return pc, nil, suberr
-		}
-	}
+	var childGasUsed mdgas.MdGasUsage
 	forwarded := false
 	if suberr == nil {
-		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
-			return pc, nil, ErrOutOfGas
-		}
-		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
 			gas.Execution -= gas.Execution / 64
 		}
-		gasChangeReason := tracing.GasChangeCallContractCreation
-		if typ == CREATE2 {
-			gasChangeReason = tracing.GasChangeCallContractCreation2
+		tracer := evm.config.Tracer
+		gasTracing := tracer.HasGasChangeHook()
+		var old mdgas.MdGas
+		if gasTracing {
+			old = scope.Gas()
 		}
-		scope.useGas(gas.Execution, evm.Config().Tracer, gasChangeReason)
+		scope.gas -= gas.Execution
 		scope.stateGas = 0
+		if gasTracing {
+			gasChangeReason := tracing.GasChangeCallContractCreation
+			if typ == CREATE2 {
+				gasChangeReason = tracing.GasChangeCallContractCreation2
+			}
+			tracer.EmitGasChange(old, scope.Gas(), gasChangeReason)
+		}
 		returnGas = gas
 		forwarded = true
 		if !evm.chainRules.IsAmsterdam {
 			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
 			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
+				childGasUsed.Execution = returnGas.Execution
 				returnGas = mdgas.MdGas{}
 			}
 		}
 	}
 	var res []byte
 	var addr accounts.Address
-	var childGasUsed mdgas.MdGasUsage
 	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
-	} else if forwarded && evm.Config().Tracer != nil {
+	} else if tracer := evm.Config().Tracer; forwarded && (tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO) {
 		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
-		evm.captureEnd(evm.depth, typ, gas, returnGas, nil, suberr)
+		evm.captureEnd(evm.depth, typ, scope.Contract.Address(), address, returnGas, childGasUsed, nil, suberr)
 	}
 	scope.Contract.selfBalanceCached = false
 	if forwarded {
 		scope.restoreChildGas(returnGas, evm.config.Tracer)
 		if suberr != nil && preparation.chargeNewAccount {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		} else if suberr == nil {
-			scope.stateGasSpill += childGasUsed.StateSpill
+			scope.mergeChildStateGas(childGasUsed.StateSpill, evm.config.Tracer)
 		}
 	}
 	// Push item on the stack based on the returned error. If the ruleset is
@@ -1085,7 +1122,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 		endowment    = stack.data[stack.top-1]
 		offset, size = stack.data[stack.top-2], stack.data[stack.top-3]
 		salt         = stack.data[stack.top-4]
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input        = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
@@ -1117,7 +1154,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, *value, false /* bailout */)
 	res := stack.pushRef()
 	if err != nil {
@@ -1126,16 +1163,15 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam {
 		if err == nil {
-			scope.stateGasSpill += childGasUsage.StateSpill
+			scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 		} else if scope.newAccountCharged {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		}
 	}
 	scope.Contract.selfBalanceCached = false
@@ -1170,7 +1206,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, *value)
 	res := stack.pushRef()
@@ -1180,13 +1216,12 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1206,7 +1241,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	res := stack.pushRef()
@@ -1216,13 +1251,12 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1252,7 +1286,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	res := stack.pushRef()
@@ -1267,7 +1301,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1283,15 +1317,41 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", STATICCALL.String(), toAddr, args)
 }
 
+func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
+	if buf := evm.outputBuffer(evm.depth, size); buf != nil && size != 0 {
+		*buf = append((*buf)[:0], mem.GetPtr(offset, size)...)
+		return slices.Clip(*buf)
+	}
+	return mem.GetCopy(offset, size)
+}
+
+// outputBuffer returns where the output of a frame at depth goes, or nil for a fresh copy.
+// Tracers that see outputs may keep them, and a buffer that outgrows the cap is not kept.
+// maxKeptCallOutput bounds each per-depth output buffer; an EVM keeps one per depth, up to 16.
+const maxKeptCallOutput = uint64(256 * datasize.KB)
+
+func (evm *EVM) outputBuffer(depth int, size uint64) *[]byte {
+	if depth == 1 {
+		return evm.txOutput
+	}
+	t := evm.config.Tracer
+	if depth >= len(evm.outputs) || size > maxKeptCallOutput || t.HasExitHook() || t.HasOpcodeHook() {
+		return nil
+	}
+	if evm.outputs == nil {
+		evm.outputs = new([16][]byte)
+	}
+	return &evm.outputs[depth]
+}
+
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
-	return pc, ret, errStopToken
+	return pc, evm.output(&scope.Memory, offset, size), errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
+	ret := evm.output(&scope.Memory, offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }
@@ -1324,12 +1384,8 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	if tracer != nil && tracer.OnEnter != nil {
-		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
-	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1395,12 +1451,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	if tracer != nil && tracer.OnEnter != nil {
-		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
-	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1507,15 +1559,22 @@ func makeLog(size int) executionFunc {
 		}
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
+		if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
+			for range size {
+				stack.pop()
+			}
+			return pc, nil, nil
+		}
 		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, 0)
 		// This is a non-consensus field, but assigned here because
 		// execution/state doesn't know the current block number.
 		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
 			log.Topics[i] = stack.pop().Bytes32()
 		}
-		copy(log.Data, mem)
+		// Append fills a new buffer without zeroing it before the copy.
+		log.Data = append(log.Data, mem...)
 		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
@@ -1565,6 +1624,10 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+		if end := pc + 1 + size; end <= uint64(len(scope.Contract.Code)) {
+			scope.Stack.pushRef().SetBytes(scope.Contract.Code[pc+1 : end])
+			return pc + size, nil, nil
+		}
 		codeLen := len(scope.Contract.Code)
 
 		startMin := min(int(pc+1), codeLen)

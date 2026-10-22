@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -17,13 +18,23 @@ import (
 type emptyReader struct{}
 
 func (r *emptyReader) ReadAccountData(accounts.Address) (*accounts.Account, error) { return nil, nil }
+
 func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
+func (r *emptyReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *emptyReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -178,10 +189,10 @@ func TestTransientStorageResetInIBSReset(t *testing.T) {
 	defer ibs.Close()
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
-	testKey := accounts.InternKey([32]byte{0x01})
+	testKey := TransientKey(*uint256.NewInt(1))
 
 	// Set transient storage
-	ibs.SetTransientState(testAddr, testKey, *uint256.NewInt(42))
+	ibs.SetTransientState(testAddr, &testKey, uint256.NewInt(42))
 	val := ibs.GetTransientState(testAddr, testKey)
 	assert.False(t, val.IsZero(), "Transient storage should be set")
 
@@ -203,9 +214,11 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x55})
 
 	// Write EIP-7702 delegation code to versionMap at txIndex=5
-	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
 		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
+		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	}
 	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, accounts.NewCode(delegationCode), true)
 
 	// Read at txIndex=10 should find the code
@@ -338,16 +351,15 @@ func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(1000)
 	acc.Nonce = 1
-	enc := accounts.SerialiseV3(&acc)
 
 	assert.NotPanics(t, func() {
-		cache.WriteAccount(addr, enc, 1)
+		cache.WriteAccount(addr, acc, 1)
 	}, "WriteAccount should not panic with nil committed account")
 
 	// Verify the write is recorded.
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok, "Should have current account")
-	assert.Equal(t, enc, current, "Current account should match written value")
+	assert.Equal(t, acc, current, "Current account should match written value")
 }
 
 // TestBlockStateCacheWriteAccountUpdatesCurrent verifies that successive
@@ -365,18 +377,16 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	acc.Nonce = 3
 	cache.PutCommittedAccount(addr, &acc)
 
-	enc := accounts.SerialiseV3(&acc)
-	cache.WriteAccount(addr, enc, 3)
+	cache.WriteAccount(addr, acc, 3)
 
 	acc2 := accounts.NewAccount()
 	acc2.Balance = *uint256.NewInt(600)
 	acc2.Nonce = 3
-	enc2 := accounts.SerialiseV3(&acc2)
-	cache.WriteAccount(addr, enc2, 5)
+	cache.WriteAccount(addr, acc2, 5)
 
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok)
-	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
+	assert.Equal(t, acc2, current, "GetCurrentAccount should return the latest write")
 }
 
 // Pins that a second DeleteAccount in the same block is a writeLog no-op —
@@ -399,9 +409,9 @@ func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
 	}
 	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
 
-	enc, present := cache.GetCurrentAccount(addr)
+	current, present := cache.GetCurrentAccount(addr)
 	assert.True(t, present, "current view must still report addr as present-and-empty")
-	assert.Nil(t, enc, "current view value must remain nil")
+	assert.Equal(t, deletedAccount, current, "current view value must remain deleted")
 }
 
 // Pins the recreate-then-redelete pattern: an intervening WriteAccount
@@ -413,10 +423,9 @@ func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(1)
-	enc := accounts.SerialiseV3(&acc)
 
 	cache.DeleteAccount(addr, 1)
-	cache.WriteAccount(addr, enc, 2)
+	cache.WriteAccount(addr, acc, 2)
 	cache.DeleteAccount(addr, 3)
 
 	deletes := 0

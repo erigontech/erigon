@@ -38,9 +38,9 @@ import (
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	reader := tests.LoadChain(blocks, db, t)
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	sn.OnHeadState(postState)
+	require.NoError(t, sn.OnHeadState(postState))
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
@@ -100,9 +100,9 @@ func TestStateAntiquaryCommitIsBounded(t *testing.T) {
 
 	run := func(maxSlotsPerCommit uint64) (commits int64, progress uint64) {
 		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-		reader := tests.LoadChain(blocks, postState, db, t)
+		reader := tests.LoadChain(blocks, db, t)
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-		sn.OnHeadState(postState)
+		require.NoError(t, sn.OnHeadState(postState))
 		ctx := context.Background()
 		vt := state_accessors.NewStaticValidatorTable()
 		counter := &atomic.Int64{}

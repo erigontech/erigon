@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
 
 const noProtocol sentryproto.Protocol = -1
@@ -36,13 +35,6 @@ var (
 		eth.ETH71: sentryproto.Protocol_ETH71,
 	}
 	ProtocolToUintMap = inverseProtocolMap(UintToProtocolMap)
-
-	UintToSideProtocolMap = map[uint]sentryproto.Protocol{
-		wit.WIT1: sentryproto.Protocol_WIT0,
-	}
-	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
-		sentryproto.Protocol_WIT0: {},
-	}
 )
 
 func inverseProtocolMap(uintToProtocol map[uint]sentryproto.Protocol) map[sentryproto.Protocol]uint {
@@ -80,12 +72,9 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 }
 
 var ProtoIds = func() map[sentryproto.Protocol]map[sentryproto.MessageId]struct{} {
-	ids := make(map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}, len(eth.FromProto)+len(wit.FromProto))
+	ids := make(map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}, len(eth.FromProto))
 	for version, fromProto := range eth.FromProto {
 		ids[protocolOf(UintToProtocolMap, version)] = messageIdSet(fromProto)
-	}
-	for version, fromProto := range wit.FromProto {
-		ids[protocolOf(UintToSideProtocolMap, version)] = messageIdSet(fromProto)
 	}
 	return ids
 }()

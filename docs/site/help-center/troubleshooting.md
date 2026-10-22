@@ -10,7 +10,7 @@ sidebar_position: 3
 
 Erigon is highly resilient and uses a fully-transactional database. This design makes it safe against hard termination (`kill -9`) and power outages. The database ensures users never see "partial writes," meaning all data changes are atomic (all-or-nothing), and all RPC methods operate within Read-Only Transactions, guaranteeing a consistent data view.
 
-**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using ECC memory, disk RAID, and performing regular backups to mitigate these risks.
+**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, a redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
@@ -20,7 +20,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 4. **Monitor System Resources:** Use `htop`, `top`, or `iostat` to monitor CPU, RAM, and disk I/O. This can help you identify a performance bottleneck. For a full monitoring dashboard, see [Creating a Dashboard](/fundamentals/creating-a-dashboard).
 5. **Look for OOM-kill events:** After an unexpected crash, always check your system logs for an "Out of Memory" killer event. This confirms if a memory issue caused the crash.
 6. **Perform a Simple Restart**: If the node is stalled, simply restart the service using `systemctl restart erigon`. Erigon's transactional database is designed to handle interruption gracefully.
-7. **Disable RPC/CL during Initial Sync**: If you are stalling during snapshot sync, try restarting without the [RPC daemon](/fundamentals/modules/rpc-daemon) or consensus client to reduce concurrent disk access, which is a bottleneck during the slowest stage (Blocks Execution).
+7. **Disable RPC/CL during Initial Sync**: If you are stalling during snapshot sync, try restarting without the [RPC Daemon](/fundamentals/modules/rpc-daemon) or consensus client to reduce concurrent disk access, which is a bottleneck during the slowest stage (Blocks Execution).
 8. **Check for Disk Space:** Regularly check your disk usage. A full disk will cause performance degradation and can lead to a node crash. See [Optimizing Storage](/fundamentals/optimizing-storage) for tips on reducing disk usage.
 9. **Verify Network Time:** Ensure your system's clock is synchronized. Incorrect time can cause issues with block propagation.
 10. **Check P2P Peer Connections:** Use `net_peerCount` or similar RPC methods to check if you have a healthy number of peers. A low count may indicate a network problem. See [Default Ports](/fundamentals/default-ports) to verify firewall rules allow P2P traffic.
@@ -29,7 +29,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](/get-started/installation/upgrading) and repair options.
 14. **Correct File Ownership:** If using a dedicated user or Docker, confirm that the user has full read/write access to the datadir. See the [Docker Compose](/fundamentals/docker-compose) guide for container-specific permission tips.
 15. **Adjust RPC Timeouts:** If specific RPC requests are timing out, try increasing the timeout values to allow more time for heavy requests to complete. See the [RPC & API flags](/fundamentals/configuring-erigon#rpc--api) in the CLI Reference.
-16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low TPS, try reducing the `--DB.read.concurrency` flag. See [Configuring Erigon](/fundamentals/configuring-erigon) for all database-related flags.
+16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low transactions per second (TPS), try reducing the `--DB.read.concurrency` flag. See [Configuring Erigon](/fundamentals/configuring-erigon) for all database-related flags.
 17. **Report a Bug:** If all else fails, open a detailed bug report on GitHub with logs, version info, and a clear description of the problem.
 18. **Engage with the Community:** The Erigon Discord server is an invaluable resource for seeking help from core developers and experienced users.
 
@@ -43,6 +43,8 @@ Before opening a GitHub issue, gather the following information to help the team
 kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
+
+If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's continuous integration (CI) watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
@@ -61,12 +63,52 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-| Purpose        | Port  | Protocol |
-| -------------- | ----- | -------- |
-| P2P (Ethereum) | 30303 | TCP+UDP  |
-| P2P (Caplin)   | 9000  | TCP+UDP  |
+* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, Network Time Protocol (NTP) and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+* **Dedicated servers (Robot)** — the firewall is stateless, so nothing is inferred from an outgoing connection. The listening ports in the table below are not enough on their own: replies to Erigon's own outbound connections — DNS, HTTPS to the snapshot webseeds, and outgoing peer dials — arrive on ephemeral local ports and need inbound rules of their own (TCP with `ack` set, plus the UDP ranges you use), and any outbound filtering needs matching reply rules. Follow [Hetzner's notes on stateless-firewall configuration](https://docs.hetzner.com/robot/dedicated-server/firewall/#notes-about-stateless-firewall-configuration) rather than porting a Cloud ruleset across.
 
-Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
+The ports to allow inbound:
 
+| Purpose                          | Port  | Protocol |
+| -------------------------------- | ----- | -------- |
+| P2P (execution layer)            | 30303 | TCP+UDP  |
+| Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
+| Caplin DISCV5 discovery          | 4000  | UDP      |
+| Caplin libp2p peering (TCP)      | 4001  | TCP      |
+| Caplin libp2p peering (QUIC)     | 4002  | UDP      |
+
+This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
+
+The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+If specifically the QUIC port (`4002`) cannot be opened — for example a Docker or Kubernetes setup where only the TCP peering port was published — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving it unreachable. This does not help if DISCV5 discovery's UDP port (`4000`) is also blocked: Caplin needs that port regardless of whether QUIC is enabled.
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
+
+A public-facing Erigon node should also not attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is worth doing explicitly on Hetzner, whose abuse and netscan detection flags outbound dials to reserved ranges — that is what prompted this note, rather than their firewall filtering the traffic. Do not apply this to a node using `--caplin.local-discovery`, which deliberately peers over private IPs. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are that registry's entries most often blocked for an Ethereum node — it is a reference list, not a ruleset to paste verbatim: `127.0.0.0/8` and `255.255.255.255/32` are included for completeness but must **not** go into an outbound drop rule, for the reason given after the list (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
+
+```text
+0.0.0.0/8             "This" Network                                RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks                          RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)                       RFC 6598, Section 7
+127.0.0.0/8           Loopback                                      RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                                    RFC 3927
+172.16.0.0/12         Private-Use Networks                          RFC 1918
+192.0.0.0/24          IETF Protocol Assignments                     RFC 5736
+192.0.2.0/24          TEST-NET-1                                    RFC 5737
+192.88.99.0/24        6to4 Relay Anycast (deprecated)               RFC 3068, RFC 7526
+192.168.0.0/16        Private-Use Networks                          RFC 1918
+198.18.0.0/15         Network Interconnect Device Benchmark Testing RFC 2544
+198.51.100.0/24       TEST-NET-2                                    RFC 5737
+203.0.113.0/24        TEST-NET-3                                    RFC 5737
+224.0.0.0/4           Multicast                                     RFC 3171
+240.0.0.0/4           Reserved for Future Use                       RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast                             RFC 919 and RFC 922, Section 7
+```
+
+A near-identical list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068) is available on Stack Exchange, but do not paste it in as a blanket `OUTPUT` policy:
+
+* It omits `127.0.0.0/8`, which is correct — an `OUTPUT` drop on loopback would break Erigon's own inter-component traffic, such as the RPC Daemon reaching the core node on `127.0.0.1:9090`.
+* It has no separate `255.255.255.255/32` rule, but that address is **not** left reachable: `240.0.0.0/4` spans `240.0.0.0`–`255.255.255.255` and already covers it.
+* On **Hetzner Cloud** it drops the metadata endpoint at `169.254.169.254`, which sits inside `169.254.0.0/16`, along with legitimate private-network and multicast traffic. Exempt what your instance needs, or scope the rules to Erigon's peer dialing instead of the whole `OUTPUT` chain.

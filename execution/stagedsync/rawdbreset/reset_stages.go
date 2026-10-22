@@ -43,9 +43,6 @@ import (
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
-	if err := db.Update(ctx, ResetWitnesses); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
@@ -221,26 +218,15 @@ func ResetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetWitnesses(tx kv.RwTx) error {
-	if err := tx.ClearTable(kv.BorWitnesses); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorWitnessSizes); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
 var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {},
 	stages.Finish:      {},
 }
+
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch,
 }
+
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
 	kv.TblPruningValsProg,
@@ -289,7 +275,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
-
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
@@ -428,10 +413,7 @@ const (
 )
 
 func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
-	if blockReader.BorSnapshots() == nil {
-		snapProgress = blockReader.FrozenBlocks()
-	}
+	snapProgress := blockReader.FrozenBlocks()
 	if snapProgress < pruneMarkerSafeThreshold {
 		return 0
 	}

@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"slices"
 	"sync"
 )
 
@@ -26,8 +27,10 @@ type plainKeyArena struct {
 
 // Grows geometrically for the same reason the prefix arena does: a fresh buffer is
 // built per block, so a block touching two keys must not pay the full chunk.
-const plainKeyArenaChunkMin = 1024
-const plainKeyArenaChunkMax = 64 * 1024
+const (
+	plainKeyArenaChunkMin = 1024
+	plainKeyArenaChunkMax = 64 * 1024
+)
 
 func (a *plainKeyArena) intern(b []byte) []byte {
 	if len(b) > plainKeyArenaChunkMax {
@@ -44,8 +47,20 @@ func (a *plainKeyArena) intern(b []byte) []byte {
 
 func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 
+const touchChunkKeys = 16384
+
+type touchEntry struct {
+	hashedKey []byte
+	plainKey  []byte
+	update    *Update
+}
+
 type parallelUpdate struct {
 	trie *prefixTrie
+
+	pending  []touchEntry
+	spare    []touchEntry
+	inflight sync.WaitGroup
 
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
@@ -54,41 +69,72 @@ type parallelUpdate struct {
 }
 
 func newParallelUpdate() *parallelUpdate {
-	return &parallelUpdate{
-		trie: newPrefixTrie(),
+	return &parallelUpdate{trie: newPrefixTrie()}
+}
+
+// Collect is not safe for concurrent calls; the caller must serialize them.
+func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
+	pu.pending = append(pu.pending, touchEntry{hashedKey: hashedKey, plainKey: plainKey, update: update})
+	if len(pu.pending) >= touchChunkKeys {
+		pu.handOff()
 	}
 }
 
-// Insert is not safe for concurrent calls; the caller must serialize them.
-func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte, update *Update) {
-	pu.trie.Insert(hashedKey, plainKey, update)
+func resetEntries(c []touchEntry) []touchEntry {
+	clear(c)
+	return c[:0]
+}
+
+func (pu *parallelUpdate) handOff() {
+	pu.inflight.Wait()
+	c := pu.pending
+	pu.pending, pu.spare = slices.Grow(pu.spare[:0], touchChunkKeys), c
+	pu.inflight.Go(func() {
+		pu.insertChunk(c)
+		clear(c)
+	})
+}
+
+func (pu *parallelUpdate) insertChunk(c []touchEntry) {
+	for i := range c {
+		pu.trie.Insert(c[i].hashedKey, c[i].plainKey, c[i].update)
+	}
+}
+
+func (pu *parallelUpdate) Build() {
+	pu.inflight.Wait()
+	pu.insertChunk(pu.pending)
+	pu.pending = resetEntries(pu.pending)
 }
 
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
 	return pu.keyArena.intern(plainKey)
 }
 
-func (pu *parallelUpdate) Reset() {
-	if pu.trie != nil {
-		pu.trie.Reset()
-	}
-	pu.deferredMu.Lock()
-	for _, upd := range pu.deferredCombined {
-		putDeferredUpdate(upd)
-	}
-	pu.deferredCombined = pu.deferredCombined[:0]
-	pu.deferredMu.Unlock()
-	pu.keyArena.reset()
-}
-
-func (pu *parallelUpdate) Close() {
-	pu.trie = nil
+func (pu *parallelUpdate) drainDeferred() {
 	pu.deferredMu.Lock()
 	for _, upd := range pu.deferredCombined {
 		putDeferredUpdate(upd)
 	}
 	pu.deferredCombined = nil
 	pu.deferredMu.Unlock()
+}
+
+func (pu *parallelUpdate) Reset() {
+	pu.inflight.Wait()
+	pu.pending = resetEntries(pu.pending)
+	if pu.trie != nil {
+		pu.trie.Reset()
+	}
+	pu.drainDeferred()
+	pu.keyArena.reset()
+}
+
+func (pu *parallelUpdate) Close() {
+	pu.inflight.Wait()
+	pu.pending, pu.spare = nil, nil
+	pu.trie = nil
+	pu.drainDeferred()
 	pu.keyArena.reset()
 }
 
