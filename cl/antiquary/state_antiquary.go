@@ -308,6 +308,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := stateAntiquaryCollector.storeEpochData(s.currentState); err != nil {
 				return err
 			}
+			if err := stateAntiquaryCollector.collectPtcWindowEpoch(s.currentState); err != nil {
+				return err
+			}
 			var prevEpoch uint64
 			if epoch > 0 {
 				prevEpoch = epoch - 1
@@ -474,9 +477,27 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
 		stateAntiquaryCollector.preStateTransitionHook(s.currentState)
+		reachesGloasFork := s.currentState.Version() < clparams.GloasVersion && block.Block.Slot/s.cfg.SlotsPerEpoch >= s.cfg.GloasForkEpoch
+		var forkSlot uint64
+		if reachesGloasFork {
+			forkSlot = s.cfg.GloasForkEpoch * s.cfg.SlotsPerEpoch
+		}
+		if reachesGloasFork && s.currentState.Slot() < forkSlot && block.Block.Slot > forkSlot {
+			if err := transition.DefaultMachine.ProcessSlots(s.currentState, forkSlot); err != nil {
+				return err
+			}
+			if err := stateAntiquaryCollector.collectPtcWindowEpoch(s.currentState); err != nil {
+				return err
+			}
+		}
 		// We sanity check the state every 1k slots or when we start.
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
+		}
+		if reachesGloasFork && block.Block.Slot == forkSlot {
+			if err := stateAntiquaryCollector.collectPtcWindowEpoch(s.currentState); err != nil {
+				return err
+			}
 		}
 		// if s.currentState.Slot() == 3751254 {
 		// 	s.dumpFullBeaconState()
@@ -550,9 +571,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			if err := stateAntiquaryCollector.collectBuilderPendingPayments(slot, s.currentState.GetBuilderPendingPayments()); err != nil {
-				return err
-			}
-			if err := stateAntiquaryCollector.collectPtcWindow(slot, s.currentState.GetPtcWindow()); err != nil {
 				return err
 			}
 			if err := stateAntiquaryCollector.collectLatestExecutionPayloadBid(slot, s.currentState.GetLatestExecutionPayloadBid()); err != nil {
@@ -726,6 +744,20 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 	if s.stateSn != nil {
 		targetSlot = max(targetSlot, s.stateSn.BlocksAvailable())
 	}
+	var snapshotView *snapshotsync.CaplinStateView
+	if s.stateSn != nil {
+		snapshotView = s.stateSn.View()
+		defer snapshotView.Close()
+	}
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, snapshotView)
+	forcedAttempt, forceForkReplay, err := ptcWindowEpochReconstructionStart(tx, s.cfg, s.genesisState.Slot(), targetSlot, getter)
+	if err != nil {
+		return err
+	}
+	if forceForkReplay {
+		s.logger.Warn("re-processing states from the Gloas fork because PtcWindowEpoch is missing", "slot", forcedAttempt)
+		targetSlot = forcedAttempt
+	}
 	// We want to backoff by some slots until we get a correct state from DB.
 	// we start from 10 * clparams.SlotsPerDump.
 	backoffStrides := uint64(10)
@@ -734,9 +766,15 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState, s.stateSn, s.syncedData)
 
 	for {
-		attempt, err := computeSlotToBeRequested(tx, s.cfg, s.genesisState.Slot(), targetSlot, backoffStep)
-		if err != nil {
-			return err
+		var attempt uint64
+		if forceForkReplay {
+			attempt = forcedAttempt
+			forceForkReplay = false
+		} else {
+			attempt, err = computeSlotToBeRequested(tx, s.cfg, s.genesisState.Slot(), targetSlot, backoffStep)
+			if err != nil {
+				return err
+			}
 		}
 		// If we are attempting slot=0 then we are at genesis.
 		if attempt == s.genesisState.Slot() {
@@ -788,6 +826,32 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 	s.balances32 = s.balances32[:0]
 	s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 	return s.currentState.InitBeaconState()
+}
+
+func ptcWindowEpochReconstructionStart(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesisSlot, targetSlot uint64, getter state_accessors.GetValFn) (uint64, bool, error) {
+	if targetSlot <= genesisSlot {
+		return targetSlot, false, nil
+	}
+	if targetSlot/cfg.SlotsPerEpoch < cfg.GloasForkEpoch {
+		return targetSlot, false, nil
+	}
+	forkSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	firstRowSlot := cfg.RoundSlotToEpoch(max(forkSlot, genesisSlot))
+	row, err := getter(kv.PtcWindowEpochTable, base_encoding.Encode64ToBytes4(firstRowSlot))
+	if err != nil {
+		return 0, false, err
+	}
+	if len(row) != 0 {
+		return targetSlot, false, nil
+	}
+	if forkSlot == 0 {
+		return genesisSlot, true, nil
+	}
+	start, err := findNearestSlotBackwards(tx, cfg, forkSlot-1)
+	if err != nil {
+		return 0, false, err
+	}
+	return max(start, genesisSlot), true, nil
 }
 
 func computeSlotToBeRequested(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesisSlot uint64, targetSlot uint64, backoffStep uint64) (uint64, error) {
