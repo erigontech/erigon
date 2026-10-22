@@ -130,7 +130,7 @@ func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
 	}
 	return lockOrderFixture{
 		cfg: &Cfg{
-			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock, headState),
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock),
 			ethClock:   clock,
 			beaconCfg:  &beaconCfg,
 			forkChoice: store,

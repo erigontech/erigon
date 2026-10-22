@@ -204,7 +204,7 @@ func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {
 		{name: "interleaved with missing segment", interveningError: forkchoice.ErrMissingSegment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service := &blockService{}
+			service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestPublishedBlockJobUpgradeResetsExecutionBackoff(t *testing.T) {
 }
 
 func TestPublishedBlockJobBackoffDoesNotExtendExpiry(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)

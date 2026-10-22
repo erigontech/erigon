@@ -10,6 +10,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -340,4 +342,76 @@ func TestNormalizeReturnsStorageKeysError(t *testing.T) {
 		return nil, want
 	}, false, false, false)
 	require.ErrorIs(t, err, want)
+}
+
+// A contract that did not exist before the tx and is created and self-destructed
+// in it leaves no state, so Normalize must emit nothing for it: no delete for the
+// apply path to replay and no key for the commitment to fold. A CREATE onto an
+// address that already held a balance still deletes that account.
+func TestNormalize_CreatedAndDestroyedInTxLeavesNoWrites(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
+	run := func(t *testing.T, reader StateReader, eip8246 bool) *WriteSet {
+		t.Helper()
+		vm := NewVersionMap(nil)
+		ibs := NewWithVersionMap(reader, vm)
+		ibs.SetNoMaterialize(true)
+		defer ibs.Close()
+		ibs.SetTxContext(0, 0)
+		ibs.SetVersion(0)
+		ibs.eip8246 = eip8246
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract))
+		require.NoError(t, ibs.SetCode(addr, []byte{0x33, 0xff}, tracing.CodeChangeContractCreation))
+		_, err := ibs.Selfdestruct(addr, eip8246)
+		require.NoError(t, err)
+		rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: eip8246}
+		out, err := ibs.FinalizedWrites(rules).Normalize(vm, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, eip8246)
+		require.NoError(t, err)
+		return out
+	}
+	hasAddr := func(ws *WriteSet) bool {
+		for h := range ws.AllHeaders() {
+			if h.Address == addr {
+				return true
+			}
+		}
+		return false
+	}
+	for _, eip8246 := range []bool{false, true} {
+		require.False(t, hasAddr(run(t, &minimalStateReader{}, eip8246)), "eip8246=%v: absent before the tx and gone after it", eip8246)
+	}
+	prefunded := run(t, newAccountStateReader(addr), false)
+	sd, ok := prefunded.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "a CREATE onto a pre-funded address must still delete that account")
+
+	// An earlier tx of the block funded the address; a reader that does not see the
+	// block's earlier txs must not make its delete look unneeded.
+	funded := NewVersionMap(nil)
+	funded.FlushVersionedWrites(func() *WriteSet {
+		w := &WriteSet{}
+		w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
+		return w
+	}(), true)
+	tx1 := Version{TxIndex: 1}
+	later := &WriteSet{}
+	later.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: tx1}, Val: true})
+	later.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: tx1}, Val: true})
+	later.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: tx1}, Val: uint256.Int{}})
+	out, err := later.Normalize(funded, 1, 0, &minimalStateReader{}, nil, true, false, false)
+	require.NoError(t, err)
+	sd, ok = out.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "an account funded earlier in the block must still be deleted")
+
+	ver := Version{TxIndex: 0}
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(5)})
+	kept, err := ws.Normalize(NewVersionMap(nil), 0, 0, &minimalStateReader{}, nil, true, false, true /*eip8246*/)
+	require.NoError(t, err)
+	bal, ok := kept.GetBalance(addr)
+	require.True(t, ok && bal.Val.Eq(uint256.NewInt(5)), "EIP-8246: a created and destroyed account keeps its balance")
+	sd, ok = kept.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "EIP-8246: the self-destruct of an account that keeps its balance must survive")
 }

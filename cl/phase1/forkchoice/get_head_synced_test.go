@@ -175,13 +175,17 @@ type pausingCheckpointStateForkGraph struct {
 	release chan struct{}
 }
 
-func (g *pausingCheckpointStateForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (g *pausingCheckpointStateForkGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g *pausingCheckpointStateForkGraph) ReplayState(root common.Hash) (*state.CachingBeaconState, error) {
 	select {
 	case g.entered <- struct{}{}:
 	default:
 	}
 	<-g.release
-	return g.ForkGraph.GetState(root, alwaysCopy)
+	return g.ForkGraph.ReplayState(root)
 }
 
 type failingCheckpointStateForkGraph struct {
@@ -189,7 +193,11 @@ type failingCheckpointStateForkGraph struct {
 	calls atomic.Int32
 }
 
-func (g *failingCheckpointStateForkGraph) GetState(common.Hash, bool) (*state.CachingBeaconState, error) {
+func (g *failingCheckpointStateForkGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g *failingCheckpointStateForkGraph) ReplayState(common.Hash) (*state.CachingBeaconState, error) {
 	g.calls.Add(1)
 	return nil, errors.New("checkpoint state unavailable")
 }
