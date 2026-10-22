@@ -390,3 +390,46 @@ func (s Store) Close() error {
 	}
 	return err
 }
+
+// Rewrite copies the store in srcDir to dstDir, replacing each record that
+// patchDir holds for the same block and hash, and returns how many it replaced.
+func Rewrite(srcDir, patchDir, dstDir string) (patched int, err error) {
+	if _, err := os.Stat(filepath.Join(dstDir, fileName)); !errors.Is(err, os.ErrNotExist) {
+		return 0, fmt.Errorf("offline BAL rewrite: %s already has a log", dstDir)
+	}
+	patches, err := OpenReader(patchDir)
+	if err != nil {
+		return 0, err
+	}
+	defer patches.Close()
+	srcLog, err := os.Open(filepath.Join(srcDir, fileName))
+	if err != nil {
+		return 0, err
+	}
+	defer srcLog.Close()
+	info, err := srcLog.Stat()
+	if err != nil {
+		return 0, err
+	}
+	data, err := mmap.OpenRo(srcLog, int(info.Size()))
+	if err != nil {
+		return 0, err
+	}
+	defer data.Unmap()
+	w, err := NewWriter(dstDir)
+	if err != nil {
+		return 0, err
+	}
+	walkRecords(data, func(blockNum uint64, hash common.Hash, recOff, payloadLen int) {
+		if err != nil {
+			return
+		}
+		payload := data[recOff+recPrefix : recOff+recPrefix+payloadLen]
+		if p, ok := patches.Get(blockNum, hash); ok {
+			payload = p
+			patched++
+		}
+		err = w.Append(blockNum, hash, payload)
+	})
+	return patched, errors.Join(err, w.Close())
+}

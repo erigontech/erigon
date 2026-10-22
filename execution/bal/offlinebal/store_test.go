@@ -323,3 +323,42 @@ func TestGenerateAndUse(t *testing.T) {
 		t.Fatal("records 1-3 changed")
 	}
 }
+
+func TestRewriteReplacesPatchedRecords(t *testing.T) {
+	src, patch, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeBlocks(t, src, 1, 2, 3)
+	w, err := NewWriter(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Append(2, hashOf(2), []byte("fixed-2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Append(3, hashOf(9), []byte("other-fork-3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	patched, err := Rewrite(src, patch, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched != 1 {
+		t.Fatalf("patched = %d, want 1 (a patch for another hash is ignored)", patched)
+	}
+	r, err := OpenReader(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if r.Len() != 3 {
+		t.Fatalf("Len = %d, want 3", r.Len())
+	}
+	for n, want := range map[uint64][]byte{1: {1}, 2: []byte("fixed-2"), 3: {3}} {
+		if got, ok := r.Get(n, hashOf(byte(n))); !ok || !bytes.Equal(got, want) {
+			t.Fatalf("Get(%d) = %q,%v want %q", n, got, ok, want)
+		}
+	}
+}
