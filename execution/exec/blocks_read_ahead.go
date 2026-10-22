@@ -234,12 +234,12 @@ func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.
 	go func() {
 		defer close(r.done)
 		var next atomic.Int64
-		var group errgroup.Group
+		group, groupCtx := errgroup.WithContext(ctx)
 		for w := range min(secp256k1.NumOfContexts(), len(txns)) {
 			cryptoContext := secp256k1.ContextForThread(w)
 			group.Go(func() error {
 				for i := int(next.Add(1) - 1); i < len(txns); i = int(next.Add(1) - 1) {
-					if err := ctx.Err(); err != nil {
+					if err := groupCtx.Err(); err != nil {
 						return err
 					}
 					from, err := signer.SenderWithContext(cryptoContext, txns[i])
