@@ -404,6 +404,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if to < s.BlockNumber {
 		return nil
 	}
+	from := s.BlockNumber + 1
+	defer func() {
+		if err == nil {
+			err = writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber)
+		}
+	}()
 
 	// Stage coordination hoisted out of the exec core: resolve the start point
 	// and exec window from committed domains + the txNum index before handing a
