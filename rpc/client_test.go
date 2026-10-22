@@ -1083,7 +1083,7 @@ func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.D
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	client, err := newClient(context.Background(), cfg, newClientTransportIO(inR, outW), log.New())
+	client, err := newClient(context.Background(), newClientTransportIO(inR, outW), log.New())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		inW.Close() // ends the client's read loop, which Close waits for
