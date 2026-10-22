@@ -132,6 +132,25 @@ func BenchmarkKeccak256(b *testing.B) {
 	}
 }
 
+// BenchmarkKeccak256Chain hashes memory[0:size] and stores the hash at memory[0], so every input is new.
+func BenchmarkKeccak256Chain(b *testing.B) {
+	for _, size := range []int{32, 64, 128, 136} {
+		p, lbl := program.New().Jumpdest()
+		code := p.Push(size).Op(vm.PUSH0, vm.KECCAK256, vm.PUSH0, vm.MSTORE).Jump(lbl).Bytes()
+
+		b.Run(formatSize(size)+"/100M", func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			callOOG(b, vmenv, addrContract)
+			for b.Loop() {
+				callOOG(b, vmenv, addrContract)
+			}
+		})
+	}
+}
+
 // BenchmarkMixedCompute simulates a realistic opcode mix based on mainnet profiling:
 // ~60% stack ops, ~20% arithmetic, ~10% memory, ~10% control flow.
 func BenchmarkMixedCompute(b *testing.B) {
