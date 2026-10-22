@@ -120,19 +120,25 @@ func TestReadBuildersSSZChecksTheRowAtTheDumpSlot(t *testing.T) {
 		name     string
 		forkSlot uint64
 		row      []byte
+		missed   bool
 		rebuild  bool
 	}{
 		{name: "legacy row after the fork", forkSlot: clparams.SlotsPerDump, row: legacy.Bytes(), rebuild: true},
 		{name: "legacy row at the fork slot", forkSlot: dumpSlot, row: legacy.Bytes(), rebuild: true},
 		{name: "current row is not applied twice", forkSlot: clparams.SlotsPerDump, row: encodeBuildersRow(t, readerBuilders(10), dump)},
-		{name: "no row", forkSlot: clparams.SlotsPerDump},
+		{name: "processed block without a row", forkSlot: clparams.SlotsPerDump, rebuild: true},
+		{name: "missed block", forkSlot: clparams.SlotsPerDump, missed: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			slotData := map[string][]byte{}
+			if !test.missed {
+				slotData[string(base_encoding.Encode64ToBytes4(dumpSlot))] = []byte{1}
+			}
 			getter := mockGetValFn(map[string]map[string][]byte{
 				kv.BuildersDump: {string(base_encoding.Encode64ToBytes4(dumpSlot)): compressSSZ(t, dump)},
 				kv.Builders:     {string(base_encoding.Encode64ToBytes4(dumpSlot)): test.row},
-				kv.SlotData:     {string(base_encoding.Encode64ToBytes4(dumpSlot)): {1}},
+				kv.SlotData:     slotData,
 			})
 			got := readerBuilders()
 			err := ReadBuildersSSZ(getter, dumpSlot, test.forkSlot, readerBuilderLimit, got)

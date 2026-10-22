@@ -1150,28 +1150,22 @@ func ReadBuildersSSZ(kvGetter state_accessors.GetValFn, slot, forkSlot, registry
 	if err != nil {
 		return err
 	}
-	// The dump already includes its own slot's row; check its format anyway so legacy history is detected at dump slots.
-	if dumpSlot := slot - slot%clparams.SlotsPerDump; firstDiffSlot > dumpSlot {
-		row, err := kvGetter(kv.Builders, base_encoding.Encode64ToBytes4(dumpSlot))
-		if err != nil {
-			return err
-		}
-		if len(row) != 0 {
-			if err := state_accessors.CheckBuildersDiffRow(row); err != nil {
-				return fmt.Errorf("check builders diff from table %s at slot %d: %w", kv.Builders, dumpSlot, err)
-			}
-		}
-	}
 
-	for currSlot := firstDiffSlot; currSlot <= slot; currSlot++ {
+	for currSlot := slot - slot%clparams.SlotsPerDump; currSlot <= slot; currSlot++ {
 		key := base_encoding.Encode64ToBytes4(currSlot)
 		row, err := kvGetter(kv.Builders, key)
 		if err != nil {
 			return err
 		}
 		if len(row) != 0 {
-			if err := state_accessors.ApplyBuildersDiff(row, out, registryLimit); err != nil {
-				return fmt.Errorf("apply builders diff from table %s at slot %d: %w", kv.Builders, currSlot, err)
+			// A loaded dump already includes its own slot's row; checking that row still detects legacy history at dump slots.
+			if currSlot < firstDiffSlot {
+				err = state_accessors.CheckBuildersDiffRow(row)
+			} else {
+				err = state_accessors.ApplyBuildersDiff(row, out, registryLimit)
+			}
+			if err != nil {
+				return fmt.Errorf("read builders diff from table %s at slot %d: %w", kv.Builders, currSlot, err)
 			}
 			continue
 		}
