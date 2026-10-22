@@ -517,6 +517,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
+		var pendingFolds []*txResult
 
 		// handleCommitResult classifies a commitment result with NO unwind
 		// side-effects: a wrong-root is routed through the fail/finalized machinery
@@ -672,7 +673,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// The apply loop is the sole sd.mem writer. Folding mid-block is safe:
 					// every cell a published tx wrote is in the versionMap, so later txs
 					// resolve it there and never read it from sd.mem.
-					if !finalized && foldErr == nil {
+					if applyResult.foldAtBlockEnd {
+						pendingFolds = append(pendingFolds, applyResult)
+					} else if !finalized && foldErr == nil {
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
 					}
 					if pe.accumulator != nil {
@@ -681,6 +684,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					for _, r := range pendingFolds {
+						if !finalized && foldErr == nil {
+							foldErr = pe.foldTx(ctx, rwTx, r)
+						}
+					}
+					pendingFolds = pendingFolds[:0]
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
@@ -1752,6 +1761,10 @@ type txResult struct {
 	// so its indexing skips the receipt cache; its logs are the block-end syscall
 	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
 	isFinalize bool
+	// foldAtBlockEnd defers the fold to the block's blockResult. Under a BAL,
+	// workers read sd.mem for cells the BAL does not cover, and a fold running
+	// beside them contends with those reads on the domain locks.
+	foldAtBlockEnd bool
 }
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
@@ -3707,6 +3720,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
+				foldAtBlockEnd:        be.versionMap.HasBAL,
 			}
 
 			if result.Receipt != nil {
@@ -3895,13 +3909,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// apply loop indexes them with skipReceiptCache, since finalize shares the
 			// last regular tx's txNum.
 			if err := be.sendResult(ctx, &txResult{
-				blockNum:   be.blockNum,
-				blockHash:  be.blockHash,
-				txNum:      txTask.Version().TxNum,
-				rules:      lastResult.Rules(),
-				writes:     finalizeWrites,
-				logs:       blockEndLogs,
-				isFinalize: true,
+				blockNum:       be.blockNum,
+				blockHash:      be.blockHash,
+				txNum:          txTask.Version().TxNum,
+				rules:          lastResult.Rules(),
+				writes:         finalizeWrites,
+				logs:           blockEndLogs,
+				isFinalize:     true,
+				foldAtBlockEnd: be.versionMap.HasBAL,
 			}, false); err != nil {
 				return nil, err
 			}
