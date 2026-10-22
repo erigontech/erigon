@@ -3444,18 +3444,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receipts.DeriveFields(blockReceipts, be.hash())
 
 			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
-				computedBal, err := pe.rederiveResumedBlockAccessList(ctx, applyTx, be.block, blockStartTxNum, lastCommittedTxNum)
-				if err != nil {
-					if errors.Is(err, rules.ErrInvalidBlock) {
-						return be.invalidBlockResult(fmt.Errorf("block %d: %w", be.number(), err)), nil
-					}
-					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot re-derive its block access list: %w", be.number(), err)), nil
+				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, lastCommittedTxNum)
+				var computedBal types.BlockAccessList
+				if err == nil {
+					computedBal, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)
 				}
-				if err := bal.Validate(header, be.block.BlockAccessList(), computedBal, pe.cfg.dirs.DataDir, pe.logger); err != nil {
-					if errors.Is(err, rules.ErrInvalidBlock) {
-						return be.invalidBlockResult(err), nil
-					}
-					return be.operationalBlockResult(err), nil
+				if err == nil {
+					err = bal.Validate(header, be.block.BlockAccessList(), computedBal, pe.cfg.dirs.DataDir, pe.logger)
+				}
+				if errors.Is(err, rules.ErrInvalidBlock) {
+					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.number(), err)), nil
+				}
+				if err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot validate its block access list: %w", be.number(), err)), nil
 				}
 			}
 		}

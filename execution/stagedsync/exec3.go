@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -585,16 +584,6 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
 	}
 	return priorReceipts, nil
-}
-
-// rederiveResumedBlockAccessList re-executes a block resumed mid-block from the
-// state history at the block start: the executor ran only the block's suffix.
-// The history must hold the committed prefix, up to lastCommittedTxNum.
-func (te *txExecutor) rederiveResumedBlockAccessList(ctx context.Context, applyTx kv.TemporalTx, block *types.Block, blockStartTxNum, lastCommittedTxNum uint64) (types.BlockAccessList, error) {
-	if err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, lastCommittedTxNum); err != nil {
-		return nil, err
-	}
-	return bal.RederiveFromHistory(ctx, te.cfg.chainConfig, te.cfg.engine, te.cfg.blockReader, applyTx, block, blockStartTxNum, te.logger)
 }
 
 func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
