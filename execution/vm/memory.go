@@ -158,6 +158,11 @@ func (m *Memory) allocated32(off *uint256.Int) bool {
 	return off.IsUint64() && off.Uint64() < uint64(len(m.store)) && uint64(len(m.store))-off.Uint64() >= 32
 }
 
+// allocated reports whether the size bytes at off are already allocated.
+func (m *Memory) allocated(off, size *uint256.Int) bool {
+	return off.IsUint64() && size.IsUint64() && off.Uint64() <= uint64(len(m.store)) && uint64(len(m.store))-off.Uint64() >= size.Uint64()
+}
+
 // allocatedCopy reports whether a copy of length bytes between dst and src
 // stays in allocated memory, so it costs no expansion gas.
 func (m *Memory) allocatedCopy(dst, src, length *uint256.Int) bool {
