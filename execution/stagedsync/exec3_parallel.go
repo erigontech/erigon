@@ -143,8 +143,8 @@ type parallelExecutor struct {
 	// currentChangeSet is the block's changeset while it is being built: the exec
 	// loop creates it and saves it by hash, then the apply fold and the committer
 	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
-	// persistent live accumulator — under splitApply the apply loop is the sole
-	// sd.mem writer, so a global install would only race the fold's own transient bind.
+	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
+	// global install would only race the fold's own transient bind.
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
@@ -263,6 +263,21 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 		unswap()
 		pe.domains().UnlockChangesetAccumulator()
 	}
+}
+
+// foldTx applies one published tx's versionMap view and indexes to sd.mem. The
+// finalize tx skips ApplyTxIndexes' receipt-cache write: it shares the last regular
+// tx's txNum, so a write here would clobber that entry.
+func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
+	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
+	defer restoreCS()
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
+		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	return nil
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context,
@@ -489,9 +504,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// splitApply: buffer each block's per-tx results and fold them to sd.mem at
-		// block end, so sd.mem stays N-1 during exec.
-		var splitApplyBuf []*txResult
+		// foldErr is the first per-tx fold error of the current block, surfaced at
+		// its blockResult.
+		var foldErr error
 
 		// handleCommitResult classifies a commitment result with NO unwind
 		// side-effects: a wrong-root is routed through the fail/finalized machinery
@@ -644,9 +659,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, writeCount)
 					}
 					blockUpdateCount += writeCount
-					// The apply loop is the sole sd.mem writer: buffer each tx result
-					// and fold the buffer to sd.mem at block end.
-					splitApplyBuf = append(splitApplyBuf, applyResult)
+					// The apply loop is the sole sd.mem writer. Folding mid-block is safe:
+					// every cell a published tx wrote is in the versionMap, so later txs
+					// resolve it there and never read it from sd.mem.
+					if !finalized && foldErr == nil {
+						foldErr = pe.foldTx(ctx, rwTx, applyResult)
+					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
@@ -686,29 +704,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						finalized = true
 						deliberateCancel()
 					}
-					// Fold the block's per-tx versionMap views to sd.mem at block end in
-					// publish order; the versionMap composes each tx's base. The finalize
-					// tx skips ApplyTxIndexes, matching the exec loop.
-					restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
-					var applyErr error
-					for _, r := range splitApplyBuf {
-						if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
-							applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-							break
-						}
-						// Index on the apply loop — the sole sd.mem writer — for every
-						// result including finalize (whose logs are the block-end syscall
-						// logs). skipReceiptCache for finalize: it shares the last regular
-						// tx's txNum, so a receipt-cache write here would clobber that entry.
-						if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
-							applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-							break
-						}
-					}
-					restoreCS()
-					splitApplyBuf = splitApplyBuf[:0]
-					if applyErr != nil {
-						failInfra(applyErr)
+					if foldErr != nil {
+						err := foldErr
+						foldErr = nil
+						failInfra(err)
 						continue
 					}
 					// This block's writes are now in the shared domain: drop it from the
@@ -3561,8 +3560,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.applyCount += applyResult.writes.Count()
 			}
 
-			// The apply loop folds these versionMap views to sd.mem at block end,
-			// keeping sd.mem at N-1 during exec so seedOrigin reads the committed base.
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
