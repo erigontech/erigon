@@ -294,9 +294,8 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	return t.sender, nil
 }
 
-// DefersSenderCharge reports whether this incarnation runs without sender
-// nonce/balance access, leaving the nonce check and gas charge to validation.
-func (t *TxTask) DefersSenderCharge(incarnation int) (chargeSenderAtValidation bool) {
+// DefersSenderCharge reports whether this run leaves the sender charge (nonce, gas, value) to validation.
+func (t *TxTask) DefersSenderCharge(incarnation int) bool {
 	if incarnation != 0 || t.Config.Aura != nil || t.Rules().IsAmsterdam {
 		return false
 	}
@@ -596,7 +595,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 
 			switch {
 			case !calcFees && t.DefersSenderCharge(ibs.Incarnation()):
-				applyRes, applyErr = protocol.ApplyMessageDeferSender(evm, message, t.GasPool(), engine)
+				applyRes, applyErr = protocol.ApplyMessageDeferSenderCharge(evm, message, t.GasPool(), engine)
 			case !calcFees:
 				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, t.GasPool(), true, false, engine)
 			default:

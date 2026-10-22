@@ -2413,8 +2413,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	return nil
 }
 
-// touchedSenderAccount reports whether a deferred-sender run read or wrote the
-// sender's nonce or balance, so its result depends on the skipped charge.
+// touchedSenderAccount reports whether a run with a deferred sender charge read or wrote the sender's nonce or balance.
 func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	sender, err := txTask.TxSender()
 	if err != nil {
@@ -2427,10 +2426,8 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
-// chargeDeferredSender checks a deferred-sender tx's nonce and balance
-// preconditions against the state after all prior txs and returns the sender
-// writes; nil means the precondition failed and the tx must re-execute.
-func chargeDeferredSender(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
+// applyDeferredSenderCharge returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func applyDeferredSenderCharge(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
 	msg, err := txTask.TxMessage()
 	if err != nil {
 		return nil, err
@@ -3156,7 +3153,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		var senderWrites *state.WriteSet
 		if valid {
 			if txTask, ok := txTask.(*exec.TxTask); ok && txTask.DefersSenderCharge(txVersion.Incarnation) {
-				if senderWrites, err = chargeDeferredSender(txTask, txResult, txVersion, be.versionMap, stateReader); err != nil {
+				if senderWrites, err = applyDeferredSenderCharge(txTask, txResult, txVersion, be.versionMap, stateReader); err != nil {
 					return nil, err
 				}
 				valid = senderWrites != nil
