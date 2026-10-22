@@ -2029,17 +2029,17 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 	})
 }
 
-// runBALWorkers executes every task of a BAL block once, on one goroutine per
-// execution slot that claims tasks in block order and keeps its roTx for the block.
+// runBALWorkers executes every task of a BAL block once. Goroutines take an
+// execution slot, claim the next task in block order and give the slot up while
+// they wait for a predecessor, so a waiting tx does not idle a slot.
 func (pe *parallelExecutor) runBALWorkers(be *blockExecutor) {
 	var next atomic.Int64
-	for range min(cap(pe.execSem), len(be.tasks)) {
+	for range min(2*cap(pe.execSem), len(be.tasks)) {
 		pe.runWG.Go(func() { pe.balWorker(be, &next) })
 	}
 }
 
 func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
-	claim := func() int { return int(next.Add(1) - 1) }
 	send := func(r *exec.TxResult) bool {
 		select {
 		case pe.results <- r:
@@ -2047,6 +2047,26 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 		case <-pe.workersCtx.Done():
 			return false
 		}
+	}
+	slotHeld := false
+	acquireSlot := func() bool {
+		select {
+		case <-pe.execSem:
+			slotHeld = true
+		case <-pe.workersCtx.Done():
+		}
+		return slotHeld
+	}
+	releaseSlot := func() {
+		if slotHeld {
+			slotHeld = false
+			pe.execSem <- struct{}{}
+		}
+	}
+	defer releaseSlot()
+	waitFor := func(i, target int) bool {
+		releaseSlot()
+		return be.waitDep(i, target) && acquireSlot()
 	}
 	newTask := func(i int) *taskVersion {
 		tv := &taskVersion{
@@ -2059,48 +2079,42 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 			execCpuNanos: &be.execCpuNanos,
 		}
 		tv.version.Incarnation = 0
-		tv.waitCommit = func(dep int) bool { return be.waitDep(i, be.taskIndexOf(dep)) }
+		tv.waitCommit = func(dep int) bool { return waitFor(i, be.taskIndexOf(dep)) }
 		return tv
 	}
 	// A claimed task must always produce a result, else the exec loop waits forever.
 	sendOperational := func(i int, err error) {
-		if i < len(be.tasks) {
-			send(&exec.TxResult{Task: newTask(i), Err: err, Operational: true})
-		}
+		releaseSlot()
+		send(&exec.TxResult{Task: newTask(i), Err: err, Operational: true})
 	}
 
-	i := claim()
-	if i >= len(be.tasks) {
-		return
-	}
-	select {
-	case <-pe.execSem:
-	case <-pe.workersCtx.Done():
-		return
-	}
-	defer func() { pe.execSem <- struct{}{} }()
-	w := pe.acquireWorker()
-	if w == nil {
-		return
-	}
-	defer pe.releaseWorker(w)
-	roTx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
-	if err != nil {
-		sendOperational(i, fmt.Errorf("block %d: open roTx: %w", be.blockNum, err))
-		return
-	}
-	defer roTx.Rollback()
-	if err := w.ResetTx(roTx); err != nil {
-		sendOperational(i, fmt.Errorf("block %d: reset roTx: %w", be.blockNum, err))
-		return
-	}
-
+	var w *exec.WorkerContext
+	i := -1
 	defer func() {
-		if rec := recover(); rec != nil {
+		if rec := recover(); rec != nil && i >= 0 && i < len(be.tasks) {
 			sendOperational(i, fmt.Errorf("BAL worker panic (block %d task %d): %v\n%s", be.blockNum, i, rec, dbg.Stack()))
 		}
 	}()
-	for ; i < len(be.tasks); i = claim() {
+	for acquireSlot() {
+		if i = int(next.Add(1) - 1); i >= len(be.tasks) {
+			return
+		}
+		if w == nil {
+			if w = pe.acquireWorker(); w == nil {
+				return
+			}
+			defer pe.releaseWorker(w)
+			roTx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx) //nolint:gocritic // held for the block, rolled back by the defer below
+			if err != nil {
+				sendOperational(i, fmt.Errorf("block %d: open roTx: %w", be.blockNum, err))
+				return
+			}
+			defer roTx.Rollback()
+			if err := w.ResetTx(roTx); err != nil {
+				sendOperational(i, fmt.Errorf("block %d: reset roTx: %w", be.blockNum, err))
+				return
+			}
+		}
 		tv := newTask(i)
 		if txTask, ok := tv.Task.(*exec.TxTask); ok && be.senders != nil {
 			if sender, ok := be.senders.TakeSender(txTask.TxIndex); ok {
@@ -2111,7 +2125,7 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 		// The run read a predecessor's in-flight write. Once that predecessor commits,
 		// keep the run if every read still matches the versionMap, else run again.
 		for result.Dep >= 0 {
-			if !be.waitDep(i, be.taskIndexOf(result.Dep)) {
+			if !waitFor(i, be.taskIndexOf(result.Dep)) {
 				return
 			}
 			if result.Err == nil && be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn, sameVersion, false, "") == state.VersionValid {
@@ -2123,6 +2137,7 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 		if result.Err == nil {
 			be.balEstimated[i] = be.versionMap.FlushVersionedWrites(result.TxOut, false, "")
 		}
+		releaseSlot()
 		if !send(result) {
 			return
 		}
