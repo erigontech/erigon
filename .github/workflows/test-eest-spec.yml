@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  # Set false when devnet fixtures add coverage beyond stable.
+  # Re-enable after bogota-devnet-1 support: https://github.com/erigontech/erigon/issues/25241
   SKIP_DEVNET_SHARDS: 'true'
 
 jobs:
