@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -56,12 +57,12 @@ var decimalBounds = []uint64{0, 1000, 2000, migrationChainSize}
 // giving the migration authentic decimal input to convert. firstTxNum seeds the BaseTxnID for a
 // bodies segment (ignored by the other types); it returns the last txn id used so a caller can chain
 // firstTxNum across consecutive bodies segments.
-func dumpDecimalSeg(t *testing.T, m *execmoduletester.ExecModuleTester, from, to uint64, typ snaptype.Type, firstTxNum uint64, logger log.Logger) (lastTxNum uint64) {
+func dumpDecimalSeg(t *testing.T, m *migrationFixture, from, to uint64, typ snaptype.Type, firstTxNum uint64, logger log.Logger) (lastTxNum uint64) {
 	t.Helper()
 	cfg := freezeblocks.BlockCompressCfg
 	cfg.Workers = 1
-	path := filepath.Join(m.Dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, from, to, typ.Enum()))
-	c, err := seg.NewCompressor(m.Ctx, "test-decimal", path, m.Dirs.Tmp, cfg, log.LvlDebug, logger)
+	path := filepath.Join(m.dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, from, to, typ.Enum()))
+	c, err := seg.NewCompressor(m.Ctx, "test-decimal", path, m.dirs.Tmp, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -81,7 +82,7 @@ func dumpDecimalSeg(t *testing.T, m *execmoduletester.ExecModuleTester, from, to
 
 // dumpAllDecimal writes the decimal segments for [0,migrationChainSize), split at decimalBounds, for
 // all three block types. Bodies chain firstTxNum across segments so BaseTxnID stays cumulative.
-func dumpAllDecimal(t *testing.T, m *execmoduletester.ExecModuleTester, logger log.Logger) {
+func dumpAllDecimal(t *testing.T, m *migrationFixture, logger log.Logger) {
 	t.Helper()
 	for i := 0; i+1 < len(decimalBounds); i++ {
 		dumpDecimalSeg(t, m, decimalBounds[i], decimalBounds[i+1], snaptype2.Headers, 0, logger)
@@ -95,18 +96,32 @@ func dumpAllDecimal(t *testing.T, m *execmoduletester.ExecModuleTester, logger l
 	}
 }
 
-// migrate runs MigrateDecimalToEpoch against the tester's datadir and DB. It closes the tester's
-// snapshots first: in production the migration runs before anything opens a segment, and it deletes
-// each decimal segment once its blocks are durable elsewhere. Holding those files open makes that
-// delete fail on Windows, where an open mapping blocks removal.
-func migrate(t *testing.T, m *execmoduletester.ExecModuleTester, logger log.Logger) error {
+// migrationFixture is a chain in the tester's DB plus a snapshots directory of its own. The tester
+// retires blocks into its own datadir in the background and keeps those files open, so converting
+// there races with it, and on Windows an open file can be neither replaced nor deleted.
+type migrationFixture struct {
+	*execmoduletester.ExecModuleTester
+	dirs datadir.Dirs
+}
+
+func newMigrationFixture(t *testing.T, logger log.Logger) *migrationFixture {
 	t.Helper()
-	m.BlockSnapshots.Close()
-	return freezeblocks.MigrateDecimalToEpoch(m.Ctx, m.Dirs, m.DB, m.ChainConfig, 1, logger)
+	m := &migrationFixture{
+		ExecModuleTester: createDumpTestKV(t, chain.AllProtocolChanges, migrationChainSize),
+		dirs:             datadir.New(t.TempDir()),
+	}
+	_, err := snaptype.LoadSalt(m.dirs.Snap, true, logger)
+	require.NoError(t, err)
+	return m
+}
+
+func migrate(t *testing.T, m *migrationFixture, logger log.Logger) error {
+	t.Helper()
+	return freezeblocks.MigrateDecimalToEpoch(m.Ctx, m.dirs, m.DB, m.ChainConfig, 1, logger)
 }
 
 // headerInDB reports whether block n's header is present in the DB.
-func headerInDB(t *testing.T, m *execmoduletester.ExecModuleTester, n uint64) bool {
+func headerInDB(t *testing.T, m *migrationFixture, n uint64) bool {
 	t.Helper()
 	var present bool
 	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
@@ -118,7 +133,7 @@ func headerInDB(t *testing.T, m *execmoduletester.ExecModuleTester, n uint64) bo
 
 // dropHeader deletes block n's header from the DB, simulating a tail block whose write-back has not
 // been committed yet.
-func dropHeader(t *testing.T, m *execmoduletester.ExecModuleTester, n uint64) {
+func dropHeader(t *testing.T, m *migrationFixture, n uint64) {
 	t.Helper()
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		h := rawdb.ReadHeaderByNumber(tx, n)
@@ -129,21 +144,21 @@ func dropHeader(t *testing.T, m *execmoduletester.ExecModuleTester, n uint64) {
 
 // requireEpochOnly asserts a single epoch-only regime: the first epoch tier [0,1024) is present for
 // every block type, and none of the decimal segments remain on disk.
-func requireEpochOnly(t *testing.T, m *execmoduletester.ExecModuleTester) {
+func requireEpochOnly(t *testing.T, m *migrationFixture) {
 	t.Helper()
 	for _, typ := range snaptype2.BlockSnapshotTypes {
-		require.FileExists(t, filepath.Join(m.Dirs.Snap, typ.FileInfo(m.Dirs.Snap, true, 0, 1024).Name()), typ.Name())
+		require.FileExists(t, filepath.Join(m.dirs.Snap, typ.FileInfo(m.dirs.Snap, true, 0, 1024).Name()), typ.Name())
 		for i := 0; i+1 < len(decimalBounds); i++ {
-			require.NoFileExists(t, filepath.Join(m.Dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, decimalBounds[i], decimalBounds[i+1], typ.Enum())), typ.Name())
+			require.NoFileExists(t, filepath.Join(m.dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, decimalBounds[i], decimalBounds[i+1], typ.Enum())), typ.Name())
 		}
 	}
 }
 
 // setupMigrated builds a chain, dumps it as decimal, and runs one full migration, leaving the datadir
 // in the completed state: epoch [0,1024),[1024,2048) + indexes, decimal deleted, tail [2048,3000) in DB.
-func setupMigrated(t *testing.T, logger log.Logger) *execmoduletester.ExecModuleTester {
+func setupMigrated(t *testing.T, logger log.Logger) *migrationFixture {
 	t.Helper()
-	m := createDumpTestKV(t, chain.AllProtocolChanges, migrationChainSize)
+	m := newMigrationFixture(t, logger)
 	dumpAllDecimal(t, m, logger)
 	require.NoError(t, migrate(t, m, logger))
 	return m
@@ -157,7 +172,7 @@ func TestMigrateDecimalToEpoch(t *testing.T) {
 		t.Skip()
 	}
 	logger := log.New()
-	m := createDumpTestKV(t, chain.AllProtocolChanges, migrationChainSize)
+	m := newMigrationFixture(t, logger)
 	dumpAllDecimal(t, m, logger)
 
 	// Drop a tail block first so we can prove the migration actually writes the tail back.
@@ -170,12 +185,12 @@ func TestMigrateDecimalToEpoch(t *testing.T) {
 	requireEpochOnly(t, m)
 	for _, typ := range snaptype2.BlockSnapshotTypes {
 		for _, idxName := range typ.IdxFileNames(true, 0, 1024) {
-			require.FileExists(t, filepath.Join(m.Dirs.Snap, idxName), idxName)
+			require.FileExists(t, filepath.Join(m.dirs.Snap, idxName), idxName)
 		}
 	}
 
 	// Epoch header segment content is correct: word K decodes to header number K.
-	d, err := seg.NewDecompressor(filepath.Join(m.Dirs.Snap, snaptype2.Headers.FileInfo(m.Dirs.Snap, true, 0, 1024).Name()))
+	d, err := seg.NewDecompressor(filepath.Join(m.dirs.Snap, snaptype2.Headers.FileInfo(m.dirs.Snap, true, 0, 1024).Name()))
 	require.NoError(t, err)
 	defer d.Close()
 	require.Equal(t, 1024, d.Count())
@@ -283,22 +298,22 @@ func TestEpochMigration_TailDurableBeforeIndexes(t *testing.T) {
 
 	// force the index step to run (and then fail): drop the headers index, and make tmp unusable.
 	headersIdx := snaptype2.Headers.IdxFileNames(true, 0, 1024)[0]
-	require.NoError(t, dir.RemoveFile(filepath.Join(m.Dirs.Snap, headersIdx)))
+	require.NoError(t, dir.RemoveFile(filepath.Join(m.dirs.Snap, headersIdx)))
 	brokenTmp := filepath.Join(t.TempDir(), "not-a-dir")
 	require.NoError(t, os.WriteFile(brokenTmp, nil, 0o644))
-	dirs := m.Dirs
+	dirs := m.dirs
 	dirs.Tmp = brokenTmp
 
 	require.Error(t, freezeblocks.MigrateDecimalToEpoch(m.Ctx, dirs, m.DB, m.ChainConfig, 1, logger))
 
 	require.True(t, headerInDB(t, m, migrationTailBlock),
 		"tail must be committed before the indexes are built")
-	require.NoFileExists(t, filepath.Join(m.Dirs.Snap, headersIdx))
+	require.NoFileExists(t, filepath.Join(m.dirs.Snap, headersIdx))
 
 	// That failure leaves a state this ordering newly makes possible — tail committed, an index
 	// missing, straddles still on disk. A resume has to converge from it.
 	require.NoError(t, migrate(t, m, logger))
-	require.FileExists(t, filepath.Join(m.Dirs.Snap, headersIdx))
+	require.FileExists(t, filepath.Join(m.dirs.Snap, headersIdx))
 	require.True(t, headerInDB(t, m, migrationTailBlock))
 	requireEpochOnly(t, m)
 }
