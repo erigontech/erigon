@@ -31,10 +31,20 @@ func main() {
 	src := flag.String("src", "", "offline-BAL store to copy")
 	patch := flag.String("patch", "", "offline-BAL store with the replacement records")
 	dst := flag.String("dst", "", "empty directory for the patched store")
+	inPlace := flag.Bool("in-place", false, "patch -src in place (zero-padded); records that grow are only listed")
 	flag.Parse()
-	if *src == "" || *patch == "" || *dst == "" {
+	if *src == "" || *patch == "" || (*dst == "") == !*inPlace {
 		flag.Usage()
 		os.Exit(2)
+	}
+	if *inPlace {
+		patched, tooBig, err := offlinebal.PatchInPlace(*src, *patch)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("patched %d records in place; too big for in-place: %v\n", patched, tooBig)
+		return
 	}
 	patched, err := offlinebal.Rewrite(*src, *patch, *dst)
 	if err != nil {

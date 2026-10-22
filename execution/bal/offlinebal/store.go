@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -435,4 +436,59 @@ func Rewrite(srcDir, patchDir, dstDir string) (patched int, err error) {
 		err = w.Append(blockNum, hash, payload)
 	})
 	return patched, errors.Join(err, w.Close())
+}
+
+// PatchInPlace overwrites each store record that patchDir holds for the same
+// block and hash with the patch payload, zero-padded to the old length, so the
+// log layout and index stay valid. Patches longer than the stored record are
+// returned in tooBig and left for Rewrite.
+func PatchInPlace(storeDir, patchDir string) (patched int, tooBig []uint64, err error) {
+	store, err := OpenReader(storeDir)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer store.Close()
+	patches, err := OpenReader(patchDir)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer patches.Close()
+	log, err := os.OpenFile(filepath.Join(storeDir, fileName), os.O_RDWR, 0)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer log.Close()
+	walkRecords(patches.data, func(blockNum uint64, hash common.Hash, recOff, payloadLen int) {
+		if err != nil {
+			return
+		}
+		old, ok := store.Get(blockNum, hash)
+		if !ok {
+			return
+		}
+		if payloadLen > len(old) {
+			tooBig = append(tooBig, blockNum)
+			return
+		}
+		padded := make([]byte, len(old))
+		copy(padded, patches.data[recOff+recPrefix:recOff+recPrefix+payloadLen])
+		oldOff := int64(binary.LittleEndian.Uint64(store.offsets[(blockNum-store.first)*8:])) + recPrefix
+		if _, err = log.WriteAt(padded, oldOff); err == nil {
+			patched++
+		}
+	})
+	if err != nil {
+		return patched, tooBig, err
+	}
+	return patched, tooBig, log.Sync()
+}
+
+// Unpad returns payload cut at the end of its first RLP item, dropping the
+// zero padding PatchInPlace leaves after a shorter record.
+func Unpad(payload []byte) []byte {
+	_, _, rest, err := rlp.Split(payload)
+	if err != nil {
+		return payload
+	}
+	return payload[:len(payload)-len(rest)]
 }
