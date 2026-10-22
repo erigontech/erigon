@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	gossipmock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestPeerDasSubscribesOnlyAfterStart(t *testing.T) {
@@ -34,8 +36,9 @@ func TestPeerDasSubscribesOnlyAfterStart(t *testing.T) {
 	beaconConfig.DataColumnSidecarSubnetCount = 2
 	caplinConfig := clparams.CaplinConfig{ArchiveBlobs: true}
 	peerDasState := peerdasstate.NewPeerDasState(&beaconConfig, &clparams.NetworkConfig{})
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
-	peerDas := NewPeerDas(nil, &beaconConfig, &caplinConfig, nil, nil, nil, [32]byte{}, nil, peerDasState, gossipManager, nil, nil)
+	peerDas := NewPeerDas(nil, &beaconConfig, &caplinConfig, nil, nil, nil, [32]byte{}, nil, peerDasState, gossipManager, nil, db)
 
 	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Times(2)
 	ctx, cancel := context.WithCancel(context.Background())

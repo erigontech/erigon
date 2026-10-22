@@ -1554,6 +1554,10 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
+func (s *Ethereum) TxPool() *txpool.TxPool {
+	return s.txPool
+}
+
 func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 	return s.execModule
 }

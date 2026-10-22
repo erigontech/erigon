@@ -122,7 +122,7 @@ type peerdas struct {
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
 	blockReader    freezeblocks.BeaconSnapshotReader
-	indiciesDB     kv.RoDB
+	indiciesDB     kv.RwDB
 	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
 	startOnce      sync.Once
 }
@@ -139,7 +139,7 @@ func NewPeerDas(
 	peerDasState *peerdasstate.PeerDasState,
 	gossipManager gossipmgr.Gossip,
 	blockReader freezeblocks.BeaconSnapshotReader, // [New in Gloas:EIP7732]
-	indiciesDB kv.RoDB, // [New in Gloas:EIP7732]
+	indiciesDB kv.RwDB, // [New in Gloas:EIP7732]
 ) PeerDas {
 	kzg.InitKZGCtx()
 	gloasDataCache, _ := lru.New[common.Hash, *gloasBlockData]("gloasDataCache", 128)
@@ -174,6 +174,16 @@ func NewPeerDas(
 
 func (d *peerdas) Start(ctx context.Context) {
 	d.startOnce.Do(func() {
+		var storedCgc uint64
+		if err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
+			var err error
+			storedCgc, err = beacon_indicies.ReadHighestCustodyGroupCount(tx)
+			return err
+		}); err != nil {
+			log.Warn("[peerdas] failed to read highest custody group count", "err", err)
+		} else {
+			d.state.RaiseAdvertisedCgc(storedCgc)
+		}
 		d.resubscribeGossip()
 		for range numOfBlobRecoveryWorkers {
 			go d.blobsRecoverWorker(ctx)
@@ -452,6 +462,11 @@ func (d *peerdas) resubscribeGossip() {
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
 	if adCgcChanged {
+		if err := d.indiciesDB.Update(context.Background(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteHighestCustodyGroupCount(tx, cgc)
+		}); err != nil {
+			log.Warn("[peerdas] failed to write highest custody group count", "err", err)
+		}
 		if !d.IsArchivedMode() {
 			// subscribe more topics, advertised cgc is increased
 			d.resubscribeGossip()

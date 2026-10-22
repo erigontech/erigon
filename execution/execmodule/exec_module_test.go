@@ -23,11 +23,13 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -51,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -61,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
@@ -1284,6 +1288,39 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}
 }
 
+func TestStopWakesBuilderWaitingForMoreTransactions(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+
+	synctest.Test(t, func(t *testing.T) {
+		provider := &observingTxnProvider{TxnProvider: emptyTxnProvider{}, txnCounts: make(chan int, 16)}
+		beaconRoot := randomHash()
+		payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			PrevRandao:            parent.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     provider,
+		}, time.Minute, time.Minute)
+
+		// The provider ran dry, so the build waits before it asks again.
+		<-provider.txnCounts
+		synctest.Wait()
+
+		started := time.Now()
+		result, err := payloadBuilder.Stop(t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, started, time.Now(), "collecting the payload must not wait for the next provider poll")
+	})
+}
+
 // Start building a block, then accept a competing block with the same parent.
 // The original build must still produce a valid block. Also run without the
 // competing commit as a control.
@@ -1408,21 +1445,27 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
-func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
-	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+func txPoolBehindParentFixture(t *testing.T) (
+	m *execmoduletester.ExecModuleTester,
+	parent *types.Block,
+	params *builder.Parameters,
+	provider *rewindingTxnProvider,
+) {
+	t.Helper()
+	m = execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	chainPack, err := m.GenerateChain(2, nil)
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 
-	parent := chainPack.TopBlock
-	provider := &rewindingTxnProvider{
+	parent = chainPack.TopBlock
+	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
+	provider = &rewindingTxnProvider{
 		pool:  m.TxPool,
 		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
 		ready: make(chan struct{}),
 	}
 	parentBeaconBlockRoot := randomHash()
-	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
+	params = &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
 		PrevRandao:            parent.Header().MixDigest,
@@ -1431,7 +1474,17 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
-	})
+	}
+	return m, parent, params, provider
+}
+
+// assembleWithTxPoolBehindParent adds two pending transactions to the txpool and starts a build whose
+// transaction selection moves the txpool head back to the block before the parent. It returns once
+// selection has started.
+func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModuleTester, parent *types.Block, payloadID uint64) {
+	t.Helper()
+	m, parent, params, provider := txPoolBehindParentFixture(t)
+	payloadID, err := m.AssembleBlock(t.Context(), params)
 	require.NoError(t, err)
 
 	select {
@@ -1439,6 +1492,12 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
+	return m, parent, payloadID
+}
+
+func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
 
 	requestCtx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -1466,6 +1525,46 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
 	}
 	require.ErrorIs(t, requestErr, context.Canceled)
+}
+
+func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
+
+	// The txpool may never see the parent again.
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Block)
+	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
+}
+
+func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
+	m, parent, params, provider := txPoolBehindParentFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		payloadID, err := m.AssembleBlock(t.Context(), params)
+		require.NoError(t, err)
+		<-provider.ready
+		synctest.Wait()
+
+		type assembled struct {
+			result execmodule.AssembledBlockResult
+			err    error
+		}
+		returned := make(chan assembled, 1)
+		go func() {
+			result, err := m.ExecModule.GetAssembledBlock(t.Context(), payloadID)
+			returned <- assembled{result, err}
+		}()
+		synctest.Wait()
+		require.NoError(t, m.TxPool.OnNewBlock(t.Context(), txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+
+		got := <-returned
+		require.NoError(t, got.err)
+		require.NotNil(t, got.result.Block)
+		require.Len(t, got.result.Block.Block.Transactions(), 2)
+	})
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
@@ -4116,4 +4215,91 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// Same-sender txs that send value, revert with value and read the sender's
+// balance must reach the state root of serial execution when parallel exec
+// charges the sender at validation.
+func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	reader, reverter, sink := common.Address{0xaa}, common.Address{0xbb}, common.Address{0xcc}
+	genesis := &types.Genesis{
+		Config: chain.TestChainOsakaConfig,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			reader:     {Code: []byte{byte(vm.CALLER), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.SSTORE), byte(vm.STOP)}},
+			reverter:   {Code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)}},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		for n := range uint64(24) {
+			to, value := reader, uint64(0)
+			switch n % 4 {
+			case 1:
+				to, value = sink, 1
+			case 2:
+				to, value = reverter, 5
+			case 3:
+				to, value = common.Address{0xdd, byte(n)}, 7
+			}
+			slot := common.BigToHash(new(big.Int).SetUint64(n))
+			tx, err := types.SignTx(types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:]),
+				*types.LatestSignerForChainID(nil), privKey)
+			require.NoError(t, err)
+			b.AddTx(tx)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
+// A tx that serial execution rejects on its sender's nonce or balance must reject the
+// block with the same error when parallel exec charges the sender at validation.
+func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	balance := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	feeCap := *uint256.NewInt(10 * common.GWei)
+	for _, tc := range []struct {
+		name               string
+		senderNonce, nonce uint64
+		value, feeCap      uint256.Int
+		wantErr            error
+	}{
+		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
+		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
+		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas limit times fee cap overflows", feeCap: *new(uint256.Int).SetAllOne(), wantErr: protocol.ErrInsufficientFunds},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			privKey, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			genesis := &types.Genesis{
+				Config: chain.TestChainOsakaConfig,
+				Alloc:  types.GenesisAlloc{crypto.PubkeyToAddress(privKey.PublicKey): {Balance: balance, Nonce: tc.senderNonce}},
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+				tx, err := types.SignTx(&types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{Nonce: tc.nonce, GasLimit: 21_000, To: &common.Address{0xaa}, Value: tc.value},
+					ChainID:  *chain.TestChainOsakaConfig.ChainID,
+					TipCap:   *uint256.NewInt(common.GWei),
+					FeeCap:   tc.feeCap,
+				}, *types.LatestSignerForChainID(chain.TestChainOsakaConfig.ChainID), privKey)
+				require.NoError(t, err)
+				b.AddUncheckedTx(tx)
+			})
+			require.NoError(t, err)
+			require.ErrorContains(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks), tc.wantErr.Error())
+		})
+	}
 }

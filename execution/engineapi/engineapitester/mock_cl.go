@@ -55,6 +55,7 @@ type MockCl struct {
 	genesisGasLimit       uint64
 	state                 *MockClState
 	chainConfig           *chain.Config
+	waitForTxPool         func(context.Context, common.Hash) error
 }
 
 func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
@@ -128,6 +129,11 @@ func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption
 	}
 	if fcuRes.PayloadId == nil {
 		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("forkchoiceUpdated for block building returned no payload id")
+	}
+	if cl.waitForTxPool != nil {
+		if err := cl.waitForTxPool(ctx, forkChoiceState.HeadHash); err != nil {
+			return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: wait for txpool: %w", err)
+		}
 	}
 	return *fcuRes.PayloadId, payloadAttributes, nil
 }
