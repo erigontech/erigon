@@ -75,11 +75,13 @@ func stMul(_ uint64, scope *CallContext) string {
 
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	if n, ok := log2Exact(y); ok {
-		y.Rsh(x, n)
-	} else {
-		y.Div(x, y)
+	if y[0]&(y[0]-1) == 0 {
+		if n, ok := log2Exact(y); ok {
+			y.Rsh(x, n)
+			return pc, nil, nil
+		}
 	}
+	y.Div(x, y)
 	return pc, nil, nil
 }
 
