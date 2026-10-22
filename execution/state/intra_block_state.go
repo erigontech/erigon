@@ -2024,6 +2024,10 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	accountVersion := ibs.Version()
 
 	if err != nil {
+		// Record so the executor surfaces it operationally rather than continuing
+		// with a wrong value; the serial (non-versioned) account read reaches the DB
+		// here, bypassing refreshAccount and the typed readers that already record.
+		ibs.recordStateReadError(err)
 		return nil, err
 	}
 
