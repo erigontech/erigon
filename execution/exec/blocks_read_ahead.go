@@ -312,6 +312,9 @@ func (bra *BlockReadAheader) RecoveredSenders(ctx context.Context, blockHash com
 
 // SendersRecovery returns the in-flight sender recovery of a block without waiting for it.
 func (bra *BlockReadAheader) SendersRecovery(blockHash common.Hash) *SendersRecovery {
+	if bra == nil {
+		return nil
+	}
 	r, _ := bra.recoveries.Get(blockHash)
 	return r
 }
