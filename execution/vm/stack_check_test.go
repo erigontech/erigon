@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -116,9 +117,12 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
+		if sload := &jt[SLOAD]; sload.constantGas == 0 {
+			require.Equal(t, reflect.ValueOf(gasSLoadEIP2929).Pointer(), reflect.ValueOf(sload.dynamicGas).Pointer(), "table %d SLOAD", i)
+		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
-			if undefined(got) || w.memorySize != nil && got.memorySize == nil {
+			if undefined(got) || w.gated && got.numPush != w.numPush || w.memorySize != nil && got.memorySize == nil {
 				// The op is not in this fork, and the fast path checks for that.
 				continue
 			}
@@ -171,6 +175,7 @@ type fastPathWant struct {
 	numPop, numPush int
 	memorySize      memorySizeFunc
 	dynamicGas      gasFunc
+	gated           bool // the fast path runs the op only in tables that have it
 }
 
 // TestRunIsGenerated fails when vm_run_gen.go or fast_path_gen_test.go are
@@ -188,17 +193,18 @@ func TestRunIsGenerated(t *testing.T) {
 	require.NoError(t, err, string(out))
 }
 
-// TestRunHasNoJumpTable fails when Go compiles run's opcode switch to a jump
-// table, which it does once the cases are dense enough. The indirect jump made
-// the fast path slower than the compare tree.
+// TestRunHasNoJumpTable fails when Go compiles the opcode switch of run or
+// runDecoded to a jump table, which it does once the cases are dense enough.
+// The indirect jump made the fast path slower than the compare tree.
 func TestRunHasNoJumpTable(t *testing.T) {
 	// The test binary has no symbol table; the package archive keeps it.
 	pkg := filepath.Join(t.TempDir(), "vm.a")
 	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", pkg, ".").CombinedOutput()
 	require.NoError(t, err, string(out))
-	out, err = exec.CommandContext(t.Context(), "go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
+	out, err = exec.CommandContext(t.Context(), "go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run(Decoded)?$`, pkg).Output()
 	require.NoError(t, err)
-	require.Contains(t, string(out), "vm_run_gen.go")
+	require.Contains(t, string(out), "(*EVM).run(SB)")
+	require.Contains(t, string(out), "(*EVM).runDecoded(SB)")
 	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
 	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
 }
@@ -210,7 +216,7 @@ func TestRunLoopHeadStoresNothing(t *testing.T) {
 	src, err := os.ReadFile("vm_run_gen.go")
 	require.NoError(t, err)
 	head := slices.IndexFunc(strings.Split(string(src), "\n"), func(l string) bool {
-		return strings.Contains(l, "pc >= uint64(len(contract.Code))")
+		return strings.Contains(l, "pc >= uint64(len(code))")
 	}) + 1
 	require.Positive(t, head)
 	pkg := filepath.Join(t.TempDir(), "vm.a")
@@ -247,14 +253,16 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 	require.Equal(t, gas, left)
 }
 
-// TestRunMatchesRunTraced runs each program through run and through runTraced,
-// which has no fast path, at every gas budget up to the program's full cost, so
-// every fast-path body must match its jump-table op in result, gas and error.
+// TestRunMatchesRunTraced runs each program through runTraced, which has no fast
+// path, and through run, without and with a code hash, which makes run decode it,
+// at every gas budget up to the program's full cost, so every fast-path body must
+// match its jump-table op in result, gas and error.
 // Programs end by returning their top four stack items. A failing op's gas is
 // not in the measured cost, so the full budget is always run as well.
 func TestRunMatchesRunTraced(t *testing.T) {
 	t.Parallel()
-	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
+	input := bytes.Repeat([]byte{0xa1, 0xb2, 0xc3}, 23)
+	runOnce := func(code []byte, gas uint64, traced, hashed bool) (string, uint64) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
@@ -265,16 +273,26 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		block.Difficulty, block.BaseFee, block.BlobBaseFee = *uint256.NewInt(24), *uint256.NewInt(25), *uint256.NewInt(26)
 		txCtx := evmtypes.TxContext{Origin: accounts.InternAddress(common.HexToAddress("0x0a")), GasPrice: *uint256.NewInt(27)}
 		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
-		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
+		self := accounts.InternAddress(common.HexToAddress("0x0e"))
+		// Warm slots with values, so a frame-cache hit fits in the gas sweep and shows its value.
+		for k, v := range map[uint64]uint64{1: 0xaa, 2: 0xbb} {
+			key := accounts.InternKey(uint256.NewInt(k).Bytes32())
+			require.NoError(t, ibs.SetState(self, key, *uint256.NewInt(v)))
+			ibs.AddSlotToAccessList(self, key)
+		}
+		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), self, *uint256.NewInt(7))
 		c.Code = code
+		if hashed {
+			c.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		}
 		f := evm.run
 		if traced {
 			f = evm.runTraced
 		}
-		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, false, false)
+		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, input, false, false, false)
 		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), gas - left.Execution
 	}
-	prog := func(parts ...any) []byte {
+	code := func(parts ...any) []byte {
 		var b []byte
 		for _, p := range parts {
 			switch p := p.(type) {
@@ -286,10 +304,19 @@ func TestRunMatchesRunTraced(t *testing.T) {
 				b = append(b, p...)
 			}
 		}
-		return append(b, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(MSTORE), byte(PUSH1), 64, byte(MSTORE),
+		return b
+	}
+	prog := func(parts ...any) []byte {
+		return append(code(parts...), byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(MSTORE), byte(PUSH1), 64, byte(MSTORE),
 			byte(PUSH1), 96, byte(MSTORE), byte(PUSH1), 128, byte(PUSH1), 0, byte(RETURN))
 	}
 	pushes := func(n int) []byte { return bytes.Repeat([]byte{byte(PUSH1), 1}, n) }
+	// A hashed run leaves the bytecode loop for the decoded one at its first jump.
+	jumpIn := code(PUSH1, 3, JUMP, JUMPDEST)
+	mem128 := code(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0xbb, PUSH1, 96, MSTORE)
+	mloads := code(PUSH1, 0, MLOAD, PUSH1, 32, MLOAD, PUSH1, 64, MLOAD, PUSH1, 96, MLOAD)
+	// The identity precompile returns 40 bytes of memory.
+	callIdentity := code(PUSH1, 0, PUSH1, 0, PUSH1, 40, PUSH1, 24, PUSH1, 0, PUSH1, 4, GAS, CALL, POP)
 	programs := map[string][]byte{
 		"arith":    prog(PUSH1, 7, PUSH1, 3, SUB, PUSH1, 5, MUL, PUSH1, 2, DIV, PUSH1, 9, LT, PUSH1, 1, GT, PUSH1, 0, EQ, ISZERO, PUSH2, 0xff, 0x0f, AND, PUSH1, 4, ADD, PUSH1, 0, ISZERO, PUSH1, 6, PUSH1, 6, EQ),
 		"loop":     prog(PUSH1, 5, JUMPDEST, PUSH1, 1, SWAP1, SUB, DUP1, PUSH1, 2, JUMPI, PUSH1, 17, JUMP, INVALID, INVALID, INVALID, JUMPDEST, pushes(3)),
@@ -307,6 +334,40 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
+		// Slots 1 and 2 are warm and set, slot 3 is cold.
+		"sload":     prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
+		"sloadcold": prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
+		"cdlunder":  prog(CALLDATALOAD),
+		"cdlhuge":   prog(PUSH1, 1, CALLDATALOAD, PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, CALLDATALOAD, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, CALLDATALOAD, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 5, CALLDATALOAD),
+		"cdcopy":    prog(mem128, PUSH1, 64, PUSH1, 0, PUSH1, 0, CALLDATACOPY, PUSH1, 40, PUSH1, 50, PUSH1, 70, CALLDATACOPY, PUSH1, 8, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 1, CALLDATACOPY, PUSH1, 8, PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, PUSH1, 40, CALLDATACOPY, PUSH1, 0, PUSH1, 200, PUSH1, 0, CALLDATACOPY, mloads),
+		"cdcgrow":   prog(PUSH1, 64, PUSH1, 0, PUSH1, 0, CALLDATACOPY, PUSH1, 32, PUSH1, 0, PUSH1, 48, CALLDATACOPY, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD, PUSH1, 64, MLOAD, MSIZE),
+		"cdchuge":   prog(mem128, PUSH1, 0, PUSH1, 0, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, CALLDATACOPY, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, CALLDATACOPY),
+		"codecopy":  prog(mem128, PUSH1, 64, PUSH1, 0, PUSH1, 0, CODECOPY, PUSH1, 32, PUSH1, 120, PUSH1, 64, CODECOPY, PUSH1, 8, PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, PUSH1, 100, CODECOPY, mloads),
+		"rdcopy":    prog(mem128, callIdentity, PUSH1, 32, PUSH1, 8, PUSH1, 64, RETURNDATACOPY, PUSH1, 40, PUSH1, 0, PUSH1, 0, RETURNDATACOPY, PUSH1, 0, PUSH1, 40, PUSH1, 0, RETURNDATACOPY, mloads),
+		"rdcoob":    prog(mem128, callIdentity, PUSH1, 32, PUSH1, 9, PUSH1, 64, RETURNDATACOPY),
+		"rdcoob0":   prog(mem128, callIdentity, PUSH1, 0, PUSH1, 41, PUSH1, 64, RETURNDATACOPY),
+		"rdchuge":   prog(mem128, callIdentity, PUSH1, 0, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 64, RETURNDATACOPY),
+		"mcopy":     prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0xbb, PUSH1, 32, MSTORE, PUSH1, 32, PUSH1, 0, PUSH1, 16, MCOPY, PUSH1, 40, PUSH1, 8, PUSH1, 0, MCOPY, PUSH1, 0, PUSH1, 0, PUSH1, 200, MCOPY, PUSH1, 64, PUSH1, 0, PUSH1, 32, MCOPY, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD, PUSH1, 64, MLOAD),
+		"mcopyover": prog(PUSH1, 0, PUSH1, 0, MSTORE, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, MCOPY),
+		"mstore8":   prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0x11, PUSH1, 3, MSTORE8, PUSH2, 0x12, 0x34, PUSH1, 31, MSTORE8, PUSH1, 0x77, PUSH1, 32, MSTORE8, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD),
+		"keccak":    prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 32, PUSH1, 0, KECCAK256, PUSH1, 0, PUSH1, 0, KECCAK256, PUSH1, 0, PUSH1, 200, KECCAK256, PUSH1, 7, PUSH1, 9, KECCAK256, PUSH1, 64, PUSH1, 0, KECCAK256),
+		// Decoded code fuses PUSHn dest JUMP and PUSHn dest JUMPI with a valid dest.
+		"fusedjump":       prog(pushes(2), PUSH1, 8, JUMP, INVALID, JUMPDEST, GAS, PC),
+		"fusedjumpbad":    prog(PUSH1, 3, JUMP, INVALID, JUMPDEST),
+		"fusedjumpdata":   prog(PUSH1, 4, JUMP, PUSH1, JUMPDEST, GAS),
+		"fusedjumpi":      prog(pushes(2), PUSH1, 1, PUSH1, 11, JUMPI, PUSH1, 0xaa, JUMPDEST, GAS, PC),
+		"fusedjumpinot":   prog(pushes(2), PUSH1, 0, PUSH1, 11, JUMPI, PUSH1, 0xaa, JUMPDEST, GAS, PC),
+		"fusedjumpiunder": prog(jumpIn, PUSH1, 7, JUMPI, JUMPDEST),
+		"fusedjumpover":   prog(jumpIn, pushes(stackLimit), PUSH2, (2*stackLimit+8)>>8, (2*stackLimit+8)&0xff, JUMP, JUMPDEST),
+		"fusedjumpiover":  prog(jumpIn, pushes(stackLimit), PUSH2, (2*stackLimit+8)>>8, (2*stackLimit+8)&0xff, JUMPI, JUMPDEST),
+		"push4end":        {byte(PUSH1), 1, byte(PUSH4), 0x12},
+		"push32end":       {byte(PUSH1), 1, byte(PUSH32), 1, 2},
+		// EIP-8024: DUPN skips its immediate byte, which is still an op a jump can land on.
+		"dupn":     prog(pushes(17), DUPN, 0x80, PC),
+		"dupnjump": prog(pushes(17), PUSH1, 38, JUMP, DUPN, JUMPDEST, PC),
+		// A missing immediate reads as 0, which is depth 145, and DUPN succeeds past the code end.
+		"dupnend":      code(PUSH1, 3, JUMP, JUMPDEST, pushes(145), DUPN),
+		"mstore8empty": {byte(MSTORE8)},
 	}
 	// MCOPY dst src len over 64 distinct bytes, returning all of memory.
 	mcopy := func(dst, src, length []byte) []byte {
@@ -363,11 +424,16 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			programs["over"+op.String()] = prog(pushes(stackLimit), op)
 		}
 	}
+	for _, name := range slices.Collect(maps.Keys(programs)) {
+		if !slices.ContainsFunc(decode(programs[name]).ins, func(in instr) bool { return in.kind() == JUMP || in.kind() == JUMPI }) {
+			programs[name+"jumpin"] = code(jumpIn, programs[name])
+		}
+	}
 	rng := rand.New(rand.NewPCG(1, 2))
-	// The generic MOD and SIGNEXTEND see whether the fast path stored gasLeft back.
-	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), MOD, SIGNEXTEND)
+	// The generic ops see whether the fast path stored its registers back.
+	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), MOD, SIGNEXTEND, CALLDATALOAD, CALLDATALOAD, CALLDATACOPY, CODECOPY, RETURNDATACOPY, MCOPY, MCOPY, MSTORE8, MSTORE8, KECCAK256, KECCAK256)
 	for i := range 300 {
-		b := pushes(8)
+		b := code(jumpIn, pushes(8))
 		for range 40 {
 			switch rng.IntN(6) {
 			case 0, 1:
@@ -397,7 +463,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	}
 	for name, code := range programs {
 		const plenty = 1_000_000
-		_, cost := runOnce(code, plenty, true)
+		_, cost := runOnce(code, plenty, true, false)
 		budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
 		if cost < 2000 {
 			for gas := range cost + 2 {
@@ -405,9 +471,11 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			}
 		}
 		for _, gas := range budgets {
-			want, _ := runOnce(code, gas, true)
-			got, _ := runOnce(code, gas, false)
+			want, _ := runOnce(code, gas, true, false)
+			got, _ := runOnce(code, gas, false, false)
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
+			got, _ = runOnce(code, gas, false, true)
+			require.Equal(t, want, got, "%s decoded at gas %d", name, gas)
 		}
 	}
 }
@@ -438,6 +506,43 @@ func TestRunTakesMcopyFastPath(t *testing.T) {
 				require.NoError(t, err)
 			}
 		})
+	}
+}
+
+// TestRunPush0BeforeShanghai pins that the PUSH0 fast cases of run and of the
+// decoded loop are off where the jump table does not have PUSH0.
+func TestRunPush0BeforeShanghai(t *testing.T) {
+	t.Parallel()
+	for _, hashed := range []bool{false, true} {
+		ibs := state.New(state.NewNoopReader())
+		t.Cleanup(ibs.Close)
+		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, &chain.Config{ChainID: uint256.NewInt(1)}, Config{})
+		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		// The jump moves a hashed run to the decoded loop.
+		c.Code = []byte{byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST), byte(PUSH0)}
+		if hashed {
+			c.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(c.Code))
+		}
+		_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100}, nil, false, false, false)
+		var invalid *ErrInvalidOpCode
+		require.ErrorAs(t, err, &invalid, "hashed=%v", hashed)
+	}
+}
+
+// TestRunDecodedShiftsBeforeConstantinople pins that the decoded loop's shifts are
+// off where the jump table lacks them.
+func TestRunDecodedShiftsBeforeConstantinople(t *testing.T) {
+	t.Parallel()
+	for _, op := range []OpCode{SHL, SHR, SAR} {
+		ibs := state.New(state.NewNoopReader())
+		t.Cleanup(ibs.Close)
+		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, &chain.Config{ChainID: uint256.NewInt(1)}, Config{})
+		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		c.Code = []byte{byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST), byte(PUSH1), 1, byte(PUSH1), 1, byte(op)}
+		c.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(c.Code))
+		_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100}, nil, false, false, false)
+		var invalid *ErrInvalidOpCode
+		require.ErrorAs(t, err, &invalid, "%s", op)
 	}
 }
 
