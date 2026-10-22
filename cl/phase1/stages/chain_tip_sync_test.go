@@ -14,11 +14,13 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -49,7 +51,7 @@ func TestFetchBlocksFromReqRespPacesRetriesAfterRequestErrors(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	sentinel := &failingRequestSentinel{}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &beaconCfg)
-	cfg := &Cfg{rpc: rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil)}
+	cfg := &Cfg{rpc: rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock)}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 
@@ -68,7 +70,7 @@ func TestStartFetchingBlocksMissedByGossipPacesSuccessfulPolls(t *testing.T) {
 		beaconCfg:  &beaconCfg,
 		ethClock:   clock,
 		forkChoice: &forkchoice.ForkChoiceStore{},
-		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil),
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -93,7 +95,7 @@ func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t
 		beaconCfg:  &beaconCfg,
 		ethClock:   clock,
 		forkChoice: &forkchoice.ForkChoiceStore{},
-		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil),
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -155,4 +157,13 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 			require.Equal(t, tt.want, stages[tt.stage].TransitionFunc(&Cfg{}, tt.args, tt.err))
 		})
 	}
+}
+
+func TestCfgCloseClosesBlockCollector(t *testing.T) {
+	collector := block_collector.NewPersistentBlockCollector(log.New(), nil, &clparams.MainnetBeaconConfig, t.TempDir())
+	require.NotNil(t, collector)
+	cfg := &Cfg{blockCollector: collector}
+	require.NoError(t, cfg.Close())
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.ErrorContains(t, collector.AddBlock(block), "database not initialized")
 }

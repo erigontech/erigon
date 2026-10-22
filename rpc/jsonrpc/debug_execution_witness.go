@@ -667,6 +667,9 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -943,7 +946,10 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Head-capture reads parent commitment from the pinned snapshot, not commitment
 	// history, so the history-availability check only applies to the durable path.
 	if hc == nil {
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, err
+		}
 		if firstTxNumInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 		}
@@ -1384,7 +1390,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
-	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return nil, err
+	}
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return nil, err
 	}
 

@@ -58,6 +58,16 @@ func (s *PeerDasState) SetCustodyGroupCount(cgc uint64) bool {
 	s.cgcMutex.Lock()
 	defer s.cgcMutex.Unlock()
 	s.realCgc = cgc
+	return s.raiseAdvertisedCgcLocked(cgc)
+}
+
+func (s *PeerDasState) RaiseAdvertisedCgc(cgc uint64) bool {
+	s.cgcMutex.Lock()
+	defer s.cgcMutex.Unlock()
+	return s.raiseAdvertisedCgcLocked(cgc)
+}
+
+func (s *PeerDasState) raiseAdvertisedCgcLocked(cgc uint64) bool {
 	// A decrease is deliberately not advertised: fulu/validator.md requires a node to
 	// keep advertising the previous (highest) count and to keep serving it.
 	if cgc > s.advertisedCgc {
@@ -90,7 +100,9 @@ func (s *PeerDasState) GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, err
 		log.Warn("node ID is not set, return empty map")
 		return make(map[cltypes.CustodyIndex]bool), nil
 	}
-	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, s.GetAdvertisedCgc())
+	s.cgcMutex.RLock()
+	defer s.cgcMutex.RUnlock()
+	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, s.advertisedCgc)
 	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), sampleSize)
 	if err != nil {
 		return nil, err

@@ -225,7 +225,7 @@ func TestExecutionPayloadBidServiceRejectsUnrepresentableSlotBeforeDependencies(
 			cfg.SecondsPerSlot = test.secondsPerSlot
 			stateCalls := 0
 			fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-			fc.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+			fc.GetStateAtBlockRootFn = func(common.Hash) (*state2.CachingBeaconState, error) {
 				stateCalls++
 				return nil, nil
 			}
@@ -392,7 +392,7 @@ func TestExecutionPayloadBidServiceWrongSlot(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not current")
 }
 
@@ -496,7 +496,7 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 
 	// Bid should NOT be in highest bids (pending, not validated)
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
@@ -721,7 +721,7 @@ func TestExecutionPayloadBidServiceGasLimitIncompatible(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore)) // Now IGNORE, not REJECT
+	require.ErrorIs(t, err, ErrIgnore) // Now IGNORE, not REJECT
 	require.Contains(t, err.Error(), "gas_limit")
 }
 
@@ -787,7 +787,7 @@ func TestExecutionPayloadBidServiceDuplicate(t *testing.T) {
 
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already seen bid")
 }
 
@@ -855,7 +855,7 @@ func TestExecutionPayloadBidServiceParentBlockHashUnknown(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "parent_block_hash")
 }
 
@@ -878,7 +878,7 @@ func TestExecutionPayloadBidServiceParentBlockRootUnknown(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "parent_block_root")
 }
 
@@ -923,7 +923,7 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 
 	err = service.ProcessMessage(context.Background(), nil, msg3)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not higher than existing")
 
 	// Highest bid should still be 2000
@@ -944,7 +944,7 @@ func TestExecutionPayloadBidServiceStoreValidBidDoesNotOverwriteHigherBid(t *tes
 	require.NoError(t, service.storeValidBidAt(high, time.Time{}))
 	err := service.storeValidBidAt(low, time.Time{})
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: high.Message.ParentBlockHash, ParentBlockRoot: high.Message.ParentBlockRoot}
 	stored, found := epbsPool.GetHighestBid(bidKey)
@@ -1046,7 +1046,7 @@ func TestExecutionPayloadBidServiceRejectsLowerBidBeforeStateFetch(t *testing.T)
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not higher than existing")
 	require.Zero(t, service.validationStateCache.Len())
 }

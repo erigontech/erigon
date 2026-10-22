@@ -125,7 +125,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			// Dump state periodically for restart checkpoints.
 			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 				var st *state.CachingBeaconState
-				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot)
 				if err == nil && st != nil {
 					if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 						err = fmt.Errorf("failed to dump state: %w", err)
@@ -143,7 +143,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// Pre-GLOAS: dump state periodically for restart checkpoints.
 		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 			var st *state.CachingBeaconState
-			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot)
 			if err == nil && st != nil {
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 					err = fmt.Errorf("failed to dump state: %w", err)
@@ -318,6 +318,8 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Before handing off to ChainTipSync, try to set the head state so that
 			// gossip beacon_block messages won't be ignored (Syncing() becomes false).
 			setHeadStateFromForkChoice(cfg, logger)
+			// A failing batch does not advance currentSlot, but its earlier blocks were imported.
+			requestCustodyBackfill(cfg, startSlot, max(currentSlot.Load(), cfg.forkChoice.HighestSeen()))
 			return ErrForwardSyncStale
 		}
 
@@ -347,7 +349,16 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
 		}
 	}
+	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil
+}
+
+// requestCustodyBackfill asks for the custody columns of the blocks forward sync imported: it
+// imports them without checking their data.
+func requestCustodyBackfill(cfg *Cfg, fromSlot, toSlot uint64) {
+	if cfg.peerDas != nil && toSlot > fromSlot {
+		cfg.peerDas.BackfillCustodyColumns(fromSlot, toSlot)
+	}
 }
 
 // setHeadStateFromForkChoice retrieves the current head state from the fork choice store
@@ -358,7 +369,7 @@ func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
 	if err != nil {
 		return
 	}
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot)
 	if err != nil || headState == nil {
 		return
 	}
@@ -406,7 +417,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	// won't exist on the network and the timeout will expire harmlessly.
 	// We use the state's LatestExecutionPayloadBid (not the block) since the anchor
 	// block is not stored in the fork graph under the single-state model.
-	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor state not available, skipping", "err", err)
 		return nil
@@ -471,16 +482,17 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 }
 
 func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	status := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
-	if canValidateGloasPayloads(cfg) {
-		var err error
-		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-		if err != nil {
-			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
-		}
+	if !canValidateGloasPayloads(cfg) {
+		return nil // StoreAnchorEnvelope recorded NotValidated
 	}
-	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+		return nil // not an EL verdict
+	}
+	if err != nil {
+		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	}
+	status, retained := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
 		anchorRoot,
 		env.Message.Payload.BlockHash,
 		status,

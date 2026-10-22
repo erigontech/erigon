@@ -13,7 +13,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | **Practice**                        | **Details**                                                                                                                                                                     | **Rationale**                                                                                                                                                                           |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Use a High-End NVMe SSD             | This is a non-negotiable prerequisite. NVMe SSDs are essential for reliable, high-performance node operation. See [Hardware Requirements](/get-started/hardware-requirements).  | Erigon is highly disk I/O intensive. Fast storage prevents bottlenecks and sync issues.                                                                                                 |
-| Integrate Hardware Reliability      | Use ECC memory and consider a disk RAID setup. Do regular backups of your chain data.                                                                                           | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
+| Integrate Hardware Reliability      | Use error-correcting code (ECC) memory and consider a redundant array of independent disks (RAID) setup. Do regular backups of your chain data.                                                                                           | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
 | Symlink Data Directories (Advanced) | For systems with multiple disks, consider symlinking `snapshots` and `temp` directories to a cheaper, high-capacity drive, while keeping the main `chaindata` on the fast NVMe. See [Optimizing Storage](/fundamentals/optimizing-storage). | Optimizes cost and capacity while retaining performance for critical files.                                                                          |
 | Maintain Sufficient RAM             | Ensure your system has at least the recommended RAM for your chosen network and [pruning mode](/fundamentals/pruning-modes). See [Hardware Requirements](/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory).                                                                                   |
 
@@ -37,7 +37,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Monitor Your Node's Health  | Implement comprehensive monitoring using tools like Prometheus and Grafana to track key metrics like disk I/O, CPU load, and sync status in real time. See [Creating a Dashboard](/fundamentals/creating-a-dashboard). | Essential for proactively identifying performance bottlenecks and stability issues.        |
 | Enable JSON-RPC Compression | Use the `--http.compression` flag. See [Configuring Erigon](/fundamentals/configuring-erigon).                                                                         | Reduces network bandwidth usage for RPC requests.                                                           |
 | Tune RPC Batch Concurrency  | Adjust the `--rpc.batch.concurrency` flag. See [RPC & API flags](/fundamentals/configuring-erigon#rpc--api).                                                           | Limits the number of parallel database reads to prevent a single batch request from overloading the server. |
-| Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](/fundamentals/tls-authentication). | A direct public binding exposes the node to DoS attacks and unrestricted calls that can exhaust resources. |
+| Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](/fundamentals/tls-authentication). | A direct public binding exposes the node to denial-of-service (DoS) attacks and unrestricted calls that can exhaust resources. |
 
 ## Maintenance and Development
 
@@ -53,7 +53,6 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | **Practice**                      | **Details**                                                                                    | **Rationale**                                                           |
 | --------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Check Validator Health            | For validator nodes, a daily check of the node's logs and service status is essential. See [Caplin](/staking/caplin) and [External Consensus Client](/staking/external-consensus-client-as-validator). | Confirms that the node is signing attestations and performing its duty. |
-| Maintain a Sufficient ETH Balance | Validators must maintain an adequate ETH balance on their signer address.                      | Required to cover transaction fees for checkpoint submissions.          |
 
 ## Advanced Performance Tricks
 
@@ -72,7 +71,7 @@ The following shell snippets can provide meaningful performance gains on the rig
 vmtouch -vldt /your/datadir/snapshots/domain
 ```
 
-**Reduce random-read pressure on cloud / NAS storage** — disable the random-access hint for snapshot files:
+**Reduce random-read pressure on cloud / network-attached storage (NAS)** — disable the random-access hint for snapshot files:
 
 ```bash
 export ERIGON_SNAPSHOT_MADV_RND=false

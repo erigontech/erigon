@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -67,9 +68,10 @@ func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 
 	writerDone := make(chan struct{})
 	var writeErr error
+	next := bigValidatorState(t, 1)
 	go func() {
 		defer close(writerDone)
-		writeErr = manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x02})
+		writeErr = manager.OnHeadStateWithBlockRoot(next, common.Hash{0x02})
 	}()
 	<-writerPaused
 
@@ -128,6 +130,58 @@ func TestOnHeadStateWithBlockRootDemotesPriorHeadToPrevious(t *testing.T) {
 	}))
 	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
 		require.Equal(t, uint64(100), headState.Slot())
+		return nil
+	}))
+}
+
+func TestPublishCopiesIntoTheStateDroppedByTheLastPublish(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	var heads []*state.CachingBeaconState
+	for i := range 4 {
+		s := bigValidatorState(t, 1)
+		require.NoError(t, s.SetSlot(uint64(100+i)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(s, common.Hash{byte(1 + i)}))
+		require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			heads = append(heads, headState)
+			return nil
+		}))
+	}
+
+	require.Same(t, heads[0], heads[3])
+	require.Equal(t, uint64(103), heads[3].Slot())
+	require.NoError(t, manager.ViewPreviousHeadState(func(previous *state.CachingBeaconState) error {
+		require.Same(t, heads[2], previous)
+		require.Equal(t, uint64(102), previous.Slot())
+		return nil
+	}))
+}
+
+func TestFailedHeadUpdateKeepsHead(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	for i := range 3 {
+		good := state.New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, good.SetSlot(uint64(100+i)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(good, common.Hash{byte(1 + i)}))
+	}
+
+	broken := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, broken.SetSlot(150))
+	broken.AddPreviousEpochAttestation(&solid.PendingAttestation{
+		AggregationBits: solid.NewBitList(0, 2048),
+		Data:            &solid.AttestationData{Slot: 200},
+	})
+	require.ErrorIs(t, manager.OnHeadStateWithBlockRoot(broken, common.Hash{0xff}), raw.ErrGetBlockRootAtSlotFuture)
+
+	root, slot, ok := manager.StateHead()
+	require.True(t, ok)
+	require.Equal(t, common.Hash{0x03}, root)
+	require.Equal(t, uint64(102), slot)
+	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(102), headState.Slot())
+		return nil
+	}))
+	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(101), headState.Slot())
 		return nil
 	}))
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -31,8 +32,10 @@ import (
 )
 
 type TransactionsSSZ struct {
-	underlying                [][]byte    // underlying transaction list
-	root                      common.Hash // root
+	underlying [][]byte    // underlying transaction list
+	root       common.Hash // root
+	// Replaced on mutation, so a hash that loaded the old pointer cannot fill the new cache.
+	progressiveRoot           *atomic.Pointer[[32]byte]
 	maxBytesPerTransaction    uint64
 	maxTransactionsPerPayload uint64
 	maxEncodedBytes           uint64
@@ -80,6 +83,7 @@ func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 	if err := requireJSONEOF(decoder); err != nil {
 		return err
 	}
+	t.progressiveRoot = new(atomic.Pointer[[32]byte])
 	t.underlying = transactions
 	return nil
 }
@@ -113,6 +117,7 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 	}
 	if len(buf) == 0 {
 		t.root = common.Hash{}
+		t.progressiveRoot = new(atomic.Pointer[[32]byte])
 		t.underlying = nil
 		return nil
 	}
@@ -136,6 +141,7 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 		return ssz.ErrLowBufferSize
 	}
 	maxBytesPerTransaction := t.maxBytes()
+	t.progressiveRoot = new(atomic.Pointer[[32]byte])
 	t.underlying = make([][]byte, length)
 	for i := range length {
 		offsetPosition := i * 4
@@ -206,6 +212,12 @@ func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 }
 
 func (t *TransactionsSSZ) HashSSZProgressive() ([32]byte, error) {
+	rootCache := t.progressiveRoot
+	if rootCache != nil {
+		if root := rootCache.Load(); root != nil {
+			return *root, nil
+		}
+	}
 	roots := make([][32]byte, len(t.underlying))
 	for i, transaction := range t.underlying {
 		root, err := merkle_tree.ProgressiveBasicListRoot(transaction, uint64(len(transaction)))
@@ -214,7 +226,14 @@ func (t *TransactionsSSZ) HashSSZProgressive() ([32]byte, error) {
 		}
 		roots[i] = root
 	}
-	return merkle_tree.ProgressiveListRoot(roots, uint64(len(roots)))
+	root, err := merkle_tree.ProgressiveListRoot(roots, uint64(len(roots)))
+	if err != nil {
+		return [32]byte{}, err
+	}
+	if rootCache != nil {
+		rootCache.CompareAndSwap(nil, &root)
+	}
+	return root, nil
 }
 
 func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {
@@ -234,6 +253,7 @@ func NewTransactionsSSZFromTransactions(txs [][]byte) *TransactionsSSZ {
 // NewTransactionsSSZFromTransactionsWithLimits constructs transactions with decoder resource limits.
 func NewTransactionsSSZFromTransactionsWithLimits(txs [][]byte, maxTransactionsPerPayload, maxBytesPerTransaction uint64) *TransactionsSSZ {
 	return &TransactionsSSZ{
+		progressiveRoot:           new(atomic.Pointer[[32]byte]),
 		underlying:                txs,
 		maxTransactionsPerPayload: maxTransactionsPerPayload,
 		maxBytesPerTransaction:    maxBytesPerTransaction,
@@ -242,6 +262,7 @@ func NewTransactionsSSZFromTransactionsWithLimits(txs [][]byte, maxTransactionsP
 
 func NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransaction uint64) *TransactionsSSZ {
 	return &TransactionsSSZ{
+		progressiveRoot:           new(atomic.Pointer[[32]byte]),
 		maxTransactionsPerPayload: maxTransactionsPerPayload,
 		maxBytesPerTransaction:    maxBytesPerTransaction,
 	}
@@ -249,6 +270,7 @@ func NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransact
 
 func NewProgressiveTransactionsSSZ() *TransactionsSSZ {
 	return &TransactionsSSZ{
+		progressiveRoot:           new(atomic.Pointer[[32]byte]),
 		maxTransactionsPerPayload: clparams.MaxTransactionsPerPayloadDefault,
 		maxBytesPerTransaction:    clparams.MaxChunkSize,
 		maxEncodedBytes:           clparams.MaxChunkSize,
@@ -284,6 +306,13 @@ func (t *TransactionsSSZ) maxBytes() uint64 {
 
 func (t *TransactionsSSZ) UnderlyngReference() [][]byte {
 	return t.underlying
+}
+
+func (t *TransactionsSSZ) Len() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.underlying)
 }
 
 func (t *TransactionsSSZ) ForEach(fn func(tx []byte, idx int, total int) bool) {

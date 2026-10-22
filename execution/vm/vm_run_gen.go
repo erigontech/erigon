@@ -271,6 +271,13 @@ run:
 					pc++
 					continue run
 				}
+			case CALLVALUE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.push(callContext.Contract.value)
+					pc++
+					continue run
+				}
 			case MLOAD:
 				if sLen >= 1 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
@@ -285,6 +292,16 @@ run:
 					gasLeft -= GasFastestStep
 					mStart, val := callContext.Stack.pop2()
 					callContext.Memory.Set32(mStart.Uint64(), val)
+					pc++
+					continue run
+				}
+			case MCOPY:
+				if sLen >= 3 && jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
+					dst, src, length := callContext.Stack.pop3()
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					callContext.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}

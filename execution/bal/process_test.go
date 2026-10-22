@@ -199,12 +199,12 @@ func TestBALBlock943Direct(t *testing.T) {
 		// EIP-7002: only storage reads (empty queue, all writes are net-zero)
 		{
 			Address:      eip7002Addr.Value(),
-			StorageReads: []accounts.StorageKey{slot0, slot1, slot2, slot3},
+			StorageReads: []common.Hash{slot0.Value(), slot1.Value(), slot2.Value(), slot3.Value()},
 		},
 		// EIP-7251: only storage reads (empty queue, all writes are net-zero)
 		{
 			Address:      eip7251Addr.Value(),
-			StorageReads: []accounts.StorageKey{slot0, slot1, slot2, slot3},
+			StorageReads: []common.Hash{slot0.Value(), slot1.Value(), slot2.Value(), slot3.Value()},
 		},
 		// EIP-2935: 1 storage change at accessIndex 0 (system call txIndex=-1)
 		{
@@ -335,7 +335,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 			}
 		}
 		for _, sr := range ac.StorageReads {
-			t.Logf("    read slot %s", sr.Value().Hex())
+			t.Logf("    read slot %s", sr.Hex())
 		}
 	}
 

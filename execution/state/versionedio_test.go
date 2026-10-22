@@ -1047,14 +1047,14 @@ func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	account := newAccountState(addr)
 
 	account.updateReadStorage(slot, orig)
-	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
+	require.Contains(t, account.storageReads, slot, "the read must be recorded")
 
 	account.applyWriteStorage(slot, orig, 0)
 
 	changes := account.changes
 	require.Empty(t, changes.StorageChanges,
 		"write-back to the originally-read value is net-zero and must NOT be recorded as a storage write")
-	require.Contains(t, changes.StorageReads, slot,
+	require.Contains(t, account.storageReads, slot,
 		"the net-zero write-back must remain a read")
 }
 
@@ -1076,7 +1076,7 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	require.Len(t, changes.StorageChanges, 1,
 		"a write to a different value is a real state change and must be recorded")
 	require.Equal(t, slot, changes.StorageChanges[0].Slot)
-	require.NotContains(t, changes.StorageReads, slot,
+	require.NotContains(t, account.storageReads, slot,
 		"a real write supersedes the recorded read")
 }
 
@@ -1602,9 +1602,9 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, seen, "the slot must appear exactly once")
-		require.NotContains(t, changes.StorageReads, slot, "a write supersedes the recorded read")
+		require.NotContains(t, account.storageReads, slot, "a write supersedes the recorded read")
 	}
-	require.Len(t, changes.StorageReads, 4*slotIndexMin)
+	require.Len(t, account.storageReads, 4*slotIndexMin)
 }
 
 // TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
@@ -1635,6 +1635,7 @@ func TestAccountState_MatchesReferenceBuilder(t *testing.T) {
 			ref.write(k, v, uint32(op))
 		}
 
+		account.finalize()
 		got, want := account.changes, ref.changes
 		got.Normalize()
 		want.Normalize()
@@ -1672,7 +1673,7 @@ func (a *referenceAccount) read(slot accounts.StorageKey, val uint256.Int) {
 	if a.written(slot) >= 0 {
 		return
 	}
-	a.changes.StorageReads = append(a.changes.StorageReads, slot)
+	a.changes.StorageReads = append(a.changes.StorageReads, slot.Value())
 }
 
 func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx uint32) {
@@ -1684,7 +1685,7 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 	}
 	kept := a.changes.StorageReads[:0]
 	for _, s := range a.changes.StorageReads {
-		if s != slot {
+		if s != slot.Value() {
 			kept = append(kept, s)
 		}
 	}
@@ -2001,4 +2002,31 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs)
+}
+
+// An arena-backed set copies AddressPath values onto its own slab, and a
+// published snapshot keeps its own copy once the set moves on to the next tx.
+func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.versionedWrites.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xacc7"))
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9)})
+
+	published := ibs.VersionedWrites()
+	ibs.versionedWrites.ReleaseAndReset()
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 1})
+
+	vw, ok := published.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), vw.Val.Nonce)
+	require.Equal(t, *uint256.NewInt(9), vw.Val.Balance)
+
+	// Prime the slab past the measured count, so the measurement sees steady-state writes, not chunk growth.
+	for i := range 128 {
+		ibs.recordWriteAddress(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), &accounts.Account{Nonce: uint64(i)})
+	}
+	ibs.versionedWrites.ReleaseAndReset()
+	acc := &accounts.Account{Nonce: 3}
+	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }

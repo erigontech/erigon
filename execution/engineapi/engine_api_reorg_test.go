@@ -480,3 +480,27 @@ func TestEngineApiForkchoiceToGenesisRewindsHead(t *testing.T) {
 		require.Equal(t, uint64(0), headAfter, "head should have rewound to genesis")
 	})
 }
+
+func TestNewPayloadResentHeadKeepsExecutedState(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		forkValidator := eat.ExecutionModule.ForkValidator()
+		payload, err := eat.MockCl.BuildNewPayload(ctx)
+		require.NoError(t, err)
+		hash := payload.ExecutionPayload.BlockHash
+		for range 2 {
+			status, err := eat.MockCl.InsertNewPayload(ctx, payload)
+			require.NoError(t, err)
+			require.Equal(t, enginetypes.ValidStatus, status.Status)
+			require.Equal(t, hash, forkValidator.ExtendingForkHeadHash())
+		}
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
+	})
+}

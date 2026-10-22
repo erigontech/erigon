@@ -44,6 +44,28 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
+// runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
+func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
+		return RunPrecompiledContract(p, input, gas, tracer)
+	}
+	buf := evm.outputBuffer(evm.depth+1, uint64(len(input)))
+	if buf == nil {
+		return RunPrecompiledContract(p, input, gas, tracer)
+	}
+	gasCost := p.RequiredGas(input)
+	if gas.Execution < gasCost {
+		return nil, gas, ErrOutOfGas
+	}
+	remaining := gas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	}
+	*buf = append((*buf)[:0], input...)
+	return slices.Clip(*buf), remaining, nil
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -67,8 +89,8 @@ type EVM struct {
 	depth int
 	// txOutput receives the top-level frame's output; nil means a fresh copy.
 	txOutput *[]byte
-	// outputs[depth] receives a nested frame's output. Only the parent reads it,
-	// and only until its next call, which is the next frame at that depth.
+	// outputs[depth] receives the output of a nested call at depth, a frame or a
+	// precompile. Only the caller reads it, and only until its next call.
 	outputs *[16][]byte
 
 	// chainConfig contains information about the current chain
@@ -413,12 +435,12 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	// Fail if we're trying to transfer more than the available balance.
 	// Skip the check for zero-value calls, matching geth's short-circuit.
-	if !value.IsZero() {
+	if !value.IsZero() && !bailout {
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
 		}
-		if !canTransfer && !bailout {
+		if !canTransfer {
 			return nil, gasRemaining, mdgas.MdGasUsage{}, ErrInsufficientBalance
 		}
 	}
@@ -464,7 +486,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
@@ -539,7 +561,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -598,7 +620,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: callerAddress, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -670,7 +692,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: addr, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, true)

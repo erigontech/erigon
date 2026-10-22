@@ -1296,9 +1296,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	// Reads opened before the commit still see the unwound branches and may have filled them.
-	if sd.cacheUnwind.pending && sd.branchCache != nil {
-		sd.branchCache.UnwindCommitted(sd.cacheUnwind.toTxNum, viewID)
+	// Reads opened before the commit still see the replaced or unwound branches and may fill them.
+	if sd.branchCache != nil {
+		if sd.cacheUnwind.pending {
+			sd.branchCache.UnwindCommitted(sd.cacheUnwind.toTxNum, viewID)
+		} else {
+			sd.branchCache.Committed(viewID)
+		}
 	}
 	for i := range pendingBranches {
 		u := &pendingBranches[i]
@@ -2039,4 +2043,15 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		changes++
 	}
 	return changes, nil
+}
+
+type DomainReader interface {
+	membatchwithdb.DomainReader
+	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
+	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
+}
+
+// AsGetter returns a metrics-free execution getter.
+func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 }

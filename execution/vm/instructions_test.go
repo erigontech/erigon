@@ -25,12 +25,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
 	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -315,16 +317,18 @@ func innerOutputsShareBuffer(cfg Config) bool {
 	return unsafe.SliceData(a) == unsafe.SliceData(b)
 }
 
-func TestInnerFrameOutputReusesBuffer(t *testing.T) {
-	if !innerOutputsShareBuffer(Config{}) {
-		t.Fatal("each inner RETURN got a new buffer")
-	}
-}
-
-// Tracers such as callTracer keep every frame's output.
-func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
-	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
-		t.Fatal("a traced inner RETURN reused the buffer")
+// Tracers that see outputs (callTracer, opcode tracers) keep them, so those get copies.
+func TestInnerFrameOutputBufferPerTracer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hooks *tracing.Hooks
+		share bool
+	}{
+		"none":   {nil, true},
+		"enter":  {&tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}, true},
+		"exit":   {&tracing.Hooks{OnExit: func(int, []byte, uint64, error, bool) {}}, false},
+		"opcode": {&tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}, false},
+	} {
+		require.Equal(t, tc.share, innerOutputsShareBuffer(Config{Tracer: tc.hooks}), name)
 	}
 }
 
@@ -786,6 +790,37 @@ func TestOpCLZ(t *testing.T) {
 	}
 }
 
+func TestOpDifficulty(t *testing.T) {
+	t.Parallel()
+	randao := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	difficulty := uint256.MustFromHex("0x7000000000000007600000000000000650000000000000054000000000000004")
+	tests := []struct {
+		name     string
+		blockCtx evmtypes.BlockContext
+		want     uint256.Int
+	}{
+		{"prevrandao", evmtypes.BlockContext{PrevRanDao: &randao, Difficulty: *difficulty}, *new(uint256.Int).SetBytes(randao[:])},
+		{"zero prevrandao", evmtypes.BlockContext{PrevRanDao: &common.Hash{}, Difficulty: *difficulty}, uint256.Int{}},
+		{"difficulty", evmtypes.BlockContext{Difficulty: *difficulty}, *difficulty},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evm := NewEVM(tc.blockCtx, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+			callContext := &CallContext{}
+			callContext.Stack.push(*uint256.NewInt(1))
+			callContext.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+			callContext.Stack.pop()
+			pc, res, err := opDifficulty(42, evm, callContext)
+			require.NoError(t, err)
+			require.Nil(t, res)
+			require.Equal(t, uint64(42), pc)
+			require.Equal(t, 2, callContext.Stack.len())
+			require.Equal(t, tc.want, *callContext.Stack.peek())
+			require.Equal(t, *uint256.NewInt(1), *callContext.Stack.back(1))
+		})
+	}
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
@@ -1088,4 +1123,107 @@ func TestEIP8024_Execution(t *testing.T) {
 func ptrToByte(v byte) *byte {
 	b := v
 	return &b
+}
+
+func TestLogDataSurvivesMemoryAndArenaReuse(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	op := makeLog(3)
+	for i, size := range []int{1024 * 1024, 1024, 32, 0, 1024 * 1024} {
+		ibs.SetTxContext(1, 0)
+		scope.Memory.Resize(uint64(size + 6))
+		data := bytes.Repeat([]byte{byte(i + 1)}, size)
+		scope.Memory.Set(6, uint64(size), data)
+		for range 3 {
+			scope.Stack.push(uint256.Int{})
+		}
+		scope.Stack.push(*uint256.NewInt(uint64(size)))
+		scope.Stack.push(*uint256.NewInt(6))
+		_, _, err := op(0, evm, scope)
+		require.NoError(t, err)
+		clear(scope.Memory.Data())
+		logs := ibs.GetRawLogs(0)
+		require.Len(t, logs, 1)
+		require.Equal(t, []common.Hash{{}, {}, {}}, logs[0].Topics)
+		require.Len(t, logs[0].Data, size)
+		require.True(t, bytes.Equal(data, logs[0].Data), "log data changed for size %d", size)
+		ibs.Reset()
+	}
+}
+
+func TestExpSmallOperandBoundaries(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	for _, base := range []uint64{0, 1, 2, 3, 7, 13, 136279841, 1 << 31, 1 << 32, 1 << 63, ^uint64(0)} {
+		for power := range uint64(66) {
+			scope := &CallContext{}
+			scope.Stack.push(*uint256.NewInt(power))
+			scope.Stack.push(*uint256.NewInt(base))
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpNegativeOneParity(t *testing.T) {
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	base := new(uint256.Int).SetAllOne()
+	for _, exponent := range []uint256.Int{{}, {1}, {2}, {3}, {0, 1}, {1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}, *new(uint256.Int).SetAllOne()} {
+		scope := &CallContext{}
+		scope.Stack.push(exponent)
+		scope.Stack.push(*base)
+		_, _, err := opExp(0, nil, scope)
+		want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+		if err != nil || scope.Stack.peek().ToBig().Cmp(want) != 0 {
+			t.Fatalf("exp %x: got %x, %v; want %x", exponent, scope.Stack.peek(), err, want)
+		}
+	}
+}
+
+func TestContextAddressWordsReusedFrame(t *testing.T) {
+	evm := &EVM{}
+	addresses := []accounts.Address{
+		accounts.NilAddress,
+		accounts.ZeroAddress,
+		accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")),
+		accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")),
+	}
+	for frame := range addresses {
+		address := addresses[frame]
+		origin := addresses[(frame+1)%len(addresses)]
+		caller := addresses[(frame+2)%len(addresses)]
+		coinbase := addresses[(frame+3)%len(addresses)]
+		evm.TxContext = evmtypes.TxContext{Origin: origin}
+		evm.Context = evmtypes.BlockContext{Coinbase: coinbase}
+		scope := evm.getCallContext(*NewContract(caller, caller, address, uint256.Int{}), nil, mdgas.MdGas{})
+		for _, tc := range []struct {
+			name    string
+			op      executionFunc
+			address accounts.Address
+		}{
+			{"ADDRESS", opAddress, address},
+			{"ORIGIN", opOrigin, origin},
+			{"CALLER", opCaller, caller},
+			{"COINBASE", opCoinbase, coinbase},
+		} {
+			value := tc.address.Value()
+			want := new(uint256.Int).SetBytes(value[:])
+			for range 2 {
+				scope.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+				scope.Stack.pop()
+				_, _, err := tc.op(0, evm, scope)
+				if err != nil || *scope.Stack.peek() != *want {
+					t.Fatalf("frame %d %s: got %x, %v; want %x", frame, tc.name, scope.Stack.peek(), err, want)
+				}
+				scope.Stack.Reset()
+			}
+		}
+		evm.putCallContext(scope)
+	}
 }
