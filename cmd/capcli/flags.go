@@ -261,16 +261,20 @@ func (b *BlobArchiveStoreCheck) command() *cli.Command {
 }
 
 func (c *DumpBlobsSnapshots) command() *cli.Command {
+	from := &cli.Uint64Flag{Name: "from", Usage: "slot to start dumping from, a segment boundary; defaults to the segment holding the Deneb fork"}
+	overwrite := &cli.BoolFlag{Name: "overwrite", Usage: "rewrite segments that are already on disk or pinned by the preverified lock"}
 	return &cli.Command{
 		Name:  "dump-blobs-snapshots",
-		Usage: "dump blobs snapshots",
-		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, toSlotFlag},
+		Usage: "dump the blob segments missing from disk and from the preverified lock, up to the frozen beacon-block frontier",
+		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, from, toSlotFlag, overwrite},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			c.chainCfg.fromCmd(cmd)
 			if err := c.outputFolder.fromCmd(cmd); err != nil {
 				return err
 			}
+			c.From = cmd.Uint64(from.Name)
 			c.To = cmd.Uint64(toSlotFlag.Name)
+			c.Overwrite = cmd.Bool(overwrite.Name)
 			return c.Run(ctx)
 		},
 	}

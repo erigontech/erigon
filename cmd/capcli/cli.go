@@ -27,11 +27,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -57,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1156,7 +1160,8 @@ type DumpBlobsSnapshots struct {
 	chainCfg
 	outputFolder
 
-	To uint64
+	From, To  uint64
+	Overwrite bool
 }
 
 func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
@@ -1185,14 +1190,128 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	if err := csn.OpenBeaconBlocks(); err != nil {
+		return err
+	}
+	defer csn.Close()
+	frozenBlocks := csn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
+
+	onDisk, pinned, err := frozenBlobSegments(dirs)
+	if err != nil {
+		return err
+	}
+	starts, err := blobDumpPlan(beaconConfig, c.From, to, frozenBlocks, onDisk, pinned, c.Overwrite)
+	if err != nil {
+		return err
+	}
+	log.Info("Dumping blob segments", "segments", len(starts), "to", to, "frozenBlocks", frozenBlocks, "overwrite", c.Overwrite)
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 	if err != nil {
 		return err
 	}
 
-	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), nil, log.LvlInfo, log.Root())
+	blobCount := freezeblocks.BlobCountFromBlocks(ctx, csn, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig))
+
+	for _, start := range starts {
+		end := start + snaptype.CaplinMergeLimit
+		if err := removeBlobIndexAndTorrents(dirs.Snap, start, end); err != nil {
+			return err
+		}
+		log.Info("Dumping blobs sidecars", "from", start, "to", end)
+		if err := freezeblocks.DumpBlobSidecarsRange(ctx, db, blobStorage, start, end, salt, dirs, estimate.CompressSnapshot.Workers(), blobCount, log.LvlInfo, log.Root()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to, frozenBlocks uint64, onDisk, pinned []snaptype.FileInfo, overwrite bool) ([]uint64, error) {
+	denebStart := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	if from == 0 {
+		from = denebStart
+	}
+	if from%snaptype.CaplinMergeLimit != 0 {
+		return nil, fmt.Errorf("--from must be a multiple of %d, got %d", snaptype.CaplinMergeLimit, from)
+	}
+	if from < denebStart {
+		return nil, fmt.Errorf("--from %d is below the Deneb fork boundary %d", from, denebStart)
+	}
+	to = min(to, frozenBlocks)
+	current := snaptype.BlobSidecars.Versions().Current
+	var starts []uint64
+	for start := from; start < to && to-start >= snaptype.CaplinMergeLimit; start += snaptype.CaplinMergeLimit {
+		end := start + snaptype.CaplinMergeLimit
+		covers := func(f snaptype.FileInfo) bool { return f.From <= start && end <= f.To }
+		if slices.ContainsFunc(onDisk, covers) || slices.ContainsFunc(pinned, covers) {
+			if !overwrite {
+				continue
+			}
+			if i := slices.IndexFunc(pinned, covers); i >= 0 {
+				return nil, fmt.Errorf("%s pins slots %d-%d in %s, so it is repaired by downloading it again, not by overwriting it", pinned[i].Name(), start, end, datadir.PreverifiedFileName)
+			}
+			if i := slices.IndexFunc(onDisk, func(f snaptype.FileInfo) bool { return covers(f) && f.Version != current }); i >= 0 {
+				return nil, fmt.Errorf("%s covers slots %d-%d at a version other than %s, so overwriting it would leave two segments for one range", onDisk[i].Name(), start, end, current)
+			}
+		}
+		starts = append(starts, start)
+	}
+	return starts, nil
+}
+
+func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
+	idx := snaptype.IdxFileMask(from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	masks := []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"}
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		for _, mask := range masks {
+			matched, err := filepath.Match(mask, e.Name())
+			if err != nil {
+				return err
+			}
+			if matched {
+				if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func frozenBlobSegments(dirs datadir.Dirs) (onDisk, pinned []snaptype.FileInfo, err error) {
+	onDisk, err = snaptype.Segments(dirs.Snap)
+	if err != nil {
+		return nil, nil, err
+	}
+	lock, err := os.ReadFile(dirs.PreverifiedPath())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, err
+	}
+	var hashes map[string]string
+	if err := toml.Unmarshal(lock, &hashes); err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", dirs.PreverifiedPath(), err)
+	}
+	for name := range hashes {
+		if f, _, ok := snaptype.ParseFileName(dirs.Snap, name); ok {
+			pinned = append(pinned, f)
+		}
+	}
+	notBlobSegment := func(f snaptype.FileInfo) bool {
+		return f.Ext != ".seg" || f.Type == nil || f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars
+	}
+	return slices.DeleteFunc(onDisk, notBlobSegment), slices.DeleteFunc(pinned, notBlobSegment), nil
 }
 
 type CheckBlobsSnapshots struct {
