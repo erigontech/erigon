@@ -36,6 +36,7 @@ func TestPBTPartitionWriteProgressCountsEachOpOnce(t *testing.T) {
 		{Key: eip8297.TreeKeyAccount(bytes.Repeat([]byte{1}, 20), eip8297.BasicDataLeafKey), Value: [32]byte{1}},
 		{Key: eip8297.TreeKeyAccount(bytes.Repeat([]byte{2}, 20), eip8297.BasicDataLeafKey), Value: [32]byte{2}},
 	}
+	ops = pbinSortedOps(ops)
 	batches, err := pbinRebuildBatches(ops, t.TempDir(), 1, 1<<20)
 	require.NoError(t, err)
 	var count int

@@ -18,12 +18,6 @@
 
 package state
 
-import "syscall"
-
 func pbtRSSAnon() any {
-	var usage syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
-		return "n/a"
-	}
-	return uint64(usage.Maxrss)
+	return "n/a"
 }
