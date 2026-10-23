@@ -369,6 +369,8 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 // per-task reader wraps it by reference. Call once after ResetState; per task the
 // block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
 func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
 	rw.ibs.Close()
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
