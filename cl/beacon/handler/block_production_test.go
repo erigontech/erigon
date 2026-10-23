@@ -3079,32 +3079,38 @@ func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
 	busy := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
 	failure := errors.New("payload finalization failed")
 	for _, tc := range []struct {
-		name      string
-		responses []error
-		want      error
+		name         string
+		responses    []error
+		want         error
+		wantLogLevel string
 	}{
 		{
-			name:      "busy before unknown payload",
-			responses: []error{busy, &engine_helpers.UnknownPayloadErr},
-			want:      busy,
+			name:         "busy before unknown payload",
+			responses:    []error{busy, &engine_helpers.UnknownPayloadErr},
+			want:         &engine_helpers.UnknownPayloadErr,
+			wantLogLevel: "lvl=warn",
 		},
 		{
-			name:      "builder failure after busy",
-			responses: []error{busy, failure, chainreader.ErrUnknownPayload},
-			want:      failure,
+			name:         "builder failure after busy",
+			responses:    []error{busy, failure, chainreader.ErrUnknownPayload},
+			want:         failure,
+			wantLogLevel: "lvl=eror",
 		},
 		{
-			name:      "builder cancellation after busy",
-			responses: []error{busy, context.Canceled, chainreader.ErrUnknownPayload},
-			want:      context.Canceled,
+			name:         "builder cancellation after busy",
+			responses:    []error{busy, context.Canceled, chainreader.ErrUnknownPayload},
+			want:         context.Canceled,
+			wantLogLevel: "lvl=eror",
 		},
 		{
-			name:      "builder cancellation before unknown payload",
-			responses: []error{context.Canceled, &engine_helpers.UnknownPayloadErr},
-			want:      context.Canceled,
+			name:         "builder cancellation before unknown payload",
+			responses:    []error{context.Canceled, &engine_helpers.UnknownPayloadErr},
+			want:         context.Canceled,
+			wantLogLevel: "lvl=eror",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
 			now := time.Now()
 			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 			calls := 0
@@ -3117,16 +3123,19 @@ func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
 				})
 
 			require.ErrorIs(t, err, tc.want)
-			if !errors.Is(tc.want, chainreader.ErrExecutionBusy) {
-				require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
-			}
+			require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
 			if errors.Is(tc.want, context.Canceled) {
-				require.ErrorContains(t, err, "payload collection canceled while request remained active")
+				require.ErrorContains(t, err, "canceled while request remained active")
 			}
-			require.False(t, execution_client.IsUnknownPayloadError(err))
+			require.Equal(t, execution_client.IsUnknownPayloadError(tc.want), execution_client.IsUnknownPayloadError(err))
 			require.ErrorContains(t, err, fmt.Sprintf("%d attempts, %d failed", len(tc.responses), len(tc.responses)))
 			require.Nil(t, payload)
 			require.Equal(t, len(tc.responses), calls)
+
+			reportProductionFailure(err, 123)
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "BlockProduction:"), "records:\n"+captured)
+			require.Contains(t, captured, tc.wantLogLevel)
 		})
 	}
 }
@@ -3149,7 +3158,7 @@ func TestProductionReportsBuilderCancellationAfterPollDeadline(t *testing.T) {
 
 	captured := logs()
 	require.Contains(t, captured, "lvl=eror")
-	require.Contains(t, captured, "payload collection canceled while request remained active")
+	require.Contains(t, captured, "no payload after 1 attempt, 1 failed: canceled while request remained active")
 }
 
 func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
@@ -5265,7 +5274,7 @@ func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *tes
 
 	captured := logs()
 	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
-	require.Contains(t, captured, "forkchoice update canceled while request remained active")
+	require.Contains(t, captured, "forkchoice update: canceled while request remained active")
 }
 
 func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
@@ -5292,9 +5301,18 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 }
 
 func TestProductionPrefersExecutionFailureOnEqualPriority(t *testing.T) {
+	logs := captureProductionLogs(t)
 	executionErr := errors.New("boom")
-	err := produceBlockWithFailingCollection(t, t.Context(), executionErr, errors.New("no aggregate"))
+	syncAggregateErr := errors.New("no aggregate")
+	err := produceBlockWithFailingCollection(t, t.Context(), executionErr, syncAggregateErr)
 	require.ErrorIs(t, err, executionErr)
+	require.NotErrorIs(t, err, syncAggregateErr)
+	require.ErrorContains(t, err, "sync aggregate: no aggregate")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, executionErr.Error())
+	require.Contains(t, captured, syncAggregateErr.Error())
 }
 
 func TestProductionReportsActionableConcurrentFailure(t *testing.T) {

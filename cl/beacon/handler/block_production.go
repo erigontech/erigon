@@ -501,8 +501,8 @@ type productionErrorSeverity uint8
 const (
 	productionErrorNone productionErrorSeverity = iota
 	productionErrorCanceled
-	productionErrorUnknownPayload
 	productionErrorBusy
+	productionErrorUnknownPayload
 	productionErrorUnexpectedCancellation
 	productionErrorActionable
 )
@@ -553,9 +553,9 @@ func reportProductionFailure(err error, targetSlot uint64) {
 // preserveProductionCancellation marks an operation cancellation observed while the request was active.
 // The marker keeps it distinct from caller cancellation even if the request is canceled
 // before the failure is reported.
-func preserveProductionCancellation(requestErr error, operation string, err error) error {
+func preserveProductionCancellation(requestErr, err error) error {
 	if requestErr == nil && errors.Is(err, context.Canceled) {
-		return fmt.Errorf("%s %w: %w", operation, errProductionOperationCanceled, err)
+		return fmt.Errorf("%w: %w", errProductionOperationCanceled, err)
 	}
 	return err
 }
@@ -603,7 +603,7 @@ func pollAssembledPayload(
 			requestErr := ctx.Err()
 			if requestErr == nil || !errors.Is(err, requestErr) {
 				failures++
-				failure := preserveProductionCancellation(requestErr, "payload collection", err)
+				failure := preserveProductionCancellation(requestErr, err)
 				bestErr = mostActionableProductionError(bestErr, failure)
 			}
 			if execution_client.IsUnknownPayloadError(err) || errors.Is(err, execution_client.ErrInvalidGetPayloadResponse) {
@@ -1868,7 +1868,7 @@ func (a *ApiHandler) produceBeaconBody(
 		)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w",
-				preserveProductionCancellation(ctx.Err(), "forkchoice update", err))
+				preserveProductionCancellation(ctx.Err(), err))
 			return
 		}
 		if len(idBytes) == 0 {
@@ -2095,6 +2095,11 @@ func (a *ApiHandler) produceBeaconBody(
 	})
 	wg.Wait()
 	if syncAggregateErr != nil {
+		if classifyProductionError(executionErr) == productionErrorActionable &&
+			classifyProductionError(syncAggregateErr) == productionErrorActionable {
+			// Keep the secondary failure as text so only the primary error controls classification.
+			return nil, nil, fmt.Errorf("%w (also: %s)", executionErr, syncAggregateErr.Error())
+		}
 		return nil, nil, mostActionableProductionError(executionErr, syncAggregateErr)
 	}
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations after the payload
