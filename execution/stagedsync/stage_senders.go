@@ -234,7 +234,7 @@ Loop:
 		}
 
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
-		if ok && body != nil && exec.RecoversSenders(header) {
+		if ok && body != nil && cfg.readAheader.ExecRecoversSenders(header) {
 			continue
 		}
 		if body == nil || !ok {
@@ -422,6 +422,9 @@ func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlockCfg, from, to uint64) error {
+	if dbg.IgnoreBAL || cfg.chainConfig.AmsterdamTime == nil {
+		return nil
+	}
 	for blockNum := from; blockNum <= to; blockNum++ {
 		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
