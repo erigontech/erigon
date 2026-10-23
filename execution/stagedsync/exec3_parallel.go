@@ -709,9 +709,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						deliberateCancel()
 					}
 					if foldErr != nil {
-						err := foldErr
+						failInfra(foldErr)
 						foldErr = nil
-						failInfra(err)
 						continue
 					}
 					// This block's writes are now in the shared domain: drop it from the
