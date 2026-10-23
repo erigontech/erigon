@@ -810,7 +810,17 @@ func TestConvertPBTSkipVerifyRejectsStateFilesPastPoint(t *testing.T) {
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	source, _ := newPBTConversionSourceAtWithFutureLeaf(t, 7, 8)
+	source, _ := newPBTConversionSource(t)
+	require.NoError(t, filepath.WalkDir(source.Snap, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.Contains(entry.Name(), "-accounts.0-1.") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(strings.Replace(path, ".0-1.", ".1-2.", 1), data, 0o644)
+	}))
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{skipVerify: true})
 	require.ErrorContains(t, err, "state files from step 1 hold writes past conversion txNum 7")

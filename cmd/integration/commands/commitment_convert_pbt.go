@@ -673,29 +673,10 @@ func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) err
 	if err != nil {
 		return err
 	}
-	if step, past := pbtConvertFirstStepPastPoint(pbtAttachVisibleFiles(files), stepSize, endTxNum); past {
+	if step, past := pbtAttachFirstStepPastPoint(pbtAttachVisibleFiles(files), stepSize, endTxNum); past {
 		return fmt.Errorf("commitment convert-pbt: state files from step %d hold writes past conversion txNum %d; wait for the next step", step, endTxNum)
 	}
 	return nil
-}
-
-func pbtConvertFirstStepPastPoint(files []pbtAttachFile, stepSize, endTxNum uint64) (uint64, bool) {
-	var first uint64
-	found := false
-	for _, file := range files {
-		if !pbtAttachAdoptsFile(file) || file.to*stepSize < endTxNum+1 {
-			continue
-		}
-		step := file.from
-		if file.to*stepSize == endTxNum+1 {
-			step = file.to
-		}
-		if !found || step < first {
-			first = step
-			found = true
-		}
-	}
-	return first, found
 }
 
 func writePBTOutputManifest(ctx context.Context, dirs datadir.Dirs, point pbinConversionPoint, pbtRoot common.Hash, hexRoot, trieHash string, skipVerify bool, workers int, logger log.Logger) error {
