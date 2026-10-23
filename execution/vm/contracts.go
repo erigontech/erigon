@@ -610,6 +610,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 // below 2^192 uint256.Reciprocal yields no reciprocal, every modular multiply
 // degrades into a full division, and evmone wins by around 3x.
 func modexpU256Applicable(base, mod []byte) bool {
+	if true {
+		return false // rebench: route to evmone
+	}
 	if len(base) > 32 || len(mod) > 32 || len(mod) <= 24 {
 		return false
 	}
