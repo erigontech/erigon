@@ -1838,58 +1838,136 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 }
 
 // A coinbase created and self-destructed in the SAME tx leaves the worker's balance
-// write stamped ValueDeleted. With a tip that does not revive it, calcFees must emit
-// the removal — ValueDeleted balance, SelfDestruct, and NO live AddressPath — so the
-// deletion verdict rides the write-set and survives WriteSet.Merge, instead of a live
-// ValueChanged balance that only calc_state's EIP-161 pass would re-delete.
+// write stamped ValueDeleted. calcFees must emit the removal — ValueDeleted balance,
+// SelfDestruct, and NO live AddressPath — so the deletion verdict rides the write-set
+// and survives WriteSet.Merge, instead of a live ValueChanged balance that only
+// calc_state's EIP-161 pass would re-delete. The second case is the dangerous one: a
+// later same-tx credit leaves a non-zero residual, but a tip-burning destruct removes
+// the account regardless — matching serial, which rejects the parallel root otherwise.
 func TestCalcFees_SameTxDestroyedCoinbase_EmitsRemoval(t *testing.T) {
 	t.Parallel()
-	coinbase := fAddr("coinbase")
 	rules := &chain.Rules{IsSpuriousDragon: true} // pre-Amsterdam: a contract self-destruct burns + deletes
+	for _, tc := range []struct {
+		name          string
+		creditAfterSD uint64 // a later same-tx credit after the burn (0 = none)
+	}{
+		{"zero residual", 0},
+		{"non-zero residual after burn", 123},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
 
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
-	version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
-	txTask := &exec.TxTask{
-		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
-		Config:          chain.TestChainBerlinConfig,
-		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task: task,
+				ExecutionResult: evmtypes.ExecutionResult{
+					FeeTipped:            *uint256.NewInt(0), // zero tip — does not revive the destroyed coinbase
+					BurntContractAddress: accounts.NilAddress,
+				},
+				Coinbase: coinbase,
+			}}
+
+			vm := state.NewVersionMap(nil)
+			// The worker creates and destroys the coinbase in THIS tx, so result.TxOut
+			// carries the destruction with the balance stamped ValueDeleted.
+			worker := state.NewWithVersionMap(state.NewNoopReader(), vm)
+			worker.SetTxContext(1, 1)
+			worker.SetVersion(0)
+			require.NoError(t, worker.CreateAccount(coinbase, true))
+			require.NoError(t, worker.AddBalance(coinbase, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
+			_, err := worker.Selfdestruct(coinbase, rules.IsAmsterdam)
+			require.NoError(t, err)
+			if tc.creditAfterSD > 0 {
+				// A later same-tx call credits the destroyed coinbase; the burn stamp stays.
+				require.NoError(t, worker.AddBalance(coinbase, *uint256.NewInt(tc.creditAfterSD), tracing.BalanceChangeTransfer))
+			}
+			result.TxOut = finalizedWrites(t, worker, rules)
+
+			wbw := findBalance(result.TxOut, coinbase)
+			require.NotNil(t, wbw)
+			require.True(t, wbw.Deletes(), "precondition: the worker's coinbase balance is stamped ValueDeleted")
+			if tc.creditAfterSD > 0 {
+				require.False(t, wbw.Val.IsZero(), "precondition: a later same-tx credit leaves a non-zero residual")
+			}
+
+			writes, err := result.calcFees(task, vm, newMapStateReader(), rules)
+			require.NoError(t, err)
+
+			bw := findBalance(writes, coinbase)
+			require.NotNil(t, bw, "coinbase balance write")
+			require.True(t, bw.Val.IsZero(), "the removal writes a zero balance")
+			require.True(t, bw.Deletes(), "the deletion verdict must ride the balance stamp, not calc_state's EIP-161 pass")
+			sdw, ok := writes.GetSelfDestruct(coinbase)
+			require.True(t, ok && sdw.Val, "the removal must carry SelfDestruct=true")
+			require.Nil(t, findAddress(writes, coinbase), "a removed account must not emit a live AddressPath")
+		})
 	}
-	task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
-	result := &execResult{TxResult: &exec.TxResult{
-		Task: task,
-		ExecutionResult: evmtypes.ExecutionResult{
-			FeeTipped:            *uint256.NewInt(0), // zero tip — does not revive the destroyed coinbase
-			BurntContractAddress: accounts.NilAddress,
-		},
-		Coinbase: coinbase,
-	}}
+}
 
-	vm := state.NewVersionMap(nil)
-	// The worker creates and destroys the coinbase in THIS tx, so result.TxOut carries
-	// the destruction with the balance stamped ValueDeleted.
-	worker := state.NewWithVersionMap(state.NewNoopReader(), vm)
-	worker.SetTxContext(1, 1)
-	worker.SetVersion(0)
-	require.NoError(t, worker.CreateAccount(coinbase, true))
-	require.NoError(t, worker.AddBalance(coinbase, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
-	_, err := worker.Selfdestruct(coinbase, rules.IsAmsterdam)
-	require.NoError(t, err)
-	result.TxOut = finalizedWrites(t, worker, rules)
+// The worker's EIP-161 removal of an empty codeless coinbase stands only without a tip:
+// serial credits the tip before the tx's empty-account sweep, so a tip keeps the account.
+func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	for _, tc := range []struct {
+		name string
+		tip  uint64
+	}{
+		{"tip keeps the account", 1_000},
+		{"zero tip leaves it removed", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+			reader := newMapStateReader()
+			reader.accounts[coinbase] = &accounts.Account{CodeHash: accounts.EmptyCodeHash}
 
-	wbw := findBalance(result.TxOut, coinbase)
-	require.NotNil(t, wbw)
-	require.True(t, wbw.Deletes(), "precondition: the worker's coinbase balance is stamped ValueDeleted")
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task: task,
+				ExecutionResult: evmtypes.ExecutionResult{
+					FeeTipped:            *uint256.NewInt(tc.tip),
+					BurntContractAddress: accounts.NilAddress,
+				},
+				Coinbase: coinbase,
+			}}
 
-	writes, err := result.calcFees(task, vm, newMapStateReader(), rules)
-	require.NoError(t, err)
+			vm := state.NewVersionMap(nil)
+			worker := state.NewWithVersionMap(reader, vm)
+			worker.SetTxContext(1, 1)
+			require.NoError(t, worker.TouchAccount(coinbase))
+			result.TxOut = finalizedWrites(t, worker, rules)
+			sd, ok := result.TxOut.GetSelfDestruct(coinbase)
+			require.True(t, ok && sd.Val, "precondition: the worker removes the touched empty coinbase")
 
-	bw := findBalance(writes, coinbase)
-	require.NotNil(t, bw, "coinbase balance write")
-	require.True(t, bw.Val.IsZero(), "a destroyed coinbase with no reviving tip has zero balance")
-	require.True(t, bw.Deletes(), "the deletion verdict must ride the balance stamp, not calc_state's EIP-161 pass")
-	sdw, ok := writes.GetSelfDestruct(coinbase)
-	require.True(t, ok && sdw.Val, "the removal must carry SelfDestruct=true")
-	require.Nil(t, findAddress(writes, coinbase), "a removed account must not emit a live AddressPath")
+			writes, err := result.calcFees(task, vm, reader, rules)
+			require.NoError(t, err)
+			sdw, ok := writes.GetSelfDestruct(coinbase)
+			if tc.tip == 0 {
+				require.False(t, ok && !sdw.Val, "no tip: the removal stands")
+				return
+			}
+			require.True(t, ok && !sdw.Val, "a tip undoes the removal")
+			bw := findBalance(writes, coinbase)
+			require.NotNil(t, bw)
+			require.Equal(t, *uint256.NewInt(tc.tip), bw.Val)
+		})
+	}
 }
 
 // failingAccountReader fails account reads once err is set.

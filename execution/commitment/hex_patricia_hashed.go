@@ -2299,6 +2299,11 @@ func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error 
 	if err != nil {
 		return err
 	}
+	// ctx.Branch returns a reused per-context buffer; the recursion below reads
+	// child branches into it, so own the bytes before they are passed as prev to
+	// CollectTombstone after the recursion — otherwise the tombstone's unwind diff
+	// records a child's bytes as this branch's previous value.
+	branch = bytes.Clone(branch)
 	// No branch record at this prefix (leaf, absent, or already a tombstone).
 	if len(branch) < 4 || BranchData(branch).ChildCount() == 0 {
 		return nil
@@ -2358,6 +2363,9 @@ func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	cell.storageAddrLen = 0
 	cell.StorageLen = 0
 	cell.loaded &^= cellLoadStorage
+	// The combined leaf's hashed extension runs into the dropped slot's key; updateCell
+	// rebuilds it from the account key.
+	cell.hashedExtLen = 0
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded

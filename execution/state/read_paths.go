@@ -414,7 +414,7 @@ reread:
 	case BalancePath:
 		r.mapBalanceVal, res, _ = s.versionMap.ReadBalance(addr, s.txIndex)
 	case NoncePath:
-		r.mapNonceVal, res, _ = s.versionMap.ReadNonce(addr, s.txIndex)
+		r.mapNonceVal, res, _, r.life = s.versionMap.ReadNonceLife(addr, s.txIndex)
 	case IncarnationPath:
 		r.mapIncarnationVal, res, _ = s.versionMap.ReadIncarnation(addr, s.txIndex)
 	case CodePath:
@@ -516,7 +516,7 @@ reread:
 		// must see zero. Anchor the dependency on canonicalVer (the latest SD cell the
 		// validator resolves), never the wipe — a revival sitting above the wipe would
 		// otherwise make validation disagree forever and livelock.
-		if path == StoragePath {
+		if path == StoragePath || path == NoncePath {
 			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{

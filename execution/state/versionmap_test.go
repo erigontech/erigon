@@ -739,6 +739,41 @@ func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
 		"a revival write after the destruct re-creates the account — the read stays valid")
 }
 
+// A revival writes SelfDestruct=false above the destruct and no nonce, so a nonce read
+// from before the destruct is stale; one rewritten after the destruct stays valid.
+func TestValidateRead_NonceBeforeDestructStaleAfterRevival(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		rewrite bool
+		want    VersionValidity
+	}{
+		{"stale", false, VersionInvalid},
+		{"rewritten", true, VersionValid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(79)
+			vm := NewVersionMap(nil)
+			writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0}, uint64(1), true)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+			writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(1), true)
+			read := VersionedRead[uint64]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}}, Val: 1}
+			if tc.rewrite {
+				writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 2}, uint64(0), true)
+				read = VersionedRead[uint64]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 2}}}
+			}
+
+			io := NewVersionedIO(4)
+			rs := ReadSet{}
+			rs.SetNonce(addr, read)
+			io.RecordReads(Version{TxIndex: 3}, rs)
+			require.Equal(t, tc.want, vm.ValidateVersion(3, io, validateEqualVersion, false, ""))
+		})
+	}
+}
+
 // TestVersionedWritePoolReuse_NoStaleFields guards the *VersionedWrite[T] pool
 // invariant: getVW* returns a recycled cell that may still hold a prior write's
 // contents, so the record path MUST wholesale-overwrite it. It drives the
