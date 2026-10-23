@@ -298,7 +298,7 @@ func MinTxGas(isEIP2780 bool) uint64 {
 func MinTxBlockGas(isLondon, isPrague, isAmsterdam bool) uint64 {
 	minTxGas := MinTxGas(isAmsterdam)
 	switch {
-	case isPrague:
+	case isPrague || isAmsterdam:
 		return minTxGas
 	case isLondon:
 		return minTxGas - minTxGas/params.RefundQuotientEIP3529

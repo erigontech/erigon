@@ -547,6 +547,7 @@ func TestMinTxBlockGas(t *testing.T) {
 		{"London", true, false, false, 16_800},
 		{"Prague", true, true, false, 21_000},
 		{"Amsterdam", true, true, true, 12_000},
+		{"Amsterdam without Prague", true, false, true, 12_000},
 	} {
 		assert.Equal(t, test.want, MinTxBlockGas(test.isLondon, test.isPrague, test.isAmsterdam), test.fork)
 	}
