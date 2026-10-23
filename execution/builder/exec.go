@@ -197,7 +197,10 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
-				time.Sleep(50 * time.Millisecond)
+				select {
+				case <-time.After(50 * time.Millisecond):
+				case <-stopSignalsOf(ctx).stopped:
+				}
 			} else {
 				break
 			}
@@ -285,6 +288,7 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
+		txnprovider.WithParentBlockWaitStop(stopSignalsOf(ctx).parentBlockWaitStopped),
 		txnprovider.WithBlockTime(header.Time),
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.
