@@ -2305,11 +2305,19 @@ func (result *execResult) calcFees(
 		coinbaseCreatedContract = cw.Val
 	}
 	burntOverride := false
+	burntSelfdestructed := false
+	burntWasContract := false
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 			burntOverride = true
 		}
+		if sw, ok := result.TxOut.GetSelfDestruct(burntAddr); ok {
+			burntSelfdestructed = sw.Val
+		}
+		_, burntHasCodeHashWrite := result.TxOut.GetCodeHash(burntAddr)
+		_, burntCreatedContract := result.TxOut.GetCreateContract(burntAddr)
+		burntWasContract = (burntAcc != nil && !burntAcc.IsEmptyCodeHash()) || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2418,6 +2426,14 @@ func (result *execResult) calcFees(
 				})
 			}
 		}
+	}
+	// The worker's EIP-161 removal of a codeless burnt recipient is undone by the
+	// base-fee credit: serial credits the fee before the tx's empty-account sweep,
+	// so the account and its storage survive. Mirrors the coinbase revival above.
+	if hasBurnt && burntSelfdestructed && !burntWasContract && !newBurntBalance.IsZero() {
+		addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
+		})
 	}
 	if hasBurnt && (newBurntBalance != oldBurntBalance || burntOverride) {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
