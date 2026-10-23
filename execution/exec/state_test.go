@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -63,36 +62,47 @@ func (task *workerTestTask) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesi
 }
 
 func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	in := NewQueueWithRetry(1)
-	defer in.Release()
-	results := NewResultsQueue(1, 1)
-	w := NewWorker(ctx, false, nil, nil, in, nil, chain.AllProtocolChanges, nil, results, nil, datadir.Dirs{}, log.New())
-	defer w.Close()
-	w.SetReader(stubStateReader{})
-	started := make(chan struct{})
-	task := &workerTestTask{
-		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
-		execute: func(evm *vm.EVM) *TxResult {
-			close(started)
-			_, _, _, err := evm.Run(vm.Contract{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
-				mdgas.MdGas{Execution: 1 << 63}, nil, false)
-			return &TxResult{Err: err}
-		},
-	}
-	in.Add(ctx, task)
-	done := make(chan error, 1)
-	go func() { done <- w.Run() }()
-	<-started
-	cancel()
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(time.Second):
-		w.evm.Cancel()
-		<-done
-		t.Fatal("worker context cancellation did not interrupt the running EVM")
+	for _, traced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("traced=%t", traced), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cancelWorker := func() {
+					cancel()
+					synctest.Wait()
+				}
+				in := NewQueueWithRetry(1)
+				defer in.Release()
+				w := NewWorker(ctx, false, nil, nil, in, nil, chain.AllProtocolChanges, nil, NewResultsQueue(1, 1), nil, datadir.Dirs{}, log.New())
+				defer w.Close()
+				w.SetReader(stubStateReader{})
+				var vmConfig vm.Config
+				if traced {
+					vmConfig.Tracer = &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {
+						if ctx.Err() == nil {
+							cancelWorker()
+						}
+					}}
+				}
+				w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, w.ibs, chain.AllProtocolChanges, vmConfig)
+				var executionErr error
+				in.Add(ctx, &workerTestTask{
+					TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
+					execute: func(evm *vm.EVM) *TxResult {
+						if !traced {
+							cancelWorker()
+						}
+						// Finite gas makes a missing cancellation check fail instead of hanging.
+						_, _, _, executionErr = evm.Run(vm.Contract{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
+							mdgas.MdGas{Execution: 1_000}, nil, false)
+						return &TxResult{Err: executionErr}
+					},
+				})
+				require.ErrorIs(t, w.Run(), context.Canceled)
+				require.NoError(t, executionErr, "cancelled EVM must stop before exhausting gas")
+				require.True(t, w.evm.Cancelled())
+			})
+		})
 	}
 }
 

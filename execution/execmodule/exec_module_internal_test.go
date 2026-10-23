@@ -185,13 +185,21 @@ func TestSuspendReadAheadCancelsActiveWarmup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer func() {
 		cancel()
-		readAheader.WaitForWarmup(context.Background())
+		waitCtx, stopWaiting := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopWaiting()
+		readAheader.WaitForWarmup(waitCtx)
+		require.NoError(t, waitCtx.Err(), "warmup did not stop after cancellation")
 	}()
 	db := &blockedWarmupDB{started: make(chan context.Context, 1)}
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	body := &types.Body{Transactions: []types.Transaction{&types.AccessListTx{}}}
 	readAheader.AddHeaderAndBody(ctx, db, emptyStageProgressTx{}, header, body)
-	warmupCtx := <-db.started
+	var warmupCtx context.Context
+	select {
+	case warmupCtx = <-db.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("warmup did not start")
+	}
 	module := &ExecModule{readAheader: readAheader}
 	waitCtx, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
 	defer stopWaiting()

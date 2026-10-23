@@ -107,14 +107,25 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 			}
 			block = types.NewBlockFromNetwork(header, body, block.BlockAccessListSidecar())
 			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
+			defer func() {
+				cancel()
+				waitCtx, stopWaiting := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stopWaiting()
+				m.ReadAheader.WaitForWarmup(waitCtx)
+				assert.NoError(t, waitCtx.Err(), "warmup did not stop after cancellation")
+			}()
 			db := &blockedWarmupDB{started: make(chan context.Context, 1)}
 			m.ReadAheader.AddBlockAccessList(block.Hash(), block.BlockAccessListSidecar())
 			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 				m.ReadAheader.AddHeaderAndBody(ctx, db, tx, block.Header(), block.Body())
 				return nil
 			}))
-			warmupCtx := <-db.started
+			var warmupCtx context.Context
+			select {
+			case warmupCtx = <-db.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("warmup did not start")
+			}
 			observer := &warmupVerdictObserver{
 				Handler: m.Log.GetHandler(), warmupCtx: warmupCtx, atVerdict: make(chan error, 1),
 			}
@@ -133,10 +144,15 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 			case <-done:
 				assert.ErrorIs(t, warmupCtx.Err(), context.Canceled, "validation returned with warmup still active")
 			case <-time.After(time.Minute):
-				t.Error("block validation did not finish")
+				cancel()
+				m.Cancel()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("block validation did not stop after cancellation")
+				}
+				t.Fatal("block validation did not finish within one minute")
 			}
-			cancel()
-			<-done
 			require.NoError(t, err)
 			if kind == "valid" {
 				require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
@@ -159,7 +175,6 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 					t.Fatal("executor did not report the invalid block")
 				}
 			}
-			m.ReadAheader.WaitForWarmup(t.Context())
 		})
 	}
 }

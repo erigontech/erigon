@@ -1838,6 +1838,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 		pe.waitForTeardownPhase(executorTeardownWarningDelay, "executor group", func() {
 			waitErr = pe.wait()
 		})
+		if waitErr != nil && pe.cfg.readAheader != nil {
+			pe.cfg.readAheader.CancelWarmup()
+		}
 		return waitErr
 	}
 
