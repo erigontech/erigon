@@ -2372,7 +2372,12 @@ func (result *execResult) calcFees(
 	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
 	// the destroyed account.
 	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
-	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)) && !coinbaseNetDeleted
+	// Pre-EIP-161 the fee touch creates and persists the coinbase even at a zero tip, so a
+	// later CALL sees it as existing (no new-account gas). EIP-161+ prunes the empty touch
+	// instead (coinbaseEmptied below). Matching serial.
+	coinbaseCreatedEmpty := !chainRules.IsEIP161Enabled() && coinbaseAcc == nil && !coinbaseSelfdestructed &&
+		newCoinbaseBalance.IsZero() && !coinbaseNetDeleted
+	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed) || coinbaseCreatedEmpty) && !coinbaseNetDeleted
 	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
 	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
