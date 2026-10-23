@@ -169,16 +169,18 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.MerkleTree = nil
 	}
 	if v.progressiveTrees != nil {
-		t.progressiveTrees = make([]*merkle_tree.MerkleTree, len(v.progressiveTrees))
+		t.progressiveTrees = slices.Grow(t.progressiveTrees[:0], len(v.progressiveTrees))[:len(v.progressiveTrees)]
 		start := 0
 		capacity := 1
 		for i, tree := range v.progressiveTrees {
-			t.progressiveTrees[i] = &merkle_tree.MerkleTree{}
-			tree.CopyInto(t.progressiveTrees[i])
 			segmentStart := start
-			t.progressiveTrees[i].SetComputeLeafFn(t.progressiveLeafFn(segmentStart))
 			start += capacity
 			capacity *= 4
+			if t.progressiveTrees[i] == nil {
+				t.progressiveTrees[i] = &merkle_tree.MerkleTree{}
+			}
+			tree.CopyInto(t.progressiveTrees[i])
+			t.progressiveTrees[i].SetComputeLeafFn(t.progressiveLeafFn(segmentStart))
 		}
 	} else {
 		t.progressiveTrees = nil

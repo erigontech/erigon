@@ -573,14 +573,11 @@ func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
 	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
 	var stateReads atomic.Int32
 	var stateCopyMu sync.Mutex
-	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(root common.Hash) (*state.CachingBeaconState, error) {
 		if root != blocks[1].Block.ParentRoot {
 			return nil, fmt.Errorf("unexpected parent state request")
 		}
 		stateReads.Add(1)
-		if !alwaysCopy {
-			return parentState, nil
-		}
 		stateCopyMu.Lock()
 		defer stateCopyMu.Unlock()
 		return parentState.Copy()
@@ -701,7 +698,7 @@ func TestBlockServiceGossipSharesParentStateFailure(t *testing.T) {
 	validationEntered := make(chan struct{})
 	finishValidation := make(chan struct{})
 	var enterOnce sync.Once
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		stateReads.Add(1)
 		enterOnce.Do(func() { close(validationEntered) })
 		<-finishValidation
@@ -733,7 +730,7 @@ func TestBlockServiceGossipSharesParentStateFailure(t *testing.T) {
 		require.ErrorContains(t, err, "state storage unavailable")
 	}
 	require.EqualValues(t, 1, stateReads.Load())
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		stateReads.Add(1)
 		return parentState.Copy()
 	}
@@ -749,7 +746,7 @@ func TestBlockServiceParentStateReplayPanicWakesWaitersAndAllowsRetry(t *testing
 	parentState := fcu.StateAtBlockRootVal[parentRoot]
 	validationEntered := make(chan struct{})
 	triggerPanic := make(chan struct{})
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		close(validationEntered)
 		<-triggerPanic
 		panic("state replay panic")
@@ -775,7 +772,7 @@ func TestBlockServiceParentStateReplayPanicWakesWaitersAndAllowsRetry(t *testing
 	require.NotContains(t, bs.validationCalls, blockValidationContextKey{parentRoot: parentRoot, slot: child.Block.Slot})
 	bs.validationMu.Unlock()
 
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		return parentState.Copy()
 	}
 	_, err := bs.blockValidationContext(t.Context(), parentRoot, child.Block.Slot)
@@ -786,7 +783,7 @@ func TestBlockServiceBoundsConcurrentParentStateReplays(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	started := make(chan struct{}, maxConcurrentBlockValidationContexts+1)
 	release := make(chan struct{})
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		started <- struct{}{}
 		<-release
 		return fcu.StateAtBlockRootVal[parentRoot].Copy()
@@ -838,11 +835,14 @@ func newBellatrixValidationContextFixture(t *testing.T) (*blockService, *mock_se
 func TestBlockValidationContextReadsSameEpochParentStateWithoutCopy(t *testing.T) {
 	service, fcu, child, parentState := newBellatrixValidationContextFixture(t)
 	require.Equal(t, state.Epoch(parentState), child.Block.Slot/parentState.BeaconConfig().SlotsPerEpoch)
-	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-		if root != child.Block.ParentRoot || alwaysCopy {
-			return nil, fmt.Errorf("unexpected parent state request: root=%x alwaysCopy=%v", root, alwaysCopy)
+	fcu.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+		if root != child.Block.ParentRoot {
+			return fmt.Errorf("unexpected parent state request: root=%x", root)
 		}
-		return parentState, nil
+		return fn(parentState)
+	}
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		return nil, errors.New("same-epoch validation copied parent state")
 	}
 	parentSlot := parentState.Slot()
 
@@ -861,16 +861,12 @@ func TestBlockValidationContextAdvancesCopiedParentStateAcrossEpoch(t *testing.T
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(expected, nextEpochSlot))
 	expectedProposer, err := expected.GetBeaconProposerIndexForSlot(nextEpochSlot)
 	require.NoError(t, err)
-	var stateFetches, copies atomic.Int32
-	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	var stateFetches atomic.Int32
+	fcu.GetStateAtBlockRootFn = func(root common.Hash) (*state.CachingBeaconState, error) {
 		if root != child.Block.ParentRoot {
 			return nil, fmt.Errorf("unexpected parent state request: root=%x", root)
 		}
 		stateFetches.Add(1)
-		if !alwaysCopy {
-			return parentState, nil
-		}
-		copies.Add(1)
 		return parentState.Copy()
 	}
 	parentSlot := parentState.Slot()
@@ -878,7 +874,6 @@ func TestBlockValidationContextAdvancesCopiedParentStateAcrossEpoch(t *testing.T
 	validationContext, err := service.blockValidationContext(t.Context(), child.Block.ParentRoot, nextEpochSlot)
 	require.NoError(t, err)
 	require.Equal(t, expectedProposer, validationContext.expectedProposer)
-	require.Equal(t, int32(1), copies.Load())
 	require.Equal(t, int32(1), stateFetches.Load(), "a non-head parent state is rebuilt on every fetch")
 	require.Equal(t, parentSlot, parentState.Slot())
 }
@@ -1360,15 +1355,12 @@ func TestBlockServiceUnrelatedReservationDoesNotRevalidateP2P(t *testing.T) {
 	validationEntered := make(chan struct{})
 	finishValidation := make(chan struct{})
 	validationCalls := 0
-	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(root common.Hash) (*state.CachingBeaconState, error) {
 		require.Equal(t, parentRoot, root)
 		validationCalls++
 		if validationCalls == 1 {
 			close(validationEntered)
 			<-finishValidation
-		}
-		if !alwaysCopy {
-			return parentState, nil
 		}
 		return parentState.Copy()
 	}
@@ -1397,7 +1389,7 @@ func TestBlockServiceCanceledHandoffDoesNotClaimSeen(t *testing.T) {
 	bs.validationMu.Lock()
 	bs.validationCache.Remove(validationKey)
 	bs.validationMu.Unlock()
-	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(root common.Hash) (*state.CachingBeaconState, error) {
 		close(revalidationEntered)
 		<-finishRevalidation
 		return parentState.Copy()
@@ -1417,7 +1409,7 @@ func TestBlockServiceCanceledHandoffDoesNotClaimSeen(t *testing.T) {
 	require.False(t, bs.seenBlocksCache.Contains(key))
 	require.NotContains(t, bs.reservations, key)
 	bs.seenBlocksMu.Unlock()
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		return parentState.Copy()
 	}
 	require.NoError(t, bs.validateFirstGossip(t.Context(), child, nil, true))
@@ -1435,7 +1427,7 @@ func TestBlockServiceGossipIgnoresInvalidatedFullParentPayload(t *testing.T) {
 func TestBlockServiceGossipIgnoresUnavailableParentState(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		return nil, errors.New("state storage unavailable")
 	}
 	scheduled := false
@@ -1481,7 +1473,7 @@ func TestUnknownParentBlockDoesNotHoldPayloadPreparation(t *testing.T) {
 	job := queued.(*blockJob)
 	synctest.Test(t, func(t *testing.T) {
 		bs := service.(*blockService)
-		store.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		store.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 			t.Error("unknown-parent retry fetched parent state")
 			return nil, nil
 		}
@@ -1582,14 +1574,10 @@ func TestScheduledBlockRejectsInvalidParentSlotBeforeStateAccess(t *testing.T) {
 			store.OnBlockErr = forkchoice.ErrParentEnvelopePending
 
 			stateReads := 0
-			store.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+			store.GetStateAtBlockRootFn = func(root common.Hash) (*state.CachingBeaconState, error) {
 				require.Equal(t, parentRoot, root)
 				stateReads++
-				parentState := store.StateAtBlockRootVal[root]
-				if alwaysCopy {
-					return parentState.Copy()
-				}
-				return parentState, nil
+				return store.StateAtBlockRootVal[root].Copy()
 			}
 
 			for range 2 {

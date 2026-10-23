@@ -310,7 +310,7 @@ func (s *proposerPreferencesService) validationView(dependentRoot common.Hash, p
 		if view, ok := s.validationViews.Get(key); ok {
 			return view, nil
 		}
-		depState, err := s.forkchoiceStore.GetStateAtBlockRoot(dependentRoot, true)
+		depState, err := s.forkchoiceStore.GetStateAtBlockRoot(dependentRoot)
 		if err != nil || depState == nil {
 			return nil, fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, dependentRoot)
 		}
