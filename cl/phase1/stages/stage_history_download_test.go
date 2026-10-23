@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -345,6 +347,63 @@ func TestHistoryDownloadIndexesCaplinSegmentsBeforeFirstBlock(t *testing.T) {
 			}))
 		})
 	}
+}
+
+type countingHistoryDownloader struct {
+	failingHistoryDownloader
+	requests int
+}
+
+func (d *countingHistoryDownloader) RequestMore(context.Context) error {
+	d.requests++
+	return d.err
+}
+
+func TestHistoryDownloadStartsDownloaderWhenIndexBuildFails(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeUnindexedBeaconBlocks(t, dirs, 0, snaptype.CaplinMergeLimit)
+	cfg := clparams.MainnetBeaconConfig
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	buildErr := errors.New("no space left in tmpdir")
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(context.Context, snaptype.FileInfo, uint32, *chain.Config, string, *background.Progress, log.Lvl, log.Logger) error {
+		return buildErr
+	}))
+
+	stop := errors.New("stop after the first request")
+	downloader := &countingHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: stop}}
+	for pass := 1; pass <= 2; pass++ {
+		err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+			beaconCfg:    &cfg,
+			downloader:   downloader,
+			sn:           sn,
+			startingSlot: 2 * snaptype.CaplinMergeLimit,
+			caplinConfig: clparams.CaplinConfig{ArchiveBlocks: true},
+			logger:       log.New(),
+		}, t.Context(), log.New())
+		require.Equal(t, pass, downloader.requests, "a failed index build must not keep the downloader from starting")
+		require.ErrorIs(t, err, stop)
+	}
+}
+
+func TestHistoryDownloadSkipsEngineWaitWithoutBlocksArchive(t *testing.T) {
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	engine.EXPECT().Ready(gomock.Any()).Return(false, nil).AnyTimes()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	downloader := &countingHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: errors.New("stop after the first request")}}
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:          &clparams.MainnetBeaconConfig,
+		downloader:         downloader,
+		engine:             engine,
+		waitForAllRoutines: true,
+		startingSlot:       1,
+		logger:             log.New(),
+	}, ctx, log.New())
+	require.Equal(t, 1, downloader.requests, "a node that archives no blocks must not wait for the engine")
+	require.NoError(t, err)
 }
 
 func TestWaitForHistoryCompletion(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -189,6 +190,26 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
 	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+}
+
+func TestCaplinLogStatReportsDumpedTip(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, false)
+
+	logger := log.New()
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	recs := make(chan *log.Record, 1)
+	logger.SetHandler(log.ChannelHandler(recs))
+	sn.LogStat("test")
+	rec := <-recs
+	require.Equal(t, []any{"blocks", common.PrettyExact(3 * limit), "indices", common.PrettyExact(2 * limit)}, rec.Ctx)
 }
 
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
@@ -541,11 +562,22 @@ func TestBuildMissingIndicesWaitsForOutstandingBuild(t *testing.T) {
 		}
 		tipAtReturn <- sn.BlocksAvailable()
 	}()
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, buildBlockedOnBuildMu, 10*time.Second, time.Millisecond, "the second build must block on buildMu")
 	close(release)
 
 	require.NoError(t, <-first)
 	require.Equal(t, uint64(2*limit-1), <-tipAtReturn, "a second build must return only once the outstanding one is visible")
+}
+
+func buildBlockedOnBuildMu() bool {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	for g := range strings.SplitSeq(string(buf), "\n\n") {
+		if strings.Contains(g, "sync.(*Mutex).Lock(") && strings.Contains(g, "(*CaplinSnapshots).BuildMissingIndices(") {
+			return true
+		}
+	}
+	return false
 }
 
 // A corrupt .idx is not a missing one: the strict open rejects it, so the discovery open

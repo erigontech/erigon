@@ -141,12 +141,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		cfg.caplinConfig.ArchiveBlocks = false // disable backfilling if not on a supported network
 	}
 
-	if err := waitForEngineReady(ctx, cfg.engine); err != nil {
-		return err
-	}
-	logger.Info("[Caplin] Building missing snapshot indices")
-	if err := cfg.sn.BuildMissingIndices(ctx, logger); err != nil {
-		return err
+	if cfg.caplinConfig.ArchiveBlocks {
+		if err := waitForEngineReady(ctx, cfg.engine, logger); err != nil {
+			return err
+		}
+		logger.Info("[Caplin] Building missing snapshot indices")
+		if err := cfg.sn.BuildMissingIndices(ctx, logger); err != nil {
+			logger.Warn("[Caplin] Could not build missing snapshot indices", "err", err)
+		}
 	}
 
 	var hasFinishedDownloadingElBlocks atomic.Bool
@@ -452,7 +454,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	return waitForHistoryCompletion(ctx, finishCh, cfg.waitForAllRoutines)
 }
 
-func waitForEngineReady(ctx context.Context, engine execution_client.ExecutionEngine) error {
+func waitForEngineReady(ctx context.Context, engine execution_client.ExecutionEngine, logger log.Logger) error {
 	if engine == nil || !engine.SupportInsertion() {
 		return nil
 	}
@@ -461,6 +463,7 @@ func waitForEngineReady(ctx context.Context, engine execution_client.ExecutionEn
 		if err != nil || ready {
 			return err
 		}
+		logger.Debug("[Caplin] Waiting for the execution engine before building snapshot indices")
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
