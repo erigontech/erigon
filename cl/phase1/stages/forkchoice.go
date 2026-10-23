@@ -42,18 +42,15 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	// checkpoint promotions (unrealized → realized) happen on time.
 	cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(cfg.ethClock.GenesisTime() + cfg.ethClock.GetCurrentSlot()*cfg.beaconCfg.SecondsPerSlot))
 
-	headRoot, headSlot, err = cfg.forkChoice.GetHeadWithSyncedHeadState()
-	if err != nil {
-		if errors.Is(err, synced_data.ErrNotSynced) {
-			// Get the current head of the fork choice
-			headRoot, headSlot, err = cfg.forkChoice.GetHead(nil)
-			if err != nil {
-				return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
-			}
-		} else {
-			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
-		}
+	var head forkchoice.ForkChoiceNode
+	head, headSlot, err = cfg.forkChoice.GetHeadWithSyncedHeadState()
+	if errors.Is(err, synced_data.ErrNotSynced) {
+		head, headSlot, err = cfg.forkChoice.GetHeadNode()
 	}
+	if err != nil {
+		return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
+	}
+	headRoot = head.Root
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
 	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
@@ -63,17 +60,9 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	}
 
 	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
-	executionHead := cfg.forkChoice.GetEth1Hash(headRoot)
-	if headVersion.AfterOrEqual(clparams.GloasVersion) {
-		head, slot, headErr := cfg.forkChoice.GetHeadNode()
-		if headErr == nil {
-			headRoot, headSlot = head.Root, slot
-			headVersion = cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
-			executionHead = cfg.forkChoice.GetEth1Hash(headRoot)
-			if hash, ready := cfg.forkChoice.GetExecutionHead(head); ready {
-				executionHead = hash
-			}
-		}
+	executionHead, ready := cfg.forkChoice.GetExecutionHead(head)
+	if !ready {
+		executionHead = cfg.forkChoice.GetEth1Hash(headRoot)
 	}
 
 	// Perform fork choice update if the engine is available
