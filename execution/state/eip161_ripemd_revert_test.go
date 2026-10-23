@@ -44,14 +44,12 @@ func (r *emptyAccountReader) ReadAccountDataForDebug(address accounts.Address) (
 	return r.ReadAccountData(address)
 }
 
-// touchThenRevertRetainsWrite touches an already-empty account on the versioned
+// touchThenRevertRemoves touches an already-empty account on the versioned
 // (parallel) path, reverts the transaction, and reports whether the finalized
-// write set still carries a write for the account. RIPEMD's touch bumps its
-// journal dirty count so the write outlives the revert (an ordinary account's
-// reverted touch leaves no write); rw_v3's EIP-161 empty-removal then sweeps the
-// retained empty account. This is the discriminator that used to be observed via
-// WriteSet.Normalize's empty→SelfDestruct conversion.
-func touchThenRevertRetainsWrite(t *testing.T, addr accounts.Address) bool {
+// write set removes the account (SelfDestruct=true). RIPEMD's touch bumps its
+// journal dirty count so the touch outlives the revert (an ordinary account's
+// reverted touch leaves no write), and FinalizedWrites emits the EIP-161 removal.
+func touchThenRevertRemoves(t *testing.T, addr accounts.Address) bool {
 	t.Helper()
 
 	empty := accounts.NewAccount() // balance 0, nonce 0, empty code hash
@@ -60,7 +58,7 @@ func touchThenRevertRetainsWrite(t *testing.T, addr accounts.Address) bool {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 
 	snap := ibs.PushSnapshot()
@@ -68,10 +66,8 @@ func touchThenRevertRetainsWrite(t *testing.T, addr accounts.Address) bool {
 	ibs.RevertToSnapshot(snap, nil)
 
 	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
-	if writes == nil {
-		return false
-	}
-	return writes.hasAddr(addr)
+	sd, ok := writes.GetSelfDestruct(addr)
+	return ok && sd.Val
 }
 
 // TestEIP161RipemdTouchSurvivesRevertOnVersionedPath pins RIPEMD-160's special
@@ -92,13 +88,13 @@ func TestEIP161RipemdTouchSurvivesRevertOnVersionedPath(t *testing.T) {
 
 	t.Run("ripemd is swept despite the revert", func(t *testing.T) {
 		t.Parallel()
-		require.True(t, touchThenRevertRetainsWrite(t, accounts.InternAddress(ripemd.Value())),
+		require.True(t, touchThenRevertRemoves(t, accounts.InternAddress(ripemd.Value())),
 			"ripemd's touch outlives a revert, so EIP-161 must still remove it")
 	})
 
 	t.Run("ordinary account is not swept", func(t *testing.T) {
 		t.Parallel()
-		require.False(t, touchThenRevertRetainsWrite(t, toAddr([]byte("ordinary-empty"))),
+		require.False(t, touchThenRevertRemoves(t, toAddr([]byte("ordinary-empty"))),
 			"a reverted touch must not remove an ordinary empty account")
 	})
 }

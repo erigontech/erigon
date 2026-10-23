@@ -78,6 +78,27 @@ func TestBeaconCommitteeSubscriptionIsUnavailableWhileSyncing(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, postBeaconCommitteeSubscription(t, handler))
 }
 
+func TestBeaconCommitteeSubscriptionRecordsAttachedValidatorsBeforeSubscribing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+
+	committeeSub := mock_services.NewMockCommitteeSubscribe(ctrl)
+	committeeSub.EXPECT().AddAttestationSubscription(gomock.Any(), gomock.Any()).Return(synced_data.ErrNotSynced)
+	handler.committeeSub = committeeSub
+	body, err := json.Marshal([]*cltypes.BeaconCommitteeSubscription{{ValidatorIndex: 7}, {ValidatorIndex: 8}})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		"/eth/v1/validator/beacon_committee_subscriptions", bytes.NewReader(body))
+
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.ElementsMatch(t, []uint64{7, 8}, validatorParams.GetValidators())
+	_, found := validatorParams.GetFeeRecipient(7)
+	require.False(t, found)
+}
+
 func TestBeaconCommitteeSubscriptionReportsOtherFailuresAsInternalError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
@@ -117,6 +138,18 @@ func TestSyncCommitteeSubscriptionSucceedsWhileSyncing(t *testing.T) {
 		SyncCommitteeIndicies: []string{"0"},
 		UntilEpoch:            1_000_000_000,
 	}}))
+}
+
+func TestSyncCommitteeSubscriptionRecordsAttachedValidatorWhenExpired(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+
+	require.Equal(t, http.StatusOK, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{{
+		ValidatorIndex:        7,
+		SyncCommitteeIndicies: []string{"0"},
+	}}))
+	require.ElementsMatch(t, []uint64{7}, validatorParams.GetValidators())
+	_, found := validatorParams.GetFeeRecipient(7)
+	require.False(t, found)
 }
 
 func postSyncCommitteeSubscriptions(t *testing.T, handler *ApiHandler, subs []ValidatorSyncCommitteeSubscriptionsRequest) int {
@@ -173,7 +206,7 @@ func TestSyncCommitteeSubscriptionRequiresIndices(t *testing.T) {
 }
 
 func TestSyncCommitteeSubscriptionRejectsInvalidIndices(t *testing.T) {
-	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, s, _, handler, _, sd, _, validatorParams := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, sd.OnHeadState(s))
 	for _, index := range []string{strconv.FormatUint(handler.beaconChainCfg.SyncCommitteeSize, 10), "x", "-1"} {
 		t.Run(index, func(t *testing.T) {
@@ -186,6 +219,7 @@ func TestSyncCommitteeSubscriptionRejectsInvalidIndices(t *testing.T) {
 				{ValidatorIndex: 1, SyncCommitteeIndicies: []string{"0"}, UntilEpoch: 1_000_000},
 				{ValidatorIndex: 2, SyncCommitteeIndicies: []string{index}, UntilEpoch: 1_000_000},
 			}))
+			require.Empty(t, validatorParams.GetValidators())
 		})
 	}
 }

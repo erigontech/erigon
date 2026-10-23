@@ -2064,14 +2064,20 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 			// Invalid but no Done writer named: the invalidation is an in-flight
 			// ESTIMATE (MVReadResultDependency), which ValidateReadSet resolves without
 			// calling checkVersion. Find the estimate's writer so the caller waits for
-			// it — re-executing now would re-read the estimate and busy-loop.
-			result.TxIn.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+			// it — re-executing now would re-read the estimate and busy-loop. Validation
+			// also cross-checks the account's AddressPath and SelfDestructPath.
+			noteEstimate := func(a accounts.Address, p state.AccountPath, k accounts.StorageKey) {
 				rr := be.versionMap.ReadStatus(a, p, k, tv.version.TxIndex)
 				if rr.Status() == state.MVReadResultDependency {
 					if b := be.taskIndexOf(rr.DepIdx()); b > blocker && b < tv.index {
 						blocker = b
 					}
 				}
+			}
+			result.TxIn.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+				noteEstimate(a, p, k)
+				noteEstimate(a, state.AddressPath, accounts.NilKey)
+				noteEstimate(a, state.SelfDestructPath, accounts.NilKey)
 				return true
 			})
 		}
@@ -2201,7 +2207,12 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes, stateErr := ibs.FinalizedWrites(txTask.Rules())
+	rules := txTask.Rules()
+	if blockNum == 0 {
+		// Genesis runs with empty rules, so its alloc keeps empty accounts (EIP-161 off).
+		rules = &chain.Rules{}
+	}
+	writes, stateErr := ibs.FinalizedWrites(rules)
 	if stateErr != nil {
 		return nil, state.ReadSet{}, nil, fmt.Errorf("finalize system tx block %d: state read: %w", blockNum, stateErr)
 	}
@@ -2330,12 +2341,14 @@ func (result *execResult) calcFees(
 	// AddressPath sibling) even when the net change is zero, else the worker's raw
 	// gas-debit value is left behind and a later whole-account read gets a stale balance.
 	// The worker destroyed the coinbase (its balance write is stamped ValueDeleted) and
-	// the fee left it empty: the account is gone. Emit the removal so the deletion
-	// verdict rides the write-set directly — otherwise WriteSet.Merge copies this fee
-	// phase's live balance over the worker's ValueDeleted and the deletion survives only
-	// because calc_state re-derives it (EIP-161 empty-removal). Matching serial, which
-	// removes the destroyed empty account.
-	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && newCoinbaseBalance.IsZero()
+	// the destruct leaves it gone: either the fee left it empty, or it was a tip-burning
+	// destruct (burnCoinbaseTip), which removes the account regardless of a non-zero
+	// residual from a later same-tx credit. Emit the removal so the deletion verdict
+	// rides the write-set directly — otherwise WriteSet.Merge copies this fee phase's
+	// live balance over the worker's ValueDeleted and the deletion survives only because
+	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
+	// the destroyed account.
+	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
 	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)) && !coinbaseNetDeleted
 	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
 	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
@@ -2345,6 +2358,14 @@ func (result *execResult) calcFees(
 	addWrites := &state.WriteSet{}
 	if coinbaseNetDeleted || coinbaseEmptied {
 		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+	}
+	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
+	// serial credits the tip before the tx's empty-account sweep, so the account and its
+	// storage survive.
+	if coinbaseSelfdestructed && !coinbaseWasContract && !newCoinbaseBalance.IsZero() {
+		addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
+		})
 	}
 	if emitCoinbase {
 		{
@@ -2390,7 +2411,7 @@ func (result *execResult) calcFees(
 			// destruct. Gated to revival cases: an unconditional emit would add a
 			// spurious block-access-list entry for an ordinary fee credit.
 			cbLifecycle, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
-			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
+			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && !coinbaseHasCodeHashWrite && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
 			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
 				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
 					WriteHeader: state.WriteHeader{

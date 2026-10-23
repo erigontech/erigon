@@ -295,50 +295,59 @@ func (r emptyAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Ac
 }
 
 // An existing account a transaction touches and leaves empty is gone for the next transaction
-// of the same request (EIP-161), as with FinalizeTx on the materializing path.
+// of the same request (EIP-161), as with FinalizeTx on the materializing path. A request can
+// run on top of any block, the genesis block included.
 func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
-	addr := accounts.InternAddress(common.HexToAddress("0x0202"))
-	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
-	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoConflictDetection()
-	ibs.SetTxContext(1, 0)
-	exists, err := ibs.Exist(addr)
-	require.NoError(t, err)
-	require.True(t, exists)
-	require.NoError(t, ibs.TouchAccount(addr))
-	require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
+	for _, block := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("block=%d", block), func(t *testing.T) {
+			addr := accounts.InternAddress(common.HexToAddress("0x0202"))
+			ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+			defer ibs.Close()
+			ibs.SetVersionMap(state.NewVersionMap(nil))
+			ibs.SetNoConflictDetection()
+			ibs.SetTxContext(block, 0)
+			exists, err := ibs.Exist(addr)
+			require.NoError(t, err)
+			require.True(t, exists)
+			require.NoError(t, ibs.TouchAccount(addr))
+			require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
 
-	ibs.SetTxContext(1, 1)
-	exists, err = ibs.Exist(addr)
-	require.NoError(t, err)
-	require.False(t, exists)
+			ibs.SetTxContext(block, 1)
+			exists, err = ibs.Exist(addr)
+			require.NoError(t, err)
+			require.False(t, exists)
+		})
+	}
 }
 
 // An account deleted under EIP-161 by one transaction, recreated empty by the next (a zero-value
 // call to a precompile) and deleted again, stays gone for the transaction after that.
 func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
-	addr := accounts.InternAddress(common.HexToAddress("0x0203"))
-	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
-	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoConflictDetection()
-	rules := &chain.Rules{IsSpuriousDragon: true}
+	for _, block := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("block=%d", block), func(t *testing.T) {
+			addr := accounts.InternAddress(common.HexToAddress("0x0203"))
+			ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+			defer ibs.Close()
+			ibs.SetVersionMap(state.NewVersionMap(nil))
+			ibs.SetNoConflictDetection()
+			rules := &chain.Rules{IsSpuriousDragon: true}
 
-	ibs.SetTxContext(1, 0)
-	require.NoError(t, ibs.TouchAccount(addr))
-	require.NoError(t, FinalizeCallTx(ibs, rules))
+			ibs.SetTxContext(block, 0)
+			require.NoError(t, ibs.TouchAccount(addr))
+			require.NoError(t, FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(1, 1)
-	exists, err := ibs.Exist(addr)
-	require.NoError(t, err)
-	require.False(t, exists)
-	require.NoError(t, ibs.CreateAccount(addr, false))
-	require.NoError(t, ibs.TouchAccount(addr))
-	require.NoError(t, FinalizeCallTx(ibs, rules))
+			ibs.SetTxContext(block, 1)
+			exists, err := ibs.Exist(addr)
+			require.NoError(t, err)
+			require.False(t, exists)
+			require.NoError(t, ibs.CreateAccount(addr, false))
+			require.NoError(t, ibs.TouchAccount(addr))
+			require.NoError(t, FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(1, 2)
-	exists, err = ibs.Exist(addr)
-	require.NoError(t, err)
-	require.False(t, exists)
+			ibs.SetTxContext(block, 2)
+			exists, err = ibs.Exist(addr)
+			require.NoError(t, err)
+			require.False(t, exists)
+		})
+	}
 }
