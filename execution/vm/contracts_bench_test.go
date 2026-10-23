@@ -221,3 +221,29 @@ func BenchmarkBLSRepeatedPoints(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkModExpU256Shapes runs MODEXP on the 193-256-bit moduli the uint256 path serves.
+func BenchmarkModExpU256Shapes(b *testing.B) {
+	p := &bigModExp{osaka: true}
+	operand := func(bits int, seed byte) []byte {
+		out := bytes.Repeat([]byte{seed | 0x81}, (bits+7)/8)
+		out[0] = 0x80 | seed
+		return out
+	}
+	for _, modBits := range []int{200, 256} {
+		for _, expBits := range []int{17, 256, 1024} {
+			base, exp, mod := operand(modBits-1, 0x13), operand(expBits, 0x25), operand(modBits, 0x37)
+			header := make([]byte, 96)
+			header[31], header[63], header[95] = byte(len(base)), byte(len(exp)), byte(len(mod))
+			header[62] = byte(len(exp) >> 8)
+			input := append(append(append(header, base...), exp...), mod...)
+			b.Run(fmt.Sprintf("mod%d_exp%d", modBits, expBits), func(b *testing.B) {
+				for b.Loop() {
+					if _, err := p.Run(input); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
