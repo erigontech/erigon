@@ -430,9 +430,20 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
+	// The transaction bound uses at most the gas limit the parent allows. The header checks assume a
+	// valid parent, so they run here only against a validated one.
+	gasLimit := header.GasLimit
+	var headerErr error
+	if parent := e.chainRW.GetHeaderByHash(ctx, req.ParentHash); parent != nil {
+		gasLimit = min(gasLimit, misc.MaxGasLimit(e.config, parent, &header))
+		if e.chainRW.IsValidated(req.ParentHash) {
+			headerErr = merge.VerifyHeaderWithParent(e.config, &header, parent)
+		}
+	}
+
 	if !e.config.AllowAA {
 		minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
-		if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
+		if uint64(len(req.Transactions)) > gasLimit/minTxBlockGas {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
@@ -476,7 +487,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var sendersRecovery *exec.SendersRecovery
 	// With a non-empty BAL the exec workers recover the senders themselves.
 	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
-	if invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
+	if headerErr == nil && invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
@@ -535,6 +546,20 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 			}, nil
 		}
+	}
+
+	// Answered after the block hash check and the other payload checks, as by the block validation,
+	// so that the block can be reported as bad.
+	if headerErr != nil {
+		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
+		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)
+		e.blockDownloader.ReportBadHeader(blockHash, req.ParentHash, err.Error())
+		parentHash := req.ParentHash
+		return &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedError(err),
+			LatestValidHash: &parentHash,
+		}, nil
 	}
 
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
