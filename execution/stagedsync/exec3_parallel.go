@@ -3166,6 +3166,10 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.versionMap.FlushVersionedWrites(senderWrites, false, "")
 				be.markReadersDirty(tx, senderWrites)
+				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
+				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
+				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
+				txResult.TxOut = txResult.TxOut.Merge(senderWrites)
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
