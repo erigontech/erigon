@@ -17,7 +17,6 @@
 package app
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -172,63 +170,6 @@ func TestStepRebaseIncreaseKeepsDualCommitment(t *testing.T) {
 		}
 		return nil
 	}))
-}
-
-func collectStateAt(t *testing.T, tx kv.TemporalTx, txNum uint64) map[string][]byte {
-	t.Helper()
-	values := make(map[string][]byte)
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		it, err := tx.RangeAsOf(domain, nil, nil, txNum+1, order.Asc, kv.Unlim)
-		require.NoError(t, err)
-		for it.HasNext() {
-			key, value, err := it.Next()
-			require.NoError(t, err)
-			if len(value) == 0 {
-				value = []byte{}
-			}
-			values[domain.String()+"\x00"+string(key)] = bytes.Clone(value)
-		}
-		it.Close()
-	}
-	return values
-}
-
-func filesPastStep(t *testing.T, root string, endStep uint64) []string {
-	t.Helper()
-	entries, err := os.ReadDir(root)
-	require.NoError(t, err)
-	var past []string
-	for _, entry := range entries {
-		matches := stepFileRe.FindStringSubmatch(entry.Name())
-		if matches == nil {
-			continue
-		}
-		to, err := strconv.ParseUint(matches[4], 10, 64)
-		require.NoError(t, err)
-		if to > endStep {
-			past = append(past, filepath.Join(root, entry.Name()))
-		}
-	}
-	return past
-}
-
-func countMisalignedFiles(t *testing.T, root string, endStep, factor uint64) int {
-	t.Helper()
-	entries, err := os.ReadDir(root)
-	require.NoError(t, err)
-	n := 0
-	for _, entry := range entries {
-		matches := stepFileRe.FindStringSubmatch(entry.Name())
-		if matches == nil {
-			continue
-		}
-		to, err := strconv.ParseUint(matches[4], 10, 64)
-		require.NoError(t, err)
-		if to <= endStep && to%factor != 0 {
-			n++
-		}
-	}
-	return n
 }
 
 func buildMergedStateFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
