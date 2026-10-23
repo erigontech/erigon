@@ -65,5 +65,7 @@ func pbinRowLaneTempFiles(t *testing.T, run *pbinRangeWriterRun) []string {
 	t.Helper()
 	lanes, err := filepath.Glob(filepath.Join(run.agg.Dirs().Tmp, "pbin-range-*-lane-*.bin"))
 	require.NoError(t, err)
-	return lanes
+	skip, err := filepath.Glob(filepath.Join(run.agg.Dirs().Tmp, "pbin-range-*-skip*"))
+	require.NoError(t, err)
+	return append(lanes, skip...)
 }
