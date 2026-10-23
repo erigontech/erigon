@@ -129,6 +129,8 @@ type parallelExecutor struct {
 	// objects for the peak of executing+resting workers; execSem sizes parallelism.
 	execSem    chan struct{}
 	runWG      sync.WaitGroup
+	// idleRunners hands a task to a finished task goroutine, which keeps its grown stack.
+	idleRunners chan func()
 	workersCtx context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
 	results        chan *exec.TxResult
@@ -1607,6 +1609,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 	pe.workersCtx = workersCtx
+	pe.idleRunners = make(chan func())
 
 	// The pool runs one worker beyond the configured count, except for a count
 	// of one (--exec.serial), which must run one transaction at a time.
@@ -1760,8 +1763,29 @@ const elasticWorkerCap = 4096
 // read-dependency has not yet committed — park on the commit frontier and
 // re-validate. Only a stable-valid result is sent to the exec loop, which commits it
 // in order. The context is released while parked so dependencies can run.
-func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
+// goReuse runs f on an idle task goroutine if one is waiting, else on a new one
+// that stays to take later tasks until the workers stop.
+func (pe *parallelExecutor) goReuse(f func()) {
+	idle, stop := pe.idleRunners, pe.workersCtx.Done()
+	select {
+	case idle <- f:
+		return
+	default:
+	}
 	pe.runWG.Go(func() {
+		for {
+			f()
+			select {
+			case f = <-idle:
+			case <-stop:
+				return
+			}
+		}
+	})
+}
+
+func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
+	pe.goReuse(func() {
 		// The roTx is bound to the execution slot, not the goroutine: opened on slot
 		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
 		// count rather than the far larger parked-goroutine count, so idle parked
