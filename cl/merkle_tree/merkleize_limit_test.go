@@ -51,22 +51,12 @@ func referenceMerkleize(chunks [][32]byte, limit uint64) [32]byte {
 	return layer[0]
 }
 
-func testChunks(count uint64) [][32]byte {
-	chunks := make([][32]byte, count)
-	for i := range chunks {
-		for j := range chunks[i] {
-			chunks[i][j] = byte(i + 1)
-		}
-	}
-	return chunks
-}
-
 func TestMerkleizeVectorNonPowerOfTwoLimit(t *testing.T) {
 	for _, limit := range nonPowerOfTwoLimits {
 		for count := uint64(0); count <= limit; count++ {
 			t.Run(fmt.Sprintf("limit%d_chunks%d", limit, count), func(t *testing.T) {
-				chunks := testChunks(count)
-				root, err := merkle_tree.MerkleizeVector(testChunks(count), limit)
+				chunks := progressiveTestChunks(int(count))
+				root, err := merkle_tree.MerkleizeVector(progressiveTestChunks(int(count)), limit)
 				require.NoError(t, err)
 				require.Equal(t, referenceMerkleize(chunks, limit), root)
 			})
@@ -78,7 +68,7 @@ func TestMerkleRootFromFlatLeavesWithLimitNonPowerOfTwo(t *testing.T) {
 	for _, limit := range nonPowerOfTwoLimits {
 		for count := uint64(1); count <= limit; count++ {
 			t.Run(fmt.Sprintf("limit%d_chunks%d", limit, count), func(t *testing.T) {
-				chunks := testChunks(count)
+				chunks := progressiveTestChunks(int(count))
 				leaves := make([]byte, 0, count*32)
 				for _, chunk := range chunks {
 					leaves = append(leaves, chunk[:]...)
@@ -95,7 +85,7 @@ func TestMerkleTreeNonPowerOfTwoLimit(t *testing.T) {
 	for _, limit := range nonPowerOfTwoLimits {
 		for count := uint64(0); count <= limit; count++ {
 			t.Run(fmt.Sprintf("limit%d_leaves%d", limit, count), func(t *testing.T) {
-				chunks := testChunks(count)
+				chunks := progressiveTestChunks(int(count))
 				tree := &merkle_tree.MerkleTree{}
 				tree.Initialize(int(count), merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
 					copy(out, chunks[idx][:])
@@ -104,4 +94,9 @@ func TestMerkleTreeNonPowerOfTwoLimit(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestMerkleProofRejectsEmptySchema(t *testing.T) {
+	_, err := merkle_tree.MerkleProof(0, 0)
+	require.Error(t, err)
 }

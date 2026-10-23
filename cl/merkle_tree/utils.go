@@ -19,7 +19,7 @@ package merkle_tree
 import "math/bits"
 
 // GetDepth returns the depth of a merkle tree with room for v leaves, that is
-// log2(next_pow_of_two(v)). It returns 0 for v <= 1.
+// log2(next_pow_of_two(v)).
 func GetDepth(v uint64) uint8 {
 	if v <= 1 {
 		return 0
