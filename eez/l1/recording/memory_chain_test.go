@@ -53,3 +53,24 @@ func TestMemoryChainRejects(t *testing.T) {
 	_, err = c.Logs(ctx, 0, head.Number+1, l1test.EmitterA, nil)
 	require.ErrorIs(t, err, l1.ErrNotFound)
 }
+
+// TestMemoryChainHistory: blocks below the first one are before the
+// chain's history; any other missing block is only not found.
+func TestMemoryChainHistory(t *testing.T) {
+	first := l1.Header{Number: 5, Hash: common.Hash{5}, ParentHash: common.Hash{4}}
+	c, err := recording.NewMemoryChain(1, &recording.Block{Header: first})
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, err = c.HeaderByHash(ctx, first.ParentHash)
+	require.ErrorIs(t, err, l1.ErrBeforeHistory)
+	require.ErrorIs(t, err, l1.ErrNotFound)
+	_, err = c.HeaderByNumber(ctx, 4)
+	require.ErrorIs(t, err, l1.ErrBeforeHistory)
+
+	_, err = c.HeaderByHash(ctx, common.Hash{9})
+	require.ErrorIs(t, err, l1.ErrNotFound)
+	require.NotErrorIs(t, err, l1.ErrBeforeHistory)
+	_, err = c.HeaderByNumber(ctx, 6)
+	require.NotErrorIs(t, err, l1.ErrBeforeHistory)
+}

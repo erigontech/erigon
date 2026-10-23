@@ -28,6 +28,9 @@ import (
 var (
 	// ErrNotFound reports a block, transaction or tag the source does not serve.
 	ErrNotFound = errors.New("not served by the L1 source")
+	// ErrBeforeHistory reports a block below the first one the source serves,
+	// which it never will; errors carrying it also carry ErrNotFound.
+	ErrBeforeHistory = errors.New("before the L1 source's history")
 	// ErrRangeTooWide reports a log query the source refuses as too large; a narrower range can succeed.
 	ErrRangeTooWide = errors.New("log range too wide for the L1 source")
 	// ErrInconsistent reports a response that contradicts itself or an earlier one.
