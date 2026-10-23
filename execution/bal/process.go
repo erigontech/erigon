@@ -29,8 +29,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func Create(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
-	bal := txIO.AsBlockAccessList()
+// Create finishes b, which may hold a prefix of the block's txs or be nil, with the rest of txIO.
+func Create(blockNum uint64, b *state.BlockAccessListBuilder, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
+	if b == nil {
+		b = state.NewBlockAccessListBuilder()
+	}
+	b.AddRemaining(txIO)
+	bal := b.Build()
 	if dbg.TraceBlockAccessLists {
 		writeBALToFile(bal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
 	}
@@ -58,7 +63,7 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 // returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
 // path, where the header carries no BAL hash) can capture it. blockBalBytes is
 // the stored BAL sidecar, nil when absent.
-func Process(blockBalBytes []byte, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessListBuilder, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
 		return nil, nil
 	}
@@ -67,7 +72,7 @@ func Process(blockBalBytes []byte, h *types.Header, vio *state.VersionedIO, isEI
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := Create(blockNum, vio, dataDir, logger)
+	computedBlockBal := Create(blockNum, built, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
