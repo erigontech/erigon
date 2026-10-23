@@ -2503,8 +2503,15 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	// reset the in-grid storage root before applying the recreate, so no stale
 	// slot folds back in. The path is unfolded above, so the account cell is reachable.
 	if stateUpdate != nil && stateUpdate.DeleteStorageSubtree && int16(len(plainKey)) == hph.accountKeyLen {
-		if err := hph.deleteStorageSubtreeBranches(hashedKey); err != nil {
-			return fmt.Errorf("deleteStorageSubtreeBranches %x: %w", hashedKey, err)
+		// A storage root shared by every slot is an extension: its first branch is below it.
+		prefix := hashedKey
+		if hph.activeRows > 0 {
+			if c := &hph.grid[hph.activeRows-1][hashedKey[hph.currentKeyLen]]; c.extLen > 0 {
+				prefix = append(slices.Clone(hashedKey), c.extension[:c.extLen]...)
+			}
+		}
+		if err := hph.deleteStorageSubtreeBranches(prefix); err != nil {
+			return fmt.Errorf("deleteStorageSubtreeBranches %x: %w", prefix, err)
 		}
 		hph.resetAccountStorageRoot(hashedKey)
 	}
