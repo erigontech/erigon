@@ -28,11 +28,88 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var errNotFound = errors.New("notfound")
+
+func inclusionListGasPools(header *types.Header, maxBlobGas uint64) []*protocol.GasPool {
+	limit, used := header.GasLimit, header.GasUsed
+	blobLeft := maxBlobGas - *header.BlobGasUsed
+	return []*protocol.GasPool{
+		protocol.NewBlockGasPool(limit-used, limit-used, blobLeft),
+		protocol.NewBlockGasPool(limit-used, limit, blobLeft),
+		protocol.NewBlockGasPool(limit, limit-used, blobLeft),
+	}
+}
+
+func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error) {
+	if len(il) == 0 {
+		satisfied := true
+		return &satisfied, nil
+	}
+	ilHash := exec.InclusionListHash(il)
+	if satisfied, ok := e.readAheader.ReadInclusionListResult(blockHash, ilHash); ok {
+		return &satisfied, nil
+	}
+
+	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	canonical, err := e.isCanonicalHash(ctx, tx, blockHash)
+	if err != nil || !canonical {
+		return nil, err
+	}
+	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil || execProgress < blockNumber {
+		return nil, err
+	}
+	block, _, err := e.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNumber)
+	if err != nil || block == nil {
+		return nil, err
+	}
+	blockEndTxNum, err := e.blockReader.TxnumReader().Max(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	historyStartTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if blockEndTxNum < historyStartTxNum {
+		return nil, nil
+	}
+
+	header := block.Header()
+	reader := state.NewHistoryReaderV3(tx, blockEndTxNum)
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return e.blockReader.Header(ctx, tx, hash, number)
+	}
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), e.engine, accounts.NilAddress, e.config)
+
+	var result *bool
+	for _, gasPool := range inclusionListGasPools(header, e.config.GetMaxBlobGasPerBlock(header.Time)) {
+		satisfied, err := protocol.CheckInclusionListTransactions(gasPool, block.Transactions(), il, reader, &blockContext, e.config, &vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		if result != nil && *result != satisfied {
+			return nil, nil
+		}
+		result = &satisfied
+	}
+	e.readAheader.SetInclusionListResult(blockHash, ilHash, *result)
+	return result, nil
+}
 
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a
 // persistent SharedDomains with an active overlay exists) or a plain DB RO tx.

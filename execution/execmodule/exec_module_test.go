@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -979,6 +980,220 @@ func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
 	block, err := m.GetAssembledBlock(t.Context(), 404)
 	require.ErrorIs(t, err, chainreader.ErrUnknownPayload)
 	require.Nil(t, block)
+}
+
+func TestInsertBlocksCachesInclusionList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	il := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil)}
+	block := chainPack.Blocks[0].WithInclusionList(il)
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+	got, _, ok := m.ReadAheader.ReadInclusionList(block.Hash())
+	require.True(t, ok)
+	require.Equal(t, il, got)
+}
+
+func TestInsertBlocksWithoutInclusionListCachesNothing(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+	_, _, ok := m.ReadAheader.ReadInclusionList(block.Hash())
+	require.False(t, ok)
+}
+
+func signedInclusionListTxn(t *testing.T, m *execmoduletester.ExecModuleTester) types.Transaction {
+	t.Helper()
+	txn, err := types.SignTx(
+		types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	return txn
+}
+
+func TestValidateChainReportsInclusionListSatisfied(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	ilTxn := signedInclusionListTxn(t, m)
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+		gen.AddTx(ilTxn)
+	})
+	require.NoError(t, err)
+	il := types.Transactions{ilTxn}
+	block := chainPack.Blocks[0].WithInclusionList(il)
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.True(t, *satisfied)
+}
+
+func TestValidateChainReportsInclusionListUnsatisfied(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	block := chainPack.Blocks[0].WithInclusionList(il)
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
+}
+
+func TestValidateChainChecksNewInclusionListForValidatedSideFork(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+
+	sideBlock := fork.TopBlock
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{sideBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err := m.ValidateChain(t.Context(), sideBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	insertRes, err = m.InsertBlocks(t.Context(), []*types.Block{sideBlock.WithInclusionList(il)})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err = m.ValidateChain(t.Context(), sideBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), sideBlock.Hash(), sideBlock.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
+}
+
+func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	sideBlock := fork.TopBlock.WithInclusionList(il)
+	for range 2 {
+		insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{sideBlock})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+		validation, err := m.ValidateChain(t.Context(), sideBlock.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+		satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), sideBlock.Hash(), sideBlock.NumberU64(), il)
+		require.NoError(t, err)
+		require.NotNil(t, satisfied)
+		require.False(t, *satisfied)
+	}
+}
+
+func TestInclusionListSatisfiedForCanonicalBlockMissingTxn(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{signedInclusionListTxn(t, m)})
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
+}
+
+func TestInclusionListSatisfiedUsesStateAfterBlockTxns(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	blockTxn := signedInclusionListTxn(t, m)
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+		gen.AddTx(blockTxn)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	sameNonceTxn, err := types.SignTx(
+		types.NewTransaction(0, common.Address{2}, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{sameNonceTxn})
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.True(t, *satisfied)
+}
+
+func TestInclusionListSatisfiedUsesCachedResult(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	ilTxn := signedInclusionListTxn(t, m)
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+		gen.AddTx(ilTxn)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	il := types.Transactions{ilTxn}
+	m.ReadAheader.SetInclusionListResult(block.Hash(), exec.InclusionListHash(il), false)
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
+}
+
+func TestInclusionListSatisfiedUnknownBlockIsNil(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), common.Hash{0x1}, 1, types.Transactions{signedInclusionListTxn(t, m)})
+	require.NoError(t, err)
+	require.Nil(t, satisfied)
 }
 
 func TestAssembleBlock(t *testing.T) {

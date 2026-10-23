@@ -341,6 +341,10 @@ func (s *getPayloadStubModule) InclusionList(_ context.Context) (types.Transacti
 	panic("not implemented")
 }
 
+func (s *getPayloadStubModule) InclusionListSatisfied(_ context.Context, _ common.Hash, _ uint64, _ types.Transactions) (*bool, error) {
+	panic("not implemented")
+}
+
 func (s *getPayloadStubModule) CurrentHeader(_ context.Context) (*types.Header, error) {
 	panic("not implemented")
 }

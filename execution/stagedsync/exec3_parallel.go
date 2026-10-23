@@ -3474,6 +3474,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
+				if pe.cfg.readAheader != nil {
+					if inclusionList, ilHash, ok := pe.cfg.readAheader.ReadInclusionList(be.hash()); ok {
+						ilSatisfied, err := protocol.CheckInclusionListTransactions(be.gasPool, be.block.Transactions(), inclusionList, reader, &tt.EvmBlockContext, pe.cfg.chainConfig, pe.cfg.vmConfig)
+						if err != nil {
+							return be.operationalBlockResult(fmt.Errorf("can't check inclusion list for block %d: %w", be.number(), err)), nil
+						}
+						pe.cfg.readAheader.SetInclusionListResult(be.hash(), ilHash, ilSatisfied)
+					}
+				}
+
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
 				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
 				// and then in finalizeWrites via Normalize below. If we instead
