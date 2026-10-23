@@ -482,24 +482,14 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 
 	t.Parallel()
 
-	t.Run("BPlus", func(t *testing.T) {
-		rc := runCfg{
-			aggStep:  50,
-			useBplus: true,
-		}
-		aggregatorV3_RestartOnDatadir(t, rc)
-	})
-	t.Run("B", func(t *testing.T) {
-		rc := runCfg{
-			aggStep: 50,
-		}
-		aggregatorV3_RestartOnDatadir(t, rc)
-	})
+	rc := runCfg{
+		aggStep: 50,
+	}
+	aggregatorV3_RestartOnDatadir(t, rc)
 }
 
 type runCfg struct {
-	aggStep  uint64
-	useBplus bool
+	aggStep uint64
 }
 
 // here we create a bunch of updates for further aggregation.

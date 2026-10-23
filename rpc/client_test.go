@@ -1076,13 +1076,9 @@ func (reverseService) Echo(ctx context.Context, s string) (string, error) {
 }
 
 // pipeClient returns a client whose server side is the returned writer and decoder.
-func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.Decoder) {
+func pipeClient(t *testing.T) (*Client, io.Writer, *json.Decoder) {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	cfg := new(clientConfig)
-	for _, opt := range opts {
-		opt(cfg)
-	}
 	client, err := newClient(context.Background(), newClientTransportIO(inR, outW), log.New())
 	require.NoError(t, err)
 	t.Cleanup(func() {

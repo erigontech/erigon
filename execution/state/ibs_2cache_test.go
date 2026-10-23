@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// addrWriteIndex is like writeIndex but scoped to a single address.
+// addrWriteIndex builds a (Path, Key) lookup map of the writes to addr.
 func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {

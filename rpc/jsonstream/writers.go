@@ -55,8 +55,8 @@ func ArrayValue[S ~[]E, E any](s *Stream, items S, elem func(*Stream, *E)) {
 	s.WriteArrayEnd()
 }
 
-// HexUint64Field writes a field name and its HexUint64 value in one step, so the name is never
-// left on the stack waiting for a value.
+// HexUint64Field writes a field name and v as a 0x-prefixed hex quantity in one step, so the name
+// is never left on the stack waiting for a value.
 func HexUint64Field(s *Stream, name string, v uint64) {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, name)
@@ -80,7 +80,8 @@ func HexField(s *Stream, name string, b []byte) {
 	flushIfFull(s.stream)
 }
 
-// HexUint256Field writes a field name and its HexUint256 value in one step, null for a nil one.
+// HexUint256Field writes a field name and v as a 0x-prefixed hex quantity in one step, or null
+// when v is nil.
 func HexUint256Field(s *Stream, name string, v *uint256.Int) {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, name)
