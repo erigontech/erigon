@@ -983,7 +983,7 @@ func TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds(t *testing.T) {
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	for range 4 {
-		NewBeaconRpcP2P(ctx, &emptyColumnResponseSentinel{}, &cfg, clock, nil)
+		NewBeaconRpcP2P(ctx, &emptyColumnResponseSentinel{}, &cfg, clock)
 	}
 	cancel()
 }

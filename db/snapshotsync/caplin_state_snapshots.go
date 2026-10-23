@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"path"
 	"path/filepath"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -93,7 +95,29 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	}
 }
 
-func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
+func requirePtcWindowEpochRows(cfg *clparams.BeaconChainConfig, getter KeyValueGetter) KeyValueGetter {
+	return func(slot uint64) ([]byte, []byte, error) {
+		key, value, err := getter(slot)
+		if err != nil {
+			return nil, nil, err
+		}
+		if cfg != nil && slot%cfg.SlotsPerEpoch == 0 && slot/cfg.SlotsPerEpoch >= cfg.GloasForkEpoch && len(value) == 0 {
+			return nil, nil, fmt.Errorf("%w: %s slot %d", errIncompleteStateRange, kv.PtcWindowEpochTable, slot)
+		}
+		return key, value, nil
+	}
+}
+
+func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) SnapshotTypes {
+	ptcWindowEpochGetter := requirePtcWindowEpochRows(cfg, getKvGetterForStateTable(db, kv.PtcWindowEpochTable))
+	var gloasForkSlot uint64
+	if cfg != nil {
+		if hi, lo := bits.Mul64(cfg.GloasForkEpoch, cfg.SlotsPerEpoch); hi != 0 {
+			gloasForkSlot = math.MaxUint64
+		} else {
+			gloasForkSlot = lo
+		}
+	}
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
 			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
@@ -128,10 +152,11 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
 			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
 			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
-			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
 			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
+			kv.PtcWindowEpochTable:               ptcWindowEpochGetter,
 		},
-		Compression: map[string]bool{},
+		Compression:   map[string]bool{},
+		GloasForkSlot: gloasForkSlot,
 	}
 }
 
@@ -155,6 +180,7 @@ type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
 type SnapshotTypes struct {
 	KeyValueGetters map[string]KeyValueGetter
 	Compression     map[string]bool
+	GloasForkSlot   uint64
 }
 
 // NewCaplinStateSnapshots - opens all snapshots. But to simplify everything:
@@ -261,10 +287,17 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	minTo := uint64(math.MaxUint64)
 	for _, typ := range s.Types() {
 		segs := vis.segments[typ.Enum()]
-		if len(segs) == 0 {
+		var to uint64
+		if len(segs) != 0 {
+			to = segs[len(segs)-1].to
+		}
+		if typ.Enum() == snaptype.PtcWindowEpoch.Enum() {
+			to = max(to, s.snapshotTypes.GloasForkSlot)
+		}
+		if to == 0 {
 			return 0
 		}
-		minTo = min(minTo, segs[len(segs)-1].to)
+		minTo = min(minTo, to)
 	}
 	if minTo == math.MaxUint64 {
 		return 0
