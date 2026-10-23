@@ -342,10 +342,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
 
-	// prevBlocks must exist before pe.run() and resetWorkers: both call
-	// EnablePrevBlockReads(pe.prevBlocks), and a nil registry panics on the first
-	// per-task SetBlock. run() resets workers on its own goroutine, so setting it
-	// after run() is a race.
+	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
 	pe.prevBlocks = state.NewPrevBlockList()
 
 	// Register the fan-out consumers and maxBlockNum BEFORE run() starts the execLoop

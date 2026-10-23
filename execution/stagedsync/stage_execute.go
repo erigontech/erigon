@@ -478,8 +478,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 // savesExecProgress reports whether a parallel-exec outcome may advance stage
 // progress: a clean or purely-exhausted batch. An operational failure (execErr) or
 // an invalid-block verdict (out.verdict) must not — progress would move past an
-// unexecuted or bad block. Exhaustion and verdict are typed on the outcome, so this
-// no longer has to disambiguate a joined error.
+// unexecuted or bad block.
 func savesExecProgress(execErr error, out execV3Outcome) bool {
 	return execErr == nil && out.verdict == nil
 }
