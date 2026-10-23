@@ -227,6 +227,9 @@ func removeDecimalSegFiles(segs []snaptype.FileInfo) error {
 				continue
 			}
 			_ = dir.RemoveFile(m)
+			if err := afterStep(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -297,6 +300,17 @@ type epochMigrator struct {
 	plan       [][2]uint64 // the one tiling every type converts on
 }
 
+// crashHook is for tests: it runs after every step that changes the disk or the DB, and an error
+// stops the migration right there, as a crash would.
+var crashHook func() error
+
+func afterStep() error {
+	if crashHook != nil {
+		return crashHook()
+	}
+	return nil
+}
+
 // epochMigrationKey marks a conversion that has started and not finished. Once the repacks delete the
 // last decimal segment, the files alone no longer show that the indexes are still to be built.
 var epochMigrationKey = []byte("epochMigrationInProgress")
@@ -361,7 +375,10 @@ func (m *epochMigrator) repackWordPerBlock(ctx context.Context, t snaptype.Type,
 				return err
 			}
 		}
-		return c.Compress()
+		if err := c.Compress(); err != nil {
+			return err
+		}
+		return afterStep()
 	}
 
 	for _, r := range plan {
@@ -559,7 +576,10 @@ func (m *epochMigrator) repackTransactions(ctx context.Context, startBlock, froz
 				}
 			}
 		}
-		return c.Compress()
+		if err := c.Compress(); err != nil {
+			return err
+		}
+		return afterStep()
 	}
 
 	delIdx := 0
@@ -724,6 +744,9 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	if err := m.setInProgress(ctx, true); err != nil {
 		return err
 	}
+	if err := afterStep(); err != nil {
+		return err
+	}
 	m.logger.Info("[epoch-migration] converting decimal block segments to epoch", "upto", frozenMax)
 
 	tailHeaders := make(map[uint64][]byte)
@@ -760,6 +783,9 @@ func (m *epochMigrator) run(ctx context.Context) error {
 		return err
 	}
 	tailHeaders, tailBodies, tailTxs = nil, nil, nil
+	if err := afterStep(); err != nil {
+		return err
+	}
 
 	if err := m.buildEpochIndexes(ctx); err != nil {
 		return err
@@ -911,6 +937,9 @@ func (m *epochMigrator) buildEpochIndexes(ctx context.Context) error {
 			}
 			p := &background.Progress{}
 			if err := t.BuildIndexes(ctx, info, nil, m.chainConfig, m.dirs.Tmp, p, m.lvl, m.logger); err != nil {
+				return err
+			}
+			if err := afterStep(); err != nil {
 				return err
 			}
 		}
