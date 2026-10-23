@@ -5,14 +5,15 @@ participants_matrix:
       el_log_level: "debug"
   cl:
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v8.1.3
+      cl_image: ethpandaops/lighthouse:stable-a376def
     - cl_type: teku
       cl_image: consensys/teku:26.4.0
 network_params:
+  preset: minimal
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
-  seconds_per_slot: 8
+  seconds_per_slot: 6
 
 additional_services:
   - assertoor

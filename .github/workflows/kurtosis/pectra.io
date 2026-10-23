@@ -9,17 +9,18 @@ participants_matrix:
       cl_log_level: "debug"
       count: 2
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v7.0.1
+      cl_image: ethpandaops/lighthouse:stable-a376def
       cl_log_level: "debug"
       count: 2
 
 network_params:
+  preset: minimal
   num_validator_keys_per_node: 32
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
-  seconds_per_slot: 8
+  seconds_per_slot: 6
   genesis_delay: 90
 
 additional_services:
