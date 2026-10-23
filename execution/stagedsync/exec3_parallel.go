@@ -2861,11 +2861,6 @@ func insertSorted(l []int, tx int) []int {
 	return l
 }
 
-// balSeededPath reports whether a BAL pre-populates cells of path p.
-func balSeededPath(p state.AccountPath) bool {
-	return p == state.BalancePath || p == state.NoncePath || p == state.CodePath || p == state.StoragePath
-}
-
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []int, tx int) []int {
 	i, _ := slices.BinarySearch(l, tx+1)
@@ -3311,7 +3306,7 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			return
 		}
 		for h := range ws.AllHeaders() {
-			if skipBALSeeded && balSeededPath(h.Path) {
+			if skipBALSeeded && h.Path.BALSeeded() {
 				continue
 			}
 			for _, tx := range readersAbove(be.readersOf(h), changedTx) {
