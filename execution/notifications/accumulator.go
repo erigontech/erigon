@@ -73,20 +73,45 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
 }
 
-// EnsureChangeTxs guarantees the change for block `height` carries `txs`. If a change for that height
-// already exists with no txs (created empty by a run that didn't have the body), it is populated in place;
-// otherwise this is a no-op. Used by the FCU flush to attach the flashblock body — read from the same tx the
-// canonical hash comes from — onto a change that was created empty ("nothing populated it").
-func (a *Accumulator) EnsureChangeTxs(height uint64, txs [][]byte) {
+// SetCanonicalChangeTxs makes the change for block `height` carry EXACTLY `txs` â the sealed body,
+// read from the same transaction the canonical hash comes from. Used by the FCU flush.
+//
+// â  IT OVERWRITES, AND THE DIFFERENCE IS A DELETED TRANSACTION THAT NOTHING RE-SENDS.
+//
+// This used to be EnsureChangeTxs, which populated the change only when it was EMPTY and was
+// otherwise a no-op. But a change for that height is not usually empty: PRE-EXECUTION already
+// started it (exec3_serial/exec3_parallel call StartChange with the txs it executed), and what
+// execution ran is NOT what the block sealed with â a stopped round commits only
+// keptHashes[:stopped.Applied], and a cut transaction goes into the next round. So the change kept
+// the pre-executed set, the FORWARD state change published it, and the txpool's OnNewBlock took
+// every one of them as MINED.
+//
+// removeMined is then correct and fatal: on a canonical chain a mined nonce N implies every nonce
+// below it mined, so it deletes the sender's whole run at or below the highest nonce it was told
+// about. Measured on soak live433, with a per-nonce trace on the sponsor:
+//
+//	nonce 1700:  exec-filter-kept block=399 -> exec-committed block=399 -> pool-exit reason=3 (Mined)
+//	[sender-run] chainNext=1512 poolLowest=1733   <- pool deleted <=1732 with the chain at 1512
+//	[sender-run] chainNext=1640 poolLowest=1733   <- chain reaches 1639 and STOPS, for ever
+//
+// Nonce 1640 then existed nowhere, so the 6,434 transactions still held (1733..8166, contiguous)
+// could never be promoted: 3,684,920 execution offerings and 3,682,981 "future" rejections for
+// 8,400 admitted transactions, every round offering 128 and keeping 0.
+//
+// A transaction must leave the pool on IMPORT of the block that carries it, and ONLY for the
+// transactions that block actually carries. The canonical body is the authority; anything the
+// change already holds for this height is a pre-execution guess at it.
+func (a *Accumulator) SetCanonicalChangeTxs(height uint64, txs [][]byte) {
 	if len(txs) == 0 {
 		return
 	}
 	for i := range a.changes {
-		if a.changes[i].BlockHeight == height && len(a.changes[i].Txs) == 0 {
-			a.changes[i].Txs = make([][]byte, len(txs))
-			for j := range txs {
-				a.changes[i].Txs[j] = common.Copy(txs[j])
-			}
+		if a.changes[i].BlockHeight != height {
+			continue
+		}
+		a.changes[i].Txs = make([][]byte, len(txs))
+		for j := range txs {
+			a.changes[i].Txs[j] = common.Copy(txs[j])
 		}
 	}
 }

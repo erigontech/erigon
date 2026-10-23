@@ -70,7 +70,7 @@ func NewDispatcher(
 }
 
 // Dispatch sends all pending notifications. The tx parameter is the data source
-// for headers, state version, and forkchoice markers — it can be the SD's
+// for headers, state version, and forkchoice markers â it can be the SD's
 // blockOverlay (MemoryMutation) for pre-commit dispatch, or a committed DB tx.
 //
 // Parameters:
@@ -140,11 +140,16 @@ func (d *Dispatcher) Dispatch(
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if accumulator != nil && currentHeader != nil {
 		// FCU flush: the txpool must learn the FCU'd block's txs so OnNewBlock removes mined txs and advances
-		// canonical nonces (L1 keystone). Read the FCU'd block (finishProgressAfter — the block just committed,
+		// canonical nonces (L1 keystone). Read the FCU'd block (finishProgressAfter â the block just committed,
 		// which sits BEHIND any ahead change the accumulator may hold) by its CANONICAL hash from the overlay;
 		// that is where the real sealed body lives. An ahead change's own block is not canonical yet, so reading
-		// by its hash returns an empty body — which is why the change was sent empty. Ensure the change for the
-		// FCU'd block carries these txs: populate an existing empty change, or create the change if none exists.
+		// by its hash returns an empty body â which is why the change was sent empty.
+		//
+		// ⚠ THE CANONICAL BODY IS AUTHORITATIVE, NOT A FALLBACK. This used to populate the change only when it
+		// was EMPTY, and a change for this height usually is NOT: pre-execution started it with the txs it
+		// executed, and what executed is not what sealed â a stopped round commits only the prefix it applied.
+		// The pre-executed set then went out as FORWARD and the txpool removed all of it as mined. See
+		// SetCanonicalChangeTxs for the measurement; it cost a soak the whole pool.
 		fcuHash, _ := rawdb.ReadCanonicalHash(tx, finishProgressAfter)
 		if fcuHash != (common.Hash{}) {
 			if body, _ := rawdb.ReadBodyWithTransactions(tx, fcuHash, finishProgressAfter); body != nil && len(body.Transactions) > 0 {
@@ -157,14 +162,14 @@ func (d *Dispatcher) Dispatch(
 						}
 					}
 					if has {
-						accumulator.EnsureChangeTxs(finishProgressAfter, rawTxs)
+						accumulator.SetCanonicalChangeTxs(finishProgressAfter, rawTxs)
 					} else if fcuHeader := rawdb.ReadHeader(tx, fcuHash, finishProgressAfter); fcuHeader != nil {
 						accumulator.StartChange(fcuHeader, rawTxs, false)
 					}
 				}
 			}
 		}
-		// Genuinely empty flush (no change for the current head) — keep the empty backfill so consumers still
+		// Genuinely empty flush (no change for the current head) â keep the empty backfill so consumers still
 		// see the head advance. Standard flow: exec already populated the change, so this is a no-op.
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
 			accumulator.StartChange(currentHeader, nil, false)
