@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -33,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 )
 
 var burntRecipient = common.HexToAddress("0xb0b0")
@@ -108,6 +111,68 @@ func TestBurntFeeKeepsTouchedEmptyRecipient(t *testing.T) {
 				if tc.storage != nil {
 					require.Equal(t, *uint256.NewInt(1), storageAt(t, st, burntRecipient, 1))
 				}
+			}
+			importSerially(t, gspec, keys[0], chainPack, check)
+			importInParallel(t, gspec, keys[0], chainPack, check)
+		})
+	}
+}
+
+// The burnt-fee recipient is destroyed by the tx that pays it a base fee: a
+// pre-Cancun SELFDESTRUCT of an existing contract, or a same-tx CREATE2 and
+// SELFDESTRUCT under EIP-6780. The fee is credited to the doomed account and
+// removed with it, like the tip of a destroyed coinbase. The next tx's fee
+// creates the recipient again, without code, nonce or storage.
+func TestBurntFeeBurnedWithDestroyedRecipient(t *testing.T) {
+	destructRuntime := program.New().Op(vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	destructInit := program.New().Sstore(1, 1).Op(vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	created := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(destructInit)))
+	for _, tc := range []struct {
+		name      string
+		config    *chain.Config
+		recipient common.Address
+		alloc     types.GenesisAlloc
+		destroy   common.Address
+	}{
+		{
+			name:      "existing contract before Cancun",
+			config:    londonConfig(),
+			recipient: burntRecipient,
+			alloc: types.GenesisAlloc{
+				burntRecipient: {Code: destructRuntime, Nonce: 1, Balance: big.NewInt(3), Storage: map[common.Hash]common.Hash{common.BytesToHash([]byte{1}): common.BytesToHash([]byte{1})}},
+			},
+			destroy: burntRecipient,
+		},
+		{
+			name:      "created in the same tx",
+			config:    pragueConfig(),
+			recipient: created,
+			alloc:     types.GenesisAlloc{factory: {Code: program.New().Create2(destructInit, 0).Op(vm.POP, vm.STOP).Bytes()}},
+			destroy:   factory,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := tc.config.Copy()
+			config.BurntContract = map[string]common.Address{"0": tc.recipient}
+			keys := revivalKeys(t, tc.alloc, 2)
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: tc.alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: tc.destroy},
+				{to: common.HexToAddress("0xbeef")},
+			})
+			check := func(t *testing.T, st *state.IntraBlockState) {
+				recipient := accounts.InternAddress(tc.recipient)
+				balance, err := st.GetBalance(recipient)
+				require.NoError(t, err)
+				require.Equal(t, baseFeePaid(chainPack, 1), balance, "only the second tx's fee survives")
+				nonce, err := st.GetNonce(recipient)
+				require.NoError(t, err)
+				require.Zero(t, nonce)
+				codeHash, err := st.GetCodeHash(recipient)
+				require.NoError(t, err)
+				require.Equal(t, accounts.EmptyCodeHash, codeHash)
+				require.Equal(t, uint256.Int{}, storageAt(t, st, tc.recipient, 1))
 			}
 			importSerially(t, gspec, keys[0], chainPack, check)
 			importInParallel(t, gspec, keys[0], chainPack, check)
