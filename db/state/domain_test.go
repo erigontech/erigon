@@ -1081,8 +1081,14 @@ func writeDupSortStepBacklog(t testing.TB, db kv.RwDB, d *Domain, stepSize uint6
 				continue
 			}
 			k := fmt.Appendf(nil, "key%05d", i)
-			v := fmt.Appendf(nil, "value%05d_step%03d_%d", i, step, rnd.IntN(1000))
 			txNum := uint64(step)*stepSize + rnd.Uint64N(stepSize)
+			if i%4 == 1 && prev[string(k)] != nil && rnd.IntN(3) == 0 {
+				require.NoError(t, w.DeleteWithPrev(k, txNum, prev[string(k)]))
+				delete(prev, string(k))
+				want[step][string(k)] = ""
+				continue
+			}
+			v := fmt.Appendf(nil, "value%05d_step%03d_%d", i, step, rnd.IntN(1000))
 			require.NoError(t, w.PutWithPrev(k, v, txNum, prev[string(k)]))
 			prev[string(k)] = v
 			want[step][string(k)] = string(v)
@@ -1121,6 +1127,60 @@ func TestDomain_CollationMatchesEveryStepOfBacklog(t *testing.T) {
 		require.Equal(t, want[step], got, "step %d", step)
 		sf.CleanupOnError()
 		coll.Close()
+	}
+}
+
+func collatedValueWords(t *testing.T, d *Domain, step kv.Step, stepSize uint64, roTx kv.Tx, values *seg.Compressor) [][]byte {
+	t.Helper()
+	coll, err := d.collateWithValues(t.Context(), step, uint64(step)*stepSize, uint64(step+1)*stepSize, roTx, values)
+	require.NoError(t, err)
+	defer coll.Close()
+	sf, err := d.buildFiles(t.Context(), step, coll, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf.CleanupOnError()
+	var words [][]byte
+	g := d.dataReader(sf.valuesDecomp)
+	g.Reset(0)
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		words = append(words, bytes.Clone(w))
+	}
+	return words
+}
+
+func TestDomain_CollationBatchMatchesPerStepCollation(t *testing.T) {
+	const stepSize, steps, keys = 16, 40, 160
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
+	want := writeDupSortStepBacklog(t, db, d, stepSize, steps, keys, 7)
+
+	sameStep := make([]byte, 8, 16)
+	binary.BigEndian.PutUint64(sameStep, ^uint64(12))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursorDupSort(d.ValuesTable)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		return c.Put([]byte("key00000"), append(sameStep, "zzz"...))
+	}))
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for _, r := range []struct{ from, to kv.Step }{{0, steps}, {5, 6}, {7, 23}, {30, steps}} {
+		comps, err := d.collateValuesBatch(t.Context(), r.from, r.to, roTx)
+		require.NoError(t, err)
+		require.Len(t, comps, int(r.to-r.from))
+		for step := r.from; step < r.to; step++ {
+			batched := collatedValueWords(t, d, step, stepSize, roTx, comps[step-r.from])
+			perStep := collatedValueWords(t, d, step, stepSize, roTx, nil)
+			require.Equal(t, perStep, batched, "range [%d,%d) step %d", r.from, r.to, step)
+			got := make(map[string]string, len(batched)/2)
+			for i := 0; i+1 < len(batched); i += 2 {
+				got[string(batched[i])] = string(batched[i+1])
+			}
+			require.Equal(t, want[step], got, "range [%d,%d) step %d", r.from, r.to, step)
+		}
 	}
 }
 

@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -99,4 +100,25 @@ func TestReadyForCollationPreservesFinalityContextResult(t *testing.T) {
 	require.Equal(t, uint64(10), lastBlockInStep)
 	require.Equal(t, uint64(20), lastBlockInDB)
 	require.Equal(t, uint64(25), lastTxInDB)
+}
+
+func TestBuildFilesClosesBatchValuesWhenCollationTxFails(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 16)
+	d := agg.d[kv.AccountsDomain]
+	writeDupSortStepBacklog(t, db, d, 16, 2, 8, 3)
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	comps, err := d.collateValuesBatch(t.Context(), 0, 2, roTx)
+	roTx.Rollback()
+	require.NoError(t, err)
+	batch := &collationBatch{from: 0, to: 2}
+	batch.values[kv.AccountsDomain] = comps
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.Error(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, batch))
+	batch.Close()
+	leftover, err := filepath.Glob(filepath.Join(agg.dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Empty(t, leftover)
 }
