@@ -36,7 +36,6 @@ import (
 // double-count it. Exercised in exec-only (DiscardCommitment) mode so no trie work runs
 // against the empty overlay.
 func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing.T) {
-
 	_, tx := temporaltest.NewTestTx(t)
 	overlay, err := membatchwithdb.NewMemoryBatch(tx)
 	require.NoError(t, err)
