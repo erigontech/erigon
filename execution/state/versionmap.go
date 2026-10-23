@@ -310,8 +310,7 @@ func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 	return nil
 }
 
-// StorageKeys returns every storage slot key recorded for addr. Used by Normalize to
-// emit synthetic delete entries for every slot of a selfdestructed contract.
+// StorageKeys returns every storage slot key recorded for addr.
 func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	e := vm.load(addr)
 	if e == nil {

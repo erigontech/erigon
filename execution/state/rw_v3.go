@@ -74,7 +74,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
 }
 
-// ApplyWrites writes an already-Normalized write-set directly to the shared
+// ApplyWrites writes a finalized write-set directly to the shared
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
