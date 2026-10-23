@@ -20,7 +20,10 @@ import (
 	"bytes"
 	"context"
 	"math/big"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -29,18 +32,22 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -63,6 +70,8 @@ import (
 const (
 	resumeBALGenesisTxNum    = uint64(1)
 	resumeBALBlockStartTxNum = uint64(2)
+	// resumeBALStepSize makes the first step, txNums [0, 4), end right after tx0.
+	resumeBALStepSize = uint64(4)
 )
 
 // resumePoint is how far into block 1 the state is committed when execution
@@ -90,6 +99,9 @@ type resumeBALFixture struct {
 	senders []common.Address
 	// wipeHistory drops the account, storage and code history after seeding.
 	wipeHistory bool
+	// fromStateFiles moves the seeded state into the files of the first step and
+	// empties the state tables, as a snapshot sync leaves them.
+	fromStateFiles bool
 }
 
 func newResumeBALFixture(t *testing.T) *resumeBALFixture {
@@ -379,6 +391,45 @@ func (fx *resumeBALFixture) droppedInitWritesBlock(t *testing.T) *types.Block {
 	return fx.withAccessList(t, bal)
 }
 
+// moveToStateFiles builds the files of the first step and empties the state
+// tables. With wipeHistory it removes the account, storage and code history
+// files instead.
+func (fx *resumeBALFixture) moveToStateFiles(t *testing.T, db kv.TemporalRwDB, dirs datadir.Dirs) {
+	t.Helper()
+	ctx := context.Background()
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	finality := execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, finality, false))
+	agg.WaitForFiles()
+	if fx.wipeHistory {
+		for _, snapDir := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+			entries, err := os.ReadDir(snapDir)
+			require.NoError(t, err)
+			for _, e := range entries {
+				name := e.Name()
+				stateDomain := strings.Contains(name, "-accounts.") || strings.Contains(name, "-storage.") || strings.Contains(name, "-code.")
+				historyFile := slices.ContainsFunc([]string{".v", ".vi", ".vei", ".ef", ".efi", ".efei"}, func(ext string) bool { return strings.HasSuffix(name, ext) })
+				if stateDomain && historyFile {
+					require.NoError(t, dir.RemoveFile(filepath.Join(snapDir, name)))
+				}
+			}
+		}
+		require.NoError(t, agg.ReloadFiles())
+	}
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for _, table := range agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain) {
+			if err := tx.ClearTable(table); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.Equal(t, resumeBALStepSize, tx.Debug().TxNumsInFiles(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
+}
+
 // exec runs block through the parallel executor from point and returns the
 // invalid-block verdict and the operational error, at most one of them set.
 func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumePoint) (*blockVerdict, error) {
@@ -386,9 +437,16 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := newResumeTestDB(t)
+	var db kv.TemporalRwDB
+	if fx.fromStateFiles {
+		db = temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(resumeBALStepSize))
+	} else {
+		db = newResumeTestDB(t)
+	}
 	fx.seed(t, db, point)
-	if fx.wipeHistory {
+	if fx.fromStateFiles {
+		fx.moveToStateFiles(t, db, dirs)
+	} else if fx.wipeHistory {
 		require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 			for _, table := range []string{
 				kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
@@ -428,6 +486,12 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
+	if fx.fromStateFiles {
+		txNum, blockNum, err := domains.SeekCommitment(ctx, rwTx)
+		require.NoError(t, err)
+		require.Equal(t, resumeBALStepSize-1, txNum, "the commitment in the files must sit at the step edge")
+		require.Equal(t, uint64(1), blockNum)
+	}
 	domains.SetTxNum(resumeBALBlockStartTxNum)
 
 	rng := execRange{blockNum: 1, initialTxNum: resumeBALGenesisTxNum, inputTxNum: resumeBALBlockStartTxNum, maxBlockNum: 1}
@@ -481,6 +545,38 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 	}
 }
 
+// TestResumedBlockFromStateFilesValidatesBlockAccessList pins the resume after a
+// snapshot sync: the state files end inside block 1, right after tx0, and the
+// state tables are empty, so the prefix's history comes from the history files.
+func TestResumedBlockFromStateFilesValidatesBlockAccessList(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.fromStateFiles = true
+	phantom := fx.phantomAccountBlock(t)
+	droppedInit := fx.droppedInitWritesBlock(t)
+	for _, tc := range []struct {
+		name         string
+		block        *types.Block
+		wantMismatch bool
+	}{
+		{"valid", fx.block, false},
+		{"phantom account", phantom, true},
+		{"dropped block-start writes", droppedInit, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verdict, err := fx.exec(t, tc.block, afterTx0)
+			require.NoError(t, err)
+			if !tc.wantMismatch {
+				if verdict != nil {
+					t.Fatal(verdict.err)
+				}
+				return
+			}
+			require.NotNil(t, verdict)
+			require.ErrorContains(t, verdict.err, "block access list mismatch")
+		})
+	}
+}
+
 // TestResumedBlockWithoutPrefixHistoryIsOperational pins that a resumed block
 // whose prefix is missing from the state history is neither accepted nor marked
 // invalid: a history read silently answers from the latest state, which would
@@ -496,6 +592,14 @@ func TestResumedBlockWithoutPrefixHistoryIsOperational(t *testing.T) {
 		require.Nil(t, verdict)
 		verdict, err = fx.exec(t, droppedInit, point)
 		require.ErrorIs(t, err, state.ErrPruned, "the forged block must not be judged without history")
+		require.Nil(t, verdict)
+	}
+
+	files := *fx
+	files.fromStateFiles = true
+	for _, block := range []*types.Block{fx.block, droppedInit} {
+		verdict, err := files.exec(t, block, afterTx0)
+		require.ErrorIs(t, err, state.ErrPruned, "a block must not be judged without the history files")
 		require.Nil(t, verdict)
 	}
 }
