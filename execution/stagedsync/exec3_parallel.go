@@ -689,8 +689,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above.
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(block.Time())
-					// A partial block records only suffix I/O; nextResult checks its
-					// BAL against a re-derived one instead.
+					// A partial block records only suffix I/O; for an Amsterdam block
+					// nextResult checks its BAL against a re-derived one instead.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
 						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)
@@ -3448,7 +3448,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)
 				}
 				if err == nil {
-					err = bal.Process(header, be.block.BlockAccessList(), vio, true, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+					err = bal.Process(header, be.block.BlockAccessList(), vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+					vio.ReleaseOutputMaps()
 				}
 				if errors.Is(err, rules.ErrInvalidBlock) {
 					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.number(), err)), nil

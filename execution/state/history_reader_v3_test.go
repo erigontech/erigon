@@ -65,10 +65,11 @@ func TestRequireStateHistory(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
-			require.Error(t, err)
-			if tc.dbg.lookupErr == nil {
-				require.ErrorIs(t, err, ErrPruned)
+			if tc.dbg.lookupErr != nil {
+				require.ErrorIs(t, err, tc.dbg.lookupErr)
+				return
 			}
+			require.ErrorIs(t, err, ErrPruned)
 		})
 	}
 }
