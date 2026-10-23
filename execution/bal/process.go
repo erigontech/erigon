@@ -91,10 +91,9 @@ func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7
 	}
 	// A stored BAL sidecar may be absent, so cross-check it only when present.
 	// The stored bytes are canonical RLP, so their Keccak is the BAL hash.
-	var blockBal types.BlockAccessList
 	if blockBalBytes != nil {
 		if storedHash := crypto.Keccak256Hash(blockBalBytes); storedHash != blockBalHash {
-			blockBal, _ = types.DecodeBlockAccessListBytes(blockBalBytes)
+			blockBal, _ := types.DecodeBlockAccessListBytes(blockBalBytes)
 			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
 			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, storedHash, blockBalHash)
 		}
@@ -104,7 +103,8 @@ func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7
 	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
-		if blockBal == nil && blockBalBytes != nil {
+		var blockBal types.BlockAccessList
+		if blockBalBytes != nil {
 			blockBal, _ = types.DecodeBlockAccessListBytes(blockBalBytes)
 		}
 		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
