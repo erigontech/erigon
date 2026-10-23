@@ -132,6 +132,9 @@ type WorkerContext struct {
 	metrics *WorkerMetrics
 	// per-worker, single-owner domain read-metrics accumulator.
 	readMetrics *kvmetrics.DomainMetrics
+	// collectorAcc keeps this worker's reads for the process-level collector until
+	// a non-blocking TrySend hands them off; Close flushes the rest.
+	collectorAcc *kvmetrics.DomainMetrics
 }
 
 // installWorkerGetHash points the EVM's BLOCKHASH lookup at the worker's own
@@ -171,9 +174,10 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 
 		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 
-		dirs:        dirs,
-		metrics:     metrics,
-		readMetrics: kvmetrics.NewDomainMetrics(),
+		dirs:         dirs,
+		metrics:      metrics,
+		readMetrics:  kvmetrics.NewDomainMetrics(),
+		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
 	return w
@@ -200,6 +204,21 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 	}
 
 	return rw.bindTx(chainTx)
+}
+
+// Close releases the worker's state and tx. Idempotent. Only call it once no
+// task runs on the worker.
+func (rw *WorkerContext) Close() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.ibs.Close()
+	_ = rw.bindTx(nil)
+	if dbg.KVReadLevelledMetrics && rw.rs != nil {
+		if c := rw.rs.Domains().Collector(); c != nil {
+			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
+			rw.collectorAcc = kvmetrics.NewDomainMetrics()
+		}
+	}
 }
 
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
@@ -261,8 +280,7 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 		}
 	}
 
-	// Writers that implement neither (NoopWriter, LightCollector) accumulate in
-	// memory and need no tx — not an error.
+	// Writers that implement neither (NoopWriter) need no tx — not an error.
 	type withPutter interface{ SetPutDel(kv.TemporalPutDel) }
 	type withTx interface{ SetTx(kv.TemporalTx) }
 	switch typedWriter := rw.stateWriter.(type) {
@@ -317,8 +335,13 @@ func (rw *WorkerContext) PublishReadMetrics() {
 	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
 		return
 	}
-	rw.rs.Domains().LogMergeMetrics(rw.readMetrics)
+	doms := rw.rs.Domains()
+	doms.MergeExecMetrics(rw.readMetrics)
+	rw.collectorAcc.Merge(rw.readMetrics)
 	rw.readMetrics.Reset()
+	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+		rw.collectorAcc = kvmetrics.NewDomainMetrics()
+	}
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -339,6 +362,7 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
+	rw.ibs.Close()
 	if rw.prevBlockReg != nil {
 		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
@@ -359,7 +383,10 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 // per-task reader wraps it by reference. Call once after ResetState; per task the
 // block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
 func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
+	rw.ibs.Close()
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
@@ -414,12 +441,6 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		result.TraceTos = callTracer.Tos()
 	}
 
-	// Extract LightCollector's accumulated writes so finalize can use them
-	// directly without IBS reconstruction.
-	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
-		result.CollectorWrites = lc.TakeWrites()
-	}
-
 	return result
 }
 
@@ -443,7 +464,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		clearDone = true
 		for _, w := range reconWorkers {
 			if w != nil {
-				_ = w.ResetTx(nil)
+				w.Close()
 			}
 		}
 	}

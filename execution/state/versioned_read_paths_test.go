@@ -966,3 +966,138 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
 	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, ""), "commit-time validation catches the stale read")
 }
+
+// CREATE over an account with storage but no code or nonce: the slot read
+// before the CREATE belongs to the old incarnation, so committed storage is zero.
+func TestVersionedRead_B_CommittedStorageAfterCreateIsZero(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		_, tx, domains := NewTestRwTx(t)
+		addr := accounts.InternAddress([20]byte{0xb7})
+		key := accounts.InternKey([32]byte{0x01})
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1)
+		acc.Incarnation = 1
+		addrValue, keyValue := addr.Value(), key.Value()
+		domains.SetTxNum(10)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(addrValue[:], keyValue[:]...), []byte{0x07}, 10, nil))
+		ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+		t.Cleanup(ibs.Close)
+		ibs.SetNoMaterialize(noMaterialize)
+		ibs.SetTxContext(1, 5)
+
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		require.EqualValues(t, 7, v.Uint64(), "noMaterialize=%v", noMaterialize)
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		committed, err := ibs.GetCommittedState(addr, key)
+		require.NoError(t, err)
+		assert.True(t, committed.IsZero(), "noMaterialize=%v", noMaterialize)
+	}
+}
+
+// A dirty address serves the recorded read of a field it has not written, as a
+// clean one does: a later estimate in the version map is left to validation.
+func TestVersionedRead_B_DirtyAddressServesRecordedRead(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb4})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.Balance = *uint256.NewInt(1234)
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, nonce)
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
+	require.False(t, ibs.warmReadable(addr), "the balance write makes the address dirty")
+
+	mvhm.WriteNonce(addr, Version{TxIndex: 2}, 9, false)
+	nonce, err = ibs.GetNonce(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, nonce)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 77, balance.Uint64(), "an own write still wins")
+
+	_, err = ibs.GetCode(addr)
+	require.NoError(t, err)
+	mvhm.WriteCode(addr, Version{TxIndex: 2}, accounts.Code{Bytes: []byte{0x60}}, false)
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	assert.Empty(t, code, "code is served from the recorded read too")
+}
+
+// Touching an account whose own balance write is already zero changes nothing,
+// so it adds no journal entry.
+func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb6})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	n := ibs.journal.length()
+	require.Positive(t, n)
+	require.NoError(t, ibs.TouchAccount(addr))
+	assert.Equal(t, n, ibs.journal.length())
+	balance, ok := ibs.versionedWrites.GetBalance(addr)
+	require.True(t, ok)
+	assert.True(t, balance.Val.IsZero())
+}
+
+// A CREATE2 onto an account a prior tx destroyed carries the balance a later tx's
+// fee revived it with, even when this tx first read the account while it was
+// destroyed.
+func TestVersionedRead_CreateCarriesRevivedBalanceAfterEarlierDestroyedRead(t *testing.T) {
+	t.Parallel()
+	for _, firstRead := range []string{"nonce", "balance", "codehash"} {
+		t.Run(firstRead, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			addr := accounts.InternAddress([20]byte{0xc7})
+			vm := NewVersionMap(nil)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+			ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 2)
+
+			var err error
+			switch firstRead {
+			case "nonce":
+				_, err = ibs.GetNonce(addr)
+			case "balance":
+				_, err = ibs.GetBalance(addr)
+			case "codehash":
+				_, err = ibs.GetCodeHash(addr)
+			}
+			require.NoError(t, err)
+
+			revived := accounts.NewAccount()
+			revived.Balance = *uint256.NewInt(1000)
+			vm.WriteBalance(addr, Version{TxIndex: 1}, revived.Balance, true)
+			vm.WriteAddress(addr, Version{TxIndex: 1}, &revived, true)
+
+			require.NoError(t, ibs.CreateAccount(addr, true))
+			bal, err := ibs.GetBalance(addr)
+			require.NoError(t, err)
+			require.EqualValues(t, 1000, bal.Uint64())
+		})
+	}
+}

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -79,7 +78,6 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 	// The witness carries no commitment trie, so this replay must run in
 	// discard-commitment mode; force it rather than gating on the env (which
 	// would leave the guard un-exercised). The fixture itself is still the gate.
-	defer dbg.OverrideDiscardCommitment(true)()
 	rf := loadMultiBlockRange(t)
 	require.NotNil(t, rf.Outputs, "range fixture missing captured outputs")
 
@@ -125,6 +123,7 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 	cfg := StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB,
 		chainspec.Mainnet.Config, engine, &vm.Config{}, nil, false, false,
 		dirs, br, chainspec.Mainnet.Genesis, syncCfg, false, nil)
+	cfg.discardCommitment = true
 
 	const seedTxNum = uint64(1) << 20
 	rng := execRange{
@@ -198,7 +197,6 @@ func TestEphemeralMultiBlockPerBlock(t *testing.T) {
 	// The witness carries no commitment trie, so this replay must run in
 	// discard-commitment mode; force it rather than gating on the env (which
 	// would leave the guard un-exercised). The fixture itself is still the gate.
-	defer dbg.OverrideDiscardCommitment(true)()
 	rf := loadMultiBlockRange(t)
 
 	// Generate mode backfills each block's own post-state (projected onto the
@@ -251,6 +249,7 @@ func TestEphemeralMultiBlockPerBlock(t *testing.T) {
 	cfg := StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB,
 		chainspec.Mainnet.Config, engine, &vm.Config{}, nil, false, false,
 		dirs, br, chainspec.Mainnet.Genesis, syncCfg, false, nil)
+	cfg.discardCommitment = true
 
 	const seedTxNum = uint64(1) << 20
 	tx, err := db.BeginTemporalRw(ctx)

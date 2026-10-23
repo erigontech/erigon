@@ -654,6 +654,28 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 	}
 }
 
+// Tasks waiting for an execution slot must not take worker contexts: a block of
+// independent tasks, where no worker parks mid-run, mints no extra contexts.
+func TestQueuedTasksDoNotGrowWorkerPool(t *testing.T) {
+	sender := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1000 + i))))
+	}
+	ownSlot := func(i int, j int, _ int) opkey {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1_000_000 + i))))
+		return opkey{addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(j)))), state.StoragePath}
+	}
+	tasks, _ := taskFactory(1000, sender, 2, 2, 1, ownSlot, readTime, writeTime, nonIOTime)
+	noExtraContexts := func(pe *parallelExecutor) error {
+		pe.mintMu.Lock()
+		defer pe.mintMu.Unlock()
+		if n := len(pe.mintedWorkers); n > 0 {
+			return fmt.Errorf("%d extra worker contexts for independent tasks", n)
+		}
+		return nil
+	}
+	runParallel(t, tasks, composeValidations([]propertyCheck{defaultChecks, noExtraContexts}), false, log.New())
+}
+
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	tb.Helper()
 	ctx := tb.Context()
