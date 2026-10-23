@@ -45,10 +45,10 @@ func TestSetCodeRevertRestoresCodeHash(t *testing.T) {
 		{"cleared", accounts.NewCode(nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			vmap := NewVersionMap(nil)
-			vmap.WriteCode(addr, Version{TxIndex: 0}, tc.code, true)
-			ibs := NewWithVersionMap(NewNoopReader(), vmap)
+			// A materialized object needs the non-arena state; it still carries a version map.
+			ibs := NewForSequentialCommitment(NewNoopReader())
 			defer ibs.Close()
+			ibs.VersionMap().WriteCode(addr, Version{TxIndex: 0}, tc.code, true)
 			ibs.SetTxContext(1, 1)
 
 			acc := accounts.NewAccount()

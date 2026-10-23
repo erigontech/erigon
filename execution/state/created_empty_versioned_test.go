@@ -253,7 +253,7 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }

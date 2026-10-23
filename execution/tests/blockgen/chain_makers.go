@@ -54,6 +54,10 @@ type BlockGen struct {
 	chain       []*types.Block
 	header      *types.Header
 	stateReader state.StateReader
+	// txWriter takes each tx's writes: the block's state writer on the serial path, as
+	// serial execution does, so a later tx reads an earlier one's deletes; a no-op
+	// writer on the versioned path, which applies the block's write-sets at the end.
+	txWriter    state.StateWriter
 	ibs         *state.IntraBlockState
 	versionMap  *state.VersionMap
 	blockIO     *state.VersionedIO
@@ -142,7 +146,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.txWriter, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
@@ -187,7 +191,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.txWriter, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	// A reverted transaction (err==nil, status Failed) is still included: its nonce
 	// bump and gas payment survive the revert and must be flushed so a later tx of
@@ -494,6 +498,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			ibs:         ibs,
 			versionMap:  versionMap,
 			stateReader: stateReader,
+			txWriter:    state.NewNoopWriter(),
 			config:      config,
 			engine:      engine,
 			txs:         make([]types.Transaction, 0, 1),
@@ -502,6 +507,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			beforeAddTx: func() {
 				txNumIncrement()
 			},
+		}
+		if versionMap == nil {
+			b.txWriter = stateWriter
 		}
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}

@@ -2036,6 +2036,10 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	accountVersion := ibs.Version()
 
 	if err != nil {
+		// Record so the executor surfaces it operationally rather than continuing
+		// with a wrong value; the serial (non-versioned) account read reaches the DB
+		// here, bypassing refreshAccount and the typed readers that already record.
+		ibs.recordStateReadError(err)
 		return nil, err
 	}
 
@@ -2488,6 +2492,14 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		}
 	} else if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
+		// A recreate below the original incarnation makes the writer clear the old code
+		// and storage on the account write, so that write must land before the new ones.
+		downRev := stateObject.original.Incarnation > stateObject.data.Incarnation
+		if downRev {
+			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+				return err
+			}
+		}
 		// Write any contract code associated with the state object; dirtyCode is
 		// set only when code actually changed, so a clear-to-empty must still
 		// write through (empty CodeDomain, consistent with the empty codeHash).
@@ -2510,8 +2522,10 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 			}
 		}
-		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
-			return err
+		if !downRev {
+			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+				return err
+			}
 		}
 		// In parallel mode only modified fields land in the versionMap WriteSet;
 		// Normalize fills the rest from the stateReader.
@@ -2736,7 +2750,7 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // emptiness. Created-empty accounts are already withheld by
 // withholdCreatedEmptyAccounts, so only pre-existing empties reach here.
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet) {
-	if ibs.blockNum == 0 || chainRules == nil || ibs.versionMap == nil {
+	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
@@ -2781,7 +2795,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 // needed. An account that existed before is kept even when it ends empty —
 // clearing it needs an explicit delete, which commit-time normalization emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
-	if ibs.blockNum == 0 || chainRules == nil {
+	if chainRules == nil {
 		return
 	}
 	for addr := range writes.address {
