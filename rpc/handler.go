@@ -71,7 +71,8 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
-	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
+	inlineCalls    bool          // the caller waits for every answer, as a single HTTP request does
+	callSlots      chan struct{} // the server's call limit for goroutine calls; nil = unlimited
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -530,6 +531,20 @@ func (h *handler) startCallProc(fn func(*callProc), done func()) {
 	}
 	if h.inlineCalls {
 		run()
+		return
+	}
+	if h.callSlots != nil {
+		// Waiting here stops the connection's read loop, so a busy client backs off.
+		select {
+		case h.callSlots <- struct{}{}:
+		case <-h.rootCtx.Done():
+			done()
+			return
+		}
+		h.callWG.Go(func() {
+			defer func() { <-h.callSlots }()
+			run()
+		})
 		return
 	}
 	h.callWG.Go(run)

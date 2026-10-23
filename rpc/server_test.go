@@ -22,6 +22,7 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"os"
@@ -29,6 +30,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -178,4 +181,23 @@ func TestServerShortLivedConn(t *testing.T) {
 		}
 		conn.Close()
 	}
+}
+
+// Calls on a connection that runs them in goroutines (WebSocket, IPC) share the
+// server's call limit: a call waits while every slot is busy.
+func TestServerCallLimit(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	server.SetCallLimit(1)
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	go func() { _ = client.Call(nil, "test_block") }()
+	require.Eventually(t, func() bool { return len(server.callSlots) == 1 }, 5*time.Second, time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	var resp echoResult
+	require.ErrorIs(t, client.CallContext(ctx, &resp, "test_echo", "hello", 10, &echoArgs{"world"}), context.DeadlineExceeded)
 }

@@ -60,10 +60,11 @@ type Server struct {
 
 	batchConcurrency    uint
 	disableStreaming    bool
-	traceRequests       bool // Whether to print requests at INFO level
-	debugSingleRequest  bool // Whether to print requests at INFO level
-	batchLimit          int  // Maximum number of requests in a batch
-	subscriptionLimit   int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
+	traceRequests       bool          // Whether to print requests at INFO level
+	debugSingleRequest  bool          // Whether to print requests at INFO level
+	batchLimit          int           // Maximum number of requests in a batch
+	subscriptionLimit   int           // Maximum number of concurrent subscriptions per connection; 0 = unlimited
+	callSlots           chan struct{} // shared by every connection that runs calls in goroutines; nil = unlimited
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
 	ingress             ingressBudget
@@ -103,6 +104,15 @@ func (s *Server) SetBatchLimit(limit int) {
 // SetSubscriptionLimit sets how many subscriptions one connection may hold at a time; 0 removes the limit.
 func (s *Server) SetSubscriptionLimit(limit int) {
 	s.subscriptionLimit = limit
+}
+
+// SetCallLimit caps the calls that WebSocket and IPC connections run at once; 0 removes the cap.
+// HTTP runs calls inline and has its own admission limit.
+func (s *Server) SetCallLimit(limit int) {
+	s.callSlots = nil
+	if limit > 0 {
+		s.callSlots = make(chan struct{}, limit)
+	}
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -162,7 +172,9 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h.callSlots = s.callSlots
+	return h
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This

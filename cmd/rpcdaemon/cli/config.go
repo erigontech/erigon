@@ -634,6 +634,24 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	srv.SetBatchLimit(cfg.BatchLimit)
 	srv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
+	// RPC admission limit: -1 = unlimited, 0 = use db.read.concurrency, >0 = explicit limit.
+	var rpcConcurrencyLimit int64
+	switch {
+	case cfg.RpcMaxConcurrentRequests == -1:
+		rpcConcurrencyLimit = 0 // disabled
+	case cfg.RpcMaxConcurrentRequests > 0:
+		rpcConcurrencyLimit = int64(cfg.RpcMaxConcurrentRequests)
+	default:
+		rpcConcurrencyLimit = int64(cfg.DBReadConcurrency)
+	}
+	if rpcConcurrencyLimit == 0 {
+		logger.Info("RPC admission control disabled (unlimited concurrent requests)")
+	} else {
+		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
+	}
+	// WebSocket and IPC calls get the same cap HTTP requests have.
+	srv.SetCallLimit(int(rpcConcurrencyLimit))
+
 	defer srv.Stop()
 
 	var defaultAPIList []rpc.API
@@ -692,21 +710,6 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		logger.Info("Socket Endpoint opened", "url", socketUrl)
 	}
 
-	// RPC admission limit: -1 = unlimited, 0 = use db.read.concurrency, >0 = explicit limit.
-	var rpcConcurrencyLimit int64
-	switch {
-	case cfg.RpcMaxConcurrentRequests == -1:
-		rpcConcurrencyLimit = 0 // disabled
-	case cfg.RpcMaxConcurrentRequests > 0:
-		rpcConcurrencyLimit = int64(cfg.RpcMaxConcurrentRequests)
-	default:
-		rpcConcurrencyLimit = int64(cfg.DBReadConcurrency)
-	}
-	if rpcConcurrencyLimit == 0 {
-		logger.Info("RPC admission control disabled (unlimited concurrent requests)")
-	} else {
-		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
-	}
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
