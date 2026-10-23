@@ -148,7 +148,7 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 	if cap(arr.hahsBuffer) < arr.hashBufLength() {
 		arr.hahsBuffer = make([]byte, 0, arr.hashBufLength())
 	}
-	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
+	depth := merkle_tree.ChunkDepth((uint64(arr.c)*8 + 31) / 32)
 
 	lnRoot := merkle_tree.Uint64Root(uint64(len(arr.u)))
 	if len(arr.u) == 0 {

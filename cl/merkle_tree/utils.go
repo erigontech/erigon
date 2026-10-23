@@ -16,6 +16,8 @@
 
 package merkle_tree
 
+import "math/bits"
+
 // GetDepth returns the depth of a merkle tree with a given number of nodes.
 // The depth is defined as the number of levels in the tree, with the root
 // node at level 0 and each child node at a level one greater than its parent.
@@ -37,4 +39,14 @@ func GetDepth(v uint64) uint8 {
 	}
 
 	return depth
+}
+
+// ChunkDepth returns the depth of a merkle tree that merkleizes up to
+// chunkLimit chunks. SSZ pads chunks to next_pow_of_two(chunkLimit), so unlike
+// GetDepth this rounds up.
+func ChunkDepth(chunkLimit uint64) uint8 {
+	if chunkLimit <= 1 {
+		return 0
+	}
+	return uint8(bits.Len64(chunkLimit - 1))
 }

@@ -96,7 +96,7 @@ func TestAttesterSlashing(t *testing.T) {
 	assert.Equal(t, expectedEncodingSize, encodingSize)
 
 	// Test HashSSZ
-	expectedRoot := common.HexToHash("54b2c5a7b42c22af13ee41982858a6977af16358b5ced64f985385944c305e99") // Expected root value
+	expectedRoot := common.HexToHash("0x2e53afa6d9984edfc18ff838f9ca57424a97ed2e63a13cc9bd5ca11b8aa77efc") // Expected root value
 	root, err := attesterSlashing.HashSSZ()
 	require.NoError(t, err)
 	assert.Equal(t, expectedRoot, common.Hash(root))

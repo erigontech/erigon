@@ -136,7 +136,7 @@ func (u *ParticipationBitList) Cap() int {
 }
 
 func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
-	depth := GetDepth((uint64(u.c) + 31) / 32)
+	depth := merkle_tree.ChunkDepth((uint64(u.c) + 31) / 32)
 	baseRoot := [32]byte{}
 	if u.l == 0 {
 		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])
