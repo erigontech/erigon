@@ -601,15 +601,11 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	return result, nil
 }
 
-// modexpMathBigFaster reports whether math/big beats evmone for a modulus field
-// wider than 256 bits: evmone's Montgomery setup does not pay off for a few
-// squarings, and math/big switches to a windowed method above a 64-bit exponent.
+// modexpMathBigFaster reports whether math/big beats evmone: for a modulus of
+// 2048 bits or more, and for one of 512 bits or more with an exponent above 64
+// bits, where math/big switches to a windowed method.
 func modexpMathBigFaster(modLen uint64, exp []byte) bool {
-	if modLen <= 32 {
-		return false
-	}
-	expBits := bitLenBytes(exp)
-	return expBits <= 8 || modLen >= 256 || modLen >= 64 && expBits > 64
+	return modLen >= 256 || modLen >= 64 && bitLenBytes(exp) > 64
 }
 
 // bitLenBytes returns the bit length of the big-endian number b.
