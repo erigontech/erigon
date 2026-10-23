@@ -2009,7 +2009,11 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 	if prevWrites != nil {
 		for h := range prevWrites.AllHeaders() {
 			if !result.TxOut.Has(h) {
-				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, true)
+				// checkExists=false: the previous incarnation's write-set may hold a
+				// net-zero storage write that was never materialized in the versionMap
+				// (net-zero writes are skipped at flush), so deleting it must be a no-op,
+				// not a "path must already exist" panic.
+				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, false)
 			}
 		}
 	}
