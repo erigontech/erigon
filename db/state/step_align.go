@@ -125,7 +125,23 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 			}
 		}
 	}
+	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
+				return 0, fmt.Errorf("%s and commitment files differ below txNum %d", d, end)
+			}
+		}
+	}
 	return end, nil
+}
+
+func fileRangesUpTo(files visibleFiles, end uint64) (ranges [][2]uint64) {
+	for _, f := range files {
+		if f.endTxNum <= end {
+			ranges = append(ranges, [2]uint64{f.startTxNum, f.endTxNum})
+		}
+	}
+	return ranges
 }
 
 func stepAlignedMergeRange(files visibleFiles, stepSize, end uint64) MergeRange {
@@ -165,13 +181,6 @@ func (at *AggregatorRoTx) stepAlignedMergeRanges(stepSize, end uint64) (*Ranges,
 			return nil, fmt.Errorf("%s history merge %d-%d has no index merge over the same range", d.name, history.from, history.to)
 		}
 		r.domain[id].history = HistoryRanges{history: history, index: index}
-	}
-	if com := r.domain[kv.CommitmentDomain].values; com.needMerge {
-		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-			if v := r.domain[d].values; v.needMerge && !v.Equal(&com) {
-				return nil, fmt.Errorf("commitment merge %d-%d needs %s merged over the same range, not %d-%d", com.from, com.to, d, v.from, v.to)
-			}
-		}
 	}
 	if r.anyDomainValues() {
 		return r, nil

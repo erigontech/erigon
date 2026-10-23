@@ -69,7 +69,20 @@ func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.AlignFilesToStepSize(t.Context(), 30)
-	require.ErrorContains(t, err, "commitment merge 0-120 needs accounts merged over the same range")
+	require.ErrorContains(t, err, "accounts and commitment files differ below txNum 120")
+}
+
+func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	split := []testFileRange{{0, 4}, {4, 6}, {6, 7}, {7, 8}}
+	generateAccountsFile(t, dirs, split)
+	generateStorageFile(t, dirs, split)
+	generatePlainCommitmentFile(t, dirs, append(split, testFileRange{4, 8}))
+	require.NoError(t, agg.OpenFolder(db))
+	_, err := agg.StepAlignedEnd(20)
+	require.ErrorContains(t, err, "accounts and commitment files differ below txNum 80")
 }
 
 func generatePlainCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
