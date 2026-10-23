@@ -206,3 +206,69 @@ func TestAvailableRlpSpaceCoversFinalizedHeader(t *testing.T) {
 		})
 	}
 }
+
+type assemblerStateReader struct {
+	*state.NoopReader
+	address accounts.Address
+	account accounts.Account
+}
+
+func (r *assemblerStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if address != r.address {
+		return nil, nil
+	}
+	account := r.account
+	return &account, nil
+}
+
+func TestBlockAssemblerFlushesVersionedWritesWithoutBAL(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(1_000_000)
+	reader := &assemblerStateReader{
+		NoopReader: state.NewNoopReader(),
+		address:    sender,
+		account:    account,
+	}
+	versionMap := state.NewVersionMap(nil)
+	ibs := state.NewWithVersionMap(reader, versionMap)
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetNoMaterialize(true)
+
+	header := &types.Header{
+		Number:     *uint256.NewInt(1),
+		Time:       1,
+		GasLimit:   1_000_000,
+		Difficulty: *uint256.NewInt(1),
+	}
+	engine := ethash.NewFaker()
+	assembler := NewBlockAssembler(AssemblerCfg{
+		ChainConfig: chain.TestChainBerlinConfig,
+		Engine:      engine,
+	}, &AssembledBlock{Header: header})
+	require.False(t, assembler.HasBAL())
+
+	to := common.Address{0xaa}
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{
+			GasLimit: 21_000,
+			To:       &to,
+			Value:    *uint256.NewInt(1),
+		},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(chain.TestChainBerlinConfig, header.Number.Uint64(), header.Time), key)
+	require.NoError(t, err)
+
+	_, _, err = assembler.AddTransactions(
+		t.Context(), nil, types.Transactions{txn}, accounts.InternAddress(common.Address{0xcc}),
+		&vm.Config{}, ibs, nil, "test", log.New(),
+	)
+	require.NoError(t, err)
+
+	nonce, _, ok := versionMap.ReadNonce(sender, 1)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), nonce)
+}

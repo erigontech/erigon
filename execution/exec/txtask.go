@@ -644,7 +644,10 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites(rules)
+			result.TxOut, result.Err = finalizedWrites(ibs, rules, evm.Context.Coinbase, result.ExecutionResult.BurntContractAddress)
+			if result.Err != nil {
+				return &result
+			}
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
@@ -658,13 +661,33 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	return &result
 }
 
+// finalizedWrites turns a dependency raised while building the write-set into a
+// retryable abort. The recover in TxnExecutor.Execute covers message execution
+// only, so a stale read found here would otherwise reach the worker as a fatal
+// task panic instead of re-executing the tx against its blocker.
+func finalizedWrites(ibs *state.IntraBlockState, rules *chain.Rules, deferredFeeAddrs ...accounts.Address) (writes *state.WriteSet, err error) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		if panicErr, ok := rec.(error); !ok || !errors.Is(panicErr, state.ErrDependency) {
+			panic(rec)
+		}
+		err = protocol.ErrExecAbortError{
+			DependencyTxIndex: ibs.DepTxIndex(),
+		}
+	}()
+	return ibs.FinalizedWrites(rules, deferredFeeAddrs...)
+}
+
 func (t *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	evm *vm.EVM,
 	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
 	chainConfig *chain.Config,
 ) *TxResult {
-	var result TxResult
+	result := TxResult{Coinbase: evm.Context.Coinbase}
 
 	if !t.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask

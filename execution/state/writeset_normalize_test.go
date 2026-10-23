@@ -366,7 +366,9 @@ func TestNormalize_CreatedAndDestroyedInTxLeavesNoWrites(t *testing.T) {
 		_, err := ibs.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
 		rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: eip8246}
-		out, err := ibs.FinalizedWrites(rules).Normalize(vm, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, eip8246)
+		writes, err := ibs.FinalizedWrites(rules)
+		require.NoError(t, err)
+		out, err := writes.Normalize(vm, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, eip8246)
 		require.NoError(t, err)
 		return out
 	}

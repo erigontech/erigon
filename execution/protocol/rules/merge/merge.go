@@ -166,7 +166,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	if err != nil {
 		return nil, err
 	}
+	eip7928 := config.IsEIPEnabled(7928, header.Time)
 	for _, r := range rewards {
+		if eip7928 && r.Amount.IsZero() {
+			continue
+		}
 		var err error
 		switch r.Kind {
 		case rules.RewardAuthor:
@@ -182,6 +186,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	}
 
 	if withdrawals != nil {
+		if eip7928 {
+			for _, w := range withdrawals {
+				state.MarkAddressAccess(accounts.InternAddress(w.Address), false)
+			}
+		}
 		if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 			if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
 				return nil, err

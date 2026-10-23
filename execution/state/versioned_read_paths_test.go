@@ -1303,3 +1303,54 @@ func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
 	require.True(t, newIBS(sys, true, false).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
 	require.True(t, newIBS(other, true, true).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
 }
+
+func TestVersionedRead_F_SelfDestructDependencyPanics(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xf1})
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, false)
+
+	defer func() {
+		r := recover()
+		require.NotNil(t, r, "must panic on self-destruct dependency")
+		err, ok := r.(error)
+		require.True(t, ok)
+		assert.ErrorIs(t, err, ErrDependency)
+	}()
+	_, _ = ibs.GetBalance(addr)
+}
+
+func TestVersionedRead_F_LaterSelfDestructDoesNotReplaceFirstProbe(t *testing.T) {
+	t.Parallel()
+	account := accounts.NewAccount()
+	account.Nonce = 7
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&refreshReader{account: &account}, mvhm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xf2})
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	_, err = ibs.GetNonce(addr)
+	require.NoError(t, err)
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	valid := mvhm.ValidateVersion(5, &io, func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, true, false, false, "")
+	require.Equal(t, VersionInvalid, valid)
+}

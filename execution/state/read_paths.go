@@ -265,6 +265,15 @@ type readPathResult struct {
 	err error
 }
 
+func checkSelfDestructDependency(s *IntraBlockState, res ReadResult, ok bool) {
+	if ok && res.Status() == MVReadResultDependency {
+		if res.DepIdx() > s.dep {
+			s.dep = res.DepIdx()
+		}
+		panic(ErrDependency)
+	}
+}
+
 // versionedReadCore is the non-generic body that drives the read.
 // Typed wrappers (readBalance, readNonce, readState, …) consume the
 // result.  See readPathOutcome for the outcome enumeration.
@@ -344,6 +353,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
 		// records match later SD-zero-path reads and don't force a version conflict.
 		destructed, sdRes, sdOK := s.readSelfDestructMemo(addr)
+		if !commited {
+			checkSelfDestructDependency(s, sdRes, sdOK)
+		}
 		switch {
 		case sdOK && sdRes.Status() == MVReadResultDone && destructed:
 			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
@@ -391,7 +403,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	}
 
 	var destructedVersion Version
-	if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
+	destructed, sdRes, sdOK := s.readSelfDestructMemo(addr)
+	if !commited {
+		checkSelfDestructDependency(s, sdRes, sdOK)
+	}
+	if sdOK && sdRes.Status() == MVReadResultDone && destructed {
 		destructTxIndex := sdRes.DepIdx()
 		sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 		// A tx's own same-tx write to this path is returned directly: it always

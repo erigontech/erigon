@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -284,4 +285,52 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 			require.Len(t, result.Logs, tc.wantLogs)
 		})
 	}
+}
+
+func TestExecuteCarriesCoinbaseForAccountAbstraction(t *testing.T) {
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc01aba5e"))
+	config := &chain.Config{AllowAA: true}
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: 1,
+		Coinbase:    coinbase,
+	}
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
+
+	txTask := &TxTask{
+		TxIndex:         0,
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		Txs:             types.Transactions{&types.AccountAbstractionTransaction{}},
+		Config:          config,
+		EvmBlockContext: blockContext,
+	}
+	result := txTask.Execute(evm, nil, nil, ibs, nil, config, nil, datadir.Dirs{}, false)
+
+	require.ErrorContains(t, result.Err, "account is not deployed")
+	require.Equal(t, coinbase, result.Coinbase)
+}
+
+func TestFinalizedWritesDependencyIsRetryable(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
+	priorVersion := state.Version{TxIndex: 0}
+	empty := accounts.NewAccount()
+	versionMap := state.NewVersionMap(nil)
+	versionMap.WriteAddress(addr, priorVersion, &empty, true)
+	versionMap.WriteBalance(addr, priorVersion, uint256.Int{}, false)
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), versionMap)
+	defer ibs.Release(false)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+	require.NoError(t, ibs.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
+
+	_, err := finalizedWrites(ibs, &chain.Rules{IsSpuriousDragon: true})
+
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, err, &abort)
+	require.Equal(t, 0, abort.DependencyTxIndex)
+	require.Nil(t, abort.OriginError)
+	require.False(t, abort.IsError())
 }

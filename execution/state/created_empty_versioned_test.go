@@ -38,7 +38,8 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 	_, hasBalance := writes.GetBalance(addr)
@@ -115,7 +116,8 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 
@@ -123,6 +125,31 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, MVReadResultDependency, result.Status())
 	require.Equal(t, 0, result.DepIdx())
+}
+
+func TestFinalizedWritesRequiresRules(t *testing.T) {
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetTxContext(1, 0)
+
+	writes, err := ibs.FinalizedWrites(nil)
+	require.Nil(t, writes)
+	require.ErrorContains(t, err, "chain rules")
+}
+
+func TestFinalizedWritesKeepCreatedEmptyWithoutAddressRead(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe1})
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetTxContext(1, 0)
+
+	account := accounts.NewAccount()
+	ibs.recordWriteAddress(addr, &account)
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	_, ok := writes.GetAddress(addr)
+	require.True(t, ok)
 }
 
 func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
@@ -211,7 +238,8 @@ func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{})
+	require.NoError(t, err)
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -225,7 +253,8 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -238,10 +267,11 @@ func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 
 	require.NoError(t, ibs.TouchAccount(params.SystemAddress))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{
+	writes, err := ibs.FinalizedWrites(&chain.Rules{
 		IsSpuriousDragon: true,
 		IsAura:           true,
 	})
+	require.NoError(t, err)
 	_, ok := writes.GetAddress(params.SystemAddress)
 	require.True(t, ok)
 }

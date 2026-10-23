@@ -801,6 +801,20 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 		"burnt contract should be existing balance + FeeBurnt")
 }
 
+func TestCalcFeesZeroBurnClearsEmptyBurntAddress(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	empty := accounts.NewAccount()
+	s.accts[s.burntAddr] = &empty
+	s.feeBurnt = uint256.Int{}
+
+	writes := s.runFinalizeTx(t, nil)
+
+	deleted, ok := writes.GetSelfDestruct(s.burntAddr)
+	require.True(t, ok)
+	require.True(t, deleted.Val)
+}
+
 func TestFinalizeTxSimple_CoinbaseIsBurntContract(t *testing.T) {
 	t.Parallel()
 	s := londonTransferScenario()

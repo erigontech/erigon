@@ -2094,7 +2094,10 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes := ibs.FinalizedWrites(txTask.Rules())
+	writes, err := ibs.FinalizedWrites(txTask.Rules())
+	if err != nil {
+		return nil, state.ReadSet{}, nil, err
+	}
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
@@ -2134,9 +2137,7 @@ func (result *execResult) calcFees(
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
 	burntAddr := result.ExecutionResult.BurntContractAddress
-	// A burnt write can only differ from the pre-state when London adds a
-	// non-zero FeeBurnt, so skip the whole read otherwise.
-	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon && !result.ExecutionResult.FeeBurnt.IsZero()
+	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon
 	coinbaseFee := result.ExecutionResult.FeeTipped
 	burntIsCoinbase := burntAddr == result.Coinbase
 	// Two entries for one account would overwrite each other, so a single entry carries both fees.
@@ -2145,15 +2146,21 @@ func (result *execResult) calcFees(
 		hasBurnt = false
 	}
 	var newBurntBalance uint256.Int
-	var burntAcc *accounts.Account
+	burntAfterExecution := accounts.NewAccount()
 	if hasBurnt {
-		burntAcc, err = vsReader.ReadAccountData(burntAddr)
+		burntAcc, err := vsReader.ReadAccountData(burntAddr)
 		if err != nil {
 			return nil, feeCreditNone, err
 		}
 		if burntAcc != nil {
-			newBurntBalance = burntAcc.Balance
+			burntAfterExecution = *burntAcc
 		}
+		if written, ok := result.TxOut.AccountAfterWrites(burntAddr, burntAfterExecution); ok {
+			burntAfterExecution = written
+		} else {
+			burntAfterExecution = accounts.NewAccount()
+		}
+		newBurntBalance = burntAfterExecution.Balance
 	}
 	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
 	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
@@ -2182,11 +2189,6 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
-	if hasBurnt {
-		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
-			newBurntBalance = bw.Val
-		}
-	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
 	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
@@ -2201,7 +2203,13 @@ func (result *execResult) calcFees(
 	if hasBurnt {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
-	emitBurnt := hasBurnt && newBurntBalance != oldBurntBalance
+	burntAfterFees := burntAfterExecution
+	burntAfterFees.Balance = newBurntBalance
+	burntEmptyRemoval := hasBurnt && state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr)
+	deleteBurnt := burntEmptyRemoval && burntAfterFees.Balance.IsZero() &&
+		burntAfterFees.Nonce == 0 && burntAfterFees.IsEmptyCodeHash() &&
+		!vm.AnyEstimateAccountCell(burntAddr, txIndex)
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || deleteBurnt)
 
 	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
 	// the coinbase must be "touched" so the commitment calculator sees the
@@ -2239,9 +2247,12 @@ func (result *execResult) calcFees(
 	}
 	if emitBurnt {
 		burntEntry = &feeEntry{
-			addr:   burntAddr,
-			acc:    feeAddressAccount(burntAcc, newBurntBalance, 0),
-			reason: tracing.BalanceDecreaseGasBuy,
+			addr:    burntAddr,
+			deleted: deleteBurnt,
+		}
+		if !deleteBurnt {
+			burntEntry.acc = burntAfterFees
+			burntEntry.reason = tracing.BalanceDecreaseGasBuy
 		}
 	}
 	// The credit only moves when a prior tx's writes moved under it, so most
@@ -3524,7 +3535,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				writes := ibs.FinalizedWrites(lastResult.Rules())
+				writes, err := ibs.FinalizedWrites(lastResult.Rules())
+				if err != nil {
+					return nil, fmt.Errorf("[parallel] finalize block writes: %w", err)
+				}
 				if !writes.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, writes)
 					be.versionMap.FlushVersionedWrites(writes, true)

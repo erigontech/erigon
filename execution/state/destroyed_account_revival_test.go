@@ -68,7 +68,8 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, err)
 	require.True(t, destroyed)
 	require.NoError(t, destroyer.FinalizeTx(amsterdamRules, NewNoopWriter()))
-	destroyWrites := destroyer.FinalizedWrites(amsterdamRules)
+	destroyWrites, err := destroyer.FinalizedWrites(amsterdamRules)
+	require.NoError(t, err)
 	t.Cleanup(destroyWrites.ReleaseAndReset)
 	vm.FlushVersionedWrites(destroyWrites, true)
 
@@ -82,7 +83,8 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 	require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
 	require.NoError(t, recreator.FinalizeTx(amsterdamRules, NewNoopWriter()))
-	recreateWrites := recreator.FinalizedWrites(amsterdamRules)
+	recreateWrites, err := recreator.FinalizedWrites(amsterdamRules)
+	require.NoError(t, err)
 	t.Cleanup(recreateWrites.ReleaseAndReset)
 
 	io := NewVersionedIO(3)

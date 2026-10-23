@@ -804,7 +804,10 @@ func (s *simulator) simulateBlock(
 		committedStorageKeys := state.CommittedStorageKeysFn(sharedDomains, tx)
 		emptyRemoval := blockNumber != 0 && s.chainConfig.IsEIP161Enabled(blockNumber)
 		recordPhase = func() error {
-			writes := intraBlockState.FinalizedWrites(rules)
+			writes, err := intraBlockState.FinalizedWrites(rules)
+			if err != nil {
+				return fmt.Errorf("finalize simulated writes: %w", err)
+			}
 			intraBlockState.MergeTxIOInto(balIO, writes)
 			intraBlockState.FlushWritesToVersionMap(writes)
 			normalized, err := writes.Normalize(intraBlockState.VersionMap(), intraBlockState.TxnIndex(), 0, stateReader, committedStorageKeys, emptyRemoval, s.chainConfig.Aura != nil, rules.IsAmsterdam)

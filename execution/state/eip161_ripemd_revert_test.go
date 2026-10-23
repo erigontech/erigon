@@ -64,7 +64,8 @@ func normalizeTouchThenRevert(t *testing.T, addr accounts.Address) bool {
 	require.NoError(t, ibs.AddBalance(addr, uint256.Int{}, 0))
 	ibs.RevertToSnapshot(snap, nil)
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
 	if writes == nil {
 		return false
 	}

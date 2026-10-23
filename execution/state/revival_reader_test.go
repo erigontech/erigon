@@ -352,7 +352,8 @@ func TestSelfdestructWriteSetShape(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, destroyed)
 
-			writes := ibs.FinalizedWrites(&chain.Rules{})
+			writes, err := ibs.FinalizedWrites(&chain.Rules{})
+			require.NoError(t, err)
 			for _, path := range []AccountPath{AddressPath, NoncePath, CodePath, CodeHashPath, CodeSizePath} {
 				require.False(t, writes.Has(WriteHeader{Address: addr, Path: path}), "%s must not survive the destruct", path)
 			}
@@ -602,7 +603,9 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, destroyed)
 
-			vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true)
+			ibsWrites, err := ibs.FinalizedWrites(&chain.Rules{})
+			require.NoError(t, err)
+			vm.FlushVersionedWrites(ibsWrites, true)
 
 			acc := base
 			vm.applySubFieldWrites(addr, 5, &acc)

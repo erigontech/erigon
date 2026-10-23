@@ -1516,7 +1516,9 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibsWrites, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(ibsWrites, true)
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)

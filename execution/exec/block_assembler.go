@@ -170,7 +170,10 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		return err
 	}
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return err
+		}
 		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
 		// first tx observes them across the ResetVersionedIO below.
@@ -223,18 +226,31 @@ func (ba *BlockAssembler) AddTransactions(
 	// SharedDomains become stale when system calls revert storage slots.
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
-	recordTxIO := func() {
-		if ba.HasBAL() {
-			writes := ibs.FinalizedWrites(ba.blockRules)
-			ibs.MergeTxIOInto(ba.balIO, writes)
-			// Publish this tx's writes to the versionMap so the next tx observes them;
-			// ResetVersionedIO below clears the per-tx write set used for BAL recording.
-			ibs.FlushWritesToVersionMap(writes)
+	recordTxIO := func() error {
+		if !ba.HasBAL() && !ibs.IsVersioned() {
+			return nil
 		}
+		if ba.blockRules == nil {
+			blockContext := protocol.NewEVMBlockContext(
+				ba.Header, protocol.GetHashFn(ba.Header, nil), ba.cfg.Engine, accounts.NilAddress, ba.cfg.ChainConfig,
+			)
+			ba.blockRules = blockContext.Rules(ba.cfg.ChainConfig)
+		}
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return err
+		}
+		if ba.HasBAL() {
+			ibs.MergeTxIOInto(ba.balIO, writes)
+		}
+		// Publish this tx's writes to the versionMap so the next tx observes them;
+		// ResetVersionedIO below clears the per-tx write set.
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
+		return nil
 	}
 	clearTxIO := func() {
-		if !ba.HasBAL() {
+		if !ba.HasBAL() && !ibs.IsVersioned() {
 			return
 		}
 		ibs.ResetVersionedIO()
@@ -376,7 +392,9 @@ LOOP:
 		// Start executing the transaction
 		logs, err := commitTx(txn, coinbase, vmConfig, ba.cfg.ChainConfig, ibs, ba.AssembledBlock)
 		if err == nil {
-			recordTxIO()
+			if err := recordTxIO(); err != nil {
+				return nil, false, fmt.Errorf("finalize transaction writes: %w", err)
+			}
 		} else {
 			clearTxIO()
 		}
@@ -423,7 +441,10 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return nil, err
+		}
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish finalize-phase writes to the versionMap, mirroring the init and

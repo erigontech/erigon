@@ -130,7 +130,9 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibsWrites, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(ibsWrites, true)
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)

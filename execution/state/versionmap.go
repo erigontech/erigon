@@ -1543,6 +1543,10 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					if valid == VersionInvalid {
 						invReason = "addr-xval-sd"
 					}
+					if valid == VersionValid && !recursive && !absent && vm.destroyedAndUnrevived(addr, txIndex) {
+						valid = VersionInvalid
+						invReason = "sd-stale"
+					}
 
 					// A prior tx creating, destroying or re-creating this account
 					// can make an AddressPath storage read stale; IncarnationPath
