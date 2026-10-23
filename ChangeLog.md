@@ -3,6 +3,9 @@
 Erigon 3.8.1 **unschedules Glamsterdam on Hoodi** and improves block validation, validator reliability,
 and block production.
 
+Non-archive nodes can upgrade in place from 3.8.0 without a re-sync. Caplin archive operators should
+review the upgrade notes below.
+
 ### Highlight: Glamsterdam on Hoodi postponed
 
 **Hoodi operators must upgrade before 26 October 2026, 17:42:48 UTC.** This release removes the
@@ -23,9 +26,9 @@ instructions as well. See the [Ethereum Foundation announcement](https://blog.et
   the Beacon API, and accepts a full slot's aggregate burst from one peer, avoiding lost committee
   votes. Sync committee subscriptions use the requested indices and survive fork-digest changes
   (#25114, #25250, #25130, #25119) — by @lystopad, @domiwei
-- **Faster head updates at epoch boundaries.** Caplin prepares checkpoint states ahead of time,
-  reducing delays that could make validators miss head and target votes
-  (#25171) — by @awskii
+- **Faster head updates at epoch boundaries.** Caplin prepares checkpoint states ahead of time and
+  reduces epoch-processing work, shortening head-update delays at the first slot of an epoch
+  (#25171, #25170, #25163) — by @awskii, @domiwei
 - **Block-production delays.** `engine_getPayload` stops waiting for the parent block after a head
   change and returns the payload built so far. `engine_newPayload` avoids scanning every header
   snapshot before validating a new block (#25254, #25242) — by @domiwei, @lystopad
@@ -34,14 +37,17 @@ instructions as well. See the [Ethereum Foundation announcement](https://blog.et
   the correct block fee recipient (#25195) — by @domiwei
 - **Data availability after downtime.** Caplin backfills missing custody columns for blocks imported
   during forward sync and preserves its highest advertised custody group count across restarts
-  (#25148, #25196) — by @domiwei
+  (#25148, #25196) — by @lystopad, @domiwei
 - **Blob snapshot protection.** `capcli dump-blobs-snapshots` preserves existing and preverified
   segments by default and no longer replaces valid blob data with empty entries when blob-count
-  records have been pruned (#25174) — by @awskii
+  records have been pruned (#25174) — by @awskii, @lystopad
 - **Peer-traffic resilience.** Caplin enforces consensus-spec payload limits on gossip and peer
   responses. Historical block access list requests have bounded re-execution work and a separate
   serving stream, protecting block-body and receipt responses from expensive replay requests
   (#25119, #25107) — by @domiwei, @yperbasis
+- **Beacon API metadata.** `/eth/v1/node/identity` now returns `seq_number` instead of `seq`,
+  `0x`-prefixed `attnets` and `syncnets`, and `custody_group_count` from Fulu. Update tooling that
+  parses the previous metadata format (#25194) — by @domiwei
 
 ### Caplin archive upgrade notes
 
