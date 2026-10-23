@@ -539,6 +539,12 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 	return bra.bodies.Get(blockHash)
 }
 
+// RecoversSenders reports whether execution recovers the block's senders in its workers;
+// the Execution stage then writes them.
+func RecoversSenders(header *types.Header) bool {
+	return !dbg.IgnoreBAL && header.HasNonEmptyBAL()
+}
+
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
 	header, ok := bra.headers.Get(blockHash)
 	if header == nil || !ok {
@@ -549,7 +555,7 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 		return nil, false
 	}
 	senders, ok := bra.senders.Get(blockHash)
-	if (len(senders) == 0 || !ok) && (dbg.IgnoreBAL || !header.HasNonEmptyBAL()) {
+	if (len(senders) == 0 || !ok) && !RecoversSenders(header) {
 		return nil, false
 	}
 	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)

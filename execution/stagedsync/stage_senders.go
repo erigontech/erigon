@@ -234,7 +234,7 @@ Loop:
 		}
 
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
-		if ok && body != nil && execRecoversSenders(header) {
+		if ok && body != nil && exec.RecoversSenders(header) {
 			continue
 		}
 		if body == nil || !ok {
@@ -421,11 +421,6 @@ func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 	return nil
 }
 
-// execRecoversSenders reports whether execution recovers this block's senders in its workers; the Execution stage then writes them.
-func execRecoversSenders(header *types.Header) bool {
-	return !dbg.IgnoreBAL && header.HasNonEmptyBAL()
-}
-
 func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlockCfg, from, to uint64) error {
 	for blockNum := from; blockNum <= to; blockNum++ {
 		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
@@ -436,7 +431,7 @@ func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlo
 		if err != nil {
 			return err
 		}
-		if header == nil || !execRecoversSenders(header) {
+		if header == nil || !exec.RecoversSenders(header) {
 			continue
 		}
 		has, err := cfg.blockReader.HasSenders(ctx, tx, hash, blockNum)
