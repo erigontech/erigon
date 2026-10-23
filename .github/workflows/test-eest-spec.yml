@@ -17,8 +17,7 @@ permissions:
   contents: read
 
 env:
-  # Re-enable after bogota-devnet-1 support: https://github.com/erigontech/erigon/issues/25241
-  SKIP_DEVNET_SHARDS: 'true'
+  SKIP_DEVNET_SHARDS: 'false'
 
 jobs:
   # Matrix entries (shard / workers / max-allowed-failures) come from
