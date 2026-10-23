@@ -2182,10 +2182,17 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
+	burnBurntFee := false
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 		}
+		// Like the coinbase tip: before EIP-8246 serial credits the burn inside the tx, so
+		// a burnt contract the tx self-destructs loses it.
+		sw, _ := result.TxOut.GetSelfDestruct(burntAddr)
+		_, hasCodeWrite := result.TxOut.GetCodeHash(burntAddr)
+		wasContract := (burntAcc != nil && !burntAcc.IsEmptyCodeHash()) || hasCodeWrite
+		burnBurntFee = !chainRules.IsAmsterdam && sw != nil && sw.Val && wasContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2198,7 +2205,7 @@ func (result *execResult) calcFees(
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
 	oldBurntBalance := newBurntBalance
-	if hasBurnt {
+	if hasBurnt && !burnBurntFee {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 	emitBurnt := hasBurnt && newBurntBalance != oldBurntBalance

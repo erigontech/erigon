@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -83,5 +84,52 @@ func testImportCoinbaseIsBurntContract(t *testing.T, amsterdam, selfdestruct boo
 		b.AddTx(txn)
 	})
 	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), blocks.Blocks))
+}
+
+// Before Cancun a burnt-fee contract that self-destructs loses the burn of the same
+// tx: serial credits it inside the tx, before the destruct takes effect.
+func TestImportBurntContractSelfdestructLosesBurn(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	config := chain.AllProtocolChanges.Copy()
+	config.CancunTime = nil
+	config.PragueTime = nil
+	config.OsakaTime = nil
+	config.AmsterdamTime = nil
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	x := common.Address{0x33}
+	beneficiary := common.Address{0x44}
+	config.BurntContract = map[string]common.Address{"0": x}
+	code := append([]byte{byte(vm.PUSH20)}, beneficiary[:]...)
+	code = append(code, byte(vm.SELFDESTRUCT))
+	genesis := &types.Genesis{
+		Config: config,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			x:      {Balance: big.NewInt(1), Code: code},
+		},
+	}
+
+	dbg.Exec3Parallel = false
+	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	signer := types.LatestSignerForChainID(config.ChainID)
+	blocks, err := gen.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{0x55})
+		gasPrice := new(uint256.Int).Add(b.GetHeader().BaseFee, uint256.NewInt(1_000))
+		for _, to := range []common.Address{x, {0xbe, 0xef}} {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), 100_000, gasPrice, nil), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+
+	dbg.Exec3Parallel = true
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), blocks.Blocks))
 }
