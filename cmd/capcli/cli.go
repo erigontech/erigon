@@ -1189,18 +1189,18 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 
-	freezingCfg := ethconfig.Defaults.Snapshot
-	freezingCfg.ChainName = c.Chain
-	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
-	if err := csn.OpenBeaconBlocks(); err != nil {
+	csn, frozenBlocks, err := openFrozenBeaconBlocks(beaconConfig, dirs, c.Chain)
+	if err != nil {
 		return err
 	}
 	defer csn.Close()
-	frozenBlocks := csn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
 
-	onDisk, pinned, err := frozenBlobSegments(dirs)
+	onDisk, pinned, lockFound, err := frozenBlobSegments(dirs)
 	if err != nil {
 		return err
+	}
+	if !lockFound {
+		log.Warn("Preverified lock not found, so pinned segment versions are not checked", "path", dirs.PreverifiedPath())
 	}
 	starts, err := blobDumpPlan(beaconConfig, c.From, to, frozenBlocks, onDisk, pinned, c.Overwrite)
 	if err != nil {
@@ -1221,6 +1221,17 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func openFrozenBeaconBlocks(beaconConfig *clparams.BeaconChainConfig, dirs datadir.Dirs, chain string) (*freezeblocks.CaplinSnapshots, uint64, error) {
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	if err := csn.OpenBeaconBlocks(); err != nil {
+		return nil, 0, err
+	}
+	frozenBlocks := csn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
+	return csn, frozenBlocks, nil
 }
 
 func dumpBlobSegment(ctx context.Context, db kv.RoDB, blobStorage blob_storage.BlobStorage, start uint64, salt uint32, dirs datadir.Dirs, blobCount freezeblocks.BlobCountBySlotFn) error {
@@ -1262,18 +1273,19 @@ func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to, frozenBloc
 	return starts, nil
 }
 
-func frozenBlobSegments(dirs datadir.Dirs) (onDisk, pinned []snaptype.FileInfo, err error) {
+func frozenBlobSegments(dirs datadir.Dirs) (onDisk, pinned []snaptype.FileInfo, lockFound bool, err error) {
 	onDisk, err = snaptype.Segments(dirs.Snap)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	lock, err := os.ReadFile(dirs.PreverifiedPath())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
+	lockFound = err == nil
 	var hashes map[string]string
 	if err := toml.Unmarshal(lock, &hashes); err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", dirs.PreverifiedPath(), err)
+		return nil, nil, false, fmt.Errorf("%s: %w", dirs.PreverifiedPath(), err)
 	}
 	for name := range hashes {
 		if f, _, ok := snaptype.ParseFileName(dirs.Snap, name); ok {
@@ -1283,7 +1295,7 @@ func frozenBlobSegments(dirs datadir.Dirs) (onDisk, pinned []snaptype.FileInfo, 
 	notBlobSegment := func(f snaptype.FileInfo) bool {
 		return f.Ext != ".seg" || f.Type == nil || f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars
 	}
-	return slices.DeleteFunc(onDisk, notBlobSegment), slices.DeleteFunc(pinned, notBlobSegment), nil
+	return slices.DeleteFunc(onDisk, notBlobSegment), slices.DeleteFunc(pinned, notBlobSegment), lockFound, nil
 }
 
 type CheckBlobsSnapshots struct {
