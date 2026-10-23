@@ -972,6 +972,40 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 	return findDoneSelfDestructLocked(e, lo, hi, target)
 }
 
+// selfDestructInRange is FindDoneSelfDestructInRange but also counts a Validated
+// (pre-seal) destruct as authoritative, matching accountLifecycleLocked. wipedCommitted
+// uses it so a code / code-size read is invalidated by an in-flight destruct that wiped
+// it before this tx — a Done-only scan misses the pre-seal destruct and the stale read
+// commits. Only the validator's wiped-code check needs this wider authority.
+func (vm *VersionMap) selfDestructInRange(addr accounts.Address, lo, hi int, target bool) (Version, bool) {
+	if vm == nil || hi <= lo {
+		return Version{}, false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return Version{}, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return Version{}, false
+	}
+	var ver Version
+	found := false
+	e.SelfDestruct.Descend(hi-1, func(k int, v *WriteCell[bool]) bool {
+		if k < lo {
+			return false
+		}
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value == target {
+			ver = Version{TxIndex: k, Incarnation: v.incarnation}
+			found = true
+			return false
+		}
+		return true
+	})
+	return ver, found
+}
+
 // findDoneSelfDestructLocked is the destruct scan every consumer shares, for
 // callers already holding e.mu. Estimate cells do not count: a verdict drawn from
 // one is published before the round that retracts it, and the reconstruction
@@ -1863,8 +1897,8 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// A balance-only revival writes no code cell for a committed code read to
 	// version-mismatch against, but the destruct below it wiped the code.
 	wipedCommitted := func(addr accounts.Address, hdr ReadHeader) VersionValidity {
-		if hdr.Source == StorageRead {
-			if _, ok := vm.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
+		if hdr.Source == StorageRead || hdr.Source == MapRead {
+			if _, ok := vm.selfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
 				return VersionInvalid
 			}
 		}
