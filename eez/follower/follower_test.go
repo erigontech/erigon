@@ -19,6 +19,7 @@ package follower_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -335,6 +336,45 @@ func TestWrongL1(t *testing.T) {
 	require.NoError(t, err)
 	n := newNode(t, other)
 	require.ErrorIs(t, n.follower.Boot(t.Context()), follower.ErrL1ChainID)
+}
+
+// downReader fails every read until fails reads have failed, as an L1 node
+// that is not up yet.
+type downReader struct {
+	l1.ChainReader
+	mu    sync.Mutex
+	fails int
+}
+
+func (r *downReader) ChainID(ctx context.Context) (uint64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fails > 0 {
+		r.fails--
+		return 0, errors.New("connection refused")
+	}
+	return r.ChainReader.ChainID(ctx)
+}
+
+// TestBootRetries: boot outlasts an unreachable L1 unless BootAttempts
+// bounds it.
+func TestBootRetries(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	c.Post(derivertest.Posting{Batch: first})
+
+	n := newNode(t, &downReader{ChainReader: c.L1, fails: testConfig.BootAttempts})
+	require.ErrorContains(t, n.follower.Boot(t.Context()), "connection refused")
+
+	_, chain := derivertest.NewL2(t)
+	cfg := testConfig
+	cfg.Dir, cfg.BootAttempts = t.TempDir(), 0
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	f, err := follower.New(&downReader{ChainReader: c.L1, fails: 10}, chain, derivertest.Config(), cfg, logger)
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	require.Equal(t, uint64(1), f.Status().Cursor)
 }
 
 // TestService runs the follower as a node service over a recording of L1,

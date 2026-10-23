@@ -53,7 +53,8 @@ type Config struct {
 	// Retry and MaxRetry bound the pause before retrying a failed step,
 	// which doubles from Retry up to MaxRetry.
 	Retry, MaxRetry time.Duration
-	// BootAttempts is how many consecutive failures boot tolerates.
+	// BootAttempts bounds the consecutive failures boot tolerates; zero
+	// retries until a failure halts or ctx ends.
 	BootAttempts int
 	// Sequencer, when set, supplies the unsafe head: its latest block,
 	// read every SequencerPoll, while it descends from the safe block.
@@ -68,7 +69,6 @@ var DefaultConfig = Config{
 	ReorgDepth:    l1.DefaultReorgDepth,
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
-	BootAttempts:  32,
 	SequencerPoll: time.Second,
 }
 
@@ -185,7 +185,7 @@ func (f *Follower) Deriver() *deriver.Deriver { return f.deriver }
 
 // Run boots and follows L1 until ctx ends or the follower must halt: on a
 // divergence from canonical L1, an L1 reorg it cannot follow, or a boot
-// that keeps failing.
+// that exhausts BootAttempts.
 func (f *Follower) Run(ctx context.Context) error {
 	if err := f.Boot(ctx); err != nil {
 		return err
@@ -249,7 +249,7 @@ func (f *Follower) Boot(ctx context.Context) error {
 	pause := f.cfg.Retry
 	for attempt := 1; ; attempt++ {
 		err := f.recover(ctx, f.boot(ctx))
-		if err == nil || halts(err) || attempt >= f.cfg.BootAttempts {
+		if err == nil || halts(err) || (f.cfg.BootAttempts > 0 && attempt >= f.cfg.BootAttempts) {
 			return err
 		}
 		f.logger.Warn("[eez] boot catch-up failed, retrying", "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause, "err", err)
