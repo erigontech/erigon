@@ -586,13 +586,11 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modexpMathBigFaster(modLen, exp):
+	default:
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
 		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
-	default:
-		evmone.ModExp(result, base, exp, mod)
 	}
 	return result, nil
 }
