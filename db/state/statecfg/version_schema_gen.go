@@ -36,7 +36,7 @@ func InitSchemasGen() {
 	Schema.RCacheDomain.FileVersion.DataKV = version.Versions{version.Version{3, 1}, version.Version{1, 0}}
 	Schema.RCacheDomain.FileVersion.AccessorKVI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.FileVersion.DataV = version.Versions{version.Version{3, 2}, version.Version{1, 0}}
-	Schema.RCacheDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.RCacheDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
