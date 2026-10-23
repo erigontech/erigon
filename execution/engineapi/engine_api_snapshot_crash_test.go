@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -248,10 +249,19 @@ func snapshotCrashTableCountsTx(tx kv.Tx, stepSize uint64) (map[string]uint64, e
 			var firstStep bool
 			switch table {
 			case kv.TblCodeVals:
+				if len(key) < 8 {
+					return fmt.Errorf("%s: key %x has length %d, want at least 8", table, key, len(key))
+				}
 				firstStep = ^binary.BigEndian.Uint64(key[len(key)-8:]) == 0
 			case kv.TblAccountVals, kv.TblStorageVals:
+				if len(value) < 8 {
+					return fmt.Errorf("%s: value for key %x has length %d, want at least 8", table, key, len(value))
+				}
 				firstStep = ^binary.BigEndian.Uint64(value[:8]) == 0
 			default:
+				if len(key) < 8 {
+					return fmt.Errorf("%s: key %x has length %d, want at least 8", table, key, len(key))
+				}
 				firstStep = binary.BigEndian.Uint64(key) < stepSize
 			}
 			if firstStep {
@@ -263,6 +273,21 @@ func snapshotCrashTableCountsTx(tx kv.Tx, stepSize uint64) (map[string]uint64, e
 		}
 	}
 	return counts, nil
+}
+
+func TestSnapshotCrashTableCountsRejectMalformedRecords(t *testing.T) {
+	for _, table := range []string{kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys} {
+		t.Run(table, func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			require.NoError(t, tx.Put(table, []byte{1}, []byte{1}))
+			var err error
+			require.NotPanics(t, func() {
+				_, err = snapshotCrashTableCountsTx(tx, 32)
+			})
+			require.ErrorContains(t, err, table)
+			require.ErrorContains(t, err, "length 1, want at least 8")
+		})
+	}
 }
 
 func assertSnapshotCrashState(t *testing.T, db kv.TemporalRoDB, want crashRecoveryState) {
@@ -287,7 +312,8 @@ func runSnapshotCrashChild(t *testing.T) {
 	clientTimeout := time.Until(request.Deadline)
 	require.Positive(t, clientTimeout)
 	buildStarted, buildAllowed, crashReached := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	observerError := make(chan error, 1)
+	observerFailure, failObserver := context.WithCancelCause(t.Context())
+	defer failObserver(nil)
 	var firstBuild, firstCrash sync.Once
 	var pruneArmed, pruneProgress atomic.Bool
 	var filesDone <-chan struct{}
@@ -314,7 +340,7 @@ func runSnapshotCrashChild(t *testing.T) {
 			if point == state.MaintenancePruneReady {
 				counts, err := snapshotCrashTableCountsTx(event.PruneTx, stepSize)
 				if err != nil {
-					observerError <- err
+					failObserver(err)
 					return
 				}
 				pruneProgress.Store(snapshotPruneProgress(beforePrune, counts))
@@ -328,7 +354,7 @@ func runSnapshotCrashChild(t *testing.T) {
 		}
 		firstCrash.Do(func() {
 			if err := observerCtx.Err(); err != nil {
-				observerError <- fmt.Errorf("maintenance boundary %d has a cancelled context: %w", point, err)
+				failObserver(fmt.Errorf("maintenance boundary %d has a cancelled context: %w", point, err))
 				return
 			}
 			if point == state.MaintenanceFilesBuilt || point == state.MaintenanceFilesPublished {
@@ -343,7 +369,7 @@ func runSnapshotCrashChild(t *testing.T) {
 					return nil
 				})
 				if err != nil {
-					observerError <- err
+					failObserver(err)
 					return
 				}
 			}
@@ -409,8 +435,8 @@ func runSnapshotCrashChild(t *testing.T) {
 			go func() { pruneError <- continueSnapshotPruning(ctx, eat.ExecutionModule.Prune) }()
 		case err := <-pruneError:
 			t.Fatalf("pruning ended before the crash boundary: %v", err)
-		case err := <-observerError:
-			t.Fatalf("maintenance observer: %v", err)
+		case <-observerFailure.Done():
+			t.Fatalf("maintenance observer: %v", context.Cause(observerFailure))
 		case <-ctx.Done():
 			t.Fatalf("snapshot crash boundary %d was not reached: %v", request.Boundary, ctx.Err())
 		}

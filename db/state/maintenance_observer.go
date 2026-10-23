@@ -27,16 +27,17 @@ type MaintenancePoint uint8
 const (
 	// MaintenanceBuildStarted marks an eligible collation attempt.
 	MaintenanceBuildStarted MaintenancePoint = iota
-	// MaintenanceFilesBuilt means all builders for a step succeeded, before
-	// integration into in-process read views. Files already exist on disk and
-	// can be discovered after a restart.
+	// MaintenanceFilesBuilt follows a successful step build, before integration
+	// into in-process read views. Any new files are already discoverable on disk.
+	// A step already covered by files may need no new files.
 	MaintenanceFilesBuilt
-	// MaintenanceFilesPublished follows integration of that step's files into
-	// new in-process read views.
+	// MaintenanceFilesPublished follows integration into new in-process read
+	// views. It also fires when the step was already covered by files.
 	MaintenanceFilesPublished
 	// MaintenancePruneReady means CollateAndPrune has run its prune callback, before committing its transaction.
 	MaintenancePruneReady
-	// MaintenancePruneCommitted means that transaction committed, before starting another file build.
+	// MaintenancePruneCommitted follows that pass's commit, before it tries to
+	// start file building. Other jobs may already be building or merging.
 	MaintenancePruneCommitted
 )
 
