@@ -101,10 +101,11 @@ jobs:
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 0
               commitment_mode: parallel
+            # The two test-dir classes, [aco] and [^aco], cover every test exactly once.
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: glamsterdam
+              sim-limit: ".*tests/[aco].*fork_(Amsterdam|BPO2ToAmsterdam)"
+              shard: glamsterdam-aco
               fixtures-tarball: eest_stable
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
@@ -112,8 +113,26 @@ jobs:
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: glamsterdam
+              sim-limit: ".*tests/[aco].*fork_(Amsterdam|BPO2ToAmsterdam)"
+              shard: glamsterdam-aco
+              fixtures-tarball: eest_stable
+              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
+              max-failures: 0
+              commitment_mode: parallel
+            - sim: consume-enginex
+              runner: ubuntu-latest
+              sim-limit: ".*tests/[^aco].*fork_(Amsterdam|BPO2ToAmsterdam)"
+              shard: glamsterdam-rest
+              fixtures-tarball: eest_stable
+              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
+              max-failures: 0
+              commitment_mode: serial
+            - sim: consume-enginex
+              runner: ubuntu-latest
+              sim-limit: ".*tests/[^aco].*fork_(Amsterdam|BPO2ToAmsterdam)"
+              shard: glamsterdam-rest
               fixtures-tarball: eest_stable
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
