@@ -109,14 +109,23 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 		}
 	}
 	slices.Sort(candidates)
+	end = 0
 	for _, c := range slices.Backward(candidates) {
 		if !slices.ContainsFunc(lists, func(files visibleFiles) bool {
 			return slices.ContainsFunc(files, func(f visibleFile) bool { return f.startTxNum < c && c < f.endTxNum })
 		}) {
-			return c, nil
+			end = c
+			break
 		}
 	}
-	return 0, nil
+	for _, files := range lists {
+		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
+			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
+				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
+			}
+		}
+	}
+	return end, nil
 }
 
 func stepAlignedMergeRange(files visibleFiles, stepSize, end uint64) MergeRange {
@@ -157,7 +166,7 @@ func (at *AggregatorRoTx) stepAlignedMergeRanges(stepSize, end uint64) (*Ranges,
 		}
 		r.domain[id].history = HistoryRanges{history: history, index: index}
 	}
-	if com := r.domain[kv.CommitmentDomain].values; com.needMerge && (at.a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced()) {
+	if com := r.domain[kv.CommitmentDomain].values; com.needMerge {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 			if v := r.domain[d].values; v.needMerge && !v.Equal(&com) {
 				return nil, fmt.Errorf("commitment merge %d-%d needs %s merged over the same range, not %d-%d", com.from, com.to, d, v.from, v.to)

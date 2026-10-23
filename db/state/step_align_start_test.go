@@ -17,10 +17,14 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -38,4 +42,43 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	at.Close()
 	_, err := agg.StepAlignedEnd(100)
 	require.ErrorContains(t, err, "starts at txNum 40")
+}
+
+func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
+	generateAccountsFile(t, dirs, split)
+	generateStorageFile(t, dirs, split)
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
+	require.NoError(t, agg.OpenFolder(db))
+	_, err := agg.StepAlignedEnd(30)
+	require.ErrorContains(t, err, "no visible file for txNum 40-80")
+}
+
+func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
+	generateAccountsFile(t, dirs, split)
+	generateStorageFile(t, dirs, split)
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
+	agg.DisableInterDomainDependencies()
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	require.NoError(t, agg.OpenFolder(db))
+	_, err := agg.AlignFilesToStepSize(t.Context(), 30)
+	require.ErrorContains(t, err, "commitment merge 0-120 needs accounts merged over the same range")
+}
+
+func generatePlainCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateCommitmentFile(t, dirs, ranges)
+	paths, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v1.0-commitment.*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths)
+	for _, path := range paths {
+		require.NoError(t, os.Rename(path, filepath.Join(dirs.SnapDomain, "v2.2-"+strings.TrimPrefix(filepath.Base(path), "v1.0-"))))
+	}
 }
