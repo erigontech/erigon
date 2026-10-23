@@ -19,9 +19,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -86,13 +84,14 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 	defer collector.Close()
 	emitter := pbt.NewRebuildFeedOpEmitter()
 	var leafCollector [8 + eip8297.ValueLength]byte
-	progress := newPbinStreamProgress("PBT leaf stream progress", "leaf collection", "leaf load")
+	sourceProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "source leaf walk", TempDir: at.Dirs().Tmp})
+	defer sourceProgress.Done()
 	for accountsCursor.ok || codeCursor.ok || storageCursor.ok {
 		address, err := pbinNextAddress(accountsCursor, codeCursor, storageCursor)
 		if err != nil {
 			return err
 		}
-		progress.account(address)
+		sourceProgress.Add(1)
 		if accountsCursor.ok && bytes.Equal(accountsCursor.key, address) {
 			var account accounts.Account
 			if err := accounts.DeserialiseV3(&account, accountsCursor.value); err != nil {
@@ -156,55 +155,8 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			}
 		}
 	}
-	return pbinLoadSortedLeaves(collector, emit, &progress)
-}
-
-type pbinStreamProgress struct {
-	next         time.Time
-	accounts     uint64
-	leaves       uint64
-	message      string
-	accountPhase string
-	leafPhase    string
-}
-
-func newPbinStreamProgress(message, accountPhase, leafPhase string) pbinStreamProgress {
-	return pbinStreamProgress{
-		next:         time.Now().Add(30 * time.Second),
-		message:      message,
-		accountPhase: accountPhase,
-		leafPhase:    leafPhase,
-	}
-}
-
-func (p *pbinStreamProgress) account(key []byte) {
-	p.accounts++
-	if p.accounts&4095 != 0 {
-		return
-	}
-	p.report(p.accountPhase, key)
-}
-
-func (p *pbinStreamProgress) leaf(key []byte) {
-	p.leaves++
-	if p.leaves&4095 != 0 {
-		return
-	}
-	p.report(p.leafPhase, key)
-}
-
-func (p *pbinStreamProgress) report(phase string, key []byte) {
-	now := time.Now()
-	if now.Before(p.next) {
-		return
-	}
-	p.next = now.Add(30 * time.Second)
-	prefix := key[:min(len(key), 8)]
-	if p.accountPhase == "" {
-		log.Root().Info(p.message, "phase", phase, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
-		return
-	}
-	log.Root().Info(p.message, "phase", phase, "accounts", p.accounts, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
+	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: collector.Collected(), TempDir: at.Dirs().Tmp})
+	return pbinLoadSortedLeaves(collector, emit, leafProgress)
 }
 
 func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, filesOnly bool) (pbinLatestCursor, error) {
@@ -275,7 +227,24 @@ func pbinCollectOp(collector *etl.Collector, scratch *[8 + eip8297.ValueLength]b
 	return collector.Collect(op.Key, scratch[:])
 }
 
-func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress *pbinStreamProgress) error {
+type pbinStreamProgress struct {
+	progress *PBTProgress
+}
+
+func (p *pbinStreamProgress) Add(n uint64) {
+	if p.progress == nil {
+		p.progress = NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load"})
+	}
+	p.progress.Add(n)
+}
+
+func (p *pbinStreamProgress) Done() {
+	if p.progress != nil {
+		p.progress.Done()
+	}
+}
+
+func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
 	var previousKey, previousValue []byte
 	var previousStamp uint64
 	flush := func() error {
@@ -295,12 +264,11 @@ func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, p
 		if err := flush(); err != nil {
 			return err
 		}
-		progress.leaf(key)
 		previousKey = bytes.Clone(key)
 		previousValue = bytes.Clone(value[8:])
 		previousStamp = binary.BigEndian.Uint64(value)
 		return nil
-	}, etl.TransformArgs{})
+	}, etl.TransformArgs{Progress: progress})
 	if err != nil {
 		return err
 	}

@@ -403,7 +403,14 @@ func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbst
 		return common.Hash{}, err
 	}
 	defer roTx.Rollback()
-	return dbstate.PBinStateRoot(at, roTx, false, eip8297.SelectedHash())
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "attach node root verify", TempDir: dirs.Tmp})
+	defer progress.Done()
+	return dbstate.PBinRootFromStream(eip8297.SelectedHash(), func(emit func(dbstate.PBinLeaf) error) error {
+		return dbstate.ForEachPBinLeaf(at, roTx, false, func(leaf dbstate.PBinLeaf) error {
+			progress.Add(1)
+			return emit(leaf)
+		})
+	})
 }
 
 func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, common.Hash, bool, bool, uint64, error) {
@@ -701,6 +708,8 @@ func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs dat
 }
 
 func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "attach published bin verify", Total: 1})
+	defer progress.Done()
 	root, err := verifyPBTRowsInScratchDB(ctx, publishedDirs, settings, kv.CommitmentBinDomain, point, "commitment attach-pbt: verify published binary rows", logger)
 	if err != nil {
 		return err
@@ -708,12 +717,16 @@ func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs
 	if root != wantRoot {
 		return fmt.Errorf("commitment attach-pbt: published binary rows root %s differs from published state root %s", root, wantRoot)
 	}
+	progress.Add(1)
 	return nil
 }
 
 func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Phase: "attach leaf stamps verify"})
+	defer progress.Done()
 	return dbstate.PBinRootFromStream(eip8297.SelectedHash(), func(emit func(dbstate.PBinLeaf) error) error {
 		return forEach(func(leaf dbstate.PBinLeaf) error {
+			progress.Add(1)
 			if leaf.Stamp > txNum {
 				return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
 			}
@@ -1006,6 +1019,14 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 		return err
 	}
 	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
+	var adoptable uint64
+	for _, file := range publishedFiles {
+		if file.from*stepSize <= endTxNum && pbtAttachAdoptsFile(file) {
+			adoptable++
+		}
+	}
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Phase: "attach adopt", Total: adoptable, TempDir: nodeDirs.Tmp})
+	defer progress.Done()
 	for _, file := range publishedFiles {
 		if file.from*stepSize > endTxNum || !pbtAttachAdoptsFile(file) {
 			continue
@@ -1024,6 +1045,7 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 		if err := syncPBTFileSidecar(file.path, dst); err != nil {
 			return err
 		}
+		progress.Add(1)
 		touched[filepath.Dir(dst)] = struct{}{}
 	}
 	if err := fsyncPBTDirs(touched); err != nil {

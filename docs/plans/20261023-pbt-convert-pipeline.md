@@ -216,15 +216,16 @@ flowchart LR
 
 ### Task 2: Progress in the log for every phase
 **Files:**
-- Modify: `db/etl/collector.go`, `db/state/pbt_leaf_stream.go`, `db/state/squeeze.go`, `db/state/pbt_range_writer.go`,
-  `db/state/pbt_convert.go`, `cmd/integration/commands/commitment_convert_pbt.go`,
-  `cmd/integration/commands/commitment_attach_pbt.go`
-- Create: `db/state/pbt_progress_test.go`
+- Modify: `db/etl/collector.go`, `db/etl/etl.go`, `db/state/pbt_leaf_stream.go`, `db/state/squeeze.go`,
+  `db/state/pbt_range_writer.go`, `db/state/pbt_convert.go`, `cmd/integration/commands/commitment_convert_pbt.go`,
+  `cmd/integration/commands/commitment_attach_pbt.go`, `cmd/integration/commands/commitment_attach_pbt_test.go`
+- Create: `db/state/pbt_progress.go`, `db/state/pbt_progress_rss_linux.go`, `db/state/pbt_progress_rss_darwin.go`,
+  `db/state/pbt_progress_rss_other.go`, `db/state/pbt_progress_test.go`
 
-- [ ] one progress helper shared by all phases: interval, done/total, rate, ETA, memory and temp.
-- [ ] wire it into the ETL merge (via `TransformArgs`), the partition-file write, the fold, each range's file stages,
+- [x] one progress helper shared by all phases: interval, done/total, rate, ETA, memory and temp.
+- [x] wire it into the ETL merge (via `TransformArgs`), the partition-file write, the fold, each range's file stages,
       every verify pass, and attach.
-- [ ] log-capture test with a short interval: every phase emits a line.
+- [x] log-capture test with a short interval: every phase emits a line.
 - [ ] run the gate — must pass before Task 3.
 
 ### Task 3: Background ETL merge

@@ -342,6 +342,8 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		seen    bool
 		state   []byte
 	)
+	foldProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT fold progress", Phase: "fold batches", TempDir: w.aggregator.Dirs().Tmp})
+	defer foldProgress.Done()
 	onRow := func(key, data, _ []byte) error {
 		if commitment.IsCommitmentStateKey(key) {
 			state = bytes.Clone(data)
@@ -358,6 +360,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return w.ranges[rangeIndex].collector.Collect(key, data)
 	}
 	visit := func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error {
+		foldProgress.Add(1)
 		seen = true
 		for i, op := range batch {
 			if observeErr := tracker.observe(op.Key, stamps[i]); observeErr != nil {
@@ -394,9 +397,10 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		},
 	}
 	stream := func(emit func(pbt.Op, uint64) error) error {
-		progress := newPbinStreamProgress("PBT range writer progress", "", "range writer")
+		progress := NewPBTProgress(PBTProgressConfig{Message: "PBT range writer progress", Phase: "range leaf stream", TempDir: w.aggregator.Dirs().Tmp})
+		defer progress.Done()
 		return leaves(func(leaf PBinLeaf) error {
-			progress.leaf(leaf.Key)
+			progress.Add(1)
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}
@@ -485,19 +489,20 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 				return collectErr
 			}
 		}
+		rangeProgress := newPbtRangeProgress(w.aggregator.Dirs().Tmp, fmt.Sprintf("range %d-%d", stepFrom, stepTo))
 		err = w.ranges[i].collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			if _, writeErr := writer.Write(key); writeErr != nil {
 				return writeErr
 			}
 			_, valueErr := writer.Write(value)
 			return valueErr
-		}, etl.TransformArgs{})
+		}, etl.TransformArgs{Progress: rangeProgress.stage(".kv", w.ranges[i].collector.Collected())})
 		if err != nil {
 			valuesComp.Close()
 			return err
 		}
 		collation.valuesCount = valuesComp.Count() / 2
-		static, err := domain.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), "")
+		static, err := domain.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), "", rangeProgress)
 		if err != nil {
 			return err
 		}

@@ -313,7 +313,7 @@ func convertCommitmentFileV3(
 	legacyAccessors := d.Accessors
 	d.Accessors = statecfg.CommitmentV3Accessors
 	closeCollation = false
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), dstDir)
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), dstDir, nil)
 	d.Accessors = legacyAccessors
 	if err != nil {
 		return 0, ki, fmt.Errorf("convertCommitmentFileV3 %q: build: %w", file.Fullpath(), err)

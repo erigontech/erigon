@@ -99,6 +99,7 @@ type Collector struct {
 
 	allocator *Allocator
 	fill      int
+	collected atomic.Uint64
 }
 
 // NewCollectorWithAllocator builds a collector that draws its buffer from the
@@ -127,6 +128,7 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if len(v) > MaxValLen {
 		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
 	}
+	c.collected.Add(1)
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
@@ -139,6 +141,10 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 		return nil
 	}
 	return c.flushBuffer(false)
+}
+
+func (c *Collector) Collected() uint64 {
+	return c.collected.Load()
 }
 
 // Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
@@ -352,6 +358,7 @@ func (c *Collector) Close() {
 		c.allocator.rememberFill(c.logPrefix, c.fill)
 	}
 	c.fill = 0
+	c.collected.Store(0)
 	c.allFlushed = false
 }
 
@@ -363,6 +370,9 @@ func (c *Collector) Close() {
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
 func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
+	if args.Progress != nil {
+		defer args.Progress.Done()
+	}
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -394,6 +404,9 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 
 		element := heapPop(h)
+		if args.Progress != nil {
+			args.Progress.Add(1)
+		}
 		provider := providers[element.TimeIdx]
 
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear

@@ -520,7 +520,14 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	gotRoot, err := dbstate.PBinStateRoot(at, nil, true, eip8297.HashBytes)
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output standalone verify", TempDir: chaindataDir})
+	defer progress.Done()
+	gotRoot, err := dbstate.PBinRootFromStream(eip8297.HashBytes, func(emit func(dbstate.PBinLeaf) error) error {
+		return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+			progress.Add(1)
+			return emit(leaf)
+		})
+	})
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: standalone output leaves: %w", err)
 	}
@@ -564,7 +571,10 @@ func verifyPBTRowsInScratchDB(ctx context.Context, dirs datadir.Dirs, settings *
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	at := agg.BeginFilesRo()
 	defer at.Close()
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Phase: "source end verify", TempDir: agg.Dirs().Tmp})
+	defer progress.Done()
 	return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		progress.Add(1)
 		if leaf.Stamp > endTxNum {
 			return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum %d, after conversion txNum %d; wait for the next step", leaf.Stamp, endTxNum)
 		}

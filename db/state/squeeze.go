@@ -1433,6 +1433,9 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 	var lengthBuf [4]byte
 	var partitions []pbinPartitionRange
 	var offset int64
+	mergeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "rebuild op merge", Total: collector.Collected(), TempDir: tmpDir})
+	writeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "pbin-ops file write", Total: collector.Collected(), TempDir: tmpDir})
+	defer writeProgress.Done()
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if bytes.Equal(previousOpKey, key) {
 			if !bytes.Equal(previousOpValue, value) {
@@ -1442,6 +1445,7 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		}
 		previousOpKey = bytes.Clone(key)
 		previousOpValue = bytes.Clone(value)
+		writeProgress.Add(1)
 		if partition := pbinPartitionOf(key); len(partitions) == 0 || partitions[len(partitions)-1].partition != partition {
 			partitions = append(partitions, pbinPartitionRange{partition: partition, offset: offset})
 		}
@@ -1452,12 +1456,13 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		if _, err := sortedWriter.Write(value); err != nil {
 			return err
 		}
+		writeProgress.Add(1)
 		size := int64(len(lengthBuf) + len(value))
 		offset += size
 		partitions[len(partitions)-1].size += size
 		partitions[len(partitions)-1].count++
 		return nil
-	}, etl.TransformArgs{}); err != nil {
+	}, etl.TransformArgs{Progress: mergeProgress}); err != nil {
 		return err
 	}
 	if err := sortedWriter.Flush(); err != nil {

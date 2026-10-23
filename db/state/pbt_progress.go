@@ -1,0 +1,162 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package state
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
+)
+
+var PBTProgressInterval = 30 * time.Second
+
+type PBTProgressConfig struct {
+	Logger   log.Logger
+	Message  string
+	Phase    string
+	Total    uint64
+	TempDir  string
+	Interval time.Duration
+}
+
+type PBTProgress struct {
+	logger   log.Logger
+	message  string
+	phase    string
+	total    uint64
+	tempDir  string
+	interval time.Duration
+	started  time.Time
+	next     time.Time
+	done     atomic.Uint64
+	mu       sync.Mutex
+}
+
+type pbtRangeProgress struct {
+	tempDir string
+	prefix  string
+}
+
+func newPbtRangeProgress(tempDir, prefix string) *pbtRangeProgress {
+	return &pbtRangeProgress{tempDir: tempDir, prefix: prefix}
+}
+
+func (p *pbtRangeProgress) stage(suffix string, total uint64) *PBTProgress {
+	return NewPBTProgress(PBTProgressConfig{
+		Message: "PBT range writer progress",
+		Phase:   p.prefix + " " + suffix,
+		Total:   total,
+		TempDir: p.tempDir,
+	})
+}
+
+func NewPBTProgress(config PBTProgressConfig) *PBTProgress {
+	if config.Logger == nil {
+		config.Logger = log.Root()
+	}
+	if config.Message == "" {
+		config.Message = "PBT progress"
+	}
+	if config.Interval <= 0 {
+		config.Interval = PBTProgressInterval
+	}
+	if config.Interval <= 0 {
+		config.Interval = 30 * time.Second
+	}
+	now := time.Now()
+	return &PBTProgress{
+		logger:   config.Logger,
+		message:  config.Message,
+		phase:    config.Phase,
+		total:    config.Total,
+		tempDir:  config.TempDir,
+		interval: config.Interval,
+		started:  now,
+		next:     now.Add(config.Interval),
+	}
+}
+
+func (p *PBTProgress) Add(n uint64) {
+	done := p.done.Add(n)
+	now := time.Now()
+	p.mu.Lock()
+	if now.Before(p.next) {
+		p.mu.Unlock()
+		return
+	}
+	p.next = now.Add(p.interval)
+	p.mu.Unlock()
+	p.log(done)
+}
+
+func (p *PBTProgress) Done() {
+	p.log(p.done.Load())
+}
+
+func (p *PBTProgress) log(done uint64) {
+	elapsed := time.Since(p.started).Seconds()
+	if elapsed <= 0 {
+		elapsed = 1e-9
+	}
+	ctx := []any{
+		"phase", p.phase,
+		"done", done,
+		"rate", float64(done) / elapsed,
+		"rss_anon", pbtRSSAnon(),
+		"go_heap", pbtHeapBytes(),
+	}
+	if p.total > 0 {
+		eta := float64(0)
+		if done < p.total && done > 0 {
+			eta = elapsed * float64(p.total-done) / float64(done)
+		}
+		ctx = append(ctx, "total", p.total, "eta", eta)
+	}
+	if p.tempDir != "" {
+		ctx = append(ctx, "temp_bytes", pbtDirSize(p.tempDir))
+	}
+	p.logger.Info(p.message, ctx...)
+}
+
+func pbtHeapBytes() uint64 {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
+}
+
+func pbtDirSize(root string) uint64 {
+	var total uint64
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, statErr := entry.Info()
+		if statErr == nil {
+			total += uint64(info.Size())
+		}
+		return nil
+	})
+	return total
+}

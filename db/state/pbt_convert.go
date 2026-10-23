@@ -18,10 +18,8 @@ package state
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -127,6 +125,8 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	cfg := pbinConversionTrieConfig()
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
+	progress := NewPBTProgress(PBTProgressConfig{Message: "PBT verification progress", Phase: "domain root verify " + domain.String(), TempDir: aggregator.Dirs().Tmp})
+	defer progress.Done()
 	if len(at.Files(domain)) == 0 {
 		return eip8297.EmptyTreeHash, nil
 	}
@@ -149,20 +149,7 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 		return common.Hash{}, fmt.Errorf("pbin verification: trie does not support verification")
 	}
 	if progressTrie, ok := trie.(interface{ SetVerifyProgress(func([]byte)) }); ok {
-		var checked uint64
-		nextProgress := time.Now()
-		progressTrie.SetVerifyProgress(func(key []byte) {
-			checked++
-			if checked&1023 != 0 {
-				return
-			}
-			now := time.Now()
-			if now.Before(nextProgress) {
-				return
-			}
-			nextProgress = now.Add(30 * time.Second)
-			log.Root().Info("PBT verification progress", "phase", "pbt verify", "domain", domain.String(), "records", checked, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
-		})
+		progressTrie.SetVerifyProgress(func([]byte) { progress.Add(1) })
 		defer progressTrie.SetVerifyProgress(nil)
 	}
 	factory, release := commitmentCtx.VerificationContextFactory(tx)

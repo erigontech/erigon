@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -25,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -257,6 +259,54 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	genesisDB.Close()
 	root, _ := reopenBinSource(t, source.DataDir, source.Chaindata)
 	require.Equal(t, wantRoot[:], root)
+}
+
+func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	previousHandler := log.Root().GetHandler()
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+	previousInterval := state.PBTProgressInterval
+	state.PBTProgressInterval = time.Millisecond
+	t.Cleanup(func() { state.PBTProgressInterval = previousInterval })
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	setExecutionProgress(t, source.Chaindata, 1)
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
+	for _, phase := range []string{
+		"source leaf walk",
+		"leaf load",
+		"source end verify",
+		"rebuild op merge",
+		"pbin-ops file write",
+		"fold batches",
+		"range leaf stream",
+		"range 0-1 .kv",
+		"range 0-1 .idt",
+		"range 0-1 .kvi",
+		"domain root verify",
+		"output standalone verify",
+		"attach leaf stamps verify",
+		"attach published bin verify",
+		"attach node root verify",
+		"attach adopt",
+	} {
+		var found bool
+		for _, line := range strings.Split(logs.String(), "\n") {
+			if strings.Contains(line, "phase=\""+phase) {
+				found = true
+				require.Contains(t, line, "done=")
+				require.Contains(t, line, "rate=")
+			}
+		}
+		require.True(t, found, "missing progress phase %q in logs:\n%s", phase, logs.String())
+	}
 }
 
 func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {

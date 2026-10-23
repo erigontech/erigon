@@ -776,7 +776,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 	}
 
 	ps := background.NewProgressSet()
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir)
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir, nil)
 	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
 	if err != nil {
 		return err
@@ -1004,7 +1004,7 @@ func (sf StaticFiles) CleanupOnError() {
 }
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
-func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string) (StaticFiles, error) {
+func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string, pbtRange *pbtRangeProgress) (StaticFiles, error) {
 	if !d.Enabled {
 		return StaticFiles{}, nil
 	}
@@ -1051,7 +1051,18 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if d.noFsync {
 		valuesComp.DisableFsync()
 	}
-	if err = valuesComp.Compress(); err != nil {
+	var idtProgress *PBTProgress
+	if pbtRange != nil {
+		idtProgress = pbtRange.stage(".idt", 1)
+	}
+	err = valuesComp.Compress()
+	if idtProgress != nil {
+		if err == nil {
+			idtProgress.Add(1)
+		}
+		idtProgress.Done()
+	}
+	if err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
 	}
 	valuesComp.Close()
@@ -1062,9 +1073,20 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		var kviProgress *PBTProgress
+		if pbtRange != nil {
+			kviProgress = pbtRange.stage(".kvi", 1)
+		}
 		idxPath := d.kviAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
 		if err = d.buildHashMapAccessorAt(ctx, idxPath, valuesDecomp, ps); err != nil {
+			if kviProgress != nil {
+				kviProgress.Done()
+			}
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
+		}
+		if kviProgress != nil {
+			kviProgress.Add(1)
+			kviProgress.Done()
 		}
 		valuesIdx, err = d.openHashMapAccessor(idxPath)
 		if err != nil {
