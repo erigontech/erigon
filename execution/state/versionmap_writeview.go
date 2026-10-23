@@ -227,8 +227,12 @@ func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int
 	if bal, res, ok := vm.ReadBalance(addr, txIdx+1); eip8246 && ok && (!res.resolved() || !bal.IsZero()) {
 		return false, nil
 	}
-	// An earlier tx of the block may have funded addr where preBlock cannot see it.
+	// An earlier tx of the block may have funded addr, or before EIP-161 left it empty,
+	// where preBlock cannot see it.
 	if vm.accountLiveAt(addr, txIdx) {
+		return false, nil
+	}
+	if acc, res, ok := vm.ReadAddress(addr, txIdx); ok && (!res.resolved() || acc != nil) {
 		return false, nil
 	}
 	acc, err := preBlock.ReadAccountData(addr)

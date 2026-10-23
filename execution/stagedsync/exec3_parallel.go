@@ -3611,7 +3611,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// The final task's sets are recorded again at block end, so it is left to the block result.
 			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
-			for i := be.balAttached - 1; i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
+			buildsBAL := task.Rules().IsAmsterdam || pe.cfg.experimentalBAL
+			for i := be.balAttached - 1; buildsBAL && i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
 				applyResult.balTxs = append(applyResult.balTxs, balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)})
 				be.balAttached++
 			}

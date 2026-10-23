@@ -265,4 +265,11 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
 	funded.FlushVersionedWrites(w, true, "")
 	require.True(t, hasAddr(run(t, &minimalStateReader{}, funded)), "an earlier tx of the block funded the address")
+
+	// Before EIP-161 an earlier tx can leave an empty account that only its AddressPath cell records.
+	empty := NewVersionMap(nil)
+	w = &WriteSet{}
+	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
+	empty.FlushVersionedWrites(w, true, "")
+	require.True(t, hasAddr(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
 }
