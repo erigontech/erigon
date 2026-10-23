@@ -103,6 +103,11 @@ func (p AccountPath) AffectsAccountLifecycle() bool {
 	}
 }
 
+// BALSeeded reports whether a block access list pre-populates cells of path p.
+func (p AccountPath) BALSeeded() bool {
+	return p == BalancePath || p == NoncePath || p == CodePath || p == StoragePath
+}
+
 // AccountKey is a (Path, Key) pair used as a field selector within an AddressEntry
 // and as a debug-printable identifier.
 type AccountKey struct {
@@ -1622,9 +1627,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry a
 			// storage read saw is a BAL no-op and stays valid; other paths mean a real
 			// concurrent change and must invalidate.
-			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
-				path == CodePath || path == StoragePath
-			if !vm.HasBAL || !isBALPrePopulatedPath {
+			if !vm.HasBAL || !path.BALSeeded() {
 				switch {
 				case recursive && matchesLive == nil:
 					// Synthetic cross-validate probe with no recorded value of its own —
