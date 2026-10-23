@@ -1573,6 +1573,14 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 
 // readSelfDestruct returns whether the account is selfdestructed.
 func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSource, Version, error) {
+	// A contract this tx recreated (own CreateContract cell) shadows a prior tx's
+	// SELFDESTRUCT in the version map, like the origin* readers above — unless this
+	// tx has since re-destroyed it, whose own SelfDestruct cell the path below returns.
+	if _, ownSD := s.versionedWrites.GetSelfDestruct(addr); !ownSD {
+		if cc, ok := s.versionedWriteCreateContract(addr); ok && cc {
+			return false, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+		}
+	}
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetSelfDestruct(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
