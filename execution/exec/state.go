@@ -202,6 +202,15 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 	return rw.bindTx(chainTx)
 }
 
+// Close releases the worker's state and tx. Idempotent. Only call it once no
+// task runs on the worker.
+func (rw *WorkerContext) Close() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.ibs.Close()
+	_ = rw.bindTx(nil)
+}
+
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -339,6 +348,7 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
+	rw.ibs.Close()
 	if rw.prevBlockReg != nil {
 		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
@@ -360,6 +370,7 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 // block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
 func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.prevBlockReg = reg
+	rw.ibs.Close()
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
@@ -443,7 +454,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		clearDone = true
 		for _, w := range reconWorkers {
 			if w != nil {
-				_ = w.ResetTx(nil)
+				w.Close()
 			}
 		}
 	}

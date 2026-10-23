@@ -1646,7 +1646,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// stopWorkers); each may hold its own roTx.
 		pe.mintMu.Lock()
 		for _, w := range pe.mintedWorkers {
-			_ = w.ResetTx(nil)
+			w.Close()
 		}
 		pe.mintedWorkers = nil
 		pe.mintMu.Unlock()
