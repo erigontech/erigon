@@ -13,6 +13,11 @@ on:
         type: boolean
         required: false
         default: false
+      run_reth:
+        description: 'Run the Reth benchmark besides the Erigon one'
+        type: boolean
+        required: false
+        default: false
       commitment_mode:
         description: 'Erigon commitment mode ("default" leaves ERIGON_COMMITMENT_PARALLEL unset)'
         type: choice
@@ -53,6 +58,7 @@ jobs:
         env:
           INPUT_RUN_GETH: ${{ github.event.inputs.run_geth }}
           INPUT_RUN_NETHERMIND: ${{ github.event.inputs.run_nethermind }}
+          INPUT_RUN_RETH: ${{ github.event.inputs.run_reth }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
@@ -61,25 +67,27 @@ jobs:
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           # Decide which client, if any, runs besides erigon:
-          # - schedule: on Sunday (UTC) geth with the daily cron, nethermind with the Sunday one
+          # - schedule: reth with the daily cron on Saturday (UTC), geth with the daily cron on Sunday, nethermind with the Sunday one
           # - workflow_dispatch: controlled by inputs, at most one of them
           PEER=""
           if [ "${{ github.event_name }}" = "schedule" ]; then
             if [ "$EVENT_SCHEDULE" = "30 2 * * 0" ]; then
               PEER="nethermind"
-            elif [ "$(date -u +%w)" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
-              PEER="geth"
+            else
+              case "$(date -u +%w)" in  # 0..6 = Sun..Sat
+                0) PEER="geth" ;;
+                6) PEER="reth" ;;
+              esac
             fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$INPUT_RUN_GETH" = "true" ] && [ "$INPUT_RUN_NETHERMIND" = "true" ]; then
-              echo "::error::Select either run_geth or run_nethermind: the start barrier synchronizes erigon with one client only"
-              exit 1
-            fi
-            if [ "$INPUT_RUN_GETH" = "true" ]; then
-              PEER="geth"
-            elif [ "$INPUT_RUN_NETHERMIND" = "true" ]; then
-              PEER="nethermind"
-            fi
+            for input in "geth:$INPUT_RUN_GETH" "nethermind:$INPUT_RUN_NETHERMIND" "reth:$INPUT_RUN_RETH"; do
+              [ "${input#*:}" = "true" ] || continue
+              if [ -n "$PEER" ]; then
+                echo "::error::Select only one of run_geth, run_nethermind and run_reth: the start barrier synchronizes erigon with one client only"
+                exit 1
+              fi
+              PEER="${input%%:*}"
+            done
           fi
 
           # coordinated_start.py knows only the erigon and geth participants: the peer client always joins the barrier as geth.
@@ -87,6 +95,7 @@ jobs:
           case "$PEER" in
             geth)       MATRIX+=',{"client":"geth","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-geth"],"install_dir":"/opt/go-ethereum"}' ;;
             nethermind) MATRIX+=',{"client":"nethermind","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-nethermind"],"install_dir":"/opt/nethermind"}' ;;
+            reth)       MATRIX+=',{"client":"reth","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-reth"],"install_dir":"/opt/reth"}' ;;
           esac
 
           # Variables
@@ -276,7 +285,7 @@ jobs:
 
       - name: Wait for port 8545 to be opened
         run: |
-          # Geth and Nethermind are expected to be pre-running on their rpc-latest-* runners
+          # Geth, Nethermind and Reth are expected to be pre-running on their rpc-latest-* runners
           # Erigon was started above
           for i in {1..30}; do
             if nc -z localhost 8545; then
@@ -414,10 +423,8 @@ jobs:
 
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
-          elif [ "$CLIENT" == "geth" ]; then
-            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD)
           else
-            commit=no-version  # the nethermind install is not a git checkout
+            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo no-version)
           fi
           
           # Prepare historical test results directory
