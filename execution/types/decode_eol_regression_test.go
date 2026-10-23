@@ -35,7 +35,7 @@ func TestDecodeEOLRegressionTruncatedTypedTx(t *testing.T) {
 		{"DynamicFeeTx", DynamicFeeTxType},
 		{"BlobTx", BlobTxType},
 		{"SetCodeTx", SetCodeTxType},
-		{"FrameTransaction", FrameTxType},
+		{"FrameTx", FrameTxType},
 	}
 
 	for _, tc := range tests {
