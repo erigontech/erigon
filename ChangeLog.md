@@ -1,3 +1,64 @@
+# Erigon v3.8.1 — Watery Whiskers — TBD
+
+Erigon 3.8.1 **unschedules Glamsterdam on Hoodi** and improves block validation, validator reliability,
+and block production.
+
+### Highlight: Glamsterdam on Hoodi postponed
+
+**Hoodi operators must upgrade before 26 October 2026, 17:42:48 UTC.** This release removes the
+Amsterdam execution-layer and Gloas Caplin activations at epoch `132352`, together with the scheduled
+gas-limit increase to **200 million**. **No replacement activation date has been set.** This supersedes
+the Hoodi activation instructions in the 3.8.0 notes (#25269) — by @yperbasis.
+
+Update Erigon and Caplin. If you use an external consensus client, update it to a release that also
+removes the old schedule. Validator operators should follow their validator client's update
+instructions as well. See the [Ethereum Foundation announcement](https://blog.ethereum.org/2026/10/22/glamsterdam-hoodi-delay).
+
+### Important fixes and improvements
+
+- **Block validation.** Caplin fixes state-copy races and balance calculations after reorgs. Execution
+  fixes stale commitment-cache reads during block access list prefetching. These bugs could produce
+  wrong state roots and reject valid blocks (#25257, #25215, #25159) — by @domiwei, @yperbasis
+- **Validator votes.** Caplin waits for a late block before rejecting an attestation submitted through
+  the Beacon API, and accepts a full slot's aggregate burst from one peer, avoiding lost committee
+  votes. Sync committee subscriptions use the requested indices and survive fork-digest changes
+  (#25114, #25250, #25130, #25119) — by @lystopad, @domiwei
+- **Faster head updates at epoch boundaries.** Caplin prepares checkpoint states ahead of time,
+  reducing delays that could make validators miss head and target votes
+  (#25171) — by @awskii
+- **Block-production delays.** `engine_getPayload` stops waiting for the parent block after a head
+  change and returns the payload built so far. `engine_newPayload` avoids scanning every header
+  snapshot before validating a new block (#25254, #25242) — by @domiwei, @lystopad
+- **Validator-client recovery after Gloas.** Caplin recognizes attached Teku and Prysm validators
+  after restarts, restoring aggregate and sync contribution processing, custody requirements, and
+  the correct block fee recipient (#25195) — by @domiwei
+- **Data availability after downtime.** Caplin backfills missing custody columns for blocks imported
+  during forward sync and preserves its highest advertised custody group count across restarts
+  (#25148, #25196) — by @domiwei
+- **Blob snapshot protection.** `capcli dump-blobs-snapshots` preserves existing and preverified
+  segments by default and no longer replaces valid blob data with empty entries when blob-count
+  records have been pruned (#25174) — by @awskii
+- **Peer-traffic resilience.** Caplin enforces consensus-spec payload limits on gossip and peer
+  responses. Historical block access list requests have bounded re-execution work and a separate
+  serving stream, protecting block-body and receipt responses from expensive replay requests
+  (#25119, #25107) — by @domiwei, @yperbasis
+
+### Caplin archive upgrade notes
+
+Gloas historical-state fixes change the stored builder-history format and reduce archive storage
+growth (#25256) — by @domiwei, @0xShadowX.
+
+- Archive nodes that have already processed Gloas may rebuild historical states from before the
+  fork. Until the new `PtcWindowEpoch` snapshots are available, post-fork history is processed locally.
+- **Downgrading after writing the new builder-history records is not supported.**
+- Existing frozen Gloas history in the old format, including affected Sepolia snapshots, is not
+  repaired by upgrading. Historical reads still fail until the affected snapshots are rebuilt or
+  replaced.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.8.0...v3.8.1
+
+---
+
 # Erigon v3.8.0 — Watery Whiskers — TBD
 
 Erigon 3.8.0 is **Glamsterdam-ready**, with **Glamsterdam on Hoodi**, faster commitment and execution,
