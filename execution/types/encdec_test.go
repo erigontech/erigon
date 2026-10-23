@@ -32,8 +32,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const RUNS = 1000 // for local tests increase this number
@@ -219,7 +219,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 func (tr *TRand) RandTransaction(_type int) Transaction {
 	var txType int
 	if _type == -1 {
-		txType = tr.RandIntInRange(0, 6) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType
+		txType = []int{0, 1, 2, 3, 4, 6}[tr.RandIntInRange(0, 6)]
 	} else {
 		txType = _type
 	}
@@ -287,28 +287,13 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			},
 			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
-	case AccountAbstractionTxType:
-		senderAddress, paymaster, deployer := tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
-		return &AccountAbstractionTransaction{
-			Nonce:                       commonTx.Nonce,
-			ChainID:                     uint256.NewInt(*tr.RandUint64()),
-			Tip:                         uint256.NewInt(*tr.RandUint64()),
-			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
-			GasLimit:                    commonTx.GasLimit,
-			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
-			SenderAddress:               accounts.InternAddress(senderAddress),
-			SenderValidationData:        tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
-			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			Paymaster:                   &paymaster,
-			PaymasterData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			Deployer:                    &deployer,
-			DeployerData:                tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			BuilderFee:                  uint256.NewInt(*tr.RandUint64()),
-			ValidationGasLimit:          *tr.RandUint64(),
-			PaymasterValidationGasLimit: *tr.RandUint64(),
-			PostOpGasLimit:              *tr.RandUint64(),
-			NonceKey:                    uint256.NewInt(*tr.RandUint64()),
+	case FrameTxType:
+		return &FrameTransaction{
+			NonceKeys: []uint256.Int{{}},
+			ChainID:   *uint256.NewInt(*tr.RandUint64()), Nonce: commonTx.Nonce, SenderAddress: tr.RandAddress(),
+			Frames:     []Frame{{Mode: FrameDefault, Limits: mdgas.MdGas{Execution: 100_000}, Data: tr.RandBytes(tr.RandIntInRange(0, 100))}},
+			Fees:       FrameFees{FeeCap: *uint256.NewInt(100), TipCap: *uint256.NewInt(1)},
+			Signatures: []FrameSignature{{Signature: tr.RandBytes(tr.RandIntInRange(0, 100))}},
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)

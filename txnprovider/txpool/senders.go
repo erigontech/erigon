@@ -54,6 +54,9 @@ func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 
 	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID == senderID {
+			if mt.TxnSlot.hasKeyedNonce() {
+				return true
+			}
 			nonce = mt.TxnSlot.Nonce
 			ok = true
 		}

@@ -42,7 +42,6 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP7976          bool
 	IsEIP7981          bool
 	IsEIP2780          bool
-	IsAATxn            bool
 }
 
 type IntrinsicGasCalcResult struct {
@@ -71,8 +70,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
 	switch {
-	case args.IsAATxn:
-		result.ExecutionGas = params.TxAAGas
 	case args.IsEIP2780:
 		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
@@ -263,11 +260,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Add the cost of authorizations
 	var perAuthCost uint64
 	if args.IsEIP2780 {
-		if args.IsAATxn {
-			perAuthCost = params.PerAuthExecutionCostEIP8038
-		} else {
-			perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
-		}
+		perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
 	} else {
 		perAuthCost = params.PerEmptyAccountCost
 	}

@@ -371,9 +371,15 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		availableGas.Execution -= executionBase
 
 		if statefulBaseGas.State > 0 {
-			var used mdgas.MdGasUsage
-			if !mdgas.Consume(&availableGas, &used, uint64(statefulBaseGas.State), mdgas.StateGas) {
-				return mdgas.MdGasCost{}, ErrOutOfGas
+			if evm.FrameContext != nil {
+				if uint64(statefulBaseGas.State) > evm.FrameContext.StateGasLeft() {
+					return mdgas.MdGasCost{}, ErrOutOfGas
+				}
+			} else {
+				var used mdgas.MdGasUsage
+				if !mdgas.Consume(&availableGas, &used, uint64(statefulBaseGas.State), mdgas.StateGas) {
+					return mdgas.MdGasCost{}, ErrOutOfGas
+				}
 			}
 		}
 

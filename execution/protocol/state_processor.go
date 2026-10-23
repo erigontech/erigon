@@ -161,7 +161,7 @@ func MakeReceipt(
 	ibs *state.IntraBlockState,
 	evm *vm.EVM,
 ) *types.Receipt {
-	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed}
+	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed, Payer: result.Payer, FrameReceipts: result.FrameReceipts}
 	if result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
@@ -169,15 +169,9 @@ func MakeReceipt(
 	}
 	receipt.TxHash = txn.Hash()
 	receipt.GasUsed = result.ReceiptGasUsed
-	// In the case of blob transaction, we need to possibly unwrap and store the gas used by blobs
-	if t, ok := txn.(*types.BlobTxWrapper); ok {
-		txn = &t.Tx
-	}
-	if txn.Type() == types.BlobTxType {
-		receipt.BlobGasUsed = txn.GetBlobGas()
-	}
+	receipt.BlobGasUsed = txn.GetBlobGas()
 	// If the transaction created a contract, store the creation address in the receipt.
-	if msg.To().IsNil() {
+	if txn.IsContractDeploy() {
 		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering

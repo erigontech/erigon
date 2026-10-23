@@ -61,7 +61,6 @@ type Config struct {
 	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
 
 	// Account Abstraction
-	AllowAA bool
 }
 
 var DefaultConfig = Config{
@@ -127,7 +126,7 @@ const (
 	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
 	GasLimitTooHigh      DiscardReason = 33 // Gas limit is too high
 	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
-	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
+	InvalidFrame         DiscardReason = 35 // Invalid frame transaction
 	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
 	NonceTooDistant      DiscardReason = 37 // Gap exceeds MaxNonceGap; the transaction can be retried after the gap shrinks
 	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
@@ -209,10 +208,10 @@ func (r DiscardReason) String() string {
 		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
 	case ErrAuthorityReserved:
 		return "EIP-7702 transaction with authority already reserved"
-	case InvalidAA:
-		return "RIP-7560 transaction failed validation"
+	case InvalidFrame:
+		return "frame transaction failed validation"
 	case ErrGetCode:
-		return "error getting account code during RIP-7560 validation"
+		return "error getting account code during validation"
 	case NonceTooDistant:
 		return "nonce gap too large: transaction nonce is too far ahead of sender's on-chain nonce"
 	case QueuedDormant:

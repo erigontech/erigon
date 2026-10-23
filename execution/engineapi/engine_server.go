@@ -329,10 +329,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			continue
 		}
-		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
+		limits, gasErr := protocol.TransactionGasLimits(transactions[i], e.config.IsAmsterdam(uint64(req.Timestamp)))
+		if gasErr == nil && (limits.Execution > uint64(req.GasLimit) || limits.State > uint64(req.GasLimit)) {
+			gasErr = protocol.ErrGasLimitReached
+		}
+		if gasErr != nil {
 			invalidTransactionStatus = &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
+				ValidationError: engine_types.NewStringifiedError(gasErr),
 			}
 		}
 	}
@@ -1420,7 +1424,7 @@ func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, e
 	list := make([]hexutil.Bytes, 0, len(encodedTxns))
 	total := 0
 	for i, tx := range encodedTxns {
-		if txns[i].Type() == types.BlobTxType || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
+		if (txns[i].Type() == types.BlobTxType || txns[i].GetBlobGas() != 0) || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
 			continue
 		}
 		list = append(list, tx)

@@ -422,6 +422,10 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if err != nil {
 			return nil, err
 		}
+		if account == nil && transaction.Type() == types.FrameTxType {
+			emptyAccount := accounts.NewAccount()
+			account = &emptyAccount
+		}
 		if account == nil {
 			transactions = transactions[1:]
 			noAccountCnt++
@@ -441,7 +445,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		missedTxs = 0
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
+		if !account.IsEmptyCodeHash() && transaction.Type() != types.FrameTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
@@ -470,6 +474,16 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 					continue
 				}
 			}
+		}
+		if transaction.Type() == types.FrameTxType {
+			newAccount := *account
+			newAccount.Nonce++
+			if err := simStateWriter.UpdateAccountData(senderAddress, account, &newAccount); err != nil {
+				return nil, err
+			}
+			filtered = append(filtered, transaction)
+			transactions = transactions[1:]
+			continue
 		}
 		txnGasLimit := transaction.GetGasLimit()
 		value := transaction.GetValue()

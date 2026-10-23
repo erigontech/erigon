@@ -204,7 +204,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.DownloaderVerifyFlag,
 	&utils.HealthCheckFlag,
 	&utils.WebSeedsFlag,
-	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
 	&utils.OverrideAmsterdamFlag,

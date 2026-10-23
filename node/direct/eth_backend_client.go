@@ -355,8 +355,8 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remoteproto.AAValidationRequest, opts ...grpc.CallOption) (*remoteproto.AAValidationReply, error) {
-	return s.server.AAValidation(ctx, in)
+func (s *EthBackendClientDirect) FrameValidation(ctx context.Context, in *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
+	return s.server.FrameValidation(ctx, in)
 }
 
 func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remoteproto.BlockForTxNumRequest, opts ...grpc.CallOption) (*remoteproto.BlockForTxNumResponse, error) {

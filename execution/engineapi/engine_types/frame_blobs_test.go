@@ -14,27 +14,22 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package types
+package engine_types
 
 import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 
-// TestAATxnAsMessageCarriesNoBlobHashes pins that an AA message is not mistaken
-// for a blob-carrying one: EIP-4844 validation keys off a non-nil blob hash
-// slice, and an AA txn has no blobs. Its To is nil, so a non-nil empty slice
-// would trip the blob contract-creation rule.
-func TestAATxnAsMessageCarriesNoBlobHashes(t *testing.T) {
-	t.Parallel()
-
-	txn := &AccountAbstractionTransaction{FeeCap: uint256.NewInt(1)}
-	msg, err := txn.AsMessage(Signer{}, nil, nil)
+func TestFrameBlobsBundle(t *testing.T) {
+	tx := &types.FrameTxWrapper{FrameTransaction: &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, BlobVersionedHashes: []common.Hash{{1}}}, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+	bundle, err := BlobsBundleFromTransactions(types.Transactions{tx})
 	require.NoError(t, err)
-
-	require.Nil(t, msg.BlobHashes())
-	require.Zero(t, msg.BlobGas())
-	require.True(t, msg.To().IsNil())
+	require.Len(t, bundle.Blobs, 1)
+	require.Len(t, bundle.Proofs, 128)
 }

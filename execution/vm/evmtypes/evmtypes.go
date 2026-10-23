@@ -72,6 +72,8 @@ type TxContext struct {
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
 	mdgas.TxnGasUsage
+	Payer                *common.Address
+	FrameReceipts        []types.FrameReceipt
 	ReceiptGasUsed       uint64 // Gas paid after refunds and the calldata floor
 	MaxGasUsed           uint64 // Gas used by the transaction before refunds
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)

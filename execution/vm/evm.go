@@ -79,6 +79,7 @@ type EVM struct {
 	// Context provides auxiliary blockchain related information
 	Context evmtypes.BlockContext
 	evmtypes.TxContext
+	FrameContext *state.FrameContext
 	// IntraBlockState gives access to the underlying state
 	intraBlockState *state.IntraBlockState
 
@@ -915,7 +916,12 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		var depositStateSpill uint64
 		if gasOK && evm.chainRules.IsAmsterdam {
 			stateGas = uint64(len(ret)) * params.CostPerStateByte
-			gasRemaining, depositStateSpill, gasOK = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			if evm.FrameContext != nil {
+				gasOK = evm.FrameContext.ChargeStateGas(stateGas)
+				gasRemaining.State = evm.FrameContext.StateGasLeft()
+			} else {
+				gasRemaining, depositStateSpill, gasOK = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			}
 		}
 
 		if gasOK {

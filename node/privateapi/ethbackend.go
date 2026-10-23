@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -491,63 +490,55 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
+func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+	txn, err := types.DecodeTransaction(req.Transaction)
+	if err != nil {
+		return &remoteproto.FrameValidationReply{}, nil
+	}
+	frame, ok := txn.(*types.FrameTransaction)
+	if !ok {
+		return &remoteproto.FrameValidationReply{}, nil
+	}
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	currentBlock, err := s.blockReader.CurrentBlock(tx)
+	block, err := s.blockReader.CurrentBlock(tx)
 	if err != nil {
 		return nil, err
 	}
-	if currentBlock == nil {
-		return nil, errors.New("AAValidation: no current block")
+	if block == nil {
+		return nil, errors.New("frame validation: no current block")
 	}
-	header := currentBlock.HeaderNoCopy()
-
-	aaTxn := types.FromProto(req.Tx)
-	txNumsReader := s.blockReader.TxnumReader()
-	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
+	header := block.HeaderNoCopy()
+	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-
-	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
-
+	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum+1))
+	defer ibs.Close()
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
-
-	senderCodeSize, err := ibs.GetCodeSize(aaTxn.SenderAddress)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	result, err := protocol.ValidateFrameTransaction(evm, frame)
 	if err != nil {
-		return nil, err
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := ibs.StateReadError(); err != nil {
+			return nil, err
+		}
+		return &remoteproto.FrameValidationReply{}, nil
 	}
-
-	validationTracer := aa.NewValidationRulesTracer(aaTxn.SenderAddress, senderCodeSize != 0)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
-	ibs.SetHooks(validationTracer.Hooks())
-
-	vmConfig := evm.Config()
-	rules := evm.ChainRules()
-	hasEIP3860 := vmConfig.HasEip3860(rules)
-
-	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
-	if err != nil {
-		return nil, err
+	dependencies := make([][]byte, len(result.Dependencies))
+	for i := range result.Dependencies {
+		dependencies[i] = result.Dependencies[i][:]
 	}
-
-	totalGasLimit, ok := aaTxn.TotalGasLimit(preTxCost)
-	if !ok {
-		log.Info("RIP-7560 validation err", "err", "gas limits sum overflows uint64")
-		return &remoteproto.AAValidationReply{Valid: false}, nil
-	}
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
-	if err != nil {
-		log.Info("RIP-7560 validation err", "err", err.Error())
-		return &remoteproto.AAValidationReply{Valid: false}, nil
-	}
-
-	return &remoteproto.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
+	return &remoteproto.FrameValidationReply{
+		Valid: true, Payer: result.Payer[:], MaxCost: result.MaxCost.Bytes(), PayerBalance: result.PayerBalance.Bytes(),
+		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies,
+	}, nil
 }
 
 func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.BlockForTxNumRequest) (*remoteproto.BlockForTxNumResponse, error) {

@@ -48,7 +48,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
 		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
@@ -854,8 +854,15 @@ run:
 				if !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
+				if evm.FrameContext != nil && op == SSTORE {
+					evm.FrameContext.RecordStorageCharge(callContext.Address(), callContext.peekStorageKey(evm))
+				}
 			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+				if evm.FrameContext != nil && op == SSTORE {
+					evm.FrameContext.RefillStorageGas(callContext.Address(), callContext.peekStorageKey(evm), uint64(-dynamicCost.State))
+				} else {
+					callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+				}
 			}
 		}
 

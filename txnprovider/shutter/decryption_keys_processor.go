@@ -258,7 +258,7 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[IdentityPreimage]*proto.
 		return nil, fmt.Errorf("failed to decode transaction: %w", err)
 	}
 
-	if txn.Type() == types.BlobTxType {
+	if txn.Type() == types.BlobTxType || txn.GetBlobGas() != 0 {
 		return nil, errors.New("blob txns not allowed in shutter")
 	}
 

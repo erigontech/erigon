@@ -227,7 +227,7 @@ func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.Sentr
 // protocol violation via the blob_versioned_hashes / BlobBundles count
 // mismatch below (blob txs must declare >=1 blob per EIP-4844).
 func (f *Fetch) checkBlobSidecar(slot *TxnSlot) error {
-	if slot == nil || slot.Txn == nil || slot.Txn.Type() != types.BlobTxType {
+	if slot == nil || slot.Txn == nil || (slot.Txn.Type() != types.BlobTxType && slot.Txn.GetBlobGas() == 0) {
 		return nil
 	}
 	blobHashes := slot.Txn.GetBlobHashes()
@@ -811,7 +811,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.TxType() == BlobTxnType {
+					if utx.Txn.GetBlobGas() != 0 {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)

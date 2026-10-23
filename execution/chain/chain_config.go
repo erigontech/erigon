@@ -131,9 +131,6 @@ type Config struct {
 	// their parent fork is active. Used for devnets where the reference
 	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
 	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
-
-	// Account Abstraction
-	AllowAA bool
 }
 
 // IsEIPEnabled reports whether the given EIP is active at the given block time:
@@ -930,7 +927,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun                                          bool
-	IsPrague, IsOsaka, IsAmsterdam                    bool
+	IsPrague, IsOsaka, IsAmsterdam, IsBogota          bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
 

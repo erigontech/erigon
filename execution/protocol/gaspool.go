@@ -24,7 +24,9 @@ import (
 	"math"
 	"sync"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // GasPool tracks block-level gas availability across the two EIP-8037
@@ -250,4 +252,13 @@ func (gp *GasPool) String() string {
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
 	return fmt.Sprintf("executionGas: %d, stateGas: %d, blobGas: %d", gp.executionGas, gp.stateGas, gp.blobGas)
+}
+
+func TransactionGasLimits(tx types.Transaction, isAmsterdam bool) (mdgas.MdGas, error) {
+	if frame, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+		_, _, limits, err := frame.GasLimits()
+		return limits, err
+	}
+	execution, state := InclusionContributions(tx.GetGasLimit(), isAmsterdam, false)
+	return mdgas.MdGas{Execution: execution, State: state}, nil
 }
