@@ -153,7 +153,7 @@ func TestOpDivPowerOfTwo(t *testing.T) {
 		uint256.MustFromHex("0x40cf02000000000000000000000000000000000000000000000000000000000"),
 	}
 	one := uint256.NewInt(1)
-	for n := uint(0); n < 256; n++ {
+	for n := range uint(256) {
 		p := new(uint256.Int).Lsh(one, n)
 		for _, y := range []*uint256.Int{p, new(uint256.Int).AddUint64(p, 1), new(uint256.Int).Sub(p, one)} {
 			for _, x := range xs {
