@@ -71,6 +71,7 @@ func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 		return err
 	}
 
+	stepSize := tx.Debug().StepSize()
 	prevCumUsedGas := -1
 	expectedFirstLogIdx := uint32(0)
 	blockNum := fromBlock
@@ -105,7 +106,7 @@ func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
 		if !exactLogIdx && txNum <= _max {
-			if err := probs.report(failFast, fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)); err != nil {
+			if err := probs.report(failFast, fmt.Errorf("block %d tx %d (txNum %d, step %d): firstLogIndex=%d, want %d", blockNum, txNum-_min-1, txNum, txNum/stepSize, logIdx, expectedFirstLogIdx)); err != nil {
 				return err
 			}
 		}
@@ -114,7 +115,7 @@ func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
-			if err := probs.report(failFast, fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)); err != nil {
+			if err := probs.report(failFast, fmt.Errorf("block %d tx %d (txNum %d, step %d): cumulativeGasUsed=%d, previous tx has %d", blockNum, txNum-_min-1, txNum, txNum/stepSize, cumUsedGas, prevCumUsedGas)); err != nil {
 				return err
 			}
 		}
