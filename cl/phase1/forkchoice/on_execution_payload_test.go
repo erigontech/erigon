@@ -1126,7 +1126,9 @@ func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
 				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
 			}
 
+			require.NotEqual(t, envelope.Message.Payload.BlockHash, f.GetEth1Hash(root))
 			require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, tc.validatePayload))
+			require.Equal(t, envelope.Message.Payload.BlockHash, f.GetEth1Hash(root))
 			require.True(t, f.isPayloadAvailable(root))
 			status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
 			require.True(t, ok)

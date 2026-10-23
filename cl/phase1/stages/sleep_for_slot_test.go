@@ -29,10 +29,15 @@ import (
 
 type sleepForSlotForkChoiceFake struct {
 	head           common.Hash
+	eth1Hash       common.Hash
 	headSlot       uint64
 	calls          *int
 	retryMinSlots  *[]uint64
 	retryDeadlines *[]time.Time
+}
+
+func (f sleepForSlotForkChoiceFake) GetEth1Hash(common.Hash) common.Hash {
+	return f.eth1Hash
 }
 
 func (f sleepForSlotForkChoiceFake) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
@@ -62,6 +67,10 @@ func (f blockingSleepForSlotForkChoiceFake) GetHead(*state.CachingBeaconState) (
 	close(f.started)
 	<-f.release
 	return f.head, 0, nil
+}
+
+func (blockingSleepForSlotForkChoiceFake) GetEth1Hash(common.Hash) common.Hash {
+	return common.Hash{}
 }
 
 func (blockingSleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnvelopes(context.Context, uint64) {
@@ -106,6 +115,7 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 		sleepForSlotForkChoiceFake{head: forkChoiceHead, calls: &calls, retryMinSlots: &retryMinSlots},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{},
 	)
 
@@ -116,6 +126,48 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 	require.Equal(t, 1, calls)
 	require.Empty(t, retryMinSlots, "a pending head change is materialized before envelope retries")
 	require.Equal(t, ForkChoice, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
+}
+
+func TestSleepForSlotGloasSameHeadNewExecutionHashWakesEarlyAndTransitionsToForkChoice(t *testing.T) {
+	head := common.Hash{1}
+	parentHash := common.Hash{2}
+	envelopeHash := common.Hash{3}
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
+
+	wake, headChanged, err := waitForNextSlotOrHeadChange(
+		t.Context(), 11, sleepForSlotConfig(10),
+		sleepForSlotForkChoiceFake{head: head, eth1Hash: envelopeHash},
+		sleepForSlotSyncedDataFake{head: head},
+		clock,
+		parentHash,
+		sleepForSlotWake{},
+	)
+
+	require.NoError(t, err)
+	require.True(t, headChanged)
+	require.Equal(t, head, wake.root)
+	require.Equal(t, envelopeHash, wake.hash)
+	require.Equal(t, ForkChoice, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
+}
+
+func TestSleepForSlotGloasNewExecutionHashWakesWithinRewakeInterval(t *testing.T) {
+	head := common.Hash{1}
+	parentHash := common.Hash{2}
+	envelopeHash := common.Hash{3}
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(4 * sleepForSlotHeadPollInterval)}
+
+	wake, headChanged, err := waitForNextSlotOrHeadChange(
+		t.Context(), 11, sleepForSlotConfig(10),
+		sleepForSlotForkChoiceFake{head: head, eth1Hash: envelopeHash},
+		sleepForSlotSyncedDataFake{head: head},
+		clock,
+		parentHash,
+		sleepForSlotWake{root: head, hash: parentHash, at: time.Now()},
+	)
+
+	require.NoError(t, err)
+	require.True(t, headChanged)
+	require.Equal(t, envelopeHash, wake.hash)
 }
 
 func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing.T) {
@@ -130,6 +182,7 @@ func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing
 		sleepForSlotForkChoiceFake{head: head, calls: &calls},
 		sleepForSlotSyncedDataFake{head: head},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{},
 	)
 
@@ -160,6 +213,7 @@ func TestSleepForSlotGloasRetriesDataAvailableEnvelopesFromHeadOrPreviousSlot(t 
 				sleepForSlotForkChoiceFake{head: head, headSlot: tt.headSlot, retryMinSlots: &retryMinSlots, retryDeadlines: &retryDeadlines},
 				sleepForSlotSyncedDataFake{head: head},
 				clock,
+				common.Hash{},
 				sleepForSlotWake{},
 			)
 
@@ -188,6 +242,7 @@ func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *test
 		sleepForSlotForkChoiceFake{head: common.Hash{2}, calls: &calls, retryMinSlots: &retryMinSlots},
 		sleepForSlotSyncedDataFake{head: common.Hash{1}},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{},
 	)
 
@@ -210,6 +265,7 @@ func TestSleepForSlotRewakesForSameHeadAfterInterval(t *testing.T) {
 		sleepForSlotForkChoiceFake{head: forkChoiceHead},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{root: forkChoiceHead, at: time.Now().Add(-sleepForSlotRewakeInterval)},
 	)
 
@@ -227,6 +283,7 @@ func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.
 		sleepForSlotForkChoiceFake{head: forkChoiceHead},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{},
 	)
 	require.NoError(t, err)
@@ -240,6 +297,7 @@ func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.
 		sleepForSlotForkChoiceFake{head: forkChoiceHead},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
+		common.Hash{},
 		wake,
 	)
 
@@ -263,6 +321,7 @@ func TestSleepForSlotPollCompletingAfterNextSlotDoesNotWakeEarly(t *testing.T) {
 		blockingSleepForSlotForkChoiceFake{head: common.Hash{2}, started: started, release: release},
 		sleepForSlotSyncedDataFake{head: common.Hash{1}},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{},
 	)
 
@@ -286,6 +345,7 @@ func TestSleepForSlotContextCancellationEndsWaitPromptly(t *testing.T) {
 		sleepForSlotForkChoiceFake{head: common.Hash{1}},
 		sleepForSlotSyncedDataFake{head: common.Hash{1}},
 		clock,
+		common.Hash{},
 		sleepForSlotWake{},
 	)
 

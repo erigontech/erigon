@@ -62,6 +62,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		monitor.ObserveFrozenBlobs(int(cfg.sn.FrozenBlobs()))
 	}
 
+	headHash := cfg.forkChoice.GetEth1Hash(headRoot)
 	// Perform fork choice update if the engine is available
 	if cfg.forkChoice.Engine() != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
@@ -74,7 +75,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			ctx,
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
+			headHash, nil, headVersion,
 		); err != nil {
 			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
 			// to lose by carrying on: the next head will send another one.
@@ -87,6 +88,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			}
 		}
 	}
+	cfg.forkChoiceUpdateHeadHash = headHash
 
 	// Set the status in the RPC
 	if err2 := cfg.rpc.SetStatus(

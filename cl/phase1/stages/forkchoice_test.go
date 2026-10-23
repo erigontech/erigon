@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -20,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
@@ -104,6 +107,10 @@ type lockOrderFixture struct {
 }
 
 func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
+	return newLockOrderFixtureWithEngine(t, slot, nil)
+}
+
+func newLockOrderFixtureWithEngine(t *testing.T, slot uint64, engine execution_client.ExecutionEngine) lockOrderFixture {
 	t.Helper()
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.GloasForkEpoch = math.MaxUint64
@@ -126,7 +133,7 @@ func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
 	store, err := forkchoice.NewForkChoiceStore(
 		clock,
 		headState,
-		nil,
+		engine,
 		pool.NewOperationsPool(&beaconCfg),
 		graph,
 		emitter,
@@ -223,6 +230,47 @@ func TestComputeForkChoiceFallsBackWithoutSyncedHeadState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, fixture.headState.Slot(), headSlot)
 	require.Equal(t, fixture.headRoot, headRoot)
+}
+
+func TestComputeForkChoiceRecordsHeadHashWithoutEngine(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	fixture.cfg.forkChoiceUpdateHeadHash = common.Hash{0xff}
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, fixture.cfg.forkChoice.GetEth1Hash(fixture.headRoot), fixture.cfg.forkChoiceUpdateHeadHash)
+}
+
+func TestComputeForkChoiceRecordsHeadHashAfterEngineSuccess(t *testing.T) {
+	injected := errors.New("injected forkchoice update failure")
+	for _, tt := range []struct {
+		name   string
+		fcuErr error
+	}{
+		{name: "failure", fcuErr: injected},
+		{name: "success"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			engine.EXPECT().
+				ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(nil, tt.fcuErr)
+			fixture := newLockOrderFixtureWithEngine(t, 0, engine)
+			sentinel := common.Hash{0xff}
+			fixture.cfg.forkChoiceUpdateHeadHash = sentinel
+
+			_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+			if tt.fcuErr != nil {
+				require.ErrorIs(t, err, injected)
+				require.Equal(t, sentinel, fixture.cfg.forkChoiceUpdateHeadHash)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, fixture.cfg.forkChoice.GetEth1Hash(fixture.headRoot), fixture.cfg.forkChoiceUpdateHeadHash)
+		})
+	}
 }
 
 func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) {

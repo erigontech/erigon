@@ -87,6 +87,7 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
+	forkChoiceUpdateHeadHash     common.Hash
 	chainTipRejections           *chainTipRejections
 }
 
@@ -437,7 +438,8 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
-						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake,
+						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock,
+						cfg.forkChoiceUpdateHeadHash, cfg.sleepForSlotLastWake,
 					)
 					cfg.sleepForSlotHeadChanged = headChanged
 					if headChanged {

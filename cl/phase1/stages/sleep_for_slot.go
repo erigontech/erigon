@@ -31,6 +31,7 @@ const sleepForSlotHeadPollInterval = 200 * time.Millisecond
 
 type sleepForSlotForkChoice interface {
 	gloasHeadReader
+	GetEth1Hash(common.Hash) common.Hash
 	RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64)
 }
 
@@ -46,6 +47,7 @@ type sleepForSlotClock interface {
 
 type sleepForSlotWake struct {
 	root common.Hash
+	hash common.Hash
 	at   time.Time
 }
 
@@ -60,6 +62,7 @@ func waitForNextSlotOrHeadChange(
 	forkChoice sleepForSlotForkChoice,
 	syncedData sleepForSlotSyncedData,
 	clock sleepForSlotClock,
+	fcuHeadHash common.Hash,
 	lastWake sleepForSlotWake,
 ) (sleepForSlotWake, bool, error) {
 	nextSlotTime := clock.GetSlotTime(nextSlot)
@@ -85,6 +88,7 @@ func waitForNextSlotOrHeadChange(
 			}
 			currentSlot := clock.GetCurrentSlot()
 			head, headSlot, err := forkChoice.GetHead(nil)
+			headHash := forkChoice.GetEth1Hash(head)
 			select {
 			case <-ctx.Done():
 				return sleepForSlotWake{}, false, ctx.Err()
@@ -96,8 +100,9 @@ func waitForNextSlotOrHeadChange(
 			if err != nil {
 				continue
 			}
-			if head != syncedData.HeadRoot() && (head != lastWake.root || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
-				return sleepForSlotWake{root: head, at: time.Now()}, true, nil
+			if (head != syncedData.HeadRoot() || headHash != fcuHeadHash) &&
+				(head != lastWake.root || headHash != lastWake.hash || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
+				return sleepForSlotWake{root: head, hash: headHash, at: time.Now()}, true, nil
 			}
 			// The head's envelope decides whether the next proposer builds on a full or empty parent.
 			minRetrySlot := headSlot
