@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/state"
 )
 
@@ -56,7 +57,7 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 		require.NoError(t, os.WriteFile(first, []byte("first"), 0o644))
 	})
 	t.Run("missing file", func(t *testing.T) {
-		require.NoError(t, os.Remove(first))
+		require.NoError(t, dir.RemoveFile(first))
 		_, err := state.ReadPBTManifest(path, sources...)
 		require.ErrorContains(t, err, "missing file")
 		require.NoError(t, os.WriteFile(first, []byte("first"), 0o644))

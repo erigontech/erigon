@@ -915,6 +915,7 @@ func addPBTSourcePastPointFile(t *testing.T, source pbtConversionSource, address
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	address := bytes.Repeat([]byte{addressByte}, length.Addr)

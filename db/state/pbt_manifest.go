@@ -111,7 +111,7 @@ func WritePBTManifest(path string, manifest PBTManifest) error {
 		return fmt.Errorf("pbt manifest: create temporary file: %w", err)
 	}
 	tempPath := temp.Name()
-	defer func() { _ = os.Remove(tempPath) }()
+	defer func() { _ = dir.RemoveFile(tempPath) }()
 	if _, err := temp.Write(data); err != nil {
 		_ = temp.Close()
 		return fmt.Errorf("pbt manifest: write: %w", err)
@@ -138,8 +138,8 @@ func ReadPBTManifest(path string, sources ...PBTManifestFileSource) (PBTManifest
 		return PBTManifest{}, fmt.Errorf("pbt manifest: read: %w", err)
 	}
 	var wire pbtManifestWire
-	if err := toml.Unmarshal(data, &wire); err != nil {
-		return PBTManifest{}, fmt.Errorf("pbt manifest: decode: %w", err)
+	if decodeErr := toml.Unmarshal(data, &wire); decodeErr != nil {
+		return PBTManifest{}, fmt.Errorf("pbt manifest: decode: %w", decodeErr)
 	}
 	manifest, err := pbtManifestFromWire(wire)
 	if err != nil {
