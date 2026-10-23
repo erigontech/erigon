@@ -26,6 +26,8 @@
     - the stamp check walks the source unsorted;
     - the output's state files are checked by file identity, not re-rooted;
     - attach checks a digest manifest instead of re-deriving roots;
+    - rows reach the range files through one ordered lane per (range, partition) plus a small skip collector, so the
+      leaf sort is the only full sort;
   - **background ETL merge**: the k-way merge runs on its own goroutine and hands batches to the consumer, so merging
     overlaps the consumer's work;
   - **parallelism**:
@@ -34,10 +36,13 @@
     - the fold loop as three overlapped stages (read/stamp, compute, flush);
     - file ranges and their recsplit indexes built concurrently;
     - attach digests.
-- `--skip-verify` is deleted: with these changes, verification no longer costs hours. `verify-pbt` keeps the full
-  independent passes for hive, CI and operators who want them.
-- Evidence: `~/org/mode/e/research/pbt-fast-migration.org` (F1–F11) and its code maps, which gpt-6-astra max checked
-  claim by claim (5 HOLDS, 5 PARTLY, no counterexample).
+- `--skip-verify` stays as an option on convert and attach. Without it, every check runs, and with these changes the
+  checks cost minutes rather than hours. With it, the checks that read file content are skipped, and each skipped
+  check is logged by name.
+- `convert-pbt --resume` builds only the missing steps when hex execution has run past an existing PBT. It folds the
+  keys of the source files that end after the PBT point on top of the existing trie.
+- Evidence: `~/org/mode/e/research/pbt-fast-migration.org` (F1–F18) and its code maps. gpt-6-astra max checked them
+  claim by claim twice: C1–C10, then C11–C19 for the lanes and resume.
 
 ## Context (from discovery)
 - Convert: `convertPBTWithOptions` (`cmd/integration/commands/commitment_convert_pbt.go`) → `ConvertPBin`
@@ -60,6 +65,7 @@
     root (C-b), the header root after the fork (C-c), `verifyPBTOutputRows` → `VerifyPBinDomainRoot` (C-d, already
     parallel by `PBT_WORKERS` over chains ≥ 12 bits), and `verifyPBTOutputStandalone` → `PBinStateRoot` (C-e).
   - Output state files are hard links of the source's (`linkSnapshotsExceptCommitment`).
+- Partitions: `pbinPartitionOf` is the zone byte plus the first hash nibble, so at most 48 are live.
 - Attach: `attachPBTWithHooks` (`commitment_attach_pbt.go`).
   - Content passes:
     - A-a, `validatePBTAttachLeafStamps`: a sorted leaf walk that yields the published leaf root;
@@ -89,7 +95,7 @@
 - **CRITICAL: every task MUST include new/updated tests** for code changes in that task, success and error paths.
 - **CRITICAL: all tests must pass before starting next task** — the gate below, every task.
 - **CRITICAL: update this plan file when scope changes during implementation**.
-- Every change is on the production path (`convert-pbt`, `attach-pbt`, `import-pbt`, `verify-pbt`). Tests drive it
+- Every change is on the production path (`convert-pbt`, `attach-pbt`, `import-pbt`). Tests drive it
   through those entry points or the functions they call, and a concurrency test asserts that the stage actually
   runs with more than one goroutine.
 - Gate per task:
@@ -136,8 +142,8 @@ flowchart LR
   L --> C[pbin-ops partition file<br/>written in order, no ETL B]
   C --> F1[read + decode + stamp stage]
   F1 --> F2[compute stage, PBT workers]
-  F2 --> F3[flush stage: sort + ETL D]
-  F3 --> K[ranges in parallel:<br/>.kv + .kvi with recsplit workers]
+  F2 --> F3[flush stage: rows to per-range,<br/>per-partition lanes + skip collector]
+  F3 --> K[ranges in parallel:<br/>lanes merged with skip → .kv + .kvi]
   K --> M[manifest: point, roots, digests]
 ```
 - **D1 — output identity is the contract.** No change touches row content or range placement. The golden harness
@@ -159,19 +165,37 @@ flowchart LR
 - **D5 — fold loop pipeline.** Stage 1 reads and decodes the next batch from the partition file and runs
   `tracker.observe/advance`; it is in order and single-goroutine. Stage 2 is `ComputeCommitmentWithDiff`. Stage 3 is
   the flush. `FlushFinished` splits into a synchronous detach of the finished rows, which the next compute must not
-  see in the overlay, and a background sort plus ETL D collect of the detached rows. Each stage runs one batch
+  see in the overlay, and a background collect of the detached rows (into the lanes of D8). Each stage runs one batch
   ahead of the next, so a batch's wall time approaches its slowest stage.
 - **D6 — files in parallel.** `buildFiles` builds every range concurrently. Recsplit workers are set from
   `--workers` and split by range size. Concurrent builds are capped by memory. `integrateDirtyFiles` runs at the
   end.
-- **D7 — manifest, and no `--skip-verify`.**
-  - Convert writes `snapshots/pbt-manifest.toml` last, after its checks pass (temp, fsync, rename):
+- **D7 — manifest; `--skip-verify` is an option.**
+  - Convert writes `snapshots/pbt-manifest.toml` last on every run, `--skip-verify` included (temp, fsync, rename):
     - point, `pbt_root`, `hex_root`, `trie_hash`, `format = 1`;
     - name, size and blake3 of every file `pbtAttachAdoptsFile` selects.
   - Attach verifies the digests in parallel, plus the root record, the point and the hex root. A file adopted by copy
-    is digested again at the destination.
+    is digested again at the destination. Attach's `--skip-verify` skips only the digest passes.
+  - Convert's `--skip-verify` skips C-a (the file-range check runs instead), C-d and C-e. C-b and C-c always run.
   - Outputs without a manifest are refused with "re-run convert-pbt with this binary".
-  - `verify-pbt` runs C-d, C-e (`PBinStateRoot`) and the manifest check.
+- **D8 — rows in lanes, no second sort.** For each range, there is one append-only lane file per partition and one
+  skip collector. A row goes to its partition's lane if its key is above the lane's last key. Otherwise it goes to
+  the skip collector, as do rows above bit 12, the global root and the `state` key. A range's `.kv` input is its
+  lanes concatenated in partition order, merged with the skip collector. Partition runs are contiguous in row-key
+  order (astra C7, C13). Measured: 0.14% of rows go to the skip collector at `MaxOps` 100k (log F12).
+- **D9 — resume.**
+  - Base: the PBT at X, taken from an earlier output or from a hex+bin source whose bin domain stopped.
+  - Gap ops: the keys of every source `.kv` that ends after X, as leaves at Y:
+    - deletions are all-zero values;
+    - chunks are added for new code and never deleted;
+    - a removed account becomes per-leaf deletions, because the writer takes no Drop.
+  - Fold: the ops go through the one leaf sort and fold on the base trie. Every written row and tombstone goes to the
+    newest range, so no stamp tracker is needed and the latest view is exact.
+  - Output layout: the bin layout copies the source's commitment layout, which attach requires.
+  - Refused:
+    - a zero-start source file that spans X, because its deletions are gone;
+    - a gap that is not post-Cancun, or that holds a bytecode rewrite.
+  - Facts: log F13–F18.
 
 ## Technical Details
 - **Partition file writer** (replaces ETL B in `pbinForEachRebuildOpStream`):
@@ -191,9 +215,8 @@ flowchart LR
   - files report per range and stage (`.idt`, `.kv`, `.kvi`);
   - verify and attach report bytes or rows done.
 - **Flags**:
-  - `convert-pbt` adds `--workers` (default `PBT_WORKERS`) and loses `--skip-verify`;
-  - `attach-pbt` loses `--skip-verify`;
-  - new `integration commitment verify-pbt --datadir`.
+  - `convert-pbt` adds `--workers` (default `PBT_WORKERS`) and `--resume`, and keeps `--skip-verify`;
+  - `attach-pbt` keeps `--skip-verify`.
 
 ## What Goes Where
 - **Implementation Steps**: code, tests, and the docs in this repo.
@@ -276,32 +299,66 @@ flowchart LR
       the golden harness stays green; `-race`.
 - [x] run the gate — must pass before Task 7.
 
-### Task 7: Parallel file ranges and indexes
+### Task 7: Rows in lanes, no second sort
+**Files:**
+- Create: `db/state/pbt_row_lanes.go`, `db/state/pbt_row_lanes_test.go`
+- Modify: `db/state/pbt_range_writer.go`, `db/state/pbt_range_writer_test.go`
+
+- [ ] per range: one append-only lane file per partition (`pbinPartitionOf` of the row's path, at most 48) and one
+      skip collector (ETL with the background merge). A row goes to its lane when its key is above the lane's last
+      key. Otherwise it goes to the skip collector, as do rows above bit 12, the global root and the `state` key that
+      `buildFiles` injects. ETL D is deleted.
+- [ ] a range's `.kv` input is its lanes concatenated in partition order, merged with the skip collector. An equal or
+      decreasing key in the merged output is a named error. Lane files are removed after their range is built, and on
+      any failure.
+- [ ] progress per range: lane bytes, skip rows, and their share of the range.
+- [ ] tests:
+  - lanes plus skip give exactly the sorted sequence for random emission orders that include F9 parents, shallow rows,
+    the global root and the `state` key;
+  - a duplicate key fails with its error;
+  - the golden harness stays green at `MaxOps` 7, 1000 and 100000;
+  - a counter shows rows took both paths.
+- [ ] GUARDS: make the merge drop the skip collector, and name the golden assertion that fires.
+- [ ] run the gate — must pass before Task 8.
+
+### Task 8: Parallel file ranges and indexes
 **Files:**
 - Modify: `db/state/pbt_range_writer.go`
 - Modify: `db/state/pbt_range_writer_test.go`
 
-- [ ] build all ranges concurrently, with recsplit workers from `--workers` split by range size, a memory cap on
-      concurrent builds, and one `integrateDirtyFiles` at the end.
-- [ ] tests: identical files at workers 1 and 16; a failure in one range removes every partial file; the golden
-      harness stays green.
-- [ ] run the gate — must pass before Task 8.
+- [ ] build all ranges concurrently:
+  - each range's lane merge, `.idt` → `.kv`, and `.kvi`;
+  - recsplit workers from `--workers`, split by range size;
+  - a memory cap on concurrent builds;
+  - one `integrateDirtyFiles` at the end.
+- [ ] tests:
+  - identical files at workers 1 and 16;
+  - a counter shows at least two ranges built at once;
+  - a failure in one range removes every partial `.kv`, `.kvi`, `.idt` and lane file;
+  - the golden harness stays green; `-race`.
+- [ ] GUARDS: make the cleanup skip one range's partial `.kvi`, and name the assertion that fires.
+- [ ] run the gate — must pass before Task 9.
 
-### Task 8: Verify without re-sorting; manifest; no `--skip-verify` in convert
+### Task 9: Verify without re-sorting; manifest; `--skip-verify` as an option
 **Files:**
 - Create: `db/state/pbt_manifest.go`, `db/state/pbt_manifest_test.go`
 - Modify: `cmd/integration/commands/commitment_convert_pbt.go`
 - Modify: `cmd/integration/commands/commitment_convert_pbt_test.go`
 
-- [ ] C-a as a parallel unsorted stamp walk. C-e as file identity: every output state file has the source file's
-      inode, plus the state records at the point. C-b, C-c and C-d stay as they are.
-- [ ] the manifest (D7): write it last; read; check with parallel digests.
-- [ ] delete `--skip-verify`, `requirePBinSourceFilesEnd`, and their tests.
-- [ ] tests: a stamp past the point in the last address range; a non-linked output state file; manifest round trip
-      and every tamper case; the golden harness stays green.
-- [ ] run the gate — must pass before Task 9.
+- [ ] C-a as a parallel unsorted stamp walk. C-e as file identity: every output state file is the source file's
+      inode, plus the state records at the point. C-b, C-c and C-d stay.
+- [ ] the manifest (D7): written last on every run, `--skip-verify` included; read; checked with parallel digests.
+- [ ] `--skip-verify` stays. It skips C-a (the file-range check `requirePBinSourceFilesEnd` runs instead), C-d and
+      C-e, and logs each skipped check by name. C-b and C-c always run.
+- [ ] tests:
+  - a stamp past the point in the last address range;
+  - a non-linked output state file;
+  - manifest round trip and every tamper case;
+  - with `--skip-verify`, the manifest is written and the skipped checks are logged;
+  - the golden harness stays green.
+- [ ] run the gate — must pass before Task 10.
 
-### Task 9: attach-pbt verifies the manifest
+### Task 10: attach-pbt verifies the manifest
 **Files:**
 - Modify: `cmd/integration/commands/commitment_attach_pbt.go`
 - Modify: `cmd/integration/commands/commitment_attach_pbt_test.go`
@@ -313,48 +370,115 @@ flowchart LR
   - the published and node hex roots against `hex_root`;
   - past the fork, the header root against `pbt_root`.
   Re-digest a file adopted by copy at the destination.
-- [ ] delete `--skip-verify`, A-a, A-b and A-c from the default path. Write the shadow root from `pbt_root` at a block
-      end before the fork. Copy the manifest into the node.
+- [ ] A-a, A-b and A-c leave the default path. `--skip-verify` stays and skips only the digest passes; every other
+      check above always runs. Write the shadow root from `pbt_root` at a block end before the fork, with or without
+      the flag. Copy the manifest into the node.
 - [ ] tests:
   - refused before adopting: a changed byte; a missing or extra file; a wrong root; a wrong hex root;
+  - with `--skip-verify`, a changed byte passes, but a wrong root is still refused;
   - a corrupted copy is refused after the copy;
   - a clean attach writes the shadow root and settings;
   - resume after a crash at each `hooks.step`.
-- [ ] run the gate — must pass before Task 10.
-
-### Task 10: verify-pbt command
-**Files:**
-- Create: `cmd/integration/commands/commitment_verify_pbt.go`
-- Create: `cmd/integration/commands/commitment_verify_pbt_test.go`
-
-- [ ] move C-d (`VerifyPBinDomainRoot`) and C-e (`PBinStateRoot` against the state record) here. Run the manifest
-      check when a manifest is present.
-- [ ] tests: a clean converted datadir passes; corrupted rows, leaves and files each fail with their error.
 - [ ] run the gate — must pass before Task 11.
 
-### Task 11: Scale benchmark
+### Task 11: Resume, part 1 — the gap leaf stream
+**Files:**
+- Create: `db/state/pbt_resume_leaves.go`, `db/state/pbt_resume_leaves_test.go`
+- Modify: `db/state/pbt_leaf_stream.go`
+
+- [ ] input: the base point X and the source point Y. Output: the accounts, storage and code keys of every source
+      `.kv` file whose range ends after X, walked in parallel by address range as in D4. History files are not
+      read.
+- [ ] per touched address, emit the leaves at Y the way execution's feed (`FeedOpEmitter.EmitAccount`) defines them, as
+      plain ops with 32-byte values:
+  - the header leaves always: basic data, plus code hash or delegation, with an all-zero deletion for the one that
+    is absent;
+  - code chunks for code written after X; chunks are never deleted;
+  - each touched storage slot, with a deletion for an empty value;
+  - for an account absent at Y, a deletion for every header leaf and for each storage tombstone. No Drop ops.
+  Stamps are the source file's `endTxNum − 1`. The ops go through the one leaf sort (ETL A).
+- [ ] refusals, each with a named error:
+  - a source file that starts at step 0 and spans X;
+  - a gap that is not entirely post-Cancun, or a chain with a bytecode rewrite (AuRa `rewriteBytecode`, Gnosis's
+    Balancer `Merge.Initialize`).
+- [ ] tests: applying the gap ops to the leaf set at X gives the leaf set at Y, on corpora with:
+  - updates and deletions;
+  - an EIP-161 deletion;
+  - EIP-7702 delegation set and clear;
+  - new code and shared code;
+  - a source merge with a non-zero start that spans X.
+  Each refusal has its own test.
+- [ ] run the gate — must pass before Task 12.
+
+### Task 12: Resume, part 2 — fold on top of the existing PBT
+**Files:**
+- Modify: `db/state/pbt_range_writer.go`, `db/state/pbt_convert.go`
+- Create: `db/state/pbt_resume_test.go`
+
+- [ ] a resume mode of the range writer:
+  - seek the commitment state at X from the base bin files instead of `WithoutCommitmentSeek`;
+  - read base rows through the trie context, and make the overlay's `Absent` consult the base;
+  - accept a base domain that holds files up to X and no MDBX rows.
+- [ ] every row and tombstone written goes to the newest output range through the lanes (Task 7). This mode has no
+      stamp tracker. The state record at Y goes to the same range.
+- [ ] verification: C-b does not apply to a delta. The default runs:
+  - C-d (rows and root);
+  - C-e (the stream root of the full leaf set at Y, compared with the state record);
+  - C-c after the fork.
+  `--skip-verify` skips C-d and C-e.
+- [ ] tests:
+  - the resumed latest row view and root equal a fresh convert at Y on the Task 11 corpora;
+  - a deleted subtree leaves tombstones;
+  - an empty gap gives the base root;
+  - `-race`.
+- [ ] run the gate — must pass before Task 13.
+
+### Task 13: Resume, part 3 — `convert-pbt --resume`
+**Files:**
+- Modify: `cmd/integration/commands/commitment_convert_pbt.go`
+- Modify: `cmd/integration/commands/commitment_convert_pbt_test.go`
+
+- [ ] `--resume` takes the base PBT from one of two places:
+  - the output datadir, from an earlier convert;
+  - when the output is empty, the source's own commitment-bin domain (a hex+bin node whose bin domain stopped).
+  X is the bin state record in the base files.
+- [ ] the output's bin file layout equals the source's commitment layout, which attach requires:
+  - link a base bin file whose range matches;
+  - merge base bin files where the source merged them;
+  - refuse a merge that starts at step 0 and spans X.
+  The state files are linked again from the source at Y. The settings and the manifest are written at Y.
+- [ ] progress lines for the gap walk, the fold, the merges and the files. The log names X, Y and the gap's key
+      count.
+- [ ] tests:
+  - resume of an earlier output;
+  - resume of a stopped hex+bin source;
+  - a source that merged across X;
+  - attach of the resumed output on a node at Y passes;
+  - the golden harness stays green.
+- [ ] run the gate — must pass before Task 14.
+
+### Task 14: Scale benchmark
 **Files:**
 - Create: `db/state/pbt_convert_bench_test.go`
 
 - [ ] `BenchmarkPBinConvert` on a ≥ 100M-leaf generated datadir: per-phase wall time, CPU-seconds and RssAnon at
-      workers 1/4/8/16.
+      workers 1/4/8/16, plus the skip-lane share.
+- [ ] `--resume` over gaps of 1%, 5% and 20% of the leaves: wall time against a fresh convert.
 - [ ] record the numbers in the plan and the research log.
-- [ ] run the gate — must pass before Task 12.
+- [ ] run the gate — must pass before Task 15.
 
-### Task 12: Verify acceptance criteria
-- [ ] every Overview item is implemented and reached from `convert-pbt`, `attach-pbt` or `verify-pbt`.
+### Task 15: Verify acceptance criteria
+- [ ] every Overview item is implemented and reached from `convert-pbt` or `attach-pbt`.
 - [ ] Hoodi real data on the Mac (`/Volumes/dev/chains/hoodi-pbt/`, offline clone):
   - bin files identical to the pre-change converter's;
   - attach on a clone, then dual re-execution over ≥ 1000 blocks with no shadow stop;
-  - `verify-pbt` passes;
   - per-phase wall time recorded.
+- [ ] Hoodi resume:
+  - remove the newest unmerged steps from a hard-linked clone to get a point X, and convert there;
+  - resume against the full source to Y;
+  - the latest row view and root equal a fresh convert at Y;
+  - attach the result to a clone; time both.
 - [ ] full gate, `go test -race` on the touched packages, and `make lint`.
-
-### Task 13: [Final] Update documentation
-- [ ] `docs/pbt-migration.md`: the pipeline, the manifest, attach's checks, `verify-pbt`, and the removed flag.
-- [ ] `cmd/integration/Readme.md`: convert, attach and verify usage.
-- [ ] root `CLAUDE.md`/`AGENTS.md` PBT paragraph, where the convert sentence changes.
-- [ ] move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 *Items requiring manual intervention or external systems — informational only*
@@ -370,5 +494,7 @@ flowchart LR
 goroutine. A partitioned bulk build is research-log idea I1: the engine per partition, one spill, and rows straight
 into the range files. It replaces both, and needs its own plan.
 
-**Rollout**: scripts that pass `--skip-verify` (erigon-2 `migrate-2.sh`) must drop it. Outputs without a manifest
-are refused, and convert must be rerun.
+**Rollout**: outputs without a manifest are refused, and convert must be rerun.
+
+**Deferred by the owner (2026-10-24)**: a `verify-pbt` command, and the docs (`docs/pbt-migration.md`,
+`cmd/integration/Readme.md`, the root `CLAUDE.md`/`AGENTS.md` PBT paragraph).
