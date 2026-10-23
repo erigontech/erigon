@@ -174,6 +174,10 @@ type VersionMap struct {
 	// SealUpTo is single-writer (the finalize sweep); reads are many-reader.
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
+
+	// fieldMissHook runs after an account-field probe missed, before the
+	// fallbacks probe the version map again. Tests set it to land a flush there.
+	fieldMissHook func()
 }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
