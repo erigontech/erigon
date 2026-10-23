@@ -52,6 +52,26 @@ type pausingHeadView struct {
 	release chan struct{}
 }
 
+type recordingHeadPublish struct {
+	synced_data.SyncedData
+	copyCalls  int
+	ownedCalls int
+	ownedState *state.CachingBeaconState
+	ownedRoot  common.Hash
+}
+
+func (s *recordingHeadPublish) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	s.copyCalls++
+	return s.SyncedData.OnHeadStateWithBlockRoot(newState, blockRoot)
+}
+
+func (s *recordingHeadPublish) OnOwnedHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	s.ownedCalls++
+	s.ownedState = newState
+	s.ownedRoot = blockRoot
+	return s.SyncedData.OnOwnedHeadStateWithBlockRoot(newState, blockRoot)
+}
+
 func (s *pausingHeadView) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
 	return s.SyncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		close(s.entered)
@@ -446,6 +466,33 @@ func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) 
 	requireLockOrderOperationCompletes(t, fixture, done)
 	_, err = checkpoint_sync.ReadLocalFinalizedState(fixture.cfg.dirs, fixture.cfg.beaconCfg)
 	require.NoError(t, err)
+}
+
+func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 1)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	recorder := &recordingHeadPublish{SyncedData: fixture.syncedData}
+	fixture.cfg.syncedData = recorder
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+
+	require.Equal(t, 1, recorder.ownedCalls)
+	require.Zero(t, recorder.copyCalls)
+	require.Equal(t, fixture.headRoot, recorder.ownedRoot)
+	require.NoError(t, fixture.cfg.forkChoice.ViewStateAtBlockRoot(fixture.headRoot, func(current *state.CachingBeaconState) error {
+		require.NotSame(t, current, recorder.ownedState)
+		return nil
+	}))
+	require.NoError(t, fixture.syncedData.ViewHeadState(func(head *state.CachingBeaconState) error {
+		require.Same(t, recorder.ownedState, head)
+		return nil
+	}))
 }
 
 func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
