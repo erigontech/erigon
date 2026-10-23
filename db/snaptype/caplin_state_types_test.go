@@ -67,6 +67,7 @@ func caplinStateTypeExpectations() []caplinStateTypeExpectation {
 		{snaptype.BuilderPendingPaymentsTable, kv.BuilderPendingPaymentsTable},
 		{snaptype.PtcWindowTable, kv.PtcWindowTable},
 		{snaptype.LatestExecutionPayloadBidTable, kv.LatestExecutionPayloadBidTable},
+		{snaptype.PtcWindowEpoch, kv.PtcWindowEpochTable},
 	}
 }
 
@@ -96,11 +97,30 @@ func TestCaplinStateSnapshotTypes(t *testing.T) {
 		wantNames[expected.name] = struct{}{}
 	}
 
-	gotNames := make(map[string]struct{}, len(snapshotsync.MakeCaplinStateSnapshotsTypes(nil).KeyValueGetters))
-	for name := range snapshotsync.MakeCaplinStateSnapshotsTypes(nil).KeyValueGetters {
+	wantActiveNames := make(map[string]struct{}, len(want)-1)
+	for name := range wantNames {
+		if name != kv.PtcWindowTable {
+			wantActiveNames[name] = struct{}{}
+		}
+	}
+
+	gotNames := make(map[string]struct{}, len(snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil).KeyValueGetters))
+	for name := range snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil).KeyValueGetters {
 		gotNames[name] = struct{}{}
 	}
-	require.Equal(t, gotNames, wantNames)
+	require.Equal(t, wantActiveNames, gotNames)
+	require.NotContains(t, gotNames, kv.PtcWindowTable)
+	require.Contains(t, gotNames, kv.PtcWindowEpochTable)
+
+	legacyFile := snaptype.PtcWindowTable.FileName(version.ZeroVersion, 0, 50_000)
+	legacyInfo, _, ok := snaptype.ParseFileName("", legacyFile)
+	require.True(t, ok)
+	require.Equal(t, snaptype.PtcWindowTable, legacyInfo.Type)
+
+	epochFile := snaptype.PtcWindowEpoch.FileName(version.ZeroVersion, 0, 50_000)
+	epochInfo, _, ok := snaptype.ParseFileName("", epochFile)
+	require.True(t, ok)
+	require.Equal(t, snaptype.PtcWindowEpoch, epochInfo.Type)
 }
 
 func TestCaplinStateSnapshotTypeRange(t *testing.T) {

@@ -37,8 +37,10 @@ import (
 // ProcessBlock processes a block with the block processor
 func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	var (
-		version = s.Version()
-		body    = block.GetBody()
+		version                                = s.Version()
+		body                                   = block.GetBody()
+		signatures, messages, publicKeys       [][]byte
+		bidSignature, bidMessage, bidPublicKey []byte
 	)
 
 	// Check the state version is correct.
@@ -72,6 +74,14 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		// 3. [New in Gloas:EIP7732] process_execution_payload_bid(state, block)
 		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload bid: %w", err)
+		}
+		signedBid := body.GetSignedExecutionPayloadBid()
+		if signedBid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+			bidSignature, bidMessage, bidPublicKey, err = state.ExecutionPayloadBidSignatureSet(s, signedBid)
+			if err != nil {
+				return fmt.Errorf("processBlock: failed to get execution payload bid signature set: %w", err)
+			}
+			signatures, messages, publicKeys = append(signatures, bidSignature), append(messages, bidMessage), append(publicKeys, bidPublicKey)
 		}
 	} else if version >= clparams.BellatrixVersion {
 		// Pre-Gloas: process execution payload if enabled
@@ -107,7 +117,6 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	}
 
 	// 4. process_randao
-	var signatures, messages, publicKeys [][]byte
 	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
 	if err != nil {
 		return err
@@ -129,10 +138,19 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	// process signature validation
 	if len(signatures) != 0 {
 		valid, err := bls.VerifyMultipleSignatures(signatures, messages, publicKeys)
-		if err != nil {
-			return err
-		}
-		if !valid {
+		if err != nil || !valid {
+			if bidSignature != nil {
+				bidValid, bidErr := bls.Verify(bidSignature, bidMessage, bidPublicKey)
+				if bidErr != nil {
+					return fmt.Errorf("processBlock: failed to verify bid signature: %w", bidErr)
+				}
+				if !bidValid {
+					return fmt.Errorf("processBlock: %w: invalid bid signature", ErrInvalidExecutionPayloadBid)
+				}
+			}
+			if err != nil {
+				return err
+			}
 			return errors.New("block signature validation failed")
 		}
 	}
@@ -231,11 +249,34 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 
 	// [New in Gloas:EIP7732] Process payload attestations
 	if s.Version() >= clparams.GloasVersion {
-		if err := forEachProcess(s, blockBody.GetPayloadAttestations(), impl.ProcessPayloadAttestation); err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessPayloadAttestation: %w", err)
+		sigs, msgs, pubKeys, err = processPayloadAttestations(impl, s, blockBody)
+		if err != nil {
+			return nil, nil, nil, err
 		}
+		signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 	}
 
+	return
+}
+
+func processPayloadAttestations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	err = solid.RangeErr[*cltypes.PayloadAttestation](blockBody.GetPayloadAttestations(), func(index int, attestation *cltypes.PayloadAttestation, length int) error {
+		if err := impl.ProcessPayloadAttestation(s, attestation); err != nil {
+			return fmt.Errorf("ProcessPayloadAttestation: %w", err)
+		}
+		indexedAttestation, err := s.GetIndexedPayloadAttestation(attestation)
+		if err != nil {
+			return fmt.Errorf("ProcessPayloadAttestation: failed to get indexed payload attestation: %w", err)
+		}
+		signature, signingRoot, aggregatePublicKey, err := state.IndexedPayloadAttestationSignatureSet(s, indexedAttestation)
+		if err != nil {
+			return fmt.Errorf("ProcessPayloadAttestation: %w", err)
+		}
+		sigs = append(sigs, signature)
+		msgs = append(msgs, signingRoot)
+		pubKeys = append(pubKeys, aggregatePublicKey)
+		return nil
+	})
 	return
 }
 

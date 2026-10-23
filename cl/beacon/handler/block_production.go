@@ -1375,7 +1375,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	// Candidate processing includes work unrelated to the bid. Evict only errors
 	// marked as deterministic bid-validation failures.
 	bidEvicted := false
-	if a.epbsPool != nil && errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
+	if a.epbsPool != nil && errors.Is(candidateErr, machine.ErrInvalidExecutionPayloadBid) {
 		bidEvicted = a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	}
 	if selfBuildErr != nil {
