@@ -1914,6 +1914,65 @@ func TestCalcFees_SameTxDestroyedCoinbase_EmitsRemoval(t *testing.T) {
 	}
 }
 
+// The worker's EIP-161 removal of an empty codeless coinbase stands only without a tip:
+// serial credits the tip before the tx's empty-account sweep, so a tip keeps the account.
+func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	for _, tc := range []struct {
+		name string
+		tip  uint64
+	}{
+		{"tip keeps the account", 1_000},
+		{"zero tip leaves it removed", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+			reader := newMapStateReader()
+			reader.accounts[coinbase] = &accounts.Account{CodeHash: accounts.EmptyCodeHash}
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task: task,
+				ExecutionResult: evmtypes.ExecutionResult{
+					FeeTipped:            *uint256.NewInt(tc.tip),
+					BurntContractAddress: accounts.NilAddress,
+				},
+				Coinbase: coinbase,
+			}}
+
+			vm := state.NewVersionMap(nil)
+			worker := state.NewWithVersionMap(reader, vm)
+			worker.SetTxContext(1, 1)
+			worker.SetNoMaterialize(true)
+			require.NoError(t, worker.TouchAccount(coinbase))
+			result.TxOut = finalizedWrites(t, worker, rules)
+			sd, ok := result.TxOut.GetSelfDestruct(coinbase)
+			require.True(t, ok && sd.Val, "precondition: the worker removes the touched empty coinbase")
+
+			writes, err := result.calcFees(task, vm, reader, rules)
+			require.NoError(t, err)
+			sdw, ok := writes.GetSelfDestruct(coinbase)
+			if tc.tip == 0 {
+				require.False(t, ok && !sdw.Val, "no tip: the removal stands")
+				return
+			}
+			require.True(t, ok && !sdw.Val, "a tip undoes the removal")
+			bw := findBalance(writes, coinbase)
+			require.NotNil(t, bw)
+			require.Equal(t, *uint256.NewInt(tc.tip), bw.Val)
+		})
+	}
+}
+
 // failingAccountReader fails account reads once err is set.
 type failingAccountReader struct {
 	*mapStateReader

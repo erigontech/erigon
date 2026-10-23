@@ -536,3 +536,37 @@ func TestSelfDestructTrieReset_SingleSlotRecreate_Seq(t *testing.T) {
 
 	require.Equal(t, want, got)
 }
+
+func TestSelfDestructTrieReset_SingleSlotRecreate_Parallel(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const workers = 4
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 0).Nonce(a, 1).Storage(a, hex.EncodeToString(slotHashBytes(5000)), "01")
+	}
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	b1 := NewUpdateBuilder().Nonce(a, 0).Balance(sib, 500).Storage(a, hex.EncodeToString(slotHashBytes(0)), "01")
+	k1, u1 := b1.Build()
+	_, blob := parUpdateBatch(t, ms, workers, k1, u1, nil, "")
+
+	clean := NewUpdateBuilder().DeleteStorage(a, hex.EncodeToString(slotHashBytes(0)))
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	got, _ := parUpdateBatch(t, ms, workers, k2, u2, blob, a)
+
+	oms := NewMockState(t)
+	oms.SetConcurrentCommitment(true)
+	ob := NewUpdateBuilder().Balance(sib, 500)
+	recreate(ob)
+	ok, ou := ob.Build()
+	want, _ := parUpdateBatch(t, oms, workers, ok, ou, nil, "")
+
+	require.Equal(t, want, got)
+}
