@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -448,13 +449,46 @@ func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet 
 	return sd.currentChangesAccumulator
 }
 
+// nilDomainWriterSeen counts domains this batch has no writer for, so the stopgap below cannot be
+// silent. See SetChangesetAccumulator.
+var nilDomainWriterSeen [kv.DomainLen]atomic.Uint64
+
+// NilDomainWriters reports, per domain, how many times SetChangesetAccumulator found no writer.
+// All zeros is the expected state; anything else names the domain the crash was about.
+func NilDomainWriters() (out [kv.DomainLen]uint64) {
+	for i := range nilDomainWriterSeen {
+		out[i] = nilDomainWriterSeen[i].Load()
+	}
+	return out
+}
+
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
+		w := sd.domainWriters[idx]
+		if w == nil {
+			// ⚠ STOPGAP, AND DELIBERATELY NOT SILENT. SetDiff dereferences its receiver even for a nil
+			// diff, so a missing writer here KILLED THE NODE:
+			//
+			//	panic: nil pointer dereference
+			//	  DomainBufferedWriter.SetDiff -> SetChangesetAccumulator -> flushPendingUpdates
+			//	  -> preExecFrontier.RetireBelow -> MergeExtendingFork -> updateForkChoice
+			//
+			// Measured once, on soak live435 pass 4 (9600 orders); 1200/2400/4800 ran clean. Writers are
+			// built once from aggTx.d and are never nilled afterwards - Close() does not nil them, and it
+			// already guards this same slice with `if d != nil` - so a nil here is a LIFECYCLE WINDOW this
+			// read could not pin, not a static shape.
+			//
+			// Skipping the diff for one domain risks losing its changeset; crashing loses the node and the
+			// run. The count is what makes this a stopgap rather than a paper-over: NilDomainWriters() names
+			// the domain, which is the fact the panic did not carry, and all-zeros says it stopped happening.
+			nilDomainWriterSeen[idx].Add(1)
+			continue
+		}
 		if sd.currentChangesAccumulator == nil {
-			sd.domainWriters[idx].SetDiff(nil)
+			w.SetDiff(nil)
 		} else {
-			sd.domainWriters[idx].SetDiff(&sd.currentChangesAccumulator.Diffs[idx])
+			w.SetDiff(&sd.currentChangesAccumulator.Diffs[idx])
 		}
 	}
 }
