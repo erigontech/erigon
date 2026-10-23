@@ -77,6 +77,9 @@ type Difference struct {
 // and b, nil when every one agrees. A block hash commits to its ancestors,
 // so the search halves the range.
 func Diff(ctx context.Context, a, b Source, from, to uint64) (*Difference, error) {
+	if from > to {
+		return nil, fmt.Errorf("empty range [%d, %d]", from, to)
+	}
 	same := func(n uint64) (bool, map[string]json.RawMessage, map[string]json.RawMessage, error) {
 		ba, err := a.Block(ctx, n)
 		if err != nil {

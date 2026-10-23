@@ -160,4 +160,7 @@ func TestDiff(t *testing.T) {
 
 	_, err = tools.Diff(t.Context(), sa, so, 0, 3)
 	require.ErrorIs(t, err, tools.ErrNoBlock)
+
+	_, err = tools.Diff(t.Context(), sa, so, 3, 2)
+	require.ErrorContains(t, err, "empty range")
 }
