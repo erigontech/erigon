@@ -175,9 +175,9 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 // than being zeroed by the SD-with-incarnation branch.
 //
 // Note: under the *current* ApplyWrites semantics this state is
-// unreachable from a real LightCollector writeset, because
+// unreachable from a real worker writeset, because
 // `BalancePath` always clears `Deleted` (see
-// TestApplyWrites_BalancePathClearsDeleted) and LightCollector emits
+// TestApplyWrites_BalancePathClearsDeleted) and the writeset carries
 // `SelfDestructPath` before the `BalancePath` reset. The test
 // populates cs.accounts directly to cover the FlushToUpdates branch
 // in isolation against future ApplyWrites changes (e.g. write-order

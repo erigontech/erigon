@@ -270,8 +270,7 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 		}
 	}
 
-	// Writers that implement neither (NoopWriter, LightCollector) accumulate in
-	// memory and need no tx — not an error.
+	// Writers that implement neither (NoopWriter) need no tx — not an error.
 	type withPutter interface{ SetPutDel(kv.TemporalPutDel) }
 	type withTx interface{ SetTx(kv.TemporalTx) }
 	switch typedWriter := rw.stateWriter.(type) {
@@ -425,12 +424,6 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	if callTracer != nil {
 		result.TraceFroms = callTracer.Froms()
 		result.TraceTos = callTracer.Tos()
-	}
-
-	// Extract LightCollector's accumulated writes so finalize can use them
-	// directly without IBS reconstruction.
-	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
-		result.CollectorWrites = lc.TakeWrites()
 	}
 
 	return result

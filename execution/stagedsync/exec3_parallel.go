@@ -937,7 +937,7 @@ func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
-		_ = worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
+		_ = worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
 		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
 }
@@ -948,7 +948,7 @@ func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 func (pe *parallelExecutor) newExecWorker() *exec.WorkerContext {
 	w := exec.NewWorkerContext(pe.workersCtx, true, pe.taskExecMetrics, pe.cfg.db,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
-	_ = w.ResetState(pe.rs, nil, nil, state.NewLightCollector(), nil)
+	_ = w.ResetState(pe.rs, nil, nil, state.NewNoopWriter(), nil)
 	w.EnablePrevBlockReads(pe.prevBlocks)
 	pe.mintMu.Lock()
 	pe.mintedWorkers = append(pe.mintedWorkers, w)
@@ -1849,9 +1849,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 					be.blockNum, tv.index, rec, dbg.Stack()))
 			}
 		}()
-		if !acquire() {
-			return
-		}
 		bumpInc := func() bool {
 			tv.version.Incarnation++
 			if int(tv.version.Incarnation) > len(be.tasks)+8 {
@@ -1864,11 +1861,9 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			}
 			return true
 		}
-		// reExec is called holding NO context; it bumps the incarnation and reacquires
-		// a context. Returns false on the incarnation limit or shutdown.
-		reExec := func() bool {
-			return bumpInc() && acquire()
-		}
+		// reExec is called holding NO context; it bumps the incarnation. Returns false on
+		// the incarnation limit.
+		reExec := bumpInc
 		// waitTo waits for the commit frontier to reach t. Returns false on shutdown.
 		waitTo := func(t int) bool {
 			return be.waitDep(tv.index, t)
@@ -1885,6 +1880,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				if slotErr != nil {
 					sendOperational(fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, slotErr))
 				}
+				return
+			}
+			// The context is taken after the slot, so tasks queued for a slot do not
+			// grow the context pool.
+			if !acquire() {
 				return
 			}
 			if err := w.ResetTx(goRoTx); err != nil {
@@ -3026,19 +3026,6 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		// finalizations see the full post-tx state via the versionMap fallback chain.
 		be.versionMap.FlushVersionedWrites(merged, true, "")
 		be.markReadersDirty(tx, merged)
-
-		// Update CollectorWrites with fee-adjusted balances so the apply fold records
-		// the correct accumulated fees.
-		if !txResult.CollectorWrites.IsEmpty() {
-			for addr, w := range addWrites.Balances() {
-				if existing, ok := txResult.CollectorWrites.GetBalance(addr); ok {
-					existing.Val = w.Val
-					existing.Reason = w.Reason
-				} else {
-					txResult.CollectorWrites.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Reason: w.Reason}, Val: w.Val})
-				}
-			}
-		}
 	}
 
 	{
