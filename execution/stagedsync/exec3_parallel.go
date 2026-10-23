@@ -2305,8 +2305,10 @@ func (result *execResult) calcFees(
 		coinbaseCreatedContract = cw.Val
 	}
 	burntOverride := false
+	burntBalanceDeleted := false
 	burntSelfdestructed := false
 	burntWasContract := false
+	burntCreatedContract := false
 	burntNonce := uint64(0)
 	burntHasCodeHashWrite := false
 	burntEmptyCodeHash := burntAcc == nil || burntAcc.IsEmptyCodeHash()
@@ -2317,6 +2319,7 @@ func (result *execResult) calcFees(
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 			burntOverride = true
+			burntBalanceDeleted = bw.Deletes()
 		}
 		if sw, ok := result.TxOut.GetSelfDestruct(burntAddr); ok {
 			burntSelfdestructed = sw.Val
@@ -2327,7 +2330,9 @@ func (result *execResult) calcFees(
 		if _, ok := result.TxOut.GetCodeHash(burntAddr); ok {
 			burntHasCodeHashWrite = true
 		}
-		_, burntCreatedContract := result.TxOut.GetCreateContract(burntAddr)
+		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
+			burntCreatedContract = true
+		}
 		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
@@ -2345,8 +2350,12 @@ func (result *execResult) calcFees(
 	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
+	// Before EIP-8246, a SELFDESTRUCT of a contract burnt recipient burns the fee
+	// credited to it, like a destroyed coinbase tip. Mirrors burnCoinbaseTip.
+	burnBurntFee := !chainRules.IsAmsterdam && burntSelfdestructed && burntWasContract
+	burntNetDestructed := burnBurntFee && !burntCreatedContract
 	oldBurntBalance := newBurntBalance
-	if hasBurnt && chainRules.IsLondon {
+	if hasBurnt && chainRules.IsLondon && !burnBurntFee {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 
@@ -2369,7 +2378,10 @@ func (result *execResult) calcFees(
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 
-	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || burntOverride)
+	// A destroyed burnt recipient whose fee was burned (or left it empty) is removed,
+	// matching serial; mirrors coinbaseNetDeleted.
+	burntNetDeleted := burntOverride && burntBalanceDeleted && (newBurntBalance.IsZero() || burnBurntFee)
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || (burntOverride && !burntNetDestructed)) && !burntNetDeleted
 	// A zero base-fee transfer still touches the burnt recipient, so EIP-161 removes
 	// an empty one with its storage. Mirrors coinbaseEmptied above.
 	burntEmptied := hasBurnt && chainRules.IsLondon && !emitBurnt && !burntSelfdestructed && burntAcc != nil &&
@@ -2380,7 +2392,7 @@ func (result *execResult) calcFees(
 	if coinbaseNetDeleted || coinbaseEmptied {
 		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
 	}
-	if burntEmptied {
+	if burntEmptied || burntNetDeleted {
 		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
 	}
 	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
@@ -2468,7 +2480,7 @@ func (result *execResult) calcFees(
 		})
 		// Mirror the AddressPath emission above for the burnt address.
 		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
-		if burntAcc != nil {
+		if burntAcc != nil && !burntNetDestructed {
 			burntAddrAcc.Nonce = burntAcc.Nonce
 			burntAddrAcc.Incarnation = burntAcc.Incarnation
 			burntAddrAcc.CodeHash = burntAcc.CodeHash
