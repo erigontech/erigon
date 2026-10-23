@@ -79,48 +79,19 @@ type signerForks struct {
 
 func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
 	var signer Signer
-	var chainId uint256.Int
-	if chainID != nil {
-		chainId.Set(chainID)
-	}
 	signer.unprotected = true
+	// Later forks enable all earlier transaction types, even if their fork flags are unset.
 	signer.frame = forks.bogota
-	switch {
-	case forks.prague || forks.bogota:
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.blob = true
-		signer.setCode = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.cancun:
-		// All transaction types are still supported
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.blob = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.london:
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.berlin:
-		signer.protected = true
-		signer.accessList = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.spuriousDragon:
-		signer.protected = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.homestead:
-	default:
-		// Only allow malleable transactions in Frontier
-		signer.malleable = true
+	signer.setCode = forks.prague || signer.frame
+	signer.blob = forks.cancun || signer.setCode
+	signer.dynamicFee = forks.london || signer.blob
+	signer.accessList = forks.berlin || signer.dynamicFee
+	signer.protected = forks.spuriousDragon || signer.accessList
+	// Only allow malleable transactions in Frontier.
+	signer.malleable = !forks.homestead && !signer.protected
+	if signer.protected && chainID != nil {
+		signer.chainID.Set(chainID)
+		signer.chainIDMul.Lsh(chainID, 1) // ×2
 	}
 	return &signer
 }
