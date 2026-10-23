@@ -390,6 +390,50 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 	}
 }
 
+func TestConvertPBTFileRangesMatchWorkers(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, false, nil)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFiles(t, source)
+	var wantKV, wantKVI map[string][]byte
+	for _, workers := range []int{1, 16} {
+		output := filepath.Join(t.TempDir(), fmt.Sprintf("output-workers-%d", workers))
+		require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{
+			workers:           workers,
+			rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: 7, MaxBytes: 1 << 30},
+		}), "workers=%d", workers)
+		kvFiles, kviFiles := pbtCommitmentBinFileBytes(t, output)
+		require.GreaterOrEqual(t, len(kvFiles), 3, "workers=%d: expected at least three ranges", workers)
+		if wantKV == nil {
+			wantKV, wantKVI = kvFiles, kviFiles
+			continue
+		}
+		require.Equal(t, wantKV, kvFiles, "workers=%d .kv", workers)
+		require.Equal(t, wantKVI, kviFiles, "workers=%d .kvi", workers)
+	}
+}
+
+func pbtCommitmentBinFileBytes(t *testing.T, output string) (map[string][]byte, map[string][]byte) {
+	t.Helper()
+	snapDomain := datadir.Open(output).SnapDomain
+	read := func(suffix string) map[string][]byte {
+		names, err := dir.ListFiles(snapDomain, suffix)
+		require.NoError(t, err)
+		files := make(map[string][]byte)
+		for _, name := range names {
+			if !strings.Contains(filepath.Base(name), kv.CommitmentBinDomain.String()) {
+				continue
+			}
+			data, err := os.ReadFile(name)
+			require.NoError(t, err)
+			files[filepath.Base(name)] = data
+		}
+		return files
+	}
+	return read(".kv"), read(".kvi")
+}
+
 func TestConvertPBTSourceWalkWorkersMatchSerial(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	source, _ := newPBTConversionSourceAt(t, 15)

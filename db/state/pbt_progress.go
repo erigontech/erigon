@@ -63,6 +63,7 @@ type pbtProgressBatch struct {
 type pbtRangeProgress struct {
 	tempDir string
 	prefix  string
+	hook    func(string) error
 }
 
 func newPbtRangeProgress(tempDir, prefix string) *pbtRangeProgress {

@@ -1005,6 +1005,10 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string, pbtRange *pbtRangeProgress) (StaticFiles, error) {
+	return d.buildFileRangeWithWorkers(ctx, stepFrom, stepTo, collation, ps, dstDir, pbtRange, d.BuildAccessorsWorkers)
+}
+
+func (d *Domain) buildFileRangeWithWorkers(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string, pbtRange *pbtRangeProgress, accessorWorkers int) (StaticFiles, error) {
 	if !d.Enabled {
 		return StaticFiles{}, nil
 	}
@@ -1055,6 +1059,11 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if pbtRange != nil {
 		idtProgress = pbtRange.batch(".idt", uint64(valuesComp.Count()))
 		valuesComp.SetProgress(idtProgress.Add)
+		if pbtRange.hook != nil {
+			if err = pbtRange.hook("idt"); err != nil {
+				return StaticFiles{}, err
+			}
+		}
 	}
 	err = valuesComp.Compress()
 	if idtProgress != nil {
@@ -1074,9 +1083,14 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 		var kviProgress *pbtProgressBatch
 		if pbtRange != nil {
 			kviProgress = pbtRange.batch(".kvi", uint64(collation.valuesCount))
+			if pbtRange.hook != nil {
+				if err = pbtRange.hook("kvi"); err != nil {
+					return StaticFiles{}, err
+				}
+			}
 		}
 		idxPath := d.kviAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
-		if err = d.buildHashMapAccessorAt(ctx, idxPath, valuesDecomp, ps, kviProgress); err != nil {
+		if err = d.buildHashMapAccessorAtWithWorkers(ctx, idxPath, valuesDecomp, ps, kviProgress, accessorWorkers); err != nil {
 			if kviProgress != nil {
 				kviProgress.Done()
 			}
@@ -1230,6 +1244,10 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 }
 
 func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet, pbtProgress *pbtProgressBatch) error {
+	return d.buildHashMapAccessorAtWithWorkers(ctx, idxPath, data, ps, pbtProgress, d.BuildAccessorsWorkers)
+}
+
+func (d *Domain) buildHashMapAccessorAtWithWorkers(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet, pbtProgress *pbtProgressBatch, workers int) error {
 	versionOfRs := version.DataStructureVersion(0)
 	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
 		versionOfRs = recsplit.ExistenceFilterVersion
@@ -1245,7 +1263,7 @@ func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, dat
 		IndexFile:  idxPath,
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
-		Workers:    d.BuildAccessorsWorkers,
+		Workers:    workers,
 	}
 	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, pbtProgress, func(rs *recsplit.RecSplit) {
 		if d._testBuildAccessorHook != nil {

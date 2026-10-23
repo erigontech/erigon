@@ -326,18 +326,18 @@ flowchart LR
 - Modify: `db/state/pbt_range_writer.go`
 - Modify: `db/state/pbt_range_writer_test.go`
 
-- [ ] build all ranges concurrently:
+- [x] build all ranges concurrently:
   - each range's lane merge, `.idt` → `.kv`, and `.kvi`;
   - recsplit workers from `--workers`, split by range size;
   - a memory cap on concurrent builds;
   - one `integrateDirtyFiles` at the end.
-- [ ] tests:
+- [x] tests:
   - identical files at workers 1 and 16;
   - a counter shows at least two ranges built at once;
   - a failure in one range removes every partial `.kv`, `.kvi`, `.idt` and lane file;
   - the golden harness stays green; `-race`.
-- [ ] GUARDS: make the cleanup skip one range's partial `.kvi`, and name the assertion that fires.
-- [ ] run the gate — must pass before Task 9.
+- [x] GUARDS: make the cleanup skip one range's partial `.kvi`, and name the assertion that fires.
+- [x] run the gate — must pass before Task 9.
 
 ### Task 9: Verify without re-sorting; manifest; `--skip-verify` as an option
 **Files:**

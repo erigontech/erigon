@@ -130,11 +130,12 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return streamErr
 	}
 	var writer *PBinRangeWriter
-	if opts.RangeWriterLimits == nil {
-		writer, err = NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
-	} else {
-		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, *opts.RangeWriterLimits)
+	limits := PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes}
+	if opts.RangeWriterLimits != nil {
+		limits = *opts.RangeWriterLimits
 	}
+	limits.Workers = workers
+	writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, limits)
 	if err != nil {
 		return common.Hash{}, err
 	}

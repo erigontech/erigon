@@ -132,6 +132,7 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 	})
 	errs := make(chan error, workers)
 	var wg sync.WaitGroup
+	allocated := make([]atomic.Uint64, workers)
 	for worker := range workers {
 		wg.Add(1)
 		go func(worker int) {
@@ -142,6 +143,15 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 				workerRuns.Add(1)
 			}
 			collector := collectors[worker]
+			report := func(n uint64) {
+				allocated[worker].Store(uint64(collector.InMemoryCapacity()))
+				var total uint64
+				for i := range allocated {
+					total += allocated[i].Load()
+				}
+				progress.SetFields("workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", total)
+				progress.Add(n)
+			}
 			for rangeIndex := worker; rangeIndex < len(ranges); rangeIndex += workers {
 				r := ranges[rangeIndex]
 				var cursors [3]pbinLatestCursor
@@ -166,7 +176,8 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 					}
 				}
 				if err == nil {
-					err = pbinWalkLeafRange(cursors[0], cursors[1], cursors[2], collector, progress.Add)
+					err = pbinWalkLeafRange(cursors[0], cursors[1], cursors[2], collector, report)
+					report(0)
 				}
 				for i := len(cursors) - 1; i >= 0; i-- {
 					cursors[i].close()
@@ -179,11 +190,12 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 		}(worker)
 	}
 	wg.Wait()
-	allocated := 0
-	for _, collector := range collectors {
-		allocated += collector.InMemoryCapacity()
+	var totalAllocated uint64
+	for i, collector := range collectors {
+		allocated[i].Store(uint64(collector.InMemoryCapacity()))
+		totalAllocated += allocated[i].Load()
 	}
-	progress.SetFields("workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", uint64(allocated))
+	progress.SetFields("workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", totalAllocated)
 	progress.Done()
 	select {
 	case err := <-errs:

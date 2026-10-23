@@ -21,13 +21,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 
-	"github.com/erigontech/erigon/common/dir"
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -72,19 +71,17 @@ type pbinRowLaneRow struct {
 	value []byte
 }
 
-type pbinRowLaneState struct {
-	key   []byte
-	value []byte
-	has   bool
-}
-
-func newPBinRowLanes(tmpDir, name string) *pbinRowLanes {
+func newPBinRowLanes(tmpDir, name string) (*pbinRowLanes, error) {
+	rangeDir, err := os.MkdirTemp(tmpDir, "pbin-range-"+name+"-")
+	if err != nil {
+		return nil, err
+	}
 	return &pbinRowLanes{
-		tmpDir: tmpDir,
+		tmpDir: rangeDir,
 		name:   name,
 		lanes:  make(map[pbinPartition]*pbinRowLane),
-		skip:   etl.NewCollector("pbin-range-"+name+"-skip", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).MergeInBackground(true),
-	}
+		skip:   etl.NewCollector("pbin-range-"+name+"-skip", rangeDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).MergeInBackground(true),
+	}, nil
 }
 
 func (r *pbinRowLanes) collect(key, value []byte) (string, error) {
@@ -113,9 +110,14 @@ func (r *pbinRowLanes) collect(key, value []byte) (string, error) {
 	if err := lane.write(key, value); err != nil {
 		return "", err
 	}
-	lane.last = bytes.Clone(key)
+	lane.last = append(lane.last[:0], key...)
 	r.laneByteCount += uint64(pbinRowLaneLengthBytes*2 + len(key) + len(value))
 	return "lane", nil
+}
+
+func (r *pbinRowLanes) setSkipBuffer(size datasize.ByteSize) {
+	r.skip.Close()
+	r.skip = etl.NewCollector("pbin-range-"+r.name+"-skip", r.tmpDir, etl.NewSortableBuffer(size), log.Root()).MergeInBackground(true)
 }
 
 func (r *pbinRowLanes) openLane(partition pbinPartition) (*pbinRowLane, error) {
@@ -228,13 +230,6 @@ func (r *pbinRowLanes) load(ctx context.Context, emit func([]byte, []byte) error
 	sort.Slice(partitions, func(i, j int) bool {
 		return bytes.Compare(partitions[i][:], partitions[j][:]) < 0
 	})
-	readers := make([]*pbinRowLaneReader, 0, len(partitions))
-	states := make([]pbinRowLaneState, 0, len(partitions))
-	defer func() {
-		for _, reader := range readers {
-			_ = reader.close()
-		}
-	}()
 	for _, partition := range partitions {
 		reader, err := newPBinRowLaneReader(r.lanes[partition])
 		if err != nil {
@@ -245,43 +240,45 @@ func (r *pbinRowLanes) load(ctx context.Context, emit func([]byte, []byte) error
 			_ = reader.close()
 			return readErr
 		}
-		readers = append(readers, reader)
-		states = append(states, pbinRowLaneState{key: laneKey, value: laneValue, has: laneHas})
-	}
-	for skipHas || len(readers) != 0 {
-		bestLane := -1
-		var bestKey []byte
-		var bestValue []byte
-		if skipHas {
-			bestKey, bestValue = skipRow.key, skipRow.value
-		}
-		for i := range states {
-			if !states[i].has {
-				continue
+		for laneHas {
+			if skipHas {
+				comparison := bytes.Compare(laneKey, skipRow.key)
+				if comparison == 0 {
+					_ = reader.close()
+					return fmt.Errorf("pbin range %s: lane merge is not strictly increasing at key %x", r.name, laneKey)
+				}
+				if comparison > 0 {
+					if err := emitRow(skipRow.key, skipRow.value); err != nil {
+						_ = reader.close()
+						return err
+					}
+					skipRow, skipHas, skipErr = pbinNextSkipRow(mergeCtx, skipRows)
+					if skipErr != nil {
+						_ = reader.close()
+						return skipErr
+					}
+					continue
+				}
 			}
-			if bestKey != nil && bytes.Equal(states[i].key, bestKey) {
-				return fmt.Errorf("pbin range %s: lane merge is not strictly increasing at key %x", r.name, bestKey)
+			if err := emitRow(laneKey, laneValue); err != nil {
+				_ = reader.close()
+				return err
 			}
-			if bestKey == nil || bytes.Compare(states[i].key, bestKey) < 0 {
-				bestLane = i
-				bestKey = states[i].key
-				bestValue = states[i].value
+			laneKey, laneValue, laneHas, readErr = reader.next()
+			if readErr != nil {
+				_ = reader.close()
+				return readErr
 			}
 		}
-		if bestKey == nil {
-			break
-		}
-		if err := emitRow(bestKey, bestValue); err != nil {
+		if err := reader.close(); err != nil {
 			return err
 		}
-		if bestLane < 0 {
-			skipRow, skipHas, skipErr = pbinNextSkipRow(mergeCtx, skipRows)
-			if skipErr != nil {
-				return skipErr
-			}
-			continue
+	}
+	for skipHas {
+		if err := emitRow(skipRow.key, skipRow.value); err != nil {
+			return err
 		}
-		states[bestLane].key, states[bestLane].value, states[bestLane].has, skipErr = readers[bestLane].next()
+		skipRow, skipHas, skipErr = pbinNextSkipRow(mergeCtx, skipRows)
 		if skipErr != nil {
 			return skipErr
 		}
@@ -365,13 +362,7 @@ func (r *pbinRowLanes) cleanup() error {
 	if r.skip != nil {
 		r.skip.Close()
 	}
-	var firstErr error
-	for _, lane := range r.lanes {
-		if err := dir.RemoveFile(lane.path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return os.RemoveAll(r.tmpDir)
 }
 
 func (r *pbinRowLanes) close() {

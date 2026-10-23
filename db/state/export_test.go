@@ -19,6 +19,7 @@ package state
 import (
 	"errors"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -43,4 +44,18 @@ func (w *PBinRangeWriter) CheckRowStampsForTest() func() int {
 
 func (w *PBinRangeWriter) SetPipelineHookForTest(hook func(string, int) error) {
 	w.pipelineHook = hook
+}
+
+func (w *PBinRangeWriter) SetRowLaneSkipBufferForTest(size uint64) {
+	for i := range w.ranges {
+		w.ranges[i].rows.setSkipBuffer(datasize.ByteSize(size))
+	}
+}
+
+func (w *PBinRangeWriter) RowLaneTempDirsForTest() []string {
+	dirs := make([]string, 0, len(w.ranges))
+	for i := range w.ranges {
+		dirs = append(dirs, w.ranges[i].rows.tmpDir)
+	}
+	return dirs
 }

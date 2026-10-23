@@ -19,15 +19,22 @@ package state
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -46,6 +53,7 @@ type PBinRangeWriter struct {
 	ranges       []pbinRange
 	maxOps       int
 	maxBytes     int
+	workers      int
 	state        []byte
 	stateInFiles bool
 	workerViews  atomic.Int32
@@ -57,6 +65,7 @@ type PBinRangeWriterLimits struct {
 	MaxOps              int
 	MaxBytes            int
 	NoRangePastFrontier bool
+	Workers             int
 }
 
 const (
@@ -506,12 +515,21 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	if aggregator.d[domain] == nil || !aggregator.d[domain].Enabled {
 		return nil, fmt.Errorf("pbin range writer: domain %s is unavailable", domain)
 	}
+	workers := limits.Workers
+	if workers <= 0 {
+		workers = dbg.PBTWorkers
+	}
+	workers = max(workers, 1)
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
 	files := pbinAccountFiles(at.Files(kv.AccountsDomain))
 	if len(files) == 0 {
 		if endTxNum == 0 {
-			return &PBinRangeWriter{aggregator: aggregator, domain: domain, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
+			return &PBinRangeWriter{aggregator: aggregator, domain: domain, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, workers: workers}, nil
+		}
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("0-%d", endTxNum+1))
+		if err != nil {
+			return nil, err
 		}
 		return &PBinRangeWriter{
 			aggregator:   aggregator,
@@ -520,11 +538,12 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			leafStamp:    endTxNum,
 			maxOps:       limits.MaxOps,
 			maxBytes:     limits.MaxBytes,
+			workers:      workers,
 			stateInFiles: !limits.NoRangePastFrontier,
 			ranges: []pbinRange{{
 				start: 0,
 				end:   endTxNum + 1,
-				rows:  newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("0-%d", endTxNum+1)),
+				rows:  rows,
 			}},
 		}, nil
 	}
@@ -537,10 +556,17 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 		if start > endTxNum {
 			break
 		}
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end))
+		if err != nil {
+			for i := range ranges {
+				ranges[i].rows.close()
+			}
+			return nil, err
+		}
 		ranges = append(ranges, pbinRange{
 			start: start,
 			end:   end,
-			rows:  newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end)),
+			rows:  rows,
 		})
 	}
 	if len(ranges) == 0 {
@@ -552,13 +578,20 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 		if endTxNum == ^uint64(0) {
 			return nil, fmt.Errorf("pbin range writer: end txNum is too large")
 		}
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", ranges[len(ranges)-1].end, endTxNum+1))
+		if err != nil {
+			for i := range ranges {
+				ranges[i].rows.close()
+			}
+			return nil, err
+		}
 		ranges = append(ranges, pbinRange{
 			start: ranges[len(ranges)-1].end,
 			end:   endTxNum + 1,
-			rows:  newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", ranges[len(ranges)-1].end, endTxNum+1)),
+			rows:  rows,
 		})
 	}
-	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, stateInFiles: stateInFiles}, nil
+	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, workers: workers, stateInFiles: stateInFiles}, nil
 }
 
 func (w *PBinRangeWriter) PBinLeafStamp() uint64 {
@@ -804,65 +837,278 @@ func (w *PBinRangeWriter) closeRanges() {
 	}
 }
 
+const (
+	pbinRangeBuildMemoryCap  uint64 = 4 * uint64(datasize.GB)
+	pbinRangeBuildMemoryUnit uint64 = uint64(datasize.MB)
+)
+
+type pbinRangeBuildPlan struct {
+	index           int
+	stepFrom        kv.Step
+	stepTo          kv.Step
+	valuesPath      string
+	idtPath         string
+	kviPath         string
+	rows            uint64
+	budget          uint64
+	accessorWorkers int
+	static          StaticFiles
+}
+
+type pbinRangeBuildLimiter struct {
+	mu       sync.Mutex
+	wake     chan struct{}
+	capacity uint64
+	used     uint64
+}
+
+func newPBinRangeBuildLimiter(capacity uint64) *pbinRangeBuildLimiter {
+	return &pbinRangeBuildLimiter{wake: make(chan struct{}), capacity: capacity}
+}
+
+func (l *pbinRangeBuildLimiter) acquire(ctx context.Context, weight uint64) error {
+	for {
+		l.mu.Lock()
+		if l.used == 0 || l.used+weight <= l.capacity {
+			l.used += weight
+			l.mu.Unlock()
+			return nil
+		}
+		wake := l.wake
+		l.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wake:
+		}
+	}
+}
+
+func (l *pbinRangeBuildLimiter) release(weight uint64) {
+	l.mu.Lock()
+	l.used -= weight
+	close(l.wake)
+	l.wake = make(chan struct{})
+	l.mu.Unlock()
+}
+
+func pbinRangeBuildWorkers(rows []uint64, workers int) []int {
+	result := make([]int, len(rows))
+	if len(result) == 0 {
+		return result
+	}
+	workers = max(workers, 1)
+	for i := range result {
+		result[i] = 1
+	}
+	if workers <= len(result) {
+		return result
+	}
+	remaining := workers - len(result)
+	var total uint64
+	for _, rowCount := range rows {
+		total += rowCount
+	}
+	if total == 0 {
+		for i := 0; remaining > 0; i, remaining = i+1, remaining-1 {
+			result[i%len(result)]++
+		}
+		return result
+	}
+	type fraction struct {
+		index int
+		value float64
+	}
+	fractions := make([]fraction, 0, len(rows))
+	for i, rowCount := range rows {
+		share := float64(remaining) * float64(rowCount) / float64(total)
+		whole := int(share)
+		result[i] += whole
+		remaining -= whole
+		fractions = append(fractions, fraction{index: i, value: share - float64(whole)})
+	}
+	sort.Slice(fractions, func(i, j int) bool { return fractions[i].value > fractions[j].value })
+	for i := 0; remaining > 0; i, remaining = i+1, remaining-1 {
+		result[fractions[i%len(fractions)].index]++
+	}
+	return result
+}
+
+func pbinRangeBuildBudget(rows uint64, compressorWorkers, accessorWorkers int) uint64 {
+	compressor := uint64(max(compressorWorkers, 1)) * 64 * uint64(datasize.MB)
+	recsplit := uint64(max(accessorWorkers, 1)) * 64 * uint64(datasize.MB)
+	skip := max(uint64(datasize.MB), rows*512)
+	return compressor + recsplit + skip
+}
+
 func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 	defer w.closeRanges()
 	domain := w.aggregator.d[w.domain]
 	stepSize := w.aggregator.StepSize()
+	rowCounts := make([]uint64, len(w.ranges))
 	for i := range w.ranges {
+		rowCounts[i] = w.ranges[i].rows.count()
+	}
+	accessorWorkers := pbinRangeBuildWorkers(rowCounts, w.workers)
+	plans := make([]pbinRangeBuildPlan, len(w.ranges))
+	for i := range plans {
 		stepFrom := kv.Step(w.ranges[i].start / stepSize)
 		stepTo := kv.Step(w.ranges[i].end / stepSize)
 		valuesPath := domain.kvNewFilePath(stepFrom, stepTo)
-		valuesComp, err := seg.NewCompressor(ctx, domain.FilenameBase+".domain.convert", valuesPath, domain.dirs.Tmp, domain.CompressCfg, log.LvlTrace, domain.logger)
-		if err != nil {
+		plans[i] = pbinRangeBuildPlan{
+			index:           i,
+			stepFrom:        stepFrom,
+			stepTo:          stepTo,
+			valuesPath:      valuesPath,
+			idtPath:         filepath.Join(domain.dirs.Tmp, filepath.Base(valuesPath)+".idt"),
+			kviPath:         domain.kviAccessorNewFilePath(stepFrom, stepTo),
+			rows:            rowCounts[i],
+			accessorWorkers: accessorWorkers[i],
+		}
+		plans[i].budget = pbinRangeBuildBudget(rowCounts[i], domain.CompressCfg.Workers, accessorWorkers[i])
+	}
+	buildProgress := NewPBTProgress(PBTProgressConfig{
+		Message: "PBT range writer progress",
+		Phase:   "range builds",
+		Total:   uint64(len(plans)),
+		TempDir: w.aggregator.Dirs().Tmp,
+		Fields:  []any{"memory_cap_bytes", pbinRangeBuildMemoryCap, "ranges_in_flight", 0},
+	})
+	defer buildProgress.Done()
+	limiter := newPBinRangeBuildLimiter(max(pbinRangeBuildMemoryCap/pbinRangeBuildMemoryUnit, uint64(1)))
+	var inFlight atomic.Int32
+	setBuildProgress := func() {
+		buildProgress.SetFields("memory_cap_bytes", pbinRangeBuildMemoryCap, "ranges_in_flight", inFlight.Load())
+		buildProgress.Add(0)
+	}
+	cleanup := func() {
+		for i := range plans {
+			plans[i].static.CleanupOnError()
+			_ = os.Remove(plans[i].valuesPath)
+			_ = os.Remove(plans[i].kviPath)
+			_ = os.Remove(plans[i].idtPath)
+		}
+		w.closeRanges()
+	}
+	var firstRealError error
+	var firstErrorMu sync.Mutex
+	recordError := func(err error) {
+		if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		firstErrorMu.Lock()
+		if firstRealError == nil {
+			firstRealError = err
+		}
+		firstErrorMu.Unlock()
+	}
+	g, buildCtx := errgroup.WithContext(ctx)
+	for i := range plans {
+		plan := &plans[i]
+		weight := max(uint64(1), (plan.budget+pbinRangeBuildMemoryUnit-1)/pbinRangeBuildMemoryUnit)
+		g.Go(func() error {
+			if err := limiter.acquire(buildCtx, weight); err != nil {
+				return err
+			}
+			inFlight.Add(1)
+			setBuildProgress()
+			defer func() {
+				inFlight.Add(-1)
+				limiter.release(weight)
+				setBuildProgress()
+			}()
+			if w.pipelineHook != nil {
+				if err := w.pipelineHook("range-build-start", plan.index); err != nil {
+					recordError(err)
+					return err
+				}
+			}
+			err := w.buildRange(buildCtx, domain, state, plan)
+			if err == nil && w.pipelineHook != nil {
+				err = w.pipelineHook("range-build-done", plan.index)
+			}
+			if err == nil {
+				buildProgress.Add(1)
+			}
+			if err != nil {
+				recordError(err)
+			}
 			return err
-		}
-		collation := Collation{valuesComp: valuesComp, valuesPath: valuesPath}
-		writer := seg.NewWriter(valuesComp, seg.CompressNone)
-		if w.stateInFiles && i == len(w.ranges)-1 && len(state) != 0 {
-			if _, collectErr := w.ranges[i].rows.collect(commitment.KeyCommitmentState, state); collectErr != nil {
-				valuesComp.Close()
-				return collectErr
-			}
-		}
-		rangeProgress := newPbtRangeProgress(w.aggregator.Dirs().Tmp, fmt.Sprintf("range %d-%d", stepFrom, stepTo))
-		rows := w.ranges[i].rows
-		if err = rows.finalize(); err != nil {
-			valuesComp.Close()
-			return err
-		}
-		rowProgress := rangeProgress.stage("rows", rows.count())
-		rowProgress.SetFields("lane_bytes", rows.laneBytes(), "skip_rows", rows.skipRows(), "skip_share", rows.skipShare())
-		rowProgress.Add(rows.count())
-		rowProgress.Done()
-		kvProgress := rangeProgress.batch(".kv", rows.count())
-		err = rows.load(ctx, func(key, value []byte) error {
-			if _, writeErr := writer.Write(key); writeErr != nil {
-				return writeErr
-			}
-			if _, valueErr := writer.Write(value); valueErr != nil {
-				return valueErr
-			}
-			kvProgress.Add(1)
-			return nil
 		})
-		kvProgress.Done()
-		if err != nil {
+	}
+	waitErr := g.Wait()
+	firstErrorMu.Lock()
+	realErr := firstRealError
+	firstErrorMu.Unlock()
+	if realErr != nil {
+		cleanup()
+		return realErr
+	}
+	if waitErr != nil {
+		cleanup()
+		return waitErr
+	}
+	w.aggregator.dirtyFilesLock.Lock()
+	for i := range plans {
+		domain.integrateDirtyFiles(plans[i].static, w.ranges[i].start, w.ranges[i].end)
+	}
+	w.aggregator.recalcVisibleFiles(nil)
+	w.aggregator.dirtyFilesLock.Unlock()
+	return nil
+}
+
+func (w *PBinRangeWriter) buildRange(buildCtx context.Context, domain *Domain, state []byte, plan *pbinRangeBuildPlan) error {
+	valuesComp, err := seg.NewCompressor(buildCtx, domain.FilenameBase+".domain.convert", plan.valuesPath, domain.dirs.Tmp, domain.CompressCfg, log.LvlTrace, domain.logger)
+	if err != nil {
+		return err
+	}
+	collation := Collation{valuesComp: valuesComp, valuesPath: plan.valuesPath}
+	writer := seg.NewWriter(valuesComp, seg.CompressNone)
+	if w.stateInFiles && plan.index == len(w.ranges)-1 && len(state) != 0 {
+		if _, collectErr := w.ranges[plan.index].rows.collect(commitment.KeyCommitmentState, state); collectErr != nil {
 			valuesComp.Close()
-			return err
-		}
-		collation.valuesCount = valuesComp.Count() / 2
-		static, err := domain.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), "", rangeProgress)
-		if err != nil {
-			return err
-		}
-		w.aggregator.dirtyFilesLock.Lock()
-		domain.integrateDirtyFiles(static, w.ranges[i].start, w.ranges[i].end)
-		w.aggregator.recalcVisibleFiles(nil)
-		w.aggregator.dirtyFilesLock.Unlock()
-		if err := rows.cleanup(); err != nil {
-			return err
+			return collectErr
 		}
 	}
+	rangeProgress := newPbtRangeProgress(w.aggregator.Dirs().Tmp, fmt.Sprintf("range %d-%d", plan.stepFrom, plan.stepTo))
+	if w.pipelineHook != nil {
+		rangeProgress.hook = func(stage string) error { return w.pipelineHook("range-"+stage, plan.index) }
+	}
+	rows := w.ranges[plan.index].rows
+	if err = rows.finalize(); err != nil {
+		valuesComp.Close()
+		return err
+	}
+	rowProgress := rangeProgress.stage("rows", rows.count())
+	rowProgress.SetFields("lane_bytes", rows.laneBytes(), "skip_rows", rows.skipRows(), "skip_share", rows.skipShare())
+	rowProgress.Add(rows.count())
+	rowProgress.Done()
+	kvProgress := rangeProgress.batch(".kv", rows.count())
+	err = rows.load(buildCtx, func(key, value []byte) error {
+		if _, writeErr := writer.Write(key); writeErr != nil {
+			return writeErr
+		}
+		if _, valueErr := writer.Write(value); valueErr != nil {
+			return valueErr
+		}
+		kvProgress.Add(1)
+		return nil
+	})
+	kvProgress.Done()
+	if err != nil {
+		valuesComp.Close()
+		return err
+	}
+	collation.valuesCount = valuesComp.Count() / 2
+	static, err := domain.buildFileRangeWithWorkers(buildCtx, plan.stepFrom, plan.stepTo, collation, background.NewProgressSet(), "", rangeProgress, plan.accessorWorkers)
+	if err != nil {
+		return err
+	}
+	if err := rows.cleanup(); err != nil {
+		static.CleanupOnError()
+		return err
+	}
+	plan.static = static
 	return nil
 }
 
