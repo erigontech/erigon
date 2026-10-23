@@ -2205,3 +2205,77 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
 }
+
+func TestValidateRead_DoneBalanceRead(t *testing.T) {
+	addr := getAddress(212)
+	bal := *uint256.NewInt(100)
+	newIO := func(readVal uint256.Int) *VersionedIO {
+		io := NewVersionedIO(6)
+		rs := ReadSet{}
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: readVal})
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+		return io
+	}
+	t.Run("stale read at the cell version invalidates", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(*uint256.NewInt(50)), validateEqualVersion, true, false, false, ""))
+	})
+	t.Run("wiped zero read at the cell version stays valid", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
+		require.Equal(t, VersionValid, vm.ValidateVersion(5, newIO(uint256.Int{}), validateEqualVersion, true, false, false, ""))
+	})
+	for _, tc := range []struct {
+		name    string
+		eip8246 bool
+		want    VersionValidity
+	}{
+		{"zero read wiped by the cell's own tx stays valid", false, VersionValid},
+		{"zero read of the destroyer's own cell under EIP-8246 invalidates", true, VersionInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := NewVersionMap(nil)
+			vm.SetEIP8246(tc.eip8246)
+			vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+			require.Equal(t, tc.want, vm.ValidateVersion(5, newIO(uint256.Int{}), validateEqualVersion, true, false, false, ""))
+		})
+	}
+	t.Run("settled writer at a newer version stays valid under a settled-only check", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1, Incarnation: 1}, bal, true)
+		settled := func(_, _ Version) VersionValidity { return VersionValid }
+		require.Equal(t, VersionValid, vm.ValidateVersion(5, newIO(*uint256.NewInt(50)), settled, true, false, false, ""))
+	})
+}
+
+func TestValidateRead_EIP8246DestroyerBalanceRewriteInvalidates(t *testing.T) {
+	addr := getAddress(213)
+	vm := NewVersionMap(nil)
+	vm.SetEIP8246(true)
+	tx1 := newNoMaterializeTx(vm, 1)
+	tx1.eip8246 = true
+	require.NoError(t, tx1.CreateAccount(addr, true))
+	_, err := tx1.Selfdestruct(addr, true)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(tx1.VersionedWrites(), true)
+
+	tx5 := newNoMaterializeTx(vm, 5)
+	tx5.eip8246 = true
+	balance, err := tx5.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+	reads := tx5.VersionedReads()
+	read, ok := reads.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, read.ReadHeader)
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5}, reads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, ""))
+
+	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(100), true)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, ""))
+}
