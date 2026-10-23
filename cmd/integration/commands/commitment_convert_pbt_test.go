@@ -1265,7 +1265,8 @@ func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
 				return nil
 			}
 			err := convertPBTWithStandaloneTestHook(t.Context(), source.DataDir, output, true, "", log.New(), hook)
-			require.ErrorContains(t, err, "commitment state is missing for one or more domains")
+			require.ErrorContains(t, err, "C-e")
+			require.ErrorContains(t, err, "state is not at conversion txNum")
 			_, statErr := os.Stat(output)
 			require.ErrorIs(t, statErr, os.ErrNotExist)
 		})
@@ -1288,7 +1289,8 @@ func TestConvertPBTRefusesSourceFileEndAfterPoint(t *testing.T) {
 	source, _ := newPBTConversionSourceAt(t, 6)
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
-	require.ErrorContains(t, err, "the last file holds writes up to txNum 7, after conversion txNum 6; wait for the next step")
+	require.ErrorContains(t, err, "pbin stamp walk: key")
+	require.ErrorContains(t, err, "stamp 7 after conversion txNum 6")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }

@@ -674,6 +674,9 @@ func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) err
 		return err
 	}
 	if step, past := pbtAttachFirstStepPastPoint(pbtAttachVisibleFiles(files), stepSize, endTxNum); past {
+		if step*stepSize <= endTxNum {
+			step++
+		}
 		return fmt.Errorf("commitment convert-pbt: state files from step %d hold writes past conversion txNum %d; wait for the next step", step, endTxNum)
 	}
 	return nil

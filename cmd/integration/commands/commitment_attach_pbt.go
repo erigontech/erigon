@@ -995,7 +995,7 @@ func pbtAttachFirstStepPastPoint(files []pbtAttachFile, stepSize, endTxNum uint6
 	var first uint64
 	found := false
 	for _, file := range files {
-		if !pbtAttachAdoptsFile(file) || file.to*stepSize <= endTxNum+1 {
+		if !pbtAttachAdoptsFile(file) || file.to*stepSize <= endTxNum {
 			continue
 		}
 		if !found || file.from < first {
