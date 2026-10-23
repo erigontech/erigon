@@ -2029,6 +2029,24 @@ func (res ReadResult) Status() int {
 	return MVReadResultNone
 }
 
+// accountLiveAt reports whether any field cell below txIdx makes the account
+// EIP-161-non-empty. Unresolved cells cannot prove death and count as live.
+func (vm *VersionMap) accountLiveAt(addr accounts.Address, txIdx int) bool {
+	if bal, rr, ok := vm.ReadBalance(addr, txIdx); ok && (!rr.resolved() || !bal.IsZero()) {
+		return true
+	}
+	if nonce, rr, ok := vm.ReadNonce(addr, txIdx); ok && (!rr.resolved() || nonce != 0) {
+		return true
+	}
+	if ch, rr, ok := vm.ReadCodeHash(addr, txIdx); ok && (!rr.resolved() || !(ch.IsEmpty() || ch.IsZero())) {
+		return true
+	}
+	if c, rr, ok := vm.ReadCode(addr, txIdx); ok && (!rr.resolved() || len(c.Bytes) > 0) {
+		return true
+	}
+	return false
+}
+
 // resolved reports whether the floor holds a value at a known version: Done (sealed) or
 // Validated (pre-seal early-break). Consumers of the value treat both alike; only sealing
 // logic requires Done specifically.
