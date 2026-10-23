@@ -129,6 +129,9 @@ func assertHash(t *testing.T, name string, got, want common.Hash) {
 	}
 }
 
+// TestFrameHashMatchesMarshalBinary checks the hash against the full wire encoding,
+// including the type byte. Both paths use the same RLP encoder, so this checks their
+// consistency but cannot detect encoding errors shared by both paths.
 func TestFrameHashMatchesMarshalBinary(t *testing.T) {
 	t.Parallel()
 	tr := NewTRand()
