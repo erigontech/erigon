@@ -260,7 +260,7 @@ type readPathResult struct {
 // reads as its empty value — EmptyCodeHash for the code hash), else outcomeReturnZero
 // when the account is absent (reads as the zero value).
 func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcome {
-	if state, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
+	if state, _, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
 		return outcomeReturnEmpty
 	}
 	return outcomeReturnZero
@@ -527,15 +527,23 @@ reread:
 		// otherwise make validation disagree forever and livelock.
 		if path == StoragePath || path == NoncePath {
 			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
+				destructVer := Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
 						Val:        true,
 					})
-					// Not recorded as a storage read: for a revived account canonicalVer
-					// is the revival cell, whose incarnation shifts as that tx re-executes,
-					// so anchoring here never settles (self-loop). The genuinely-absent
-					// case anchors on the stable destruct and does record it.
+					// Record the wiped slot read anchored on the destruct version, matching
+					// liveStorage: a later store above the destruct resolves there and
+					// version-mismatches this read, so it invalidates by version alone. The
+					// destruct is stable, so this needs no value tiebreaker to survive the
+					// revival tx's incarnation churn.
+					if path == StoragePath {
+						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+							ReadHeader: ReadHeader{Source: MapRead, Version: destructVer},
+							Val:        uint256.Int{},
+						})
+					}
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
