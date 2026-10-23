@@ -3305,11 +3305,8 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // reverse index records for changedTx's changed keys (new ∪ old write-sets), sorted
 // ascending so the cascade order matches the scan.
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
-	// A BAL-seeded cell already holds its final value, so a reader of it stays valid; a
-	// wrong BAL fails the block, and the finalize re-validation still checks dirty readers.
-	skipBALSeeded := be.versionMap.HasBAL
 	set := map[int]struct{}{}
-	add := func(ws *state.WriteSet) {
+	add := func(ws *state.WriteSet, skipBALSeeded bool) {
 		if ws == nil {
 			return
 		}
@@ -3322,8 +3319,11 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			}
 		}
 	}
-	add(newWrites)
-	add(oldWrites)
+	// A BAL-seeded cell the tx still writes already holds its final value, so a reader of
+	// it stays valid; a wrong BAL fails the block. A dropped write may not be in the BAL,
+	// so its readers are always re-checked.
+	add(newWrites, be.versionMap.HasBAL)
+	add(oldWrites, false)
 	return slices.Sorted(maps.Keys(set))
 }
 
