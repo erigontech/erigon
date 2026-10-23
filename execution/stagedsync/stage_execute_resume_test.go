@@ -105,8 +105,16 @@ func TestWriteSendersRecoveredByExec(t *testing.T) {
 
 	var zero uint64
 	h := common.Hash{0x01}
-	header := &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(1), WithdrawalsHash: &h, BlobGasUsed: &zero,
-		ExcessBlobGas: &zero, ParentBeaconBlockRoot: &h, RequestsHash: &h, BlockAccessListHash: &h}
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		BaseFee:               uint256.NewInt(1),
+		WithdrawalsHash:       &h,
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &h,
+		RequestsHash:          &h,
+		BlockAccessListHash:   &h,
+	}
 	hash := header.Hash()
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, 1))
