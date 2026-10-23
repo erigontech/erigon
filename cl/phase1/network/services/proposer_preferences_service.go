@@ -310,7 +310,7 @@ func (s *proposerPreferencesService) validationView(dependentRoot common.Hash, p
 		if view, ok := s.validationViews.Get(key); ok {
 			return view, nil
 		}
-		depState, err := s.forkchoiceStore.GetStateAtBlockRoot(dependentRoot, true)
+		depState, err := s.forkchoiceStore.GetStateAtBlockRoot(dependentRoot)
 		if err != nil || depState == nil {
 			return nil, fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, dependentRoot)
 		}
@@ -352,15 +352,25 @@ func (s *proposerPreferencesService) validateProposerPreferences(msg *cltypes.Si
 	if !ok {
 		return fmt.Errorf("validator index %d not found: %w", validatorIndex, raw.ErrInvalidValidatorIndex)
 	}
-	domain, err := fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainProposerPreferences, proposalEpoch, view.genesisValidatorsRoot)
+	return VerifyProposerPreferencesSignature(s.beaconCfg, msg, pk, view.genesisValidatorsRoot)
+}
+
+func VerifyProposerPreferencesSignature(
+	cfg *clparams.BeaconChainConfig,
+	msg *cltypes.SignedProposerPreferences,
+	pubkey common.Bytes48,
+	genesisValidatorsRoot common.Hash,
+) error {
+	proposalEpoch := state.GetEpochAtSlot(cfg, msg.Message.ProposalSlot)
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainProposerPreferences, proposalEpoch, genesisValidatorsRoot)
 	if err != nil {
 		return fmt.Errorf("failed to get domain: %w", err)
 	}
-	signingRoot, err := computeSigningRoot(preferences, domain)
+	signingRoot, err := computeSigningRoot(msg.Message, domain)
 	if err != nil {
 		return fmt.Errorf("failed to compute signing root: %w", err)
 	}
-	valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:])
+	valid, err := blsVerify(msg.Signature[:], signingRoot[:], pubkey[:])
 	if err != nil {
 		return fmt.Errorf("signature verification error: %w", err)
 	}

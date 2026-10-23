@@ -118,7 +118,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	targetState, err := f.getCheckpointState(target)
+	targetState, err := f.getCheckpointStateLocked(target)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +172,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
 	f.gloasWeightTree.markDirty(index)
+	f.voteTally.markDirty(index)
 }
 
 func (f *ForkChoiceStore) trackGloasWeights() bool {
@@ -216,6 +217,7 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
 	f.gloasWeightTree.markDirty(validatorIndex)
+	f.voteTally.markDirty(validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
@@ -223,6 +225,7 @@ func (f *ForkChoiceStore) updateLatestMessages(
 	indicies []uint64,
 ) {
 	if f.trackGloasWeights() {
+		f.voteTally = voteTally{}
 		f.updateLatestMessagesGloas(attestation, indicies)
 	} else {
 		f.updateLatestMessagesPreGloas(attestation, indicies)
