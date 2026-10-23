@@ -207,15 +207,20 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		txCount       int
 		txGasLimit    uint64
 		cfg           *chain.Config
+		allowAA       bool
 		noWithdrawals bool
 		nilBlobHashes bool
+		prague        bool
 		amsterdam     bool
 		wantStatus    engine_types.EngineStatus
+		wantErr       string
 		wantErrCode   int
 	}{
 		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
-		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus},
-		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus},
+		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached"},
+		{name: "5 txs with AllowAA", txCount: 5, cfg: preCancunChainConfig(), allowAA: true, wantStatus: engine_types.SyncingStatus},
+		{name: "4 txs on Prague", txCount: 4, cfg: preOsakaChainConfig(), prague: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 21000 gas each"},
 		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
 		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
@@ -224,6 +229,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
+			test.cfg.AllowAA = test.allowAA
 			to := common.Address{0x1}
 			txs := make(types.Transactions, test.txCount)
 			for i := range txs {
@@ -237,13 +243,15 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			withdrawals := types.Withdrawals{}
 			withdrawalsHash := types.DeriveSha(withdrawals)
 			header.WithdrawalsHash = &withdrawalsHash
-			if test.nilBlobHashes || test.amsterdam {
+			if test.nilBlobHashes || test.prague || test.amsterdam {
 				header.BlobGasUsed = new(uint64)
 				header.ExcessBlobGas = new(uint64)
 				header.ParentBeaconBlockRoot = &common.Hash{}
 			}
-			if test.amsterdam {
+			if test.prague || test.amsterdam {
 				header.RequestsHash = (types.FlatRequests{}).Hash()
+			}
+			if test.amsterdam {
 				balHash := empty.BlockAccessListHash
 				header.BlockAccessListHash = &balHash
 				header.SlotNumber = new(uint64)
@@ -265,6 +273,8 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			case test.amsterdam:
 				payload.BlockAccessList = &hexutil.Bytes{0xc0}
 				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.prague:
+				status, err = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
 			case test.nilBlobHashes:
 				status, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
 			default:
@@ -278,6 +288,9 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.wantStatus, status.Status)
+			if test.wantErr != "" {
+				require.EqualError(t, status.ValidationError.Error(), test.wantErr)
+			}
 		})
 	}
 }
