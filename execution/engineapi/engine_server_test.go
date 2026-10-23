@@ -18,6 +18,7 @@ package engineapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -204,14 +205,18 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		txCount       int
+		txGasLimit    uint64
 		cfg           *chain.Config
 		noWithdrawals bool
 		nilBlobHashes bool
+		amsterdam     bool
 		wantStatus    engine_types.EngineStatus
 		wantErrCode   int
 	}{
 		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus},
+		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus},
+		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
 		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
 		{name: "5 txs with null blob hashes", txCount: 5, cfg: prePragueChainConfig(), nilBlobHashes: true, wantErrCode: -32602},
@@ -222,7 +227,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			to := common.Address{0x1}
 			txs := make(types.Transactions, test.txCount)
 			for i := range txs {
-				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
 			}
 			header := makeParentHeader(1001)
 			header.ParentHash = common.Hash{0x1}
@@ -232,10 +237,16 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			withdrawals := types.Withdrawals{}
 			withdrawalsHash := types.DeriveSha(withdrawals)
 			header.WithdrawalsHash = &withdrawalsHash
-			if test.nilBlobHashes {
+			if test.nilBlobHashes || test.amsterdam {
 				header.BlobGasUsed = new(uint64)
 				header.ExcessBlobGas = new(uint64)
 				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
+			if test.amsterdam {
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+				balHash := empty.BlockAccessListHash
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
 			}
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
@@ -250,9 +261,13 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			srv.test = true
 
 			var status *engine_types.PayloadStatus
-			if test.nilBlobHashes {
+			switch {
+			case test.amsterdam:
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.nilBlobHashes:
 				status, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
-			} else {
+			default:
 				status, err = srv.NewPayloadV2(t.Context(), payload)
 			}
 			if test.wantErrCode != 0 {
