@@ -1605,23 +1605,16 @@ func setDefaultMinerGasLimit(config *ethconfig.Config, chainConfig *chain.Config
 	}
 }
 
-// newMCPRPCServer serves MCP's RPC tools from the APIs --http.api enabled, never more.
 func newMCPRPCServer(apis []rpc.API, cfg *httpcfg.HttpCfg, logger log.Logger) (*rpc.Server, error) {
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
-	for _, api := range apisForNamespaces(apis, []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}) {
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
+	for _, api := range apis {
+		if !slices.Contains(mcpNamespaces, api.Namespace) {
+			continue
+		}
 		if err := srv.RegisterAPI(api); err != nil {
 			return nil, err
 		}
 	}
 	return srv, nil
-}
-
-func apisForNamespaces(apis []rpc.API, namespaces []string) []rpc.API {
-	out := make([]rpc.API, 0, len(apis))
-	for _, api := range apis {
-		if slices.Contains(namespaces, api.Namespace) {
-			out = append(out, api)
-		}
-	}
-	return out
 }
