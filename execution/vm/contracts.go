@@ -605,11 +605,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 // wider than 256 bits: evmone's Montgomery setup does not pay off for a few
 // squarings, and math/big switches to a windowed method above a 64-bit exponent.
 func modexpMathBigFaster(modLen uint64, exp []byte) bool {
-	if modLen <= 32 {
-		return false
-	}
-	expBits := bitLenBytes(exp)
-	return expBits <= 8 || modLen >= 256 || modLen >= 64 && expBits > 64
+	return modLen >= 256 || modLen >= 64 && bitLenBytes(exp) > 64
 }
 
 // bitLenBytes returns the bit length of the big-endian number b.
