@@ -299,7 +299,7 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 		return accounts.NilAddress, err
 	}
 	t.sender = sender
-	if !dbg.IgnoreBAL && t.Header.HasNonEmptyBAL() {
+	if RecoversSenders(t.Header) {
 		return t.sender, nil
 	}
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
