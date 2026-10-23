@@ -194,6 +194,38 @@ func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
 	}
 }
 
+// EIP-161 removes a touched empty account only from Spurious Dragon on, and AuRa
+// keeps the system address, which every system call touches.
+func TestFinalizedWritesRemovalFollowsEIP161(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xe7})
+	for _, tc := range []struct {
+		name    string
+		addr    accounts.Address
+		rules   *chain.Rules
+		removed bool
+	}{
+		{"from Spurious Dragon", addr, &chain.Rules{IsSpuriousDragon: true}, true},
+		{"before Spurious Dragon", addr, &chain.Rules{}, false},
+		{"AuRa system address", params.SystemAddress, &chain.Rules{IsSpuriousDragon: true, IsAura: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			empty := accounts.NewAccount()
+			ibs := NewWithVersionMap(&emptyAccountReader{addr: tc.addr, acc: &empty}, NewVersionMap(nil))
+			t.Cleanup(ibs.Close)
+			ibs.SetNoMaterialize(true)
+			ibs.SetTxContext(1, 0)
+			_, err := ibs.Exist(tc.addr)
+			require.NoError(t, err)
+			require.NoError(t, ibs.AddBalance(tc.addr, uint256.Int{}, 0))
+
+			sd, ok := ibs.FinalizedWrites(tc.rules).GetSelfDestruct(tc.addr)
+			require.Equal(t, tc.removed, ok && sd.Val)
+		})
+	}
+}
+
 func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	vm := NewVersionMap(nil)
