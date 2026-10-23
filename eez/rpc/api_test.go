@@ -44,9 +44,6 @@ import (
 // location fields every transaction has.
 func TestRender(t *testing.T) {
 	eez.Register()
-	// What the RPC config sets for an EEZ node.
-	ethapi.SetTxRendering(true)
-	t.Cleanup(func() { ethapi.SetTxRendering(false) })
 	tx, err := systemtx.New(protocol.SystemTx{ChainID: 6290, Nonce: 2, To: protocol.EEZL2Address, Value: *uint256.NewInt(3), Input: []byte{1}})
 	require.NoError(t, err)
 	b, err := json.Marshal(ethapi.NewRPCTransaction(tx, common.Hash{1}, 10, 5, 0, uint256.NewInt(7)))

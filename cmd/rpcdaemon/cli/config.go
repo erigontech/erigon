@@ -353,7 +353,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	// Before any chain config read, local or by the remote rules engine.
 	if eezEnabled {
 		eez.Register()
-		cfg.RenderRegisteredTxTypes = true
 		if cfg.WithDatadir {
 			cfg.Dirs = eez.Dirs(cfg.Dirs)
 		}

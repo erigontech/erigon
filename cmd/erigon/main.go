@@ -91,7 +91,6 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 		return err
 	}
 	if eezCfg != nil {
-		nodeCfg.Http.RenderRegisteredTxTypes = true
 		if err := configureFollowerNode(nodeCfg); err != nil {
 			return err
 		}

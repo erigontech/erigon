@@ -18,40 +18,24 @@ package ethapi
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// Renderer adjusts the RPC rendering of a transaction after the fields every
-// type shares are set.
-type Renderer func(txn types.Transaction, result *RPCTransaction)
+// TransactionRenderer adjusts the RPC rendering of a transaction after the
+// fields every type shares are set.
+type TransactionRenderer func(txn types.Transaction, result *RPCTransaction)
 
-var (
-	renderersMu sync.RWMutex
-	renderers   = map[byte]Renderer{}
-
-	renderingEnabled bool
-)
-
-// SetTxRendering turns the renderers of registered transaction types on or off, from
-// httpcfg.HttpCfg.RenderRegisteredTxTypes. Call it before the RPC servers start.
-func SetTxRendering(on bool) { renderingEnabled = on }
+// txRenderers is written only before the RPC servers start and read only
+// while they serve, so it needs no lock.
+var txRenderers = map[byte]TransactionRenderer{}
 
 // RegisterTxRenderer makes render adjust the RPC rendering of transactions of
-// txType, a type registered with types.RegisterTxType.
-func RegisterTxRenderer(txType byte, render Renderer) {
+// txType, a type registered with types.RegisterTxType. Call it before the RPC
+// servers start; it is not safe for concurrent use.
+func RegisterTxRenderer(txType byte, render TransactionRenderer) {
 	if !types.IsRegisteredTxType(txType) {
 		panic(fmt.Sprintf("ethapi: renderer for unregistered transaction type %#x", txType))
 	}
-	renderersMu.Lock()
-	defer renderersMu.Unlock()
-	renderers[txType] = render
-}
-
-func renderer(txType byte) (Renderer, bool) {
-	renderersMu.RLock()
-	defer renderersMu.RUnlock()
-	r, ok := renderers[txType]
-	return r, ok
+	txRenderers[txType] = render
 }

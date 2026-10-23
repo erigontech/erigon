@@ -111,7 +111,6 @@ type HttpCfg struct {
 	WsMaxConnections                  int  // WebSocket connection limit; 0 = unlimited
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
-	RenderRegisteredTxTypes           bool // Apply the RPC renderers of registered transaction types, such as EEZ's 0x76
 	WitnessCacheBlocks                uint // Recent blocks to eagerly cache legacy debug_executionWitness results for; 0 disables (embedded RPC only)
 	WitnessCacheHeadCapture           bool // Serve witnesses on a minimal node via head-capture (pinned parent commitment snapshot); cache-only (embedded RPC only)
 	WitnessCacheMaxMB                 uint // Resident-memory cap (MB) for the witness cache; 0 = count-only

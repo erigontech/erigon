@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -92,7 +91,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.Engine,
 	logger log.Logger, testingEntry *rpc.API, witnessCache *witnessResultCache,
 ) (list []rpc.API) {
-	ethapi.SetTxRendering(cfg.RenderRegisteredTxTypes)
 	base := NewBaseApi(filters, stateCache, blockReader, engine, NewBaseApiConfig(cfg))
 	base.witnessCache = witnessCache
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)

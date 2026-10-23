@@ -46,21 +46,14 @@ func renderedKeys(t *testing.T, txn types.Transaction) map[string]any {
 func TestRenderer(t *testing.T) {
 	require.Panics(t, func() { RegisterTxRenderer(taggedTxType, func(types.Transaction, *RPCTransaction) {}) }, "unregistered type")
 	types.RegisterTxType(taggedTxType, types.TxTypeSpec{New: func() types.Transaction { return taggedTx{new(types.DynamicFeeTransaction)} }})
+	t.Cleanup(func() { types.UnregisterTxTypeForTesting(taggedTxType) })
 
 	to := common.Address{2}
 	inner := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to}, ChainID: *uint256.NewInt(1)}
 	require.Contains(t, renderedKeys(t, taggedTx{inner}), "yParity")
 
 	RegisterTxRenderer(taggedTxType, func(_ types.Transaction, r *RPCTransaction) { r.YParity, r.MaxFeePerGas = nil, nil })
-	t.Cleanup(func() {
-		renderersMu.Lock()
-		delete(renderers, taggedTxType)
-		renderersMu.Unlock()
-	})
-	require.Contains(t, renderedKeys(t, taggedTx{inner}), "yParity", "renderers apply only when the RPC config turns them on")
-
-	SetTxRendering(true)
-	t.Cleanup(func() { SetTxRendering(false) })
+	t.Cleanup(func() { delete(txRenderers, taggedTxType) })
 	fields := renderedKeys(t, taggedTx{inner})
 	require.NotContains(t, fields, "yParity")
 	require.NotContains(t, fields, "maxFeePerGas")
