@@ -1,7 +1,7 @@
 
 id: el-triggered-exit
 name: "EL-triggered exit test"
-timeout: 1h
+timeout: 10m
 config:
   #walletPrivkey: ""
   validatorIndex: 20

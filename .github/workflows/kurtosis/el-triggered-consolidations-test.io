@@ -1,7 +1,7 @@
 
 id: el-triggered-consolidation
 name: "EL-triggered consolidation test"
-timeout: 1h
+timeout: 10m
 config:
   #walletPrivkey: ""
   sourceValidatorIndex: 6610

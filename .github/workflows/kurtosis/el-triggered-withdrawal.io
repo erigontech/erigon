@@ -1,7 +1,7 @@
 
 id: el-triggered-withdrawal
 name: "EL-triggered withdrawal test"
-timeout: 1h
+timeout: 10m
 config:
   walletPrivkey: ""
   validatorIndex: 20

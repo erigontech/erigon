@@ -1,6 +1,6 @@
 id: pectra-massive-deposit-0x02
 name: "Massive deposit with 0x02 creds"
-timeout: 1h
+timeout: 10m
 config:
   #walletPrivkey: ""
   depositContract: "0x4242424242424242424242424242424242424242"

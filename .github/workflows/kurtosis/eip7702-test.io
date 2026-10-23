@@ -1,7 +1,7 @@
 
 id: eip7702-test
 name: "EIP7702 test"
-timeout: 30m
+timeout: 10m
 config:
   #walletPrivkey: ""
   waitForSlot: 41
