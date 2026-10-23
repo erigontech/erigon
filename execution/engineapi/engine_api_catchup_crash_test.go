@@ -159,9 +159,11 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 						want = catchupRecoveryCheckpoint(checkpoints[committedCycles-1], canonical.state, replacement.state)
 					}
 					// Inspect persisted state before node initialization can change it.
-					checkpoint, blocks := readCrashRecoveryDataDir(t, request.DataDir, replacement.payloads)
-					assertEquivalentCrashRecoveryState(t, want, checkpoint)
-					require.Equal(t, downloaded, blocks, "bulk-imported blocks and BALs must survive every crash")
+					inspectCrashRecoveryDataDir(t, request.DataDir, func(db kv.TemporalRoDB) {
+						assertEquivalentCrashRecoveryState(t, want, readCrashRecoveryCheckpoint(t, db))
+						blocks := readCrashRecoveryBlocks(t, db, replacement.payloads)
+						require.Equal(t, downloaded, blocks, "bulk-imported blocks and BALs must survive every crash")
+					})
 
 					args := baseArgs
 					// Without the artificial batch cap, startup can finish catch-up
@@ -192,17 +194,6 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			}
 		})
 	}
-}
-
-func readCrashRecoveryDataDir(t *testing.T, dataDir string, payloads []*engineapitester.MockClPayload) (crashRecoveryState, []crashRecoveryBlock) {
-	t.Helper()
-	var checkpoint crashRecoveryState
-	var blocks []crashRecoveryBlock
-	inspectCrashRecoveryDataDir(t, dataDir, func(db kv.TemporalRoDB) {
-		checkpoint = readCrashRecoveryCheckpoint(t, db)
-		blocks = readCrashRecoveryBlocks(t, db, payloads)
-	})
-	return checkpoint, blocks
 }
 
 func inspectCrashRecoveryDataDir(t *testing.T, dataDir string, inspect func(kv.TemporalRoDB)) {

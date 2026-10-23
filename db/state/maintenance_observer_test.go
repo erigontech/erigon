@@ -40,10 +40,7 @@ func TestMaintenanceObserverClose(t *testing.T) {
 		{"prune_committed", MaintenancePruneCommitted, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				agg, err := newAggregator(t.Context(), datadir.New(t.TempDir()), log.New())
-				require.NoError(t, err)
-				defer agg.Close()
+			testMaintenanceObserver(t, func(t *testing.T, agg *Aggregator) {
 				defer agg.ctxCancel()
 				callerCtx, cancel := context.WithCancel(t.Context())
 				defer cancel()
@@ -85,10 +82,7 @@ func TestMaintenanceObserverClose(t *testing.T) {
 }
 
 func TestMaintenanceObserverOperationCancellation(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		agg, err := newAggregator(t.Context(), datadir.New(t.TempDir()), log.New())
-		require.NoError(t, err)
-		defer agg.Close()
+	testMaintenanceObserver(t, func(t *testing.T, agg *Aggregator) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		observed := make(chan error, 1)
@@ -103,5 +97,20 @@ func TestMaintenanceObserverOperationCancellation(t *testing.T) {
 		require.Len(t, observed, 1)
 		require.ErrorIs(t, <-observed, context.Canceled)
 		require.NoError(t, agg.ctx.Err(), "operation cancellation must not stop the aggregator")
+	})
+}
+
+func testMaintenanceObserver(t *testing.T, run func(*testing.T, *Aggregator)) {
+	t.Helper()
+	// Diagnostic goroutines may live for the process lifetime, so start them
+	// outside the bubble. Contexts used by fake-time waits must live inside it.
+	agg, err := newAggregator(t.Context(), datadir.New(t.TempDir()), log.New())
+	require.NoError(t, err)
+	agg.ctxCancel()
+	synctest.Test(t, func(t *testing.T) {
+		agg.ctx, agg.ctxCancel = context.WithCancel(t.Context())
+		agg.observerCtx, agg.observerCancel = context.WithCancel(agg.ctx)
+		defer agg.Close()
+		run(t, agg)
 	})
 }

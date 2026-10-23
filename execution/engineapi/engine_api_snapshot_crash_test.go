@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -34,10 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
@@ -354,8 +351,10 @@ func runSnapshotCrashChild(t *testing.T) {
 		t.Fatalf("file building did not start: %v", ctx.Err())
 	}
 	require.NotNil(t, filesDone, "the held build must identify its completion signal")
-	beforePrune = snapshotCrashTableCounts(t, eat.ChainDB)
-	stepSize = eat.ChainDB.StepSize()
+	if pruneWindow {
+		beforePrune = snapshotCrashTableCounts(t, eat.ChainDB)
+		stepSize = eat.ChainDB.StepSize()
+	}
 	insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
 	t.Log("holding the reorg after unwind")
 	unwound := transitions.hold(t, execmodule.StateTransitionUnwindComplete, 1)
@@ -402,22 +401,8 @@ func runSnapshotCrashChild(t *testing.T) {
 // A time-budgeted FCU pass may leave all state pruning for a later pass.
 // Repeat the same commit/build path while execution is idle until pruning makes progress.
 func continueSnapshotPruning(ctx context.Context, eat engineapitester.EngineApiTester) error {
-	eat.ExecutionModule.WaitIdle(ctx)
-	db, ok := eat.ChainDB.(kv.TemporalRwDB)
-	if !ok {
-		return fmt.Errorf("snapshot pruning requires a writable temporal database")
-	}
 	for ctx.Err() == nil {
-		// Prune work may time out, but a reached commit barrier must stay held
-		// until process termination.
-		_, finished, err := db.CollateAndPrune(context.Background(), func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-			finality, err := execfinality.Resolve(tx, snapshotCrashReorgDepth, false, rawdbv3.TxNums)
-			if err != nil {
-				return nil, err
-			}
-			_, err = tx.PruneSmallBatches(ctx, time.Second)
-			return finality, err
-		})
+		finished, err := eat.ExecutionModule.Prune(ctx)
 		if err != nil {
 			return err
 		}
