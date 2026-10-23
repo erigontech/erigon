@@ -80,7 +80,7 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	return testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 }
 
-func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t testing.TB, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := domainCfg
@@ -1048,6 +1048,94 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	}
 	require.Equal(t, []string{"key1", "value1_step1"}, words1,
 		"step 1 collation must contain only step 1 values")
+}
+
+func writeDupSortStepBacklog(t testing.TB, db kv.RwDB, d *Domain, stepSize uint64, steps, keys int, seed uint64) []map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	rnd := rand.New(rand.NewPCG(seed, seed+1))
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dt := d.beginForTests()
+	defer dt.Close()
+	w := dt.NewWriter(db)
+	defer w.Close()
+	want := make([]map[string]string, steps)
+	prev := make(map[string][]byte)
+	for step := range steps {
+		want[step] = make(map[string]string)
+		for i := range keys {
+			var written bool
+			switch i % 4 {
+			case 0:
+				written = true
+			case 1:
+				written = rnd.IntN(4) == 0
+			case 2:
+				written = step < steps/4 && rnd.IntN(2) == 0
+			case 3:
+				written = step >= 3*steps/4 && rnd.IntN(2) == 0
+			}
+			if !written {
+				continue
+			}
+			k := fmt.Appendf(nil, "key%05d", i)
+			v := fmt.Appendf(nil, "value%05d_step%03d_%d", i, step, rnd.IntN(1000))
+			txNum := uint64(step)*stepSize + rnd.Uint64N(stepSize)
+			require.NoError(t, w.PutWithPrev(k, v, txNum, prev[string(k)]))
+			prev[string(k)] = v
+			want[step][string(k)] = string(v)
+		}
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	return want
+}
+
+func TestDomain_CollationMatchesEveryStepOfBacklog(t *testing.T) {
+	const stepSize, steps, keys = 16, 40, 160
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
+	want := writeDupSortStepBacklog(t, db, d, stepSize, steps, keys, 7)
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for step := range steps {
+		coll, err := d.collate(t.Context(), kv.Step(step), uint64(step)*stepSize, uint64(step+1)*stepSize, roTx)
+		require.NoError(t, err)
+		sf, err := d.buildFiles(t.Context(), kv.Step(step), coll, background.NewProgressSet())
+		require.NoError(t, err)
+		got := make(map[string]string)
+		var lastKey []byte
+		g := d.dataReader(sf.valuesDecomp)
+		g.Reset(0)
+		for g.HasNext() {
+			k, _ := g.Next(nil)
+			require.True(t, g.HasNext(), "step %d: key %q without a value", step, k)
+			v, _ := g.Next(nil)
+			require.Positive(t, bytes.Compare(k, lastKey), "step %d: key %q out of order", step, k)
+			lastKey = k
+			got[string(k)] = string(v)
+		}
+		require.Equal(t, want[step], got, "step %d", step)
+		sf.CleanupOnError()
+		coll.Close()
+	}
+}
+
+func BenchmarkDomain_CollateOldestStepOfBacklog(b *testing.B) {
+	const stepSize, steps, keys = 16, 256, 4000
+	db, d := testDbAndDomainOfStep(b, statecfg.Schema.StorageDomain, stepSize, log.New())
+	writeDupSortStepBacklog(b, db, d, stepSize, steps, keys, 11)
+	roTx, err := db.BeginRo(b.Context())
+	require.NoError(b, err)
+	defer roTx.Rollback()
+	for b.Loop() {
+		coll, err := d.collate(b.Context(), 0, 0, stepSize, roTx)
+		require.NoError(b, err)
+		coll.Close()
+	}
 }
 
 func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
