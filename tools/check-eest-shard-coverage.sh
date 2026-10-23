@@ -6,8 +6,9 @@
 # manifests (.meta/index.json). It also guards manifest naming that controls
 # race-binary dispatch in the Makefile.
 #
-# The fork-split families each run every fork exactly once — spec race shards
-# (eest-spec-shards.yml `run` regexes) over blockchain_test, and stable/devnet
+# The fork-split families each run every fork exactly once — the stable and
+# stable race spec shards (eest-spec-shards.yml `run` regexes) over
+# blockchain_test, and stable/devnet
 # hive consume-enginex shards (test-hive-eest.yml sim-limit) over
 # blockchain_test_engine_x. A gap silently never runs a fork; an overlap runs
 # it twice.
@@ -29,31 +30,36 @@ for tool in jq yq awk; do
 done
 [[ -f "$stable_index" ]] || { echo "check-eest-shard-coverage: stable index not found: $stable_index" >&2; exit 1; }
 
-# Live regexes, one "route=regex" per line, read from the shard manifest's `run`
-# keys. -sequential/-parallel variants of a fork carry the same regex, so strip
-# the mode suffix and dedupe to one entry per fork route.
-race_regexes() {
+stable_family='^blocktests-stable-(?!race-)'
+race_family='^blocktests-stable-race-'
+
+# Live regexes of one shard family (a shard-name prefix regex), one
+# "route=regex" per line, read from the shard manifest's `run` keys.
+# -sequential/-parallel variants of a fork carry the same regex, so strip the
+# mode suffix and dedupe to one entry per fork route.
+fork_regexes() {
 	yq -o=json '.' "$shards" \
-		| jq -r '.[]
-			| select(.shard | test("^blocktests-stable-race-"))
+		| jq -r --arg family "$1" '.[]
+			| select(.shard | test($family))
 			| select((.run // "") != "")
-			| "\(.shard | sub("^blocktests-stable-race-"; "") | sub("-(sequential|parallel)$"; ""))=\(.run)"' \
+			| "\(.shard | sub($family; "") | sub("-(sequential|parallel)$"; ""))=\(.run)"' \
 		| sort -u
 }
-# A fork's -sequential/-parallel race shards must carry the same non-empty run
+# A fork's -sequential/-parallel shards must carry the same non-empty run
 # regex. The partition check only sees the deduped union, so a run dropped or
 # emptied on one mode still covers the fork via the other — while that mode hits
-# the runner's glob arm with no --run and races the whole corpus.
-check_race_mode_parity() {
-	echo "==== race shard -sequential/-parallel run parity ===="
+# the runner's glob arm with no --run and runs the whole corpus.
+check_mode_parity() {
+	local title="$1" family="$2"
+	echo "==== $title -sequential/-parallel run parity ===="
 	local rows
-	rows=$(yq -o=json '.' "$shards" | jq -r '
+	rows=$(yq -o=json '.' "$shards" | jq -r --arg family "$family" '
 		.[]
-		| select(.shard | test("^blocktests-stable-race-.+-(sequential|parallel)$"))
-		| (.shard | capture("^blocktests-stable-race-(?<route>.+)-(?<mode>sequential|parallel)$")) as $m
+		| select(.shard | test($family + ".+-(sequential|parallel)$"))
+		| (.shard | sub($family; "") | capture("^(?<route>.+)-(?<mode>sequential|parallel)$")) as $m
 		| "\($m.route)\t\($m.mode)\t\(.run // "")"')
 	if [[ -z "${rows//[[:space:]]/}" ]]; then
-		echo "  ERROR: no stable race -sequential/-parallel shards found (shard naming changed?)" >&2
+		echo "  ERROR: no $title -sequential/-parallel shards found (shard naming changed?)" >&2
 		return 1
 	fi
 	printf '%s\n' "$rows" | awk -F'\t' '
@@ -121,9 +127,13 @@ check_partition() {
 rc=0
 check_transaction_race_shards || rc=1
 echo
-check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(race_regexes)" || rc=1
+check_partition "spec stable shards (blocktest --run)" "$stable_index" blockchain_test       ""                     "$(fork_regexes "$stable_family")" || rc=1
 echo
-check_race_mode_parity || rc=1
+check_mode_parity "stable shard" "$stable_family" || rc=1
+echo
+check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(fork_regexes "$race_family")" || rc=1
+echo
+check_mode_parity "race shard" "$race_family" || rc=1
 echo
 check_partition "hive stable consume-enginex (sim-limit)" "$stable_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes eest_stable)" || rc=1
 echo
@@ -137,6 +147,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the transaction race-shard names or race run regexes in tools/eest-spec-shards.yml, or the Hive matrix in .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: fix the transaction race-shard names or stable/race run regexes in tools/eest-spec-shards.yml, or the Hive matrix in .github/workflows/test-hive-eest.yml." >&2
 fi
 exit $rc

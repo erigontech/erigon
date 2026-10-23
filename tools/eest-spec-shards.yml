@@ -32,7 +32,8 @@
 #                                      the runner's RAM. Opt-in-true on purpose:
 #                                      a false-valued key is invisible to jq's
 #                                      // default and to GitHub's loose ==.
-#   run                   (optional) — blocktest --run fork regex for race shards.
+#   run                   (optional) — blocktest --run fork regex for fork-split
+#                                      stable blocktest shards.
 #                                      Read by run-eest-spec-test.sh (to filter the
 #                                      run) and tools/check-eest-shard-coverage.sh
 #                                      (to verify the shards partition every fork).
@@ -98,14 +99,26 @@
   commitment-parallel: false
   expected-tests: 18598
   no-ramdisk: true
-- shard: blocktests-stable-sequential
+- shard: blocktests-stable-pre-osaka-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-- shard: blocktests-stable-parallel
+  run: &stable_pre_osaka 'fork_(Frontier|Homestead|TangerineWhistle|SpuriousDragon|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai|Cancun|Prague)'
+- shard: blocktests-stable-pre-osaka-parallel
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: true
+  run: *stable_pre_osaka
+- shard: blocktests-stable-osaka-amsterdam-sequential
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: false
+  run: &stable_osaka_amsterdam 'fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4|Amsterdam|BPO2ToAmsterdam)'
+- shard: blocktests-stable-osaka-amsterdam-parallel
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
+  run: *stable_osaka_amsterdam
 - shard: blocktests-devnet-sequential
   workers: 12
   max-allowed-failures: 0

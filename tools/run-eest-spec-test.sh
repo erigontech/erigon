@@ -13,7 +13,9 @@
 #   rlptests-legacy-race                      complete legacy RLP tests
 #   transactiontests-legacy-race              complete legacy transaction tests
 #   difficultytests-legacy-race               complete legacy difficulty tests
-#   blocktests-stable-sequential               blockchain tests vs. eest_stable
+#   blocktests-stable-{pre-osaka,osaka-amsterdam}-{sequential,parallel}
+#                                              blockchain tests vs. eest_stable, split by
+#                                              fork via the manifest `run` regex
 #   blocktests-devnet-{sequential,parallel}    blockchain tests vs. eest_devnet
 #   blocktests-legacy-consensus-{sequential,parallel}
 #                                              Hive consensus suite
@@ -40,7 +42,7 @@
 #                                              benchmark fixtures
 #   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-sequential
 #                                              race-detector variant of
-#                                              blocktests-stable-sequential, split by
+#                                              the blocktests-stable shards, split by
 #                                              fork via the manifest `run` regex so
 #                                              each sub-shard fits under ~30
 #                                              min. Caller (Makefile / CI) must
@@ -115,7 +117,7 @@ fixture_base() {
 }
 base=$(fixture_base "${fixture_sets[0]}")
 
-# Resolve workers + failure budget + commitment-parallel + the optional race
+# Resolve workers + failure budget + commitment-parallel + the optional fork
 # --run regex from the single-source manifest. This script, the test-eest-spec.yml
 # load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml, so
 # adding a shard / tweaking a budget / changing a fork filter is a one-file edit.
@@ -162,9 +164,9 @@ case "$shard_route" in
 		cmd=transactiontest;   paths=("$base/TransactionTests") ;;
 	difficultytests-legacy-*)
 		cmd=difficultytest;   paths=("$base/DifficultyTests") ;;
-	# race shards reuse this arm; each one's per-fork --run regex comes from the
+	# fork-split shards reuse this arm; each one's per-fork --run regex comes from the
 	# manifest `run` key (appended after this case), not from a per-shard arm.
-	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
+	blocktests-stable-* | blocktests-devnet | blocktests-devnet-race-*)
 		cmd=blocktest;   paths=("$base/blockchain_tests") ;;
 	blocktests-legacy-consensus | blocktests-legacy-consensus-*)
 		cmd=blocktest;   paths=("$base/BlockchainTests") ;;
