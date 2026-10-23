@@ -271,6 +271,13 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 // wrappers consume the result. skipStorage suppresses the storage-read fallback on a
 // miss, for callers that resolve the value themselves. Result is written into *r
 // (caller stack, passed pre-zeroed) to avoid a return-value copy per read.
+func (s *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
+	_, created := s.versionedWrites.GetCreateContract(addr)
+	_, destructed := s.versionedWrites.GetSelfDestruct(addr)
+	_, recorded := s.versionedWrites.GetAddress(addr)
+	return created || destructed || recorded
+}
+
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
@@ -315,15 +322,17 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// writer overwrite the recorded read, so seal-time re-validation would compare the
 	// re-resolved version against itself and miss the divergence. Per-cell, not per-address:
 	// only the tx's own write to this exact cell takes precedence (via versionedWriteHit below).
-	if !commited {
-		if !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) {
-			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
-				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
-				r.outcome = outcomeReadSetHit
-				r.source = prHeader.Source
-				r.version = prHeader.Version
-				return
-			}
+	// A committed read wants the pre-tx value, which is what the tx's first read of the cell
+	// recorded: a read after the tx's own write is served from the write set and not recorded.
+	// A tx that created or destroyed the account, or holds its state object, answers otherwise.
+	if !commited && !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) ||
+		commited && path == StoragePath && s.stateObjects[addr] == nil && !s.wroteAccountLifecycle(addr) {
+		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
+			(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
+			r.outcome = outcomeReadSetHit
+			r.source = prHeader.Source
+			r.version = prHeader.Version
+			return
 		}
 	}
 
