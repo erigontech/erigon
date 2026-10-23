@@ -216,6 +216,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		return err
 	}
 	defer sn.Close()
+	w := seg.NewWriter(sn, seg.CompressKeys|seg.CompressVals)
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -257,7 +258,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if skippedInARow > 1000 {
 			return fmt.Errorf("skipped too many blocks in a row during snapshot generation, range %d-%d at slot %d", fromSlot, toSlot, i)
 		}
-		if err := sn.AddWord(dump); err != nil {
+		if _, err := w.Write(dump); err != nil {
 			return err
 		}
 	}
@@ -287,6 +288,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		return err
 	}
 	defer sn.Close()
+	w := seg.NewWriter(sn, seg.CompressKeys|seg.CompressVals)
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -321,7 +323,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 			}
 		}
 		if commitmentsCount == 0 {
-			if err := sn.AddWord(nil); err != nil {
+			if _, err := w.Write(nil); err != nil {
 				return err
 			}
 			continue
@@ -348,7 +350,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping beacon blobs", "progress", i)
 		}
-		if err := sn.AddWord(reusableBuf); err != nil {
+		if _, err := w.Write(reusableBuf); err != nil {
 			return err
 		}
 
