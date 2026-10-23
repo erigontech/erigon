@@ -32,6 +32,10 @@ instructions as well. See the [Ethereum Foundation announcement](https://blog.et
 - **Block-production delays.** `engine_getPayload` stops waiting for the parent block after a head
   change and returns the payload built so far. `engine_newPayload` avoids scanning every header
   snapshot before validating a new block (#25254, #25242) — by @domiwei, @lystopad
+- **Head updates and envelope propagation.** Caplin reduces pauses from state dumps and speeds up
+  block validation at epoch boundaries. It publishes head changes at the start of a slot, avoiding
+  block-production failures caused by a stale head, and republishes Gloas execution payload envelopes
+  that arrived before their beacon block once processing succeeds (#25287) — by @domiwei
 - **Validator-client recovery after Gloas.** Caplin recognizes attached Teku and Prysm validators
   after restarts, restoring aggregate and sync contribution processing, custody requirements, and
   the correct block fee recipient (#25195) — by @domiwei
