@@ -2343,12 +2343,19 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// prefund, and reading after createObject would see the just-written zero.
 	var carryBalance uint256.Int
 	carryBalanceValid := previous != nil && !previous.selfdestructed
-	if carryBalanceValid {
+	if previous != nil {
 		b, _, err := ibs.getBalance(addr)
 		if err != nil {
 			return err
 		}
-		carryBalance = b
+		// Carry the live balance over the create. Normally zero for a self-destructed
+		// previous, but a same-tx credit may have revived the account before this create
+		// (the EVM preserves funds sent to a not-yet-created address), so carry a non-zero
+		// revived balance too.
+		if carryBalanceValid || !b.IsZero() {
+			carryBalance = b
+			carryBalanceValid = true
+		}
 	}
 	newObj := ibs.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
