@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -198,6 +199,7 @@ func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 	targetSlot := postState.Slot() + 1
+	startBuilderHandoffWindow(handler, targetSlot)
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("block production passed the gate")).AnyTimes()
@@ -215,6 +217,61 @@ func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 	var endpointErr *beaconhttp.EndpointError
 	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
+}
+
+func TestBlockProductionRefusesHistoricSlot(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	targetSlot := postState.Slot() + 1
+	currentSlot := targetSlot + 1
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	handler.ethClock = clock
+	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+
+	requests := []struct {
+		name, method, path, body string
+		headers                  map[string]string
+	}{
+		{
+			name:   "v3 GET",
+			method: http.MethodGet,
+			path: fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true",
+				targetSlot, (common.Bytes96{}).String()),
+		},
+		{
+			name:   "v4 POST",
+			method: http.MethodPost,
+			path:   fmt.Sprintf("/eth/v4/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&include_payload=true", targetSlot, (common.Bytes96{}).String()),
+			body:   `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`,
+			headers: map[string]string{
+				"Content-Type":          "application/json",
+				"Eth-Consensus-Version": "gloas",
+			},
+		},
+	}
+	for _, request := range requests {
+		t.Run(request.name, func(t *testing.T) {
+			httpRequest := httptest.NewRequestWithContext(t.Context(), request.method, request.path, strings.NewReader(request.body))
+			for name, value := range request.headers {
+				httpRequest.Header.Set(name, value)
+			}
+			recorder := httptest.NewRecorder()
+			handler.mux.ServeHTTP(recorder, httpRequest)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), "historic slot")
+		})
+	}
+
+	for _, slot := range []uint64{currentSlot, currentSlot + 1} {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
+			"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true", slot, (common.Bytes96{}).String()), http.NoBody)
+		recorder := httptest.NewRecorder()
+		handler.mux.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+		require.NotContains(t, recorder.Body.String(), "historic slot")
+	}
 }
 
 // Validator endpoints refuse to serve a head that trails the imported blocks, as block
