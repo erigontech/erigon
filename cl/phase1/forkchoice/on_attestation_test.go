@@ -172,6 +172,163 @@ func TestOnAttestationUsesTargetShuffling(t *testing.T) {
 	}
 }
 
+func TestTargetBeaconCommitteeUsesCheckpointState(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	graph := fixture.forkGraph(false)
+	graph.states[fixture.targetRoot] = fixture.targetState
+	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
+
+	committee, committeesPerSlot, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	require.NoError(t, err)
+	require.Equal(t, fixture.targetState.CommitteeCount(fixture.targetEpoch), committeesPerSlot)
+	require.Equal(t, fixture.targetValidator, committee[fixture.committeePosition])
+	require.NotContains(t, committee, fixture.headValidator)
+
+	committee, count, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, committeesPerSlot)
+	require.NoError(t, err)
+	require.Nil(t, committee)
+	require.Equal(t, committeesPerSlot, count)
+
+	_, _, err = store.TargetBeaconCommittee(solid.Checkpoint{Epoch: fixture.targetEpoch, Root: common.Hash{0xff}}, fixture.attestationSlot, fixture.committeeIndex)
+	require.Error(t, err)
+}
+
+func TestTargetBeaconCommitteeRejectsTargetOutsideFinalizedChain(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	graph := fixture.forkGraph(false)
+	graph.states[fixture.targetRoot] = fixture.targetState
+	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: common.Hash{0xff}})
+
+	_, _, err := store.TargetBeaconCommittee(
+		solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot},
+		fixture.attestationSlot,
+		fixture.committeeIndex,
+	)
+	require.Error(t, err)
+	require.Empty(t, graph.stateRoots())
+	require.Zero(t, store.targetCommitteeBuilds.Load())
+
+	t.Run("target is finalized root", func(t *testing.T) {
+		graph := fixture.forkGraph(false)
+		graph.states[fixture.targetDependentRoot] = fixture.targetState
+		store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+
+		_, _, err := store.TargetBeaconCommittee(
+			solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetDependentRoot},
+			fixture.attestationSlot,
+			fixture.committeeIndex,
+		)
+		require.NoError(t, err)
+		require.Equal(t, []common.Hash{fixture.targetDependentRoot}, graph.stateRoots())
+	})
+
+	t.Run("different root before finalized epoch start", func(t *testing.T) {
+		graph := fixture.forkGraph(false)
+		graph.states[fixture.headDependentRoot] = fixture.targetState
+		store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+
+		_, _, err := store.TargetBeaconCommittee(
+			solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.headDependentRoot},
+			fixture.attestationSlot,
+			fixture.committeeIndex,
+		)
+		require.Error(t, err)
+		require.Empty(t, graph.stateRoots())
+	})
+}
+
+func TestTargetBeaconCommitteeLimitsUncachedBuilds(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	graph := fixture.forkGraph(false)
+	graph.states[fixture.targetRoot] = fixture.targetState
+	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
+
+	store.targetCommitteeBuilds.Store(maxConcurrentTargetCommitteeBuilds)
+	_, _, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	require.Error(t, err)
+	require.Empty(t, graph.stateRoots())
+	require.Equal(t, int32(maxConcurrentTargetCommitteeBuilds), store.targetCommitteeBuilds.Load())
+	headerCalls, blockCalls := graph.forkGraphCalls()
+	require.Zero(t, headerCalls)
+	require.Zero(t, blockCalls)
+
+	store.targetCommitteeBuilds.Store(maxConcurrentTargetCommitteeBuilds - 1)
+	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{fixture.targetRoot}, graph.stateRoots())
+	require.Equal(t, int32(maxConcurrentTargetCommitteeBuilds-1), store.targetCommitteeBuilds.Load())
+
+	store.targetCommitteeBuilds.Store(maxConcurrentTargetCommitteeBuilds)
+	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{fixture.targetRoot}, graph.stateRoots())
+	require.Equal(t, int32(maxConcurrentTargetCommitteeBuilds), store.targetCommitteeBuilds.Load())
+
+	errorGraph := fixture.forkGraph(false)
+	errorStore := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, errorGraph)
+	errorStore.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+	_, _, err = errorStore.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	require.Error(t, err)
+	require.Zero(t, errorStore.targetCommitteeBuilds.Load())
+}
+
+func TestTargetBeaconCommitteeLimitsCheckpointBlockAge(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
+	targetSlot := fixture.targetEpoch * fixture.cfg.SlotsPerEpoch
+
+	for _, test := range []struct {
+		name      string
+		target    solid.Checkpoint
+		slot      uint64
+		wantRead  bool
+		finalized bool
+	}{
+		{
+			name:      "older than four epochs",
+			target:    target,
+			slot:      targetSlot + 4*fixture.cfg.SlotsPerEpoch + 1,
+			finalized: true,
+		},
+		{
+			name:      "exactly four epochs old",
+			target:    target,
+			slot:      targetSlot + 4*fixture.cfg.SlotsPerEpoch,
+			wantRead:  true,
+			finalized: true,
+		},
+		{
+			name:   "unknown target block",
+			target: solid.Checkpoint{Epoch: fixture.targetEpoch, Root: common.Hash{0xff}},
+			slot:   fixture.attestationSlot,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			graph := fixture.forkGraph(false)
+			graph.states[test.target.Root] = fixture.targetState
+			store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+			if test.finalized {
+				store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+			}
+
+			_, _, err := store.TargetBeaconCommittee(test.target, test.slot, fixture.committeeIndex)
+			if test.wantRead {
+				require.NoError(t, err)
+				require.Equal(t, []common.Hash{test.target.Root}, graph.stateRoots())
+				return
+			}
+			require.Error(t, err)
+			require.Empty(t, graph.stateRoots())
+		})
+	}
+}
+
 func TestOnAttestationHeadStateTooOldUsesTargetState(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	baseState := decodeAttestationAnchorState(t, cfg)

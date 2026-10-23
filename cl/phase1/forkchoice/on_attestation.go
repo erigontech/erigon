@@ -63,7 +63,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	useCheckpointState := f.syncedDataManager.Syncing()
 	if !useCheckpointState {
 		if err := f.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
-			if !f.headStateHasTargetShuffling(headState, headRoot, target) {
+			if !f.HeadStateHasTargetShuffling(headState, headRoot, target) {
 				useCheckpointState = true
 				return nil
 			}
@@ -90,8 +90,9 @@ func (f *ForkChoiceStore) OnAttestation(
 	return nil
 }
 
+// HeadStateHasTargetShuffling reports whether the head state computes the target's committees.
 // The one-epoch window preserves the target's final seed mix; the dependent block then identifies the same committees.
-func (f *ForkChoiceStore) headStateHasTargetShuffling(headState *state.CachingBeaconState, headRoot common.Hash, target solid.Checkpoint) bool {
+func (f *ForkChoiceStore) HeadStateHasTargetShuffling(headState *state.CachingBeaconState, headRoot common.Hash, target solid.Checkpoint) bool {
 	headEpoch := state.Epoch(headState)
 	if target.Epoch > headEpoch+1 || target.Epoch+1 < headEpoch {
 		return false
@@ -102,6 +103,41 @@ func (f *ForkChoiceStore) headStateHasTargetShuffling(headState *state.CachingBe
 		return false
 	}
 	return targetDependentRoot == f.Ancestor(headRoot, dependentSlot).Root
+}
+
+// TargetBeaconCommittee returns a committee from the target checkpoint state.
+func (f *ForkChoiceStore) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+	var targetState *checkpointState
+	if cached, ok := f.checkpointStates.Load(target); ok {
+		targetState = cached.(*checkpointState)
+	} else {
+		if f.targetCommitteeBuilds.Add(1) > maxConcurrentTargetCommitteeBuilds {
+			f.targetCommitteeBuilds.Add(-1)
+			return nil, 0, errors.New("too many target committee builds")
+		}
+		defer f.targetCommitteeBuilds.Add(-1)
+		header, ok := f.forkGraph.GetHeader(target.Root)
+		if !ok {
+			return nil, 0, errors.New("target checkpoint block does not exist")
+		}
+		if header.Slot+maxTargetCheckpointBlockAge*f.beaconCfg.SlotsPerEpoch < slot {
+			return nil, 0, errors.New("target checkpoint block is too old")
+		}
+		if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok &&
+			f.Ancestor(target.Root, finalized.Epoch*f.beaconCfg.SlotsPerEpoch).Root != finalized.Root {
+			return nil, 0, errors.New("target checkpoint does not descend from finalized checkpoint")
+		}
+		var err error
+		targetState, err = f.getCheckpointState(target)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	if targetState == nil {
+		return nil, 0, errors.New("target state does not exist")
+	}
+	committee, committeesPerSlot := targetState.beaconCommittee(slot, committeeIndex)
+	return committee, committeesPerSlot, nil
 }
 
 func (f *ForkChoiceStore) ProcessAttestingIndicies(
