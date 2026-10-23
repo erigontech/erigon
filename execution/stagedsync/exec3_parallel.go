@@ -127,11 +127,11 @@ type parallelExecutor struct {
 	// keeps its object but releases its execSem slot, so resting does not reduce
 	// concurrency — another worker runs on a different object. runSem must hold enough
 	// objects for the peak of executing+resting workers; execSem sizes parallelism.
-	execSem    chan struct{}
-	runWG      sync.WaitGroup
+	execSem chan struct{}
+	runWG   sync.WaitGroup
 	// idleRunners hands a task to a finished task goroutine, which keeps its grown stack.
 	idleRunners chan func()
-	workersCtx context.Context
+	workersCtx  context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
 	results        chan *exec.TxResult
 	workerCount    int
