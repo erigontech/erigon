@@ -334,6 +334,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	}
 
 	dbPath := filepath.Join(config.Dirs.DataDir, name)
+	if label == dbcfg.ChainDB && config.Dirs.Chaindata != "" {
+		dbPath = config.Dirs.Chaindata
+	}
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {

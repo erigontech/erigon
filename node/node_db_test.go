@@ -17,11 +17,14 @@
 package node
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -47,4 +50,16 @@ func TestParallelCommitmentReaders(t *testing.T) {
 	require.Zero(t, parallelCommitmentReaders())
 	statecfg.ExperimentalParallelCommitment = true
 	require.Equal(t, commitment.ParallelCommitmentReadTxs(), parallelCommitmentReaders())
+}
+
+// The chain database opens at Dirs.Chaindata, also when it is not
+// <datadir>/chaindata.
+func TestOpenDatabaseChaindata(t *testing.T) {
+	cfg := testNodeConfig(t)
+	cfg.Dirs.Chaindata = filepath.Join(cfg.Dirs.DataDir, "chain", "chaindata")
+	db, err := OpenDatabase(t.Context(), cfg, dbcfg.ChainDB, "", false, log.New())
+	require.NoError(t, err)
+	db.Close()
+	require.FileExists(t, filepath.Join(cfg.Dirs.Chaindata, "mdbx.dat"))
+	require.NoFileExists(t, filepath.Join(cfg.Dirs.DataDir, "chaindata", "mdbx.dat"))
 }
