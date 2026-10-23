@@ -80,7 +80,7 @@ func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(P
 }
 
 func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCursor pbinLatestCursor, emit func(PBinLeaf) error) error {
-	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true)
+	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true).MergeInBackground(true)
 	defer collector.Close()
 	emitter := pbt.NewRebuildFeedOpEmitter()
 	var leafCollector [8 + eip8297.ValueLength]byte

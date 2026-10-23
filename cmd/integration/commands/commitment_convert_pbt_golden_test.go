@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -86,6 +87,10 @@ type pbtGoldenRow struct {
 }
 
 func TestConvertPBTOutputGolden(t *testing.T) {
+	backgroundMerges := etl.BackgroundMergeRuns()
+	defer func() {
+		require.Greater(t, etl.BackgroundMergeRuns(), backgroundMerges, "convert path must use background ETL merge")
+	}()
 	var got []pbtGoldenCase
 	for _, corpus := range pbtGoldenCorpora() {
 		t.Run(corpus.name, func(t *testing.T) {

@@ -231,13 +231,14 @@ flowchart LR
 ### Task 3: Background ETL merge
 **Files:**
 - Modify: `db/etl/collector.go`
+- Create: `db/etl/merge_background.go`
 - Create: `db/etl/merge_background_test.go`
 
-- [ ] `MergeInBackground(true)` on `Collector`, plus the `MergeLoad` equivalent. The test is written first: random
+- [x] `MergeInBackground(true)` on `Collector`, plus the `MergeLoad` equivalent. The test is written first: random
       data, many spill files, and in-RAM providers, and the background merge must give exactly the serial order.
-- [ ] tests: a `loadFunc` error stops the goroutine with no leak; context cancel stops it; an empty collector; one
+- [x] tests: a `loadFunc` error stops the goroutine with no leak; context cancel stops it; an empty collector; one
       provider.
-- [ ] enable it on ETL A in `pbinLoadSortedLeaves`.
+- [x] enable it on ETL A in `pbinLoadSortedLeaves`.
 - [ ] run the gate — must pass before Task 4.
 
 ### Task 4: No re-sort in the fold input

@@ -96,11 +96,14 @@ type Collector struct {
 	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
 	sortAndFlushInBackground       bool
 	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
+	mergeInBackground              bool
 
 	allocator *Allocator
 	fill      int
 	collected atomic.Uint64
 }
+
+var mergeBackgroundRuns atomic.Uint64
 
 // NewCollectorWithAllocator builds a collector that draws its buffer from the
 // allocator's pool lazily, on the first Collect — a collector that never
@@ -119,6 +122,15 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Lo
 func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 	c.sortAndFlushInBackground = v
 	return c
+}
+
+func (c *Collector) MergeInBackground(v bool) *Collector {
+	c.mergeInBackground = v
+	return c
+}
+
+func BackgroundMergeRuns() uint64 {
+	return mergeBackgroundRuns.Load()
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
@@ -308,7 +320,11 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
+	merge := mergeSortFiles
+	if c.mergeInBackground {
+		merge = mergeSortFilesInBackground
+	}
+	if err := merge(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -318,7 +334,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 func MergeLoad(logPrefix string, collectors []*Collector, loadFunc func(k, v []byte) error, args TransformArgs) error {
 	errs := make([]error, len(collectors))
 	var wg sync.WaitGroup
+	mergeInBackground := false
 	for i, c := range collectors {
+		mergeInBackground = mergeInBackground || c.mergeInBackground
 		if c.allFlushed {
 			continue
 		}
@@ -332,6 +350,9 @@ func MergeLoad(logPrefix string, collectors []*Collector, loadFunc func(k, v []b
 	for _, c := range collectors {
 		providers = append(providers, c.dataProviders...)
 		args.BufferType = c.bufType
+	}
+	if mergeInBackground {
+		return mergeSortFilesInBackground(logPrefix, providers, loadFunc, args)
 	}
 	return mergeSortFiles(logPrefix, providers, loadFunc, args)
 }
