@@ -3945,6 +3945,25 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
 	})
 
+	t.Run("index files starting after values files", func(t *testing.T) {
+		t.Parallel()
+		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		for step := range kv.Step(2) {
+			require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+		}
+
+		dc := d.beginForTests()
+		defer dc.Close()
+		require.Len(t, dc.ht.iit.files, 2)
+		dc.ht.iit.files = dc.ht.iit.files[1:]
+		require.NotZero(t, dc.ht.iit.files[0].startTxNum)
+		require.Equal(t, dc.ht.iit.files[0].startTxNum, dc.HistoryCoverageStart())
+	})
+
 	t.Run("history values files without index files", func(t *testing.T) {
 		t.Parallel()
 		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
