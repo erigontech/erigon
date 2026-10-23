@@ -825,4 +825,10 @@ func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
 	dbg.StagesOnlyBlocks = true
 	t.Cleanup(func() { dbg.StagesOnlyBlocks = false })
 	require.False(t, bra.ExecRecoversSenders(header), "execution is disabled, so the Senders stage recovers")
+
+	dbg.StagesOnlyBlocks = false
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = false
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+	require.False(t, bra.ExecRecoversSenders(header), "serial exec has no workers, so the Senders stage recovers")
 }

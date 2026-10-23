@@ -539,10 +539,14 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 	return bra.bodies.Get(blockHash)
 }
 
-// RecoversSenders reports whether execution recovers the block's senders in its workers;
-// the Execution stage then writes them.
+// ExecRecoversBALSenders reports whether parallel exec workers recover the senders of
+// blocks with a non-empty BAL; the Execution stage then writes them.
+func ExecRecoversBALSenders() bool {
+	return dbg.Exec3Parallel && !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks
+}
+
 func RecoversSenders(header *types.Header) bool {
-	return !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks && header.HasNonEmptyBAL()
+	return ExecRecoversBALSenders() && header.HasNonEmptyBAL()
 }
 
 // ExecRecoversSenders is RecoversSenders for a cached block: execution recovers the
