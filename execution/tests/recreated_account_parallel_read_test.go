@@ -189,3 +189,51 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 		return nil
 	}))
 }
+
+// A BAL block dispatches a bounded window of txs past the commit frontier. A block
+// of many more txs than the window, each depending on the one before it, must still
+// complete and match the serial result.
+func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	const txs = 80
+	counter := common.HexToAddress("0xc0c0")
+	config := chain.TestChainOsakaConfig.Copy()
+	config.AmsterdamTime = common.NewUint64(0)
+	signer := types.LatestSignerForChainID(config.ChainID)
+	key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{1}, 32))
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	alloc := types.GenesisAlloc{
+		counter: {Code: program.New().Push(0).Op(vm.SLOAD).Push(1).Op(vm.ADD).Push(0).Op(vm.SSTORE).Bytes()},
+		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
+	}
+
+	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		for range txs {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), counter, uint256.NewInt(0), 300_000, uint256.NewInt(10_000_000_000), nil), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	for _, receipt := range chainPack.Receipts[0] {
+		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
+	}
+
+	dbg.Exec3Parallel = true
+	require.NoError(t, m.InsertChain(chainPack))
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		v, err := st.GetState(accounts.InternAddress(counter), accounts.InternKey(common.Hash{}))
+		require.NoError(t, err)
+		require.Equal(t, *uint256.NewInt(txs), v)
+		return nil
+	}))
+}

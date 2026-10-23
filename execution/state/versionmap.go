@@ -671,6 +671,11 @@ func (vm *VersionMap) ReadStorageLife(addr accounts.Address, key accounts.Storag
 	return val, res, false, life
 }
 
+// ReadNonceLife is ReadNonce folded with the lifecycle verdict (one RLock).
+func (vm *VersionMap) ReadNonceLife(addr accounts.Address, txIdx int) (uint64, ReadResult, bool, lifecycleVerdict) {
+	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
+}
+
 // ReadCodeLife is ReadCode folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadCodeLife(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool, lifecycleVerdict) {
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
@@ -1704,6 +1709,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 						valid = VersionInvalid
 					}
 				}
+			}
+		}
+		// A revival writes SelfDestruct=false above the wipe, so the latest cell hides it.
+		// A nonce written at or before an in-block destruct reads as zero, like the read path.
+		if valid == VersionValid && path == NoncePath {
+			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex, txIndex, true); ok {
+				valid = VersionInvalid
 			}
 		}
 	case MVReadResultDependency:
