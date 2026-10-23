@@ -249,12 +249,12 @@ func TestHeaderToMatchesSync(t *testing.T) {
 	// the same page as bytesUncompressed (sync path).
 	require := require.New(t)
 
-	pageSize := 16
+	writerPageSize := 16
 	testKeys := []string{"account_key_001", "account_key_002", "account_key_003", "account_key_004"}
 	testVals := []string{"val1", "val2", "val3", "val4"}
 
 	// Build page via sync path
-	mock1 := &multyBytesWriter{pageSize: pageSize}
+	mock1 := &multyBytesWriter{pageSize: writerPageSize}
 	pw1 := NewPagedWriter(t.Context(), mock1, false, 1)
 	for i := range testKeys {
 		require.NoError(pw1.Add([]byte(testKeys[i]), []byte(testVals[i])))
@@ -263,7 +263,7 @@ func TestHeaderToMatchesSync(t *testing.T) {
 	require.True(syncOK)
 
 	// Build page via async path (headerTo + concatenation, same as worker does)
-	mock2 := &multyBytesWriter{pageSize: pageSize}
+	mock2 := &multyBytesWriter{pageSize: writerPageSize}
 	pw2 := NewPagedWriter(t.Context(), mock2, false, 1)
 	for i := range testKeys {
 		require.NoError(pw2.Add([]byte(testKeys[i]), []byte(testVals[i])))
