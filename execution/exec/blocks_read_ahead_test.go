@@ -821,4 +821,8 @@ func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
 	require.False(t, bra.ExecRecoversSenders(header), "no sidecar")
 	bra.bals.Add(header.Hash(), types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0x02}}}))
 	require.True(t, bra.ExecRecoversSenders(header))
+
+	dbg.StagesOnlyBlocks = true
+	t.Cleanup(func() { dbg.StagesOnlyBlocks = false })
+	require.False(t, bra.ExecRecoversSenders(header), "execution is disabled, so the Senders stage recovers")
 }
