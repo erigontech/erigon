@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -124,6 +125,18 @@ func TestRederiveBlockAccessListReportsHeaderLookupError(t *testing.T) {
 	getHeader := func(common.Hash, uint64) (*types.Header, error) { return nil, lookupErr }
 	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, getHeader)
 	require.ErrorIs(t, err, lookupErr)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// TestRederiveBlockAccessListReportsRecoveredPanic pins that a panic recovered
+// from a replayed transaction is reported as the node's failure, as the live
+// executor reports it.
+func TestRederiveBlockAccessListReportsRecoveredPanic(t *testing.T) {
+	t.Parallel()
+	getHeader := func(common.Hash, uint64) (*types.Header, error) { panic("header read panicked") }
+	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, getHeader)
+	_, isPanic := errors.AsType[*protocol.ErrExecPanic](err)
+	require.True(t, isPanic, "%v", err)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
 

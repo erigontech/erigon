@@ -18,6 +18,7 @@ package bal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -71,7 +72,7 @@ func RederiveBlockAccessList(
 	})
 	// phaseErr returns the error of the phase that just ran. The node's own
 	// failures come first: the EVM folds failed state reads and header lookups
-	// into failed calls.
+	// into failed calls, and the executor recovers panics into errors.
 	phaseErr := func(err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -81,6 +82,9 @@ func RederiveBlockAccessList(
 		}
 		if headerErr != nil {
 			return headerErr
+		}
+		if _, ok := errors.AsType[*protocol.ErrExecPanic](err); ok {
+			return err
 		}
 		if err != nil {
 			return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
