@@ -42,12 +42,12 @@ const (
 
 type MaintenanceEvent struct {
 	Point MaintenancePoint
-	// FilesDone is set at BuildStarted for background jobs. It closes after
-	// that job's build and any merge it runs finish, including on failure;
-	// it does not wait for a merge already running in another job.
+	// FilesDone, when supplied at BuildStarted, closes after that job's build
+	// and any merge it runs finish, including on failure. It is nil for jobs
+	// without a completion signal and does not wait for another job's merge.
 	FilesDone <-chan struct{}
-	// PruneTx is a read-only view of the pending transaction at PruneReady.
-	// It is valid only during the observer call.
+	// PruneTx borrows the pending transaction at PruneReady for inspection.
+	// It is valid only during the observer call; do not write, commit or roll it back.
 	PruneTx kv.Tx
 }
 

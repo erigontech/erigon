@@ -20,10 +20,12 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -294,6 +296,7 @@ func runSnapshotCrashChild(t *testing.T) {
 	var filesDone <-chan struct{}
 	var beforePrune map[string]uint64
 	var stepSize uint64
+	var eat engineapitester.EngineApiTester
 	pruneWindow := request.Boundary == state.MaintenancePruneReady || request.Boundary == state.MaintenancePruneCommitted
 	observe := func(observerCtx context.Context, event state.MaintenanceEvent) {
 		point := event.Point
@@ -327,13 +330,33 @@ func runSnapshotCrashChild(t *testing.T) {
 			return
 		}
 		firstCrash.Do(func() {
+			if err := observerCtx.Err(); err != nil {
+				observerError <- fmt.Errorf("maintenance boundary %d has a cancelled context: %w", point, err)
+				return
+			}
+			if point == state.MaintenanceFilesBuilt || point == state.MaintenanceFilesPublished {
+				err := eat.ChainDB.ViewTemporal(observerCtx, func(tx kv.TemporalTx) error {
+					for _, domain := range kv.StateDomains {
+						visible := len(tx.Debug().DomainFiles(domain)) > 0
+						published := point == state.MaintenanceFilesPublished
+						if visible != published {
+							return fmt.Errorf("%s files visible at maintenance boundary %d: got %t, want %t", domain, point, visible, published)
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					observerError <- err
+					return
+				}
+			}
 			close(crashReached)
 			<-observerCtx.Done()
 		})
 	}
 	// Keep the node alive until process termination. An attempt timeout must
 	// not release a pre-commit barrier and let persistence continue.
-	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
+	eat, err = engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
 		Logger: testlog.Logger(t, log.LvlError), DataDir: request.DataDir,
 		Genesis: request.Genesis, CoinbaseKey: key, NoEmptyBlock1: true,
 		EngineApiClientTimeout: &clientTimeout, StateTransitionObserver: transitions.observe,
@@ -386,11 +409,11 @@ func runSnapshotCrashChild(t *testing.T) {
 			require.NoError(t, err, "replacement FCU before crash boundary")
 			require.True(t, pruneWindow, "file publication must leave the reorg held")
 			response = nil
-			go func() { pruneError <- continueSnapshotPruning(ctx, eat) }()
+			go func() { pruneError <- continueSnapshotPruning(ctx, eat.ExecutionModule.Prune) }()
 		case err := <-pruneError:
 			t.Fatalf("pruning ended before the crash boundary: %v", err)
 		case err := <-observerError:
-			t.Fatalf("reading pending prune progress: %v", err)
+			t.Fatalf("maintenance observer: %v", err)
 		case <-ctx.Done():
 			t.Fatalf("snapshot crash boundary %d was not reached: %v", request.Boundary, ctx.Err())
 		}
@@ -400,9 +423,9 @@ func runSnapshotCrashChild(t *testing.T) {
 
 // A time-budgeted FCU pass may leave all state pruning for a later pass.
 // Repeat the same commit/build path while execution is idle until pruning makes progress.
-func continueSnapshotPruning(ctx context.Context, eat engineapitester.EngineApiTester) error {
+func continueSnapshotPruning(ctx context.Context, prune func(context.Context) (<-chan struct{}, error)) error {
 	for ctx.Err() == nil {
-		finished, err := eat.ExecutionModule.Prune(ctx)
+		finished, err := prune(ctx)
 		if err != nil {
 			return err
 		}
@@ -411,6 +434,31 @@ func continueSnapshotPruning(ctx context.Context, eat engineapitester.EngineApiT
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+		// A pass that starts no build returns an already-closed signal.
+		if err := common.Sleep(ctx, 100*time.Millisecond); err != nil {
+			return err
+		}
 	}
 	return ctx.Err()
+}
+
+func TestSnapshotPruneRetryDelay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		finished := make(chan struct{})
+		close(finished)
+		calls := 0
+		started := time.Now()
+		err := continueSnapshotPruning(ctx, func(context.Context) (<-chan struct{}, error) {
+			calls++
+			if calls == 2 {
+				cancel()
+			}
+			return finished, nil
+		})
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 2, calls)
+		require.Positive(t, time.Since(started), "completed jobs must not cause an immediate retry")
+	})
 }

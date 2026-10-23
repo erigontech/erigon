@@ -22,6 +22,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -196,6 +199,36 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	}
 }
 
+func TestCrashRecoveryInspectionRejectsGap(t *testing.T) {
+	const childDataDir = "ERIGON_CRASH_INSPECTION_GAP"
+	if dataDir := os.Getenv(childDataDir); dataDir != "" {
+		inspectCrashRecoveryDataDir(t, dataDir, func(kv.TemporalRoDB) {
+			t.Fatal("inspection accepted a files/DB gap")
+		})
+		return
+	}
+	dataDir := newSmallStepDataDir(t)
+	dirs := datadir.New(dataDir)
+	_, err := state.GetStateIndicesSalt(dirs, true, testlog.Logger(t, log.LvlError))
+	require.NoError(t, err)
+	db, err := mdbx.New(dbcfg.ChainDB, testlog.Logger(t, log.LvlError)).Path(dirs.Chaindata).
+		MapSize(datasize.GB).GrowthStep(16 * datasize.MB).Open(t.Context())
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state.SavePruneValProgress(tx, kv.TblAccountVals, &prune.Stat{TxTo: 32, KeyProgress: prune.Done, ValueProgress: prune.Done})
+	}))
+	db.Close()
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestCrashRecoveryInspectionRejectsGap$", "-test.v", "-test.timeout=1m")
+	cmd.Env = append(os.Environ(), childDataDir+"="+dataDir)
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	require.Contains(t, string(output), "gap between snapshot files and DB")
+	require.Contains(t, string(output), "--- FAIL: TestCrashRecoveryInspectionRejectsGap", "inspection must fail the test, not exit the process")
+}
+
 func inspectCrashRecoveryDataDir(t *testing.T, dataDir string, inspect func(kv.TemporalRoDB)) {
 	t.Helper()
 	ctx := t.Context()
@@ -212,10 +245,16 @@ func inspectCrashRecoveryDataDir(t *testing.T, dataDir string, inspect func(kv.T
 
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	require.NoError(t, err)
-	agg, err := state.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	agg, err := state.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().Open(ctx)
 	require.NoError(t, err)
 	defer agg.Close()
 	require.NoError(t, agg.OpenFolder(rawDB))
+	// Keep gap detection, but report its error through the test instead of os.Exit.
+	require.NoError(t, rawDB.View(ctx, func(tx kv.Tx) error {
+		files := agg.BeginFilesRo()
+		defer files.Close()
+		return files.CheckFilesDBGap(tx)
+	}))
 
 	blockSnapshots := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
 	defer blockSnapshots.Close()
