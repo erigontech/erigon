@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io/fs"
 	"maps"
 	"math/big"
@@ -386,6 +387,30 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 			converted[sequential] = binFiles(output)
 		}
 		require.Equal(t, converted[true], converted[false], "maxOps=%d", maxOps)
+	}
+}
+
+func TestConvertPBTSourceWalkWorkersMatchSerial(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, _ := newPBTConversionSourceAt(t, 15)
+	var wantLeaves map[string][]byte
+	var wantRoot common.Hash
+	for _, workers := range []int{1, 4, 16} {
+		output := filepath.Join(t.TempDir(), fmt.Sprintf("output-%d", workers))
+		runs := new(atomic.Int32)
+		require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{
+			workers:          workers,
+			sourceWorkerRuns: runs,
+		}), "workers=%d", workers)
+		gotLeaves := readPBTBinLeaves(t, output, source.Chaindata)
+		gotRoot := readPBTBinRoot(t, output, source.Chaindata)
+		if workers == 1 {
+			wantLeaves, wantRoot = gotLeaves, gotRoot
+		} else {
+			require.Greater(t, runs.Load(), int32(1), "workers=%d: source walk did not run concurrently", workers)
+			require.Equal(t, wantLeaves, gotLeaves, "workers=%d", workers)
+			require.Equal(t, wantRoot, gotRoot, "workers=%d", workers)
+		}
 	}
 }
 

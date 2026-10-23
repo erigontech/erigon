@@ -84,11 +84,6 @@ func (b *mergeBatch) row(index int) ([]byte, []byte) {
 	return key, value
 }
 
-func (b *mergeBatch) reset() {
-	b.entries = b.entries[:0]
-	b.arena = b.arena[:0]
-}
-
 func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
 	free := make(chan *mergeBatch, mergeBatchRing)
 	ready := make(chan *mergeBatch, mergeBatchRing)
@@ -139,8 +134,6 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 			case ready <- batch:
 				return nil
 			case <-producerStop:
-				batch.reset()
-				free <- batch
 				return common.ErrStopped
 			}
 		}
@@ -166,20 +159,29 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 		mergeArgs := args
 		mergeArgs.Quit = mergeQuit
 		err = mergeSortFiles(logPrefix, providers, emit, mergeArgs)
-		if err == nil && len(current.entries) != 0 {
-			err = publish(current)
-			current = nil
-		} else {
-			current.reset()
-			free <- current
-			current = nil
+		if len(current.entries) != 0 {
+			publishErr := publish(current)
+			if err == nil {
+				err = publishErr
+			}
 		}
 		producerResult <- err
 		close(ready)
 	}()
 
+	var consumed uint64
 	for batch := range ready {
 		for i := range batch.entries {
+			consumed++
+			if consumed%1024 == 0 {
+				if err := common.Stopped(args.Quit); err != nil {
+					stop()
+					producerErr := <-producerResult
+					<-watchDone
+					_ = producerErr
+					return err
+				}
+			}
 			key, value := batch.row(i)
 			if err := loadFunc(key, value); err != nil {
 				stop()
@@ -189,8 +191,7 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 				return err
 			}
 		}
-		batch.reset()
-		free <- batch
+		free <- newMergeBatch()
 	}
 	producerErr := <-producerResult
 	<-watchDone

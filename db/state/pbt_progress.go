@@ -33,6 +33,7 @@ type PBTProgressConfig struct {
 	Logger   log.Logger
 	Message  string
 	Phase    string
+	Fields   []any
 	Total    uint64
 	TempDir  string
 	Interval time.Duration
@@ -42,6 +43,7 @@ type PBTProgress struct {
 	logger   log.Logger
 	message  string
 	phase    string
+	fields   []any
 	total    uint64
 	tempDir  string
 	interval time.Duration
@@ -130,6 +132,7 @@ func NewPBTProgress(config PBTProgressConfig) *PBTProgress {
 		logger:   config.Logger,
 		message:  config.Message,
 		phase:    config.Phase,
+		fields:   config.Fields,
 		total:    config.Total,
 		tempDir:  config.TempDir,
 		interval: config.Interval,
@@ -179,6 +182,7 @@ func (p *PBTProgress) log(done uint64) {
 	if p.tempDir != "" {
 		ctx = append(ctx, "temp_bytes", pbtDirSize(p.tempDir))
 	}
+	ctx = append(ctx, p.fields...)
 	p.logger.Info(p.message, ctx...)
 }
 

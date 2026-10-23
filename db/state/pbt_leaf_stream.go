@@ -20,7 +20,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/big"
+	"sync"
+	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -45,6 +49,10 @@ type pbinLatestCursor struct {
 }
 
 func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {
+	return ForEachPBinLeafWithWorkers(at, roTx, filesOnly, 1, nil, emit)
+}
+
+func ForEachPBinLeafWithWorkers(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, workerRuns *atomic.Int32, emit func(PBinLeaf) error) error {
 	if at == nil {
 		return fmt.Errorf("pbin leaf stream: nil aggregator transaction")
 	}
@@ -54,11 +62,19 @@ func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(P
 	if !filesOnly && roTx == nil {
 		return fmt.Errorf("pbin leaf stream: nil database transaction")
 	}
+	workers = max(workers, 1)
+	if workers > 1 && filesOnly {
+		return pbinForEachLeafParallel(at, roTx, filesOnly, workers, workerRuns, emit)
+	}
+	return pbinForEachLeafSerial(at, roTx, filesOnly, emit)
+}
+
+func pbinForEachLeafSerial(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {
 	domains := [...]kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain}
 	var cursors [len(domains)]pbinLatestCursor
 	for i, domain := range domains {
 		var err error
-		cursors[i], err = pbinOpenLatestCursor(at, roTx, domain, filesOnly)
+		cursors[i], err = pbinOpenLatestCursor(at, roTx, domain, filesOnly, nil, nil)
 		if err != nil {
 			for j := i - 1; j >= 0; j-- {
 				cursors[j].close()
@@ -76,22 +92,137 @@ func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(P
 			return err
 		}
 	}
-	return pbinForEachLeaf(at, cursors[0], cursors[1], cursors[2], emit)
-}
-
-func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCursor pbinLatestCursor, emit func(PBinLeaf) error) error {
 	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true).MergeInBackground(true)
 	defer collector.Close()
+	progress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "source leaf walk", TempDir: at.Dirs().Tmp})
+	err := pbinWalkLeafRange(cursors[0], cursors[1], cursors[2], collector, progress.Add)
+	progress.Done()
+	if err != nil {
+		return err
+	}
+	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: collector.Collected(), TempDir: at.Dirs().Tmp})
+	return pbinLoadSortedLeaves(collector, emit, leafProgress)
+}
+
+type pbinLeafAddressRange struct {
+	from []byte
+	to   []byte
+}
+
+func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, workerRuns *atomic.Int32, emit func(PBinLeaf) error) error {
+	ranges := pbinLeafAddressRanges(workers)
+	const totalBufferBytes = 2 * datasize.GB
+	perWorkerBuffer := totalBufferBytes / datasize.ByteSize(workers)
+	collectors := make([]*etl.Collector, workers)
+	for i := range collectors {
+		collectors[i] = etl.NewCollector(fmt.Sprintf("pbin-leaf-stream-%d", i), at.Dirs().Tmp, etl.NewSortableBuffer(perWorkerBuffer), log.Root()).MergeInBackground(true)
+	}
+	defer func() {
+		for _, collector := range collectors {
+			collector.Close()
+		}
+	}()
+	pin := at.Pin()
+	defer pin.Close()
+	progress := NewPBTProgress(PBTProgressConfig{
+		Message: "PBT leaf stream progress",
+		Phase:   "source leaf walk",
+		Fields:  []any{"workers", workers, "etl_a_buffer_bytes", uint64(totalBufferBytes)},
+		TempDir: at.Dirs().Tmp,
+	})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			workerAt := pin.BeginFilesRo()
+			defer workerAt.Close()
+			if workerRuns != nil {
+				workerRuns.Add(1)
+			}
+			collector := collectors[worker]
+			for rangeIndex := worker; rangeIndex < len(ranges); rangeIndex += workers {
+				r := ranges[rangeIndex]
+				var cursors [3]pbinLatestCursor
+				domains := [...]kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain}
+				var err error
+				for i, domain := range domains {
+					cursors[i], err = pbinOpenLatestCursor(workerAt, roTx, domain, filesOnly, r.from, r.to)
+					if err != nil {
+						for j := i - 1; j >= 0; j-- {
+							cursors[j].close()
+						}
+						break
+					}
+				}
+				if err != nil {
+					errs <- err
+					return
+				}
+				for i := range cursors {
+					if err = cursors[i].advance(); err != nil {
+						break
+					}
+				}
+				if err == nil {
+					err = pbinWalkLeafRange(cursors[0], cursors[1], cursors[2], collector, progress.Add)
+				}
+				for i := len(cursors) - 1; i >= 0; i-- {
+					cursors[i].close()
+				}
+				if err != nil {
+					errs <- err
+					return
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+	progress.Done()
+	select {
+	case err := <-errs:
+		return err
+	default:
+	}
+	total := uint64(0)
+	for _, collector := range collectors {
+		total += collector.Collected()
+	}
+	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: total, TempDir: at.Dirs().Tmp})
+	return pbinLoadSortedLeafCollectors(collectors, emit, leafProgress)
+}
+
+func pbinLeafAddressRanges(workers int) []pbinLeafAddressRange {
+	rangeCount := 4 * workers
+	space := new(big.Int).Lsh(big.NewInt(1), uint(pbinAddressLength*8))
+	count := big.NewInt(int64(rangeCount))
+	ranges := make([]pbinLeafAddressRange, rangeCount)
+	for i := range ranges {
+		from := new(big.Int).Mul(space, big.NewInt(int64(i)))
+		from.Quo(from, count)
+		to := new(big.Int).Mul(space, big.NewInt(int64(i+1)))
+		to.Quo(to, count)
+		ranges[i] = pbinLeafAddressRange{from: pbinAddressBoundary(from), to: pbinAddressBoundary(to)}
+	}
+	return ranges
+}
+
+func pbinAddressBoundary(value *big.Int) []byte {
+	if value.Sign() == 0 || value.Bit(pbinAddressLength*8) != 0 {
+		return nil
+	}
+	result := make([]byte, pbinAddressLength)
+	valueBytes := value.Bytes()
+	copy(result[len(result)-len(valueBytes):], valueBytes)
+	return result
+}
+
+func pbinWalkLeafRange(accountsCursor, codeCursor, storageCursor pbinLatestCursor, collector *etl.Collector, report func(uint64)) error {
 	emitter := pbt.NewRebuildFeedOpEmitter()
 	var leafCollector [8 + eip8297.ValueLength]byte
-	sourceProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "source leaf walk", TempDir: at.Dirs().Tmp})
 	var sourceDone, sourceReported uint64
-	defer func() {
-		if sourceDone != sourceReported {
-			sourceProgress.Add(sourceDone - sourceReported)
-		}
-		sourceProgress.Done()
-	}()
+	defer func() { report(sourceDone - sourceReported) }()
 	for accountsCursor.ok || codeCursor.ok || storageCursor.ok {
 		address, err := pbinNextAddress(accountsCursor, codeCursor, storageCursor)
 		if err != nil {
@@ -99,7 +230,7 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 		}
 		sourceDone++
 		if sourceDone-sourceReported >= 4096 {
-			sourceProgress.Add(sourceDone - sourceReported)
+			report(sourceDone - sourceReported)
 			sourceReported = sourceDone
 		}
 		if accountsCursor.ok && bytes.Equal(accountsCursor.key, address) {
@@ -165,11 +296,10 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			}
 		}
 	}
-	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: collector.Collected(), TempDir: at.Dirs().Tmp})
-	return pbinLoadSortedLeaves(collector, emit, leafProgress)
+	return nil
 }
 
-func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, filesOnly bool) (pbinLatestCursor, error) {
+func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, filesOnly bool, from, to []byte) (pbinLatestCursor, error) {
 	domainRoTx := at.DbgDomain(domain)
 	if domainRoTx == nil {
 		return pbinLatestCursor{}, fmt.Errorf("pbin leaf stream: domain %s is unavailable", domain)
@@ -177,9 +307,9 @@ func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, file
 	var iter *DomainLatestIterFile
 	var err error
 	if filesOnly {
-		iter, err = domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
+		iter, err = domainRoTx.DebugRangeLatestFromFiles(from, to, kv.Unlim)
 	} else {
-		iter, err = domainRoTx.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+		iter, err = domainRoTx.DebugRangeLatest(roTx, from, to, kv.Unlim)
 	}
 	if err != nil {
 		return pbinLatestCursor{}, err
@@ -255,6 +385,20 @@ func (p *pbinStreamProgress) Done() {
 }
 
 func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
+	return pbinLoadSortedLeafStream(func(load func([]byte, []byte) error) error {
+		return collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			return load(key, value)
+		}, etl.TransformArgs{Progress: progress})
+	}, emit)
+}
+
+func pbinLoadSortedLeafCollectors(collectors []*etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
+	return pbinLoadSortedLeafStream(func(load func([]byte, []byte) error) error {
+		return etl.MergeLoad("pbin leaf stream", collectors, load, etl.TransformArgs{Progress: progress})
+	}, emit)
+}
+
+func pbinLoadSortedLeafStream(load func(func([]byte, []byte) error) error, emit func(PBinLeaf) error) error {
 	var previousKey, previousValue []byte
 	var previousStamp uint64
 	flush := func() error {
@@ -263,7 +407,7 @@ func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, p
 		}
 		return emit(PBinLeaf{Key: previousKey, Value: previousValue, Stamp: previousStamp})
 	}
-	err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+	err := load(func(key, value []byte) error {
 		if previousKey != nil && bytes.Equal(previousKey, key) {
 			if !bytes.Equal(previousValue, value[8:]) {
 				return fmt.Errorf("pbin leaf stream: conflicting values for key %x", key)
@@ -278,7 +422,7 @@ func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, p
 		previousValue = bytes.Clone(value[8:])
 		previousStamp = binary.BigEndian.Uint64(value)
 		return nil
-	}, etl.TransformArgs{Progress: progress})
+	})
 	if err != nil {
 		return err
 	}

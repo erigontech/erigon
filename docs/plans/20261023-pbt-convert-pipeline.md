@@ -258,12 +258,12 @@ flowchart LR
 - Modify: `db/state/pbt_convert.go`
 - Create: `db/state/pbt_leaf_stream_parallel_test.go`
 
-- [ ] N address-range walkers, each with its own ETL A collector, merged with background `MergeLoad`. The worker
+- [x] N address-range walkers, each with its own ETL A collector, merged with background `MergeLoad`. The worker
       count comes from `--workers`.
-- [ ] `PBinRootFromStream` runs as its own stage beside the partition-file writer, fed from the same merged stream.
-- [ ] tests: the leaf set and stamps equal the serial walk's for workers 1/4/16, shared code across ranges included;
+- [x] `PBinRootFromStream` runs as its own stage beside the partition-file writer, fed from the same merged stream.
+- [x] tests: the leaf set and stamps equal the serial walk's for workers 1/4/16, shared code across ranges included;
       the concurrency counter is > 1; the golden harness stays green.
-- [ ] run the gate — must pass before Task 6.
+- [x] run the gate — must pass before Task 6.
 
 ### Task 6: Fold loop pipeline
 **Files:**

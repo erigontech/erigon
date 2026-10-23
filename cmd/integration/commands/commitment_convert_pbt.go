@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -54,6 +55,7 @@ var (
 	convertPBTKeepHex       bool
 	convertPBTOutputDatadir string
 	convertPBTSkipVerify    bool
+	convertPBTWorkers       int
 )
 
 type pbtConvertHooks struct {
@@ -62,6 +64,8 @@ type pbtConvertHooks struct {
 	rangeWriterLimits    *dbstate.PBinRangeWriterLimits
 	sequentialCommitment bool
 	workerViews          *atomic.Int32
+	sourceWorkerRuns     *atomic.Int32
+	workers              int
 	skipVerify           bool
 }
 
@@ -72,6 +76,7 @@ func init() {
 	withExperimentalCommitment(cmdCommitmentConvertPBT)
 	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTKeepHex, "keep-hex", false, "keep the source v3 hex commitment files")
 	cmdCommitmentConvertPBT.Flags().StringVar(&convertPBTOutputDatadir, "output.datadir", "", "new datadir for the converted commitment files")
+	cmdCommitmentConvertPBT.Flags().IntVar(&convertPBTWorkers, "workers", dbg.PBTWorkers, "source walk and commitment workers")
 	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTSkipVerify, "skip-verify", false, "build only: check the source end by file ranges instead of a leaf pass, and skip re-verifying the written rows and root")
 	must(cmdCommitmentConvertPBT.MarkFlagDirname("output.datadir"))
 	must(cmdCommitmentConvertPBT.MarkFlagRequired("output.datadir"))
@@ -84,7 +89,7 @@ var cmdCommitmentConvertPBT = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		return convertPBTWithOptions(ctx, datadirCli, convertPBTOutputDatadir, convertPBTKeepHex, chain, logger, pbtConvertHooks{skipVerify: convertPBTSkipVerify})
+		return convertPBTWithOptions(ctx, datadirCli, convertPBTOutputDatadir, convertPBTKeepHex, chain, logger, pbtConvertHooks{skipVerify: convertPBTSkipVerify, workers: convertPBTWorkers})
 	},
 }
 
@@ -289,6 +294,8 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		Hash:              eip8297.HashBytes,
 		RangeWriterLimits: hooks.rangeWriterLimits,
 		WorkerViews:       hooks.workerViews,
+		Workers:           hooks.workers,
+		SourceWorkerRuns:  hooks.sourceWorkerRuns,
 	})
 	targetTx.Rollback()
 	if err != nil {

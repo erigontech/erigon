@@ -17,11 +17,13 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -41,6 +43,8 @@ type PBinConvertOptions struct {
 	Hash              eip8297.HashFn
 	RangeWriterLimits *PBinRangeWriterLimits
 	WorkerViews       *atomic.Int32
+	Workers           int
+	SourceWorkerRuns  *atomic.Int32
 }
 
 func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) error) (common.Hash, error) {
@@ -70,7 +74,13 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if opts.Hash == nil {
 		return common.Hash{}, fmt.Errorf("pbin conversion: nil hash function")
 	}
+	workers := opts.Workers
+	if workers <= 0 {
+		workers = dbg.PBTWorkers
+	}
+	workers = max(workers, 1)
 	cfg := pbinConversionTrieConfig()
+	cfg.WarmupNumWorkers = workers
 	options := []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek()}
 	if opts.TargetDB != nil {
 		options = append(options, execctx.WithParaTrieDB(opts.TargetDB))
@@ -86,14 +96,37 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	var streamRoot common.Hash
 	var streamErr error
 	leaves := func(emit func(PBinLeaf) error) error {
-		streamRoot, streamErr = PBinRootFromStream(opts.Hash, func(add func(PBinLeaf) error) error {
-			return ForEachPBinLeaf(sourceFiles, opts.SourceTx, true, func(leaf PBinLeaf) error {
-				if addErr := add(leaf); addErr != nil {
-					return addErr
+		rootInput := make(chan PBinLeaf, 1024)
+		rootDone := make(chan struct{})
+		go func() {
+			defer close(rootDone)
+			streamRoot, streamErr = PBinRootFromStream(opts.Hash, func(add func(PBinLeaf) error) error {
+				for leaf := range rootInput {
+					if addErr := add(leaf); addErr != nil {
+						return addErr
+					}
 				}
-				return emit(leaf)
+				return nil
 			})
+		}()
+		defer func() {
+			close(rootInput)
+			<-rootDone
+		}()
+		returnErr := ForEachPBinLeafWithWorkers(sourceFiles, opts.SourceTx, true, workers, opts.SourceWorkerRuns, func(leaf PBinLeaf) error {
+			rootLeaf := PBinLeaf{Key: bytes.Clone(leaf.Key), Value: bytes.Clone(leaf.Value), Stamp: leaf.Stamp}
+			select {
+			case rootInput <- rootLeaf:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-rootDone:
+				return streamErr
+			}
+			return emit(leaf)
 		})
+		if returnErr != nil {
+			return returnErr
+		}
 		return streamErr
 	}
 	var writer *PBinRangeWriter
