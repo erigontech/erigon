@@ -22,7 +22,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -37,7 +36,6 @@ import (
 // double-count it. Exercised in exec-only (DiscardCommitment) mode so no trie work runs
 // against the empty overlay.
 func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing.T) {
-	defer dbg.OverrideDiscardCommitment(true)()
 
 	_, tx := temporaltest.NewTestTx(t)
 	overlay, err := membatchwithdb.NewMemoryBatch(tx)
@@ -53,7 +51,7 @@ func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing
 		&types.Header{Number: *uint256.NewInt(1)},
 		overlay,
 		nil,
-		ExecuteBlockCfg{},
+		ExecuteBlockCfg{discardCommitment: true},
 		stage,
 		false,
 		log.New(),

@@ -336,7 +336,7 @@ func (rw *WorkerContext) PublishReadMetrics() {
 		return
 	}
 	doms := rw.rs.Domains()
-	doms.LogMergeMetrics(rw.readMetrics)
+	doms.MergeExecMetrics(rw.readMetrics)
 	rw.collectorAcc.Merge(rw.readMetrics)
 	rw.readMetrics.Reset()
 	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {

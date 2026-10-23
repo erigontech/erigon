@@ -303,7 +303,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// Exec-only (DISCARD_COMMITMENT): nil the commit stream so no commitment work
 	// runs — fan-out and batch-commit trigger no-op on a nil channel, and the
 	// calculator exits immediately and closes rootResults.
-	if dbg.DiscardCommitment() {
+	if pe.cfg.discardCommitment {
 		commitResults = nil
 	}
 	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on; a nil

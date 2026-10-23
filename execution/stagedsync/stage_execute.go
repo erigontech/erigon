@@ -83,6 +83,11 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
+	// discardCommitment runs execution without computing/persisting commitment
+	// (exec-only). Initialized from dbg.DiscardCommitment() at the stage boundary;
+	// the ephemeral single-block replay harness sets it directly since the env is
+	// read only at package init.
+	discardCommitment bool
 
 	// balSink, when set, receives the BAL derived from each executed block's
 	// VersionedIO (see ProcessBAL). Test-only seam: lets the block-replay
@@ -121,22 +126,23 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:              db,
-		prune:           pm,
-		batchSize:       batchSize,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		vmConfig:        vmConfig,
-		dirs:            dirs,
-		notifications:   notifications,
-		stateStream:     stateStream,
-		badBlockHalt:    badBlockHalt,
-		blockReader:     blockReader,
-		genesis:         genesis,
-		historyV3:       true,
-		syncCfg:         syncCfg,
-		experimentalBAL: experimentalBAL,
-		readAheader:     readAheader,
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		notifications:     notifications,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		genesis:           genesis,
+		historyV3:         true,
+		syncCfg:           syncCfg,
+		experimentalBAL:   experimentalBAL,
+		readAheader:       readAheader,
+		discardCommitment: dbg.DiscardCommitment(),
 	}
 }
 
@@ -414,7 +420,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if err != nil {
 		return err
 	}
-	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, dbg.DiscardCommitment(), s.BlockNumber, initialTxNum, blockNum)
+	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, cfg.discardCommitment, s.BlockNumber, initialTxNum, blockNum)
 	if err != nil {
 		return err
 	}

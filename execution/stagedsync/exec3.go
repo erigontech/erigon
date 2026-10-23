@@ -196,10 +196,11 @@ func ExecV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
+	doms.SetDiscardCommitment(cfg.discardCommitment)
 	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup
 	// entirely: EnableParaTrieDB after the witness seed's DomainPut touches would
 	// panic on the dropped sequential-buffer keys.
-	if !dbg.DiscardCommitment() {
+	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
 		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
@@ -327,8 +328,9 @@ func execV3Serial(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
+	doms.SetDiscardCommitment(cfg.discardCommitment)
 	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup.
-	if !dbg.DiscardCommitment() {
+	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
 		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
@@ -452,7 +454,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		stepCheckTx.Rollback()
 	}
 
-	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !dbg.DiscardCommitment() {
+	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !cfg.discardCommitment {
 		logger.Warn("["+logPrefix+"] can't persist commitment: txn step frozen",
 			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommittedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
@@ -782,7 +784,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose commitment which is writable to the db, otherwise the update will get lost
 			var exhausted *ErrLoopExhausted
-			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, te.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
 			// Heads-up to the commitment calculator, ahead of the block's
@@ -885,7 +887,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		// both executors; a second bump here double-counted it on the serial path.
 	}
 
-	if dbg.DiscardCommitment() {
+	if cfg.discardCommitment {
 		return true, times, nil
 	}
 
