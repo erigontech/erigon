@@ -450,13 +450,16 @@ func TestMetricsAndEvents(t *testing.T) {
 	cfg.Dir = t.TempDir()
 	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, logger)
 	require.NoError(t, err)
+	// Counters are process-wide: other tests move them too.
+	counter := func(name string) uint64 { return metrics.GetOrCreateCounter(name).GetValueUint64() }
+	derived, reorgs, divergences := counter("eez_l2_blocks_derived_total"), counter("eez_l1_reorgs_total"), counter("eez_divergences_total")
 	require.NoError(t, f.Boot(t.Context()))
 	require.Equal(t, uint64(2), metrics.GetOrCreateGauge("eez_l2_cursor").GetValueUint64())
 	require.Equal(t, l1First+1, metrics.GetOrCreateGauge("eez_l1_scanned").GetValueUint64())
-	require.Positive(t, metrics.GetOrCreateCounter("eez_l2_blocks_derived_total").GetValueUint64())
+	require.Equal(t, derived+2, counter("eez_l2_blocks_derived_total"))
 
 	require.NoError(t, f.Handle(t.Context(), l1.Reorg{Ancestor: l1.Header{Number: l1First}}))
-	require.Positive(t, metrics.GetOrCreateCounter("eez_l1_reorgs_total").GetValueUint64())
+	require.Equal(t, reorgs+1, counter("eez_l1_reorgs_total"))
 	for _, event := range []string{
 		"eez.deriver.safe.advanced",
 		"eez.l1_watcher.reorg.detected",
@@ -475,5 +478,5 @@ func TestMetricsAndEvents(t *testing.T) {
 		t.Fatal("follower did not halt")
 	}
 	require.Contains(t, out.String(), "event=eez.deriver.state.diverged_post")
-	require.Positive(t, metrics.GetOrCreateCounter("eez_divergences_total").GetValueUint64())
+	require.Equal(t, divergences+1, counter("eez_divergences_total"))
 }
