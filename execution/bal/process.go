@@ -104,6 +104,9 @@ func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7
 	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
+		if blockBal == nil && blockBalBytes != nil {
+			blockBal, _ = types.DecodeBlockAccessListBytes(blockBalBytes)
+		}
 		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
 		return nil, fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
 			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)
