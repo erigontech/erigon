@@ -2855,14 +2855,10 @@ const balDispatchWindow = 32
 
 // insertSorted adds tx to the ascending, duplicate-free list l.
 func insertSorted(l []int, tx int) []int {
-	if n := len(l); n == 0 || l[n-1] < tx {
-		return append(l, tx)
+	if i, found := slices.BinarySearch(l, tx); !found {
+		l = slices.Insert(l, i, tx)
 	}
-	i, found := slices.BinarySearch(l, tx)
-	if found {
-		return l
-	}
-	return slices.Insert(l, i, tx)
+	return l
 }
 
 // balSeededPath reports whether a BAL pre-populates cells of path p.
@@ -2872,10 +2868,7 @@ func balSeededPath(p state.AccountPath) bool {
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []int, tx int) []int {
-	i, found := slices.BinarySearch(l, tx)
-	if found {
-		i++
-	}
+	i, _ := slices.BinarySearch(l, tx+1)
 	return l[i:]
 }
 
