@@ -64,7 +64,7 @@ func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 // AsSnapshotGetter reads this SD's in-memory values first. The shared cache
 // can advance independently of this SD, so entries newer than tx's snapshot
 // are ignored and the value is read from tx instead.
-// The SD's in-memory values must remain unchanged while the getter is in use.
+// The queried domains must remain unchanged in memory while the getter is in use.
 func (sd *SharedDomains) AsSnapshotGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &snapshotGetter{sd: sd, TemporalGetter: NewCachedTemporalTxStateGetter(tx, sd.stateCache)}
 }
@@ -104,11 +104,11 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	if stateCache == nil || !dbg.UseStateCache {
 		return g
 	}
-	// A writable tx's visible end comes from the SharedDomains flush memo, not
-	// from the tx, so only a read-only tx can vouch for a fill here. A read-only
-	// wrapper can hide a writable tx, so both ends are checked.
+	// Only a read-only backing tx has an exact visible end for cache fills.
+	// Overlay read views expose write methods, while read-only wrappers can
+	// hide a writable tx, so classify the underlying transaction.
 	generationTx := kv.UnderlyingTx(tx)
-	if generationTx == nil || writableTx(tx) || writableTx(generationTx) {
+	if generationTx == nil || writableTx(generationTx) {
 		return g
 	}
 	stateVersion, err := rawdb.GetStateVersion(generationTx)

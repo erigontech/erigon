@@ -352,6 +352,36 @@ func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
 	}
 }
 
+func TestEmbeddedRPCCacheViewTreatsDisabledHistoryAsMiss(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.SetInMemHistoryReads(false)
+	require.NoError(t, domains.InitBlockOverlay(tx))
+
+	rpcCache := &execmodule.Cache{}
+	view, err := rpcCache.View(ctx, rpchelper.PinToOverlay(tx, domains.BlockOverlay()))
+	require.NoError(t, err)
+	cacheView := view.(*execmodule.CacheView)
+	for _, phase := range []string{"before teardown", "after teardown"} {
+		t.Run(phase, func(t *testing.T) {
+			for name, keyLen := range map[string]int{"account": 20, "storage": 52} {
+				t.Run(name, func(t *testing.T) {
+					_, ok, err := cacheView.GetAsOf(make([]byte, keyLen), 1)
+					require.NoError(t, err)
+					require.False(t, ok, "unavailable in-memory history must allow the reader to try the database")
+				})
+			}
+		})
+		domains.Close()
+	}
+}
+
 func TestEmbeddedRPCPinnedViewIgnoresLaterCachePublications(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -434,6 +464,9 @@ func TestEmbeddedRPCPinnedViewIgnoresLaterCachePublications(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.oldValue, value, "a later cache publication must not change the pinned RPC state")
 			require.Equal(t, 1, countedTx.reads, "a newer cache value must fall back to the original transaction")
+			cached, hit = stateCache.View(nil).Get(tc.domain, key)
+			require.True(t, hit)
+			require.Equal(t, tc.newValue, cached, "a stale RPC read must not replace a newer shared-cache entry")
 			overlaid, err := rpcView.Get(otherKey)
 			require.NoError(t, err)
 			require.Equal(t, encAccount(1), overlaid, "overlay data remains readable after teardown")

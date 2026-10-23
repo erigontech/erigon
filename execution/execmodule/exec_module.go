@@ -197,11 +197,16 @@ func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if c.context != nil {
 		if len(key) == 20 {
-			return c.context.GetAsOf(kv.AccountsDomain, key, ts)
+			v, ok, err = c.context.GetAsOf(kv.AccountsDomain, key, ts)
+		} else {
+			v, ok, err = c.context.GetAsOf(kv.StorageDomain, key, ts)
 		}
-		return c.context.GetAsOf(kv.StorageDomain, key, ts)
+		if errors.Is(err, kv.ErrInMemHistoryDisabled) {
+			// A cache miss lets the historical reader fall back to its transaction.
+			return nil, false, nil
+		}
 	}
-	return nil, false, nil
+	return v, ok, err
 }
 
 type ExecModule struct {
