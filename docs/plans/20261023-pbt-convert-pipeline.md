@@ -239,7 +239,7 @@ flowchart LR
 - [x] tests: a `loadFunc` error stops the goroutine with no leak; context cancel stops it; an empty collector; one
       provider.
 - [x] enable it on ETL A in `pbinLoadSortedLeaves`.
-- [ ] run the gate — must pass before Task 4.
+- [x] run the gate — must pass before Task 4.
 
 ### Task 4: No re-sort in the fold input
 **Files:**

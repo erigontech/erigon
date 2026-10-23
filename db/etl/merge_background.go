@@ -151,14 +151,14 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 			default:
 			}
 			if current.full(key, value) {
-				if err := publish(current); err != nil {
-					return err
+				if publishErr := publish(current); publishErr != nil {
+					return publishErr
 				}
-				var err error
-				current, err = take()
-				if err != nil {
-					return err
+				next, takeErr := take()
+				if takeErr != nil {
+					return takeErr
 				}
+				current = next
 			}
 			current.add(key, value)
 			return nil

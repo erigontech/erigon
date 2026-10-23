@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -192,7 +193,7 @@ func addPBTGoldenStorageBucket(t *testing.T, source pbtConversionSource) {
 	tx.Rollback()
 	agg.CloseFilesNoReopen()
 	for _, file := range files {
-		require.NoError(t, os.Remove(file))
+		require.NoError(t, dir.RemoveFile(file))
 	}
 	require.NoError(t, agg.ReloadFiles())
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
