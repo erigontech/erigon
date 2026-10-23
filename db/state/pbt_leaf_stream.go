@@ -18,7 +18,9 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -67,6 +69,116 @@ func ForEachPBinLeafWithWorkers(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, 
 		return pbinForEachLeafParallel(at, roTx, filesOnly, workers, workerRuns, emit)
 	}
 	return pbinForEachLeafSerial(at, roTx, filesOnly, emit)
+}
+
+func VerifyPBinSourceStamps(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, endTxNum uint64, workers int, workerRuns *atomic.Int32, report func(uint64)) error {
+	if at == nil {
+		return fmt.Errorf("pbin stamp walk: nil aggregator transaction")
+	}
+	if !filesOnly && roTx == nil {
+		return fmt.Errorf("pbin stamp walk: nil database transaction")
+	}
+	workers = max(workers, 1)
+	ranges := pbinStampAddressRanges(workers)
+	pin := at.Pin()
+	defer pin.Close()
+	walkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var errorMu sync.Mutex
+	var firstErr error
+	recordError := func(err error) {
+		errorMu.Lock()
+		if firstErr == nil || errors.Is(firstErr, context.Canceled) && !errors.Is(err, context.Canceled) {
+			firstErr = err
+		}
+		errorMu.Unlock()
+		cancel()
+	}
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			if workerRuns != nil {
+				workerRuns.Add(1)
+			}
+			for rangeIndex := worker; rangeIndex < len(ranges); rangeIndex += workers {
+				if err := verifyPBinSourceStampRange(walkCtx, pin, roTx, filesOnly, ranges[rangeIndex], endTxNum, report); err != nil {
+					recordError(err)
+					return
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+	errorMu.Lock()
+	defer errorMu.Unlock()
+	if firstErr != nil {
+		return firstErr
+	}
+	return nil
+}
+
+func verifyPBinSourceStampRange(ctx context.Context, pin *AggregatorFilesPin, roTx kv.Tx, filesOnly bool, addressRange pbinLeafAddressRange, endTxNum uint64, report func(uint64)) error {
+	domains := [...]kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain}
+	var cursors [len(domains)]pbinLatestCursor
+	workerAt := pin.BeginFilesRo()
+	defer workerAt.Close()
+	for i, domain := range domains {
+		var err error
+		cursors[i], err = pbinOpenLatestCursor(workerAt, roTx, domain, filesOnly, addressRange.from, addressRange.to)
+		if err != nil {
+			for j := i - 1; j >= 0; j-- {
+				cursors[j].close()
+			}
+			return err
+		}
+	}
+	defer func() {
+		for i := range cursors {
+			cursors[i].close()
+		}
+	}()
+	for i := range cursors {
+		if err := cursors[i].advance(); err != nil {
+			return err
+		}
+	}
+	var done, reported uint64
+	defer func() {
+		if report != nil {
+			report(done - reported)
+		}
+	}()
+	for {
+		cursor := -1
+		for i := range cursors {
+			if !cursors[i].ok || cursor >= 0 && bytes.Compare(cursors[i].key, cursors[cursor].key) >= 0 {
+				continue
+			}
+			cursor = i
+		}
+		if cursor < 0 {
+			return nil
+		}
+		current := &cursors[cursor]
+		if current.stamp > endTxNum {
+			return fmt.Errorf("pbin stamp walk: key %x has stamp %d after conversion txNum %d", current.key, current.stamp, endTxNum)
+		}
+		done++
+		if report != nil && done-reported >= 4096 {
+			report(done - reported)
+			reported = done
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if err := current.advance(); err != nil {
+			return err
+		}
+	}
 }
 
 func pbinForEachLeafSerial(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {
@@ -211,7 +323,14 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 }
 
 func pbinLeafAddressRanges(workers int) []pbinLeafAddressRange {
-	rangeCount := 4 * workers
+	return pbinAddressRanges(4 * workers)
+}
+
+func pbinStampAddressRanges(workers int) []pbinLeafAddressRange {
+	return pbinAddressRanges(workers)
+}
+
+func pbinAddressRanges(rangeCount int) []pbinLeafAddressRange {
 	space := new(big.Int).Lsh(big.NewInt(1), uint(pbinAddressLength*8))
 	count := big.NewInt(int64(rangeCount))
 	ranges := make([]pbinLeafAddressRange, rangeCount)

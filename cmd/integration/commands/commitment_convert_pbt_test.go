@@ -787,11 +787,20 @@ func TestConvertPBTSkipVerifySkipsWrittenRowsCheck(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
+	previousHandler := log.Root().GetHandler()
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
 	output := filepath.Join(t.TempDir(), "output")
 	hooks := pbtConvertHooks{skipVerify: true, standalone: func(dirs datadir.Dirs) error {
 		return corruptPBTOutputRow(t.Context(), dirs)
 	}}
 	require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), hooks))
+	for _, check := range []string{"C-a", "C-d", "C-e"} {
+		require.Contains(t, logs.String(), "check="+check)
+	}
+	_, err := os.Stat(filepath.Join(datadir.Open(output).Snap, "pbt-manifest.toml"))
+	require.NoError(t, err)
 	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
@@ -801,20 +810,241 @@ func TestConvertPBTSkipVerifyRejectsStateFilesPastPoint(t *testing.T) {
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	source, _ := newPBTConversionSource(t)
-	require.NoError(t, filepath.WalkDir(source.Snap, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.Contains(entry.Name(), "-accounts.0-1.") {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(strings.Replace(path, ".0-1.", ".1-2.", 1), data, 0o644)
-	}))
+	source, _ := newPBTConversionSourceAtWithFutureLeaf(t, 7, 8)
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{skipVerify: true})
 	require.ErrorContains(t, err, "state files from step 1 hold writes past conversion txNum 7")
+}
+
+func TestConvertPBTStampWalkRejectsPastPoint(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	for _, addressByte := range []byte{0x66, 0xff} {
+		source, _ := newPBTConversionSourceAt(t, 15)
+		addPBTSourcePastPointFile(t, source, addressByte, 17)
+		for _, workers := range []int{1, 16} {
+			output := filepath.Join(t.TempDir(), fmt.Sprintf("output-%x-%d", addressByte, workers))
+			err := convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{workers: workers})
+			require.ErrorContains(t, err, "pbin stamp walk: key", "address=%x workers=%d", addressByte, workers)
+			require.ErrorContains(t, err, "stamp", "address=%x workers=%d", addressByte, workers)
+		}
+	}
+}
+
+func TestConvertPBTCRejectsCopiedStateFile(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBTWithStandaloneTestHook(t.Context(), source.DataDir, output, true, "", log.New(), func(dirs datadir.Dirs) error {
+		files, err := pbtAttachFiles(dirs)
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			if !pbtAttachStateDomain(file.domain) || filepath.Ext(file.path) != ".kv" {
+				continue
+			}
+			data, readErr := os.ReadFile(file.path)
+			if readErr != nil {
+				return readErr
+			}
+			copyPath := file.path + ".copy"
+			if writeErr := os.WriteFile(copyPath, data, 0o644); writeErr != nil {
+				return writeErr
+			}
+			return os.Rename(copyPath, file.path)
+		}
+		return errors.New("no state file")
+	})
+	require.ErrorContains(t, err, "C-e output state file")
+}
+
+func TestConvertPBTCRejectsChangedStateRecord(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{afterOutput: func() error {
+		return corruptPBTSourceHexState(t.Context(), source.Dirs)
+	}})
+	require.ErrorContains(t, err, "C-e commitment state")
+}
+
+func TestConvertPBTManifestCoversSelectedFiles(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	manifest, err := dbstate.ReadPBTManifest(filepath.Join(datadir.Open(output).Snap, "pbt-manifest.toml"))
+	require.NoError(t, err)
+	files, err := pbtAttachFiles(datadir.Open(output))
+	require.NoError(t, err)
+	want := 0
+	for _, file := range pbtAttachVisibleFiles(files) {
+		if pbtAttachAdoptsFile(file) {
+			want++
+		}
+	}
+	require.Equal(t, want, len(manifest.Files))
+}
+
+func addPBTSourcePastPointFile(t *testing.T, source pbtConversionSource, addressByte byte, stamp uint64) {
+	t.Helper()
+	settings, err := dbstate.ReadErigonDBSettings(source.Dirs)
+	require.NoError(t, err)
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
+	agg := dbstate.New(source.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	address := bytes.Repeat([]byte{addressByte}, length.Addr)
+	account := accounts.Account{Nonce: 3, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), stamp, nil))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	domains.Close()
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
+	agg.WaitForFiles()
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+}
+
+func corruptPBTSourceHexState(ctx context.Context, dirs datadir.Dirs) error {
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	if err != nil {
+		return err
+	}
+	configurePBTSourceVariant(settings)
+	rawPath, err := os.MkdirTemp("", "convert-pbt-corrupt-state-chaindata-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(rawPath) }()
+	rawDB, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
+			return err
+		}
+		return rawdbv3.TxNums.Append(tx, 1, 7)
+	}); err != nil {
+		rawDB.Close()
+		return err
+	}
+	agg, err := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).Open(ctx)
+	if err != nil {
+		rawDB.Close()
+		return err
+	}
+	if err := agg.OpenFolder(rawDB); err != nil {
+		agg.Close()
+		rawDB.Close()
+		return err
+	}
+	at := agg.BeginFilesRo()
+	it, err := at.DebugRangeLatestFromFiles(kv.CommitmentDomain, nil, nil, kv.Unlim)
+	if err != nil {
+		at.Close()
+		agg.Close()
+		rawDB.Close()
+		return err
+	}
+	iter := it.(*dbstate.DomainLatestIterFile)
+	rows := make([]struct {
+		key, value []byte
+		stamp      uint64
+	}, 0)
+	for iter.HasNext() {
+		key, value, nextErr := iter.Next()
+		if nextErr != nil {
+			iter.Close()
+			at.Close()
+			agg.Close()
+			rawDB.Close()
+			return nextErr
+		}
+		rows = append(rows, struct {
+			key, value []byte
+			stamp      uint64
+		}{key: bytes.Clone(key), value: bytes.Clone(value), stamp: iter.Stamp()})
+	}
+	iter.Close()
+	at.Close()
+	agg.Close()
+	rawDB.Close()
+	if err := removePBTOutputDomainFilesForHook(dirs, kv.CommitmentDomain.String()); err != nil {
+		return err
+	}
+	state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), 1, 6, nil)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range rows {
+		if bytes.Equal(rows[i].key, commitment.KeyCommitmentV3State) {
+			rows[i].value = state
+			changed = true
+		}
+	}
+	if !changed {
+		return errors.New("commitment state record is missing")
+	}
+	rawDB, err = mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer rawDB.Close()
+	agg, err = dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(rawDB); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentDomain), execctx.WithoutCommitmentSeek())
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	for _, row := range rows {
+		if err := domains.DomainPut(kv.CommitmentDomain, tx, row.key, row.value, row.stamp, nil); err != nil {
+			return err
+		}
+	}
+	if err := domains.Flush(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return agg.BuildFiles2(ctx, db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false)
 }
 
 func TestRequirePBinSourceFilesEnd(t *testing.T) {

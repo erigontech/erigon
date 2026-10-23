@@ -292,7 +292,7 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 		"range 0-1 .idt",
 		"range 0-1 .kvi",
 		"domain root verify",
-		"output standalone verify",
+		"output identity verify",
 		"attach leaf stamps verify",
 		"attach published bin verify",
 		"attach node root verify",

@@ -345,18 +345,18 @@ flowchart LR
 - Modify: `cmd/integration/commands/commitment_convert_pbt.go`
 - Modify: `cmd/integration/commands/commitment_convert_pbt_test.go`
 
-- [ ] C-a as a parallel unsorted stamp walk. C-e as file identity: every output state file is the source file's
+- [x] C-a as a parallel unsorted stamp walk. C-e as file identity: every output state file is the source file's
       inode, plus the state records at the point. C-b, C-c and C-d stay.
-- [ ] the manifest (D7): written last on every run, `--skip-verify` included; read; checked with parallel digests.
-- [ ] `--skip-verify` stays. It skips C-a (the file-range check `requirePBinSourceFilesEnd` runs instead), C-d and
+- [x] the manifest (D7): written last on every run, `--skip-verify` included; read; checked with parallel digests.
+- [x] `--skip-verify` stays. It skips C-a (the file-range check `requirePBinSourceFilesEnd` runs instead), C-d and
       C-e, and logs each skipped check by name. C-b and C-c always run.
-- [ ] tests:
+- [x] tests:
   - a stamp past the point in the last address range;
   - a non-linked output state file;
   - manifest round trip and every tamper case;
   - with `--skip-verify`, the manifest is written and the skipped checks are logged;
   - the golden harness stays green.
-- [ ] run the gate — must pass before Task 10.
+- [x] run the gate — must pass before Task 10.
 
 ### Task 10: attach-pbt verifies the manifest
 **Files:**

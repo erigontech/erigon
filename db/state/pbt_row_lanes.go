@@ -37,7 +37,7 @@ import (
 
 const (
 	pbinRowLaneCount       = 48
-	pbinRowLaneBufferBytes = 1 << 20
+	pbinRowLaneBufferBytes = 64 << 10
 	pbinRowLaneLengthBytes = 4
 )
 
@@ -56,8 +56,7 @@ type pbinRowLanes struct {
 type pbinRowLane struct {
 	partition pbinPartition
 	path      string
-	file      *os.File
-	writer    *bufio.Writer
+	buffer    []byte
 	last      []byte
 }
 
@@ -127,11 +126,14 @@ func (r *pbinRowLanes) openLane(partition pbinPartition) (*pbinRowLane, error) {
 	if err != nil {
 		return nil, err
 	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
 	return &pbinRowLane{
 		partition: partition,
-		path:      file.Name(),
-		file:      file,
-		writer:    bufio.NewWriterSize(file, pbinRowLaneBufferBytes),
+		path:      path,
+		buffer:    make([]byte, 0, pbinRowLaneBufferBytes),
 	}, nil
 }
 
@@ -141,18 +143,41 @@ func (l *pbinRowLane) write(key, value []byte) error {
 		return fmt.Errorf("pbin row lane %02x-%02x: row is too large", l.partition[0], l.partition[1])
 	}
 	binary.BigEndian.PutUint32(length[:], uint32(len(key)))
-	if _, err := l.writer.Write(length[:]); err != nil {
-		return err
+	rowBytes := pbinRowLaneLengthBytes*2 + len(key) + len(value)
+	if len(l.buffer) > 0 && len(l.buffer)+rowBytes > cap(l.buffer) {
+		if err := l.flush(); err != nil {
+			return err
+		}
 	}
-	if _, err := l.writer.Write(key); err != nil {
-		return err
-	}
+	l.buffer = append(l.buffer, length[:]...)
+	l.buffer = append(l.buffer, key...)
 	binary.BigEndian.PutUint32(length[:], uint32(len(value)))
-	if _, err := l.writer.Write(length[:]); err != nil {
+	l.buffer = append(l.buffer, length[:]...)
+	l.buffer = append(l.buffer, value...)
+	if len(l.buffer) >= cap(l.buffer) {
+		return l.flush()
+	}
+	return nil
+}
+
+func (l *pbinRowLane) flush() error {
+	if len(l.buffer) == 0 {
+		return nil
+	}
+	file, err := os.OpenFile(l.path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
 		return err
 	}
-	_, err := l.writer.Write(value)
-	return err
+	_, writeErr := file.Write(l.buffer)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	l.buffer = l.buffer[:0]
+	return nil
 }
 
 func pbinRowLaneMustSkip(key []byte) bool {
@@ -169,10 +194,7 @@ func (r *pbinRowLanes) finalize() error {
 	}
 	var firstErr error
 	for _, lane := range r.lanes {
-		if err := lane.writer.Flush(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		if err := lane.file.Close(); err != nil && firstErr == nil {
+		if err := lane.flush(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -371,8 +393,7 @@ func (r *pbinRowLanes) close() {
 		return
 	}
 	for _, lane := range r.lanes {
-		_ = lane.writer.Flush()
-		_ = lane.file.Close()
+		_ = lane.flush()
 	}
 	_ = r.cleanup()
 }

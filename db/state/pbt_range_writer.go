@@ -1080,7 +1080,7 @@ func (w *PBinRangeWriter) buildRange(buildCtx context.Context, domain *Domain, s
 		return err
 	}
 	rowProgress := rangeProgress.stage("rows", rows.count())
-	rowProgress.SetFields("lane_bytes", rows.laneBytes(), "skip_rows", rows.skipRows(), "skip_share", rows.skipShare())
+	rowProgress.SetFields("lane_bytes", rows.laneBytes(), "lane_buffer_bytes", pbinRowLaneBufferBytes, "skip_rows", rows.skipRows(), "skip_share", rows.skipShare())
 	rowProgress.Add(rows.count())
 	rowProgress.Done()
 	kvProgress := rangeProgress.batch(".kv", rows.count())

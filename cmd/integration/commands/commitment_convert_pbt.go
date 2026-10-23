@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/spf13/cobra"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -217,7 +217,8 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		if err := requirePBinSourceFilesEnd(sourceDirs, sourceAgg.StepSize(), point.TxNum); err != nil {
 			return err
 		}
-	} else if err := requirePBinSourceEnd(sourceAgg, point.TxNum); err != nil {
+		logger.Warn("PBT verification check skipped", "check", "C-a", "replacement", "source file ranges")
+	} else if err := requirePBinSourceEndWithWorkers(ctx, sourceAgg, point.TxNum, hooks.workers, logger); err != nil {
 		return err
 	}
 	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, blockReader, point)
@@ -342,16 +343,37 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		}
 	}
 	if hooks.skipVerify {
-		logger.Info("PBT output verification skipped", "root", root, "block", point.BlockNum, "txNum", point.TxNum)
+		logger.Warn("PBT verification check skipped", "check", "C-d")
+		logger.Warn("PBT verification check skipped", "check", "C-e")
 	} else {
 		if err := verifyPBTOutputRows(ctx, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
 			return err
 		}
-		if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, root, logger); err != nil {
+		if err := verifyPBTOutputIdentity(sourceDirs, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
 			return err
 		}
 	}
 	if err := dbstate.WriteErigonDBSettings(outputDirs, finalSettings); err != nil {
+		return err
+	}
+	hexRoot := ""
+	if hexRootValue, found, hexErr := pbtAttachHexRoot(ctx, outputDirs, finalSettings, point.BlockNum, point.TxNum, logger); hexErr != nil {
+		return hexErr
+	} else if found {
+		hexRoot = hexRootValue.Hex()
+	} else if detectedV3 {
+		oldBin, oldHexBin, oldV3, oldHash, oldSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema
+		statecfg.ConfigureCommitmentV3Records(true)
+		hexRootValue, sourceFound, hexErr := pbtAttachHexRoot(ctx, sourceDirs, sourceSettings, point.BlockNum, point.TxNum, logger)
+		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldHash, oldSchema
+		if hexErr != nil {
+			return hexErr
+		}
+		if sourceFound {
+			hexRoot = hexRootValue.Hex()
+		}
+	}
+	if err := writePBTOutputManifest(ctx, outputDirs, point, root, hexRoot, hashName, hooks.skipVerify, hooks.workers, logger); err != nil {
 		return err
 	}
 	removeOutput = false
@@ -485,68 +507,123 @@ func readPBinConversionPointFromFiles(at *dbstate.AggregatorRoTx, variant string
 	return pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, nil
 }
 
-func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
-	configurePBTSourceVariant(settings)
-	chaindataDir, err := os.MkdirTemp("", "convert-pbt-chaindata-")
+func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
+	_, err := verifyPBTRowsInScratchDB(ctx, dirs, settings, domain, point, "commitment convert-pbt: verify written rows", logger)
+	return err
+}
+
+func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
+	sourceFiles, err := pbtAttachFiles(sourceDirs)
 	if err != nil {
-		return err
+		return fmt.Errorf("commitment convert-pbt: C-e source files: %w", err)
 	}
-	defer func() { _ = dir.RemoveAll(chaindataDir) }()
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataDir).MustOpen()
-	defer rawDB.Close()
-	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
+	outputFiles, err := pbtAttachFiles(outputDirs)
 	if err != nil {
-		return err
+		return fmt.Errorf("commitment convert-pbt: C-e output files: %w", err)
 	}
-	defer agg.Close()
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		return err
+	sourceByPath := make(map[string]pbtAttachFile)
+	for _, file := range pbtAttachVisibleFiles(sourceFiles) {
+		if pbtAttachAdoptsFile(file) {
+			rel, relErr := filepath.Rel(sourceDirs.Snap, file.path)
+			if relErr != nil {
+				return relErr
+			}
+			sourceByPath[filepath.Clean(rel)] = file
+		}
 	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
+	isBinary := func(file pbtAttachFile) bool {
+		return file.domain == kv.CommitmentBinDomain || settings.TrieVariantName() == dbstate.TrieVariantBin && file.domain == kv.CommitmentDomain
 	}
-	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutCommitmentSeek())
-	if err != nil {
-		return err
+	identityFiles := make([]pbtAttachFile, 0, len(outputFiles))
+	for _, file := range pbtAttachVisibleFiles(outputFiles) {
+		if pbtAttachAdoptsFile(file) && !isBinary(file) {
+			identityFiles = append(identityFiles, file)
+		}
 	}
-	defer domains.Close()
-	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(domains.CommitmentDomains()))
-	for _, domain := range domains.CommitmentDomains() {
-		contexts = append(contexts, domains.GetCommitmentCtxForDomain(domain))
-	}
-	txNum, blockNum, err := commitmentdb.SeekCommitments(ctx, tx, contexts...)
-	if err != nil {
-		return fmt.Errorf("commitment convert-pbt: standalone output: %w", err)
-	}
-	if txNum != point.TxNum || blockNum != point.BlockNum {
-		return fmt.Errorf("commitment convert-pbt: standalone output checkpoint is (%d, %d), want (%d, %d)", blockNum, txNum, point.BlockNum, point.TxNum)
-	}
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output standalone verify", TempDir: chaindataDir})
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output identity verify", Total: uint64(len(identityFiles))})
 	defer progress.Done()
-	gotRoot, err := dbstate.PBinRootFromStream(eip8297.HashBytes, func(emit func(dbstate.PBinLeaf) error) error {
-		return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
-			progress.Add(1)
-			return emit(leaf)
-		})
-	})
-	if err != nil {
-		return fmt.Errorf("commitment convert-pbt: standalone output leaves: %w", err)
+	for _, file := range identityFiles {
+		rel, relErr := filepath.Rel(outputDirs.Snap, file.path)
+		if relErr != nil {
+			return relErr
+		}
+		source, ok := sourceByPath[filepath.Clean(rel)]
+		if !ok {
+			return fmt.Errorf("commitment convert-pbt: C-e output state file %s has no source file", file.path)
+		}
+		sourceInfo, sourceErr := os.Stat(source.path)
+		if sourceErr != nil {
+			return sourceErr
+		}
+		outputInfo, outputErr := os.Stat(file.path)
+		if outputErr != nil {
+			return outputErr
+		}
+		if !os.SameFile(sourceInfo, outputInfo) {
+			return fmt.Errorf("commitment convert-pbt: C-e output state file %s is not a hard link of %s", file.path, source.path)
+		}
+		progress.Add(1)
 	}
-	if gotRoot != wantRoot {
-		return fmt.Errorf("commitment convert-pbt: standalone output root %x differs from converted root %x", gotRoot, wantRoot)
+	if err := verifyPBTOutputStateRecords(outputDirs, settings, domain, point); err != nil {
+		return err
 	}
 	return nil
 }
 
-func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
-	_, err := verifyPBTRowsInScratchDB(ctx, dirs, settings, domain, point, "commitment convert-pbt: verify written rows", logger)
-	return err
+func verifyPBTOutputStateRecords(dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint) error {
+	configurePBTSourceVariant(settings)
+	agg, err := openPBTState(context.Background(), dirs, settings, nil, log.Root())
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: C-e state records: %w", err)
+	}
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	checks := []struct {
+		domain kv.Domain
+		key    []byte
+		name   string
+		decode func([]byte) (uint64, uint64, error)
+	}{
+		{domain: domain, key: commitment.KeyCommitmentState, name: domain.String(), decode: func(value []byte) (uint64, uint64, error) {
+			if len(value) < 16 {
+				return 0, 0, errors.New("state record is too short")
+			}
+			tx, block := commitmentdb.DecodeTxBlockNums(value)
+			return block, tx, nil
+		}},
+	}
+	if settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		checks = append(checks, struct {
+			domain kv.Domain
+			key    []byte
+			name   string
+			decode func([]byte) (uint64, uint64, error)
+		}{domain: kv.CommitmentDomain, key: commitment.KeyCommitmentV3State, name: "commitment", decode: func(value []byte) (uint64, uint64, error) {
+			block, tx, _, decodeErr := commitment.DecodeCommitmentV3State(value)
+			if decodeErr != nil {
+				return 0, 0, decodeErr
+			}
+			return block, tx, nil
+		}})
+	}
+	for _, check := range checks {
+		value, found, start, end, getErr := at.DebugGetLatestFromFiles(check.domain, check.key, ^uint64(0))
+		if getErr != nil {
+			return fmt.Errorf("commitment convert-pbt: C-e %s state: %w", check.name, getErr)
+		}
+		if !found || start > point.TxNum || end <= point.TxNum {
+			return fmt.Errorf("commitment convert-pbt: C-e %s state is not at conversion txNum %d", check.name, point.TxNum)
+		}
+		block, tx, decodeErr := check.decode(value)
+		if decodeErr != nil {
+			return fmt.Errorf("commitment convert-pbt: C-e %s state: %w", check.name, decodeErr)
+		}
+		if block != point.BlockNum || tx != point.TxNum {
+			return fmt.Errorf("commitment convert-pbt: C-e %s state is (%d, %d), want (%d, %d)", check.name, block, tx, point.BlockNum, point.TxNum)
+		}
+	}
+	return nil
 }
 
 func verifyPBTRowsInScratchDB(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, what string, logger log.Logger) (common.Hash, error) {
@@ -576,17 +653,19 @@ func verifyPBTRowsInScratchDB(ctx context.Context, dirs datadir.Dirs, settings *
 }
 
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
+	err := requirePBinSourceEndWithWorkers(context.Background(), agg, endTxNum, 1, log.Root())
+	if err != nil && strings.Contains(err.Error(), "pbin stamp walk") {
+		return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum, after conversion txNum %d", endTxNum)
+	}
+	return err
+}
+
+func requirePBinSourceEndWithWorkers(ctx context.Context, agg *dbstate.Aggregator, endTxNum uint64, workers int, logger log.Logger) error {
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Phase: "source end verify", TempDir: agg.Dirs().Tmp})
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "source end verify", TempDir: agg.Dirs().Tmp})
 	defer progress.Done()
-	return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
-		progress.Add(1)
-		if leaf.Stamp > endTxNum {
-			return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum %d, after conversion txNum %d; wait for the next step", leaf.Stamp, endTxNum)
-		}
-		return nil
-	})
+	return dbstate.VerifyPBinSourceStamps(ctx, at, nil, true, endTxNum, workers, nil, progress.Add)
 }
 
 func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) error {
@@ -598,6 +677,43 @@ func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) err
 		return fmt.Errorf("commitment convert-pbt: state files from step %d hold writes past conversion txNum %d; wait for the next step", step, endTxNum)
 	}
 	return nil
+}
+
+func writePBTOutputManifest(ctx context.Context, dirs datadir.Dirs, point pbinConversionPoint, pbtRoot common.Hash, hexRoot, trieHash string, skipVerify bool, workers int, logger log.Logger) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: manifest files: %w", err)
+	}
+	sources := make([]dbstate.PBTManifestFileSource, 0, len(files))
+	for _, file := range pbtAttachVisibleFiles(files) {
+		if !pbtAttachAdoptsFile(file) {
+			continue
+		}
+		rel, relErr := filepath.Rel(dirs.Snap, file.path)
+		if relErr != nil {
+			return relErr
+		}
+		sources = append(sources, dbstate.PBTManifestFileSource{Name: filepath.Clean(rel), Path: file.path})
+	}
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{
+		Logger:  logger,
+		Message: "PBT manifest progress",
+		Phase:   "manifest digest",
+		Total:   uint64(len(sources)),
+		TempDir: dirs.Tmp,
+		Fields:  []any{"bytes_done", uint64(0)},
+	})
+	var bytesDone atomic.Uint64
+	manifest, err := dbstate.BuildPBTManifest(ctx, dbstate.PBTManifestPoint{Block: point.BlockNum, TxNum: point.TxNum}, pbtRoot.Hex(), hexRoot, trieHash, skipVerify, sources, workers, func(done, _, bytes uint64) {
+		progress.SetFields("bytes_done", bytesDone.Add(bytes))
+		progress.Add(1)
+	})
+	progress.Done()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dirs.Snap, "pbt-manifest.toml")
+	return dbstate.WritePBTManifest(path, manifest)
 }
 
 func readPBinForkPoint(ctx context.Context, tx kv.Tx, blockReader *freezeblocks.BlockReader, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
