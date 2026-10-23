@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -179,6 +180,35 @@ func TestStateReadErrorIsNotInvalidBlock(t *testing.T) {
 				require.ErrorContains(t, err, "deserialse2")
 				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 			})
+		})
+	}
+}
+
+// The corrupt record is first read through Exist and Empty, by a value CALL
+// from a contract, not through a balance read.
+func TestStateReadErrorInCallIsNotInvalidBlock(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		t.Run(map[bool]string{false: "serial", true: "parallel"}[parallel], func(t *testing.T) {
+			corrupt := common.Address{0xcc, 19: 1}
+			payer := common.HexToAddress("0xc0de")
+			alloc := types.GenesisAlloc{payer: {Code: callCode(corrupt, 1), Balance: big.NewInt(1)}}
+			keys := revivalKeys(t, alloc, 1)
+			gspec := &types.Genesis{Config: chain.TestChainOsakaConfig, GasLimit: 30_000_000, Alloc: alloc}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+			signer := types.LatestSignerForChainID(gspec.Config.ChainID)
+			chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+				if i == 1 {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(m.Address), payer, uint256.NewInt(0), 200_000, uint256.NewInt(10_000_000_000), nil), *signer, m.Key)
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			require.NoError(t, err)
+			storeUnexecutedBlocks(t, m, chainPack)
+			corruptAccountRecord(t, m, corrupt)
+			err = executeStoredBlocks(t, m, m.Engine, parallel, 2)
+			require.ErrorContains(t, err, "deserialse2")
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
 }

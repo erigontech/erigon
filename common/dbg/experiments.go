@@ -208,8 +208,7 @@ func MemUsage() (alloc, sys uint64) {
 	return s[0].Value.Uint64(), s[1].Value.Uint64()
 }
 
-func DiscardCommitment() bool { return discardCommitment }
-
+func DiscardCommitment() bool       { return discardCommitment }
 func NoPrune() bool                 { return noPrune }
 func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }
