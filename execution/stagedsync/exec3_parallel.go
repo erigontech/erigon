@@ -2354,6 +2354,14 @@ func (result *execResult) calcFees(
 	if coinbaseNetDeleted || coinbaseEmptied {
 		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
 	}
+	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
+	// serial credits the tip before the tx's empty-account sweep, so the account and its
+	// storage survive.
+	if coinbaseSelfdestructed && !coinbaseWasContract && !newCoinbaseBalance.IsZero() {
+		addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
+		})
+	}
 	if emitCoinbase {
 		{
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
