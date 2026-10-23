@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
@@ -1191,6 +1192,35 @@ func TestExpSmallOperandBoundaries(t *testing.T) {
 			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
 			got := scope.Stack.popCopy()
 			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpMatchesBigInt(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	edges := []uint256.Int{{}, {1}, {2}, {3}, {1<<62 - 1}, {1 << 62}, {1<<62 + 1}, {1 << 63}, {0, 1}, {0, 0, 1}, {0, 0, 0, 1 << 63}, *new(uint256.Int).SetAllOne()}
+	rng := rand.New(rand.NewPCG(1, 2))
+	random := func() uint256.Int {
+		x := uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64()}
+		return *x.Rsh(&x, uint(rng.IntN(256)))
+	}
+	bases := append([]uint256.Int{{3}, {5}, {0x081f7721}, {1 << 32}, {^uint64(0) - 2, ^uint64(0), ^uint64(0), ^uint64(0)}}, edges...)
+	exponents := append([]uint256.Int(nil), edges...)
+	for range 200 {
+		bases = append(bases, random())
+		exponents = append(exponents, random())
+	}
+	for _, base := range bases {
+		for _, exponent := range exponents {
+			scope := &CallContext{}
+			scope.Stack.push(exponent)
+			scope.Stack.push(base)
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%x exponent=%x", &base, &exponent)
 		}
 	}
 }
