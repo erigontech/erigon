@@ -2202,7 +2202,12 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes, stateErr := ibs.FinalizedWrites(txTask.Rules())
+	rules := txTask.Rules()
+	if blockNum == 0 {
+		// Genesis runs with empty rules, so its alloc keeps empty accounts (EIP-161 off).
+		rules = &chain.Rules{}
+	}
+	writes, stateErr := ibs.FinalizedWrites(rules)
 	if stateErr != nil {
 		return nil, state.ReadSet{}, nil, fmt.Errorf("finalize system tx block %d: state read: %w", blockNum, stateErr)
 	}

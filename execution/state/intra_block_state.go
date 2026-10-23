@@ -2728,7 +2728,7 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // emptiness. Created-empty accounts are already withheld by
 // withholdCreatedEmptyAccounts, so only pre-existing empties reach here.
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet) {
-	if ibs.blockNum == 0 || chainRules == nil || ibs.versionMap == nil {
+	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
@@ -2773,7 +2773,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 // needed. An account that existed before is kept even when it ends empty —
 // clearing it needs an explicit delete, which commit-time normalization emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
-	if ibs.blockNum == 0 || chainRules == nil {
+	if chainRules == nil {
 		return
 	}
 	for addr := range writes.address {
