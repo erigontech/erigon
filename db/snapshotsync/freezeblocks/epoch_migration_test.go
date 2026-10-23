@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -609,6 +610,17 @@ func TestPlanEpochConversionAlignsPrunedStarts(t *testing.T) {
 	}
 	require.Equal(t, tailFrom, at)
 	require.True(t, cut, "the aligned start is a boundary every type shares")
+}
+
+// The mainnet case: with history expiry a node keeps the transactions of the decimal segment that
+// holds the merge, so they start at 15,500,000, inside the top-tier segment [15,204,352,15,728,640).
+// Snapping to that segment's end would drop the 191,247 post-merge blocks below 15,728,640.
+func TestPlanEpochConversionKeepsPostMergeTransactions(t *testing.T) {
+	start := map[snaptype.Enum]uint64{snaptype2.Enums.Headers: 0, snaptype2.Enums.Bodies: 0, snaptype2.Enums.Transactions: 15_500_000}
+	plan, _ := planEpochConversion(start, 16_000_000, snapcfg.KnownCfgOrDevnet(networkname.Mainnet))
+	require.Equal(t, uint64(15_500_288), start[snaptype2.Enums.Transactions])
+	require.Less(t, start[snaptype2.Enums.Transactions], uint64(15_537_393), "only pre-merge blocks are dropped")
+	require.True(t, slices.ContainsFunc(plan, func(r [2]uint64) bool { return r[0] == 15_500_288 }))
 }
 
 // A start inside the last full segment aligns to its end, the tail: that type would come out with no

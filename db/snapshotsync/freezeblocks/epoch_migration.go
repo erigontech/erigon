@@ -766,7 +766,8 @@ func (m *epochMigrator) setInProgress(ctx context.Context, started bool) error {
 
 // warnDropped logs the blocks a pruned type gives up to start on the epoch grid, and how many of them
 // the node's block retention still covers. Those are fewer than one smallest tier, the oldest the node
-// keeps, and would be pruned once the chain advances by as many blocks.
+// keeps, and would be pruned once the chain advances by as many blocks. The cut that start adds to
+// the tiling is not one the published files have, so the segments around it never merge or match them.
 func (m *epochMigrator) warnDropped(ctx context.Context, frontier, start map[snaptype.Enum]uint64, frozenMax uint64) error {
 	var mode prune.Mode
 	if m.db != nil {
@@ -788,7 +789,8 @@ func (m *epochMigrator) warnDropped(ctx context.Context, frontier, start map[sna
 				retained = to - max(cutoff, from)
 			}
 		}
-		m.logger.Warn("[epoch-migration] dropping blocks below the epoch grid", "type", t.Name(), "from", from, "to", to, "stillRetained", retained)
+		m.logger.Warn("[epoch-migration] dropping blocks below the epoch grid; segments around this cut will not merge or match published files",
+			"type", t.Name(), "from", from, "to", to, "stillRetained", retained)
 	}
 	return nil
 }
