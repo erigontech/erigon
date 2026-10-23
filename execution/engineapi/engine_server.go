@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -336,6 +337,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	var sendersRecovery *exec.SendersRecovery
+	if invalidTransactionStatus == nil && len(transactions) > 0 {
+		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
+	}
+
 	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
 	if req.BaseFeePerGas != nil {
 		baseFee = new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas))
@@ -481,6 +487,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedError(blockAccessListErr),
 		}, nil
+	}
+	if sendersRecovery != nil {
+		e.executionService.AddSendersRecovery(blockHash, sendersRecovery)
 	}
 	if blockAccessList != nil {
 		if err = blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)); err != nil {

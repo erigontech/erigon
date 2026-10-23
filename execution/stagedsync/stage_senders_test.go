@@ -195,6 +195,99 @@ func TestSenders(t *testing.T) {
 	}
 }
 
+func TestSendersRegisteredRecovery(t *testing.T) {
+	require := require.New(t)
+
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	bodyKey, err := crypto.GenerateKey()
+	require.NoError(err)
+	recoveredKey, err := crypto.GenerateKey()
+	require.NoError(err)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	signed := func(key *ecdsa.PrivateKey) []types.Transaction {
+		txn, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{GasLimit: 21_000, Value: u256.Num1},
+			GasPrice: u256.Num1,
+		}, *signer, key)
+		require.NoError(err)
+		return []types.Transaction{txn}
+	}
+
+	header := &types.Header{Number: *common.Num1}
+	hash := header.Hash()
+	require.NoError(rawdb.WriteHeader(tx, header))
+	require.NoError(rawdb.WriteBody(tx, hash, 1, &types.Body{Transactions: signed(bodyKey)}))
+	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
+	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 1))
+
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, signer, signed(recoveredKey)))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", m.BlockReader, readAheader)
+	require.NoError(stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+
+	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
+	require.NoError(err)
+	require.Equal([]common.Address{crypto.PubkeyToAddress(recoveredKey.PublicKey)}, senders)
+}
+
+func TestSendersMixesRegisteredAndRecoveredBlocks(t *testing.T) {
+	require := require.New(t)
+
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	signedTxns := func(firstNonce uint64, n int) []types.Transaction {
+		txns := make([]types.Transaction, n)
+		for i := range txns {
+			txns[i], err = types.SignTx(&types.LegacyTx{
+				CommonTx: types.CommonTx{Nonce: firstNonce + uint64(i), GasLimit: 21_000, Value: u256.Num1},
+				GasPrice: u256.Num1,
+			}, *signer, key)
+			require.NoError(err)
+		}
+		return txns
+	}
+	writeBlock := func(number *uint256.Int, txns []types.Transaction) common.Hash {
+		header := &types.Header{Number: *number}
+		hash := header.Hash()
+		require.NoError(rawdb.WriteHeader(tx, header))
+		require.NoError(rawdb.WriteBody(tx, hash, number.Uint64(), &types.Body{Transactions: txns}))
+		require.NoError(rawdb.WriteCanonicalHash(tx, hash, number.Uint64()))
+		return hash
+	}
+
+	recovered := signedTxns(0, 1)
+	registered := signedTxns(1, 2_000)
+	hashes := []common.Hash{writeBlock(common.Num1, recovered), writeBlock(common.Num2, registered)}
+	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 2))
+
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddSendersRecovery(hashes[1], exec.StartSendersRecovery(m.Ctx, signer, registered))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", m.BlockReader, readAheader)
+	require.NoError(stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 2, m.Ctx, log.New()))
+
+	for i, want := range []int{len(recovered), len(registered)} {
+		_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hashes[i], uint64(i+1))
+		require.NoError(err)
+		require.Len(senders, want)
+		for _, got := range senders {
+			require.Equal(sender, got)
+		}
+	}
+}
+
 // Distinct senders paying one recipient form one read-modify-write chain:
 // every speculative run conflicts, and validation work must stay linear in the chain length.
 func TestParallelTransfersToOneRecipientValidateLinearly(t *testing.T) {

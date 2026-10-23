@@ -225,7 +225,7 @@ func TestExecutionPayloadBidServiceRejectsUnrepresentableSlotBeforeDependencies(
 			cfg.SecondsPerSlot = test.secondsPerSlot
 			stateCalls := 0
 			fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-			fc.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+			fc.GetStateAtBlockRootFn = func(common.Hash) (*state2.CachingBeaconState, error) {
 				stateCalls++
 				return nil, nil
 			}

@@ -1536,10 +1536,10 @@ func unversionedName(name string) string {
 }
 
 func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
-	return s.RemoveOverlapsWithKeepers(onDelete, nil)
+	return s.RemoveOverlapsWithKeepers(onDelete, nil, nil)
 }
 
-func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) error, eligibleKeepers []string) error {
+func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) error, eligibleKeepers, crossings []string) error {
 	notOwned := func(f snaptype.FileInfo) bool { return !s.HasType(f.Type) }
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
@@ -1557,6 +1557,7 @@ func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) er
 	if s.keepUnindexedlyCovered || eligibleKeepers != nil {
 		keepSegments, segmentsToRemove = keepUnindexedlyCovered(idxList, keepSegments, segmentsToRemove, eligibleKeepers)
 	}
+	keepSegments = slices.DeleteFunc(keepSegments, func(f snaptype.FileInfo) bool { return slices.Contains(crossings, f.Name()) })
 
 	keepNames := make([]string, 0, len(keepSegments))
 	for i := range keepSegments {
@@ -1578,6 +1579,17 @@ func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) er
 				}
 				return true
 			})
+		}
+		retained := make(map[string]struct{})
+		for i := range keepSegments {
+			for _, name := range keepSegments[i].Type.IdxFileNames(keepSegments[i].From, keepSegments[i].To) {
+				retained[unversionedName(name)] = struct{}{}
+			}
+		}
+		for i := range idxList {
+			if _, ok := retained[unversionedName(idxList[i].Name())]; ok {
+				keptIndexes[idxList[i].Path] = struct{}{}
+			}
 		}
 		isKeptIndex := func(f snaptype.FileInfo) bool {
 			_, kept := keptIndexes[f.Path]
@@ -1619,6 +1631,7 @@ func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) er
 		defer s.dirtyLock.Unlock()
 		retired := s.retireSegmentsNotInList(mvcc.RetireReasonMerged, keepNames)
 		s.recalcVisibleFiles(s.alignMin, retired)
+		s.removeUnheld(crossings)
 	}()
 
 	s.removeOrphanedIdx(supersededIdx)
@@ -1700,6 +1713,27 @@ func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 		orphans = append(orphans, superseded[i].Path)
 	}
 	removeOldFiles(orphans) // pairs each file with its .torrent, as reclamation does
+}
+
+func (s *BaseRoSnapshots) removeUnheld(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	holders := make(map[string]*DirtySegment)
+	s.forEachRetired(func(seg *DirtySegment) {
+		for _, name := range seg.FilePaths(s.dir) {
+			holders[name] = seg
+		}
+	})
+	unheld := make([]string, 0, len(names))
+	for _, name := range names {
+		if holder, ok := holders[name]; ok {
+			holder.canDelete.Store(true)
+			continue
+		}
+		unheld = append(unheld, filepath.Join(s.dir, name))
+	}
+	removeOldFiles(unheld)
 }
 
 func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []string, err error) {
