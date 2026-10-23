@@ -1189,7 +1189,7 @@ func allSnapshots(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) (*
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
 		var needsMigration bool
-		if needsMigration, err = freezeblocks.HasDecimalBlockSegments(dirs, chainConfig); err != nil {
+		if needsMigration, err = freezeblocks.EpochMigrationPending(ctx, db, dirs, chainConfig); err != nil {
 			return
 		}
 		if needsMigration {

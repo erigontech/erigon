@@ -3075,11 +3075,11 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	// Most commands here run without the datadir lock, possibly beside a node, so they must not convert.
 	var unconverted bool
-	if unconverted, err = freezeblocks.HasDecimalBlockSegments(dirs, chainConfig); err != nil {
+	if unconverted, err = freezeblocks.EpochMigrationPending(ctx, chainDB, dirs, chainConfig); err != nil {
 		return
 	}
 	if unconverted {
-		err = fmt.Errorf("datadir %s still has legacy decimal block segments: start erigon once (or run `erigon seg retire --datadir=%s`) to convert them",
+		err = fmt.Errorf("datadir %s has block segments still to convert to epoch: start erigon once (or run `erigon seg retire --datadir=%s`) to convert them",
 			dirs.DataDir, dirs.DataDir)
 		return
 	}

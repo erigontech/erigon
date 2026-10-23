@@ -1622,6 +1622,6 @@ func TestOpenSnapsRefusesUnconvertedDatadir(t *testing.T) {
 	require.NoError(t, os.WriteFile(segment, []byte{1}, 0o644)) // an empty file is skipped as a download placeholder
 
 	_, _, err := openSnaps(t.Context(), ethconfig.NewSnapCfg(false, true, true, "mainnet"), dirs, db, log.New())
-	require.ErrorContains(t, err, "legacy decimal block segments")
+	require.ErrorContains(t, err, "still to convert to epoch")
 	require.FileExists(t, segment)
 }

@@ -113,17 +113,8 @@ func classifyByType(all []snaptype.FileInfo, t snaptype.Enum) (epoch, decimal []
 //
 // A gap stops both the run and coveredTo. Inputs must be sorted and overlap-free.
 func coverage(epoch, decimal []snaptype.FileInfo) (start, coveredTo uint64, runLen int) {
-	var epochEnd uint64
+	epochEnd := epochRunEnd(epoch)
 	haveEpoch := len(epoch) > 0
-	if haveEpoch {
-		epochEnd = epoch[0].From
-		for i := range epoch {
-			if epoch[i].From != epochEnd {
-				break
-			}
-			epochEnd = epoch[i].To
-		}
-	}
 	var decimalStart, decimalEnd uint64
 	if len(decimal) > 0 {
 		decimalStart = decimal[0].From
@@ -149,12 +140,46 @@ func coverage(epoch, decimal []snaptype.FileInfo) (start, coveredTo uint64, runL
 	}
 }
 
+// epochRunEnd is where the gap-free run of epoch segments from the first one ends, 0 with none.
+func epochRunEnd(epoch []snaptype.FileInfo) uint64 {
+	if len(epoch) == 0 {
+		return 0
+	}
+	end := epoch[0].From
+	for i := range epoch {
+		if epoch[i].From != end {
+			break
+		}
+		end = epoch[i].To
+	}
+	return end
+}
+
+// dropConverted drops the decimal segments the epoch run already holds. The repacks delete the ones
+// they read, but a crash between a merge and its cleanup leaves the merge inputs too, and once the
+// epoch run is past them they would read as a gap before the decimal segment that continues it.
+func dropConverted(epoch, decimal []snaptype.FileInfo) []snaptype.FileInfo {
+	if len(epoch) == 0 {
+		return decimal
+	}
+	end := epochRunEnd(epoch)
+	i := 0
+	for i < len(decimal) && decimal[i].To <= end {
+		i++
+	}
+	return decimal[i:]
+}
+
 // planEpochConversion aligns each type's start up to the first smallest-tier boundary at or above it
 // and tiles [0, frozenMax) so that every aligned start is a boundary. All types convert on this one
 // tiling, because the transactions index is built by walking a bodies segment of the identical range.
 // A pruned type gives up the blocks below its aligned start, fewer than one smallest tier.
-func planEpochConversion(start map[snaptype.Enum]uint64, frozenMax uint64, snCfg *snapcfg.Cfg) (plan [][2]uint64, tailFrom uint64) {
-	cuts := make([]uint64, 0, len(start))
+//
+// written holds where each type's epoch segments begin. After a crash a type that has some resumes at
+// their end, so its aligned start is no longer in start, but the segments already written were cut
+// at it, and the types still to convert must be too.
+func planEpochConversion(start map[snaptype.Enum]uint64, written []uint64, frozenMax uint64, snCfg *snapcfg.Cfg) (plan [][2]uint64, tailFrom uint64) {
+	cuts := slices.Clone(written)
 	for t, s := range start {
 		if r := s % snaptype.EpochMinSegmentSize; r != 0 {
 			s += snaptype.EpochMinSegmentSize - r
@@ -268,6 +293,7 @@ type epochMigrator struct {
 	// a crash between a merge and its cleanup leaves both, and cleanup has to remove both.
 	allDecimal map[snaptype.Enum][]snaptype.FileInfo
 	hasEpoch   map[snaptype.Enum]bool
+	epochFrom  []uint64    // where each type's epoch segments begin
 	plan       [][2]uint64 // the one tiling every type converts on
 }
 
@@ -620,6 +646,16 @@ func HasDecimalBlockSegments(dirs datadir.Dirs, chainConfig *chain.Config) (bool
 	return false, nil
 }
 
+// EpochMigrationPending reports whether MigrateDecimalToEpoch still has work here: decimal segments
+// to convert, or a conversion that deleted the last of them and stopped before every index was built.
+// Entry points use it to decide whether to migrate, or, read-only, to refuse the datadir.
+func EpochMigrationPending(ctx context.Context, db kv.RoDB, dirs datadir.Dirs, chainConfig *chain.Config) (bool, error) {
+	if pending, err := HasDecimalBlockSegments(dirs, chainConfig); err != nil || pending {
+		return pending, err
+	}
+	return migrationInProgress(ctx, db)
+}
+
 // MigrateDecimalToEpoch turns any decimal block segments in dirs.Snap into epoch ones and writes the
 // sub-1024 tail back to the DB. Run it at startup, before the block snapshots are opened. It's a no-op
 // when there's no decimal, and safe to re-run after a crash (it resumes from the epoch segments already
@@ -674,7 +710,7 @@ func (m *epochMigrator) run(ctx context.Context) error {
 
 	frontier := maps.Clone(start)
 	var tailFrom uint64
-	m.plan, tailFrom = planEpochConversion(start, frozenMax, m.snCfg)
+	m.plan, tailFrom = planEpochConversion(start, m.epochFrom, frozenMax, m.snCfg)
 	for _, t := range snaptype2.BlockSnapshotTypes {
 		// The same visible-file rule: a type left with no segment hides every other type's.
 		if start[t.Enum()] >= tailFrom && !m.hasEpoch[t.Enum()] {
@@ -740,11 +776,15 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	return nil
 }
 
-func (m *epochMigrator) inProgress(ctx context.Context) (started bool, err error) {
+func (m *epochMigrator) inProgress(ctx context.Context) (bool, error) {
 	if m.db == nil {
 		return false, nil
 	}
-	err = m.db.View(ctx, func(tx kv.Tx) error {
+	return migrationInProgress(ctx, m.db)
+}
+
+func migrationInProgress(ctx context.Context, db kv.RoDB) (started bool, err error) {
+	err = db.View(ctx, func(tx kv.Tx) error {
 		v, getErr := tx.GetOne(kv.DatabaseInfo, epochMigrationKey)
 		started = len(v) > 0
 		return getErr
@@ -807,13 +847,21 @@ func (m *epochMigrator) loadSegs() (start map[snaptype.Enum]uint64, frozenMax ui
 	m.contiguousLen = make(map[snaptype.Enum]int)
 	m.allDecimal = make(map[snaptype.Enum][]snaptype.FileInfo)
 	m.hasEpoch = make(map[snaptype.Enum]bool)
+	m.epochFrom = nil
 	start = make(map[snaptype.Enum]uint64)
 	frozenMax = ^uint64(0)
 	for _, t := range snaptype2.BlockSnapshotTypes {
 		epoch, decimal := classifyByType(all, t.Enum())
+		if len(decimal) > 0 {
+			hasDecimal = true
+		}
+		decimal = dropConverted(epoch, decimal)
 		typeStart, coveredTo, contiguousLen := coverage(epoch, decimal)
 		m.decimalSegs[t.Enum()] = decimal
 		m.hasEpoch[t.Enum()] = len(epoch) > 0
+		if len(epoch) > 0 {
+			m.epochFrom = append(m.epochFrom, epoch[0].From)
+		}
 		for i := range all {
 			if f := &all[i]; f.Type != nil && f.Type.Enum() == t.Enum() && !f.Epoch {
 				m.allDecimal[t.Enum()] = append(m.allDecimal[t.Enum()], *f)
@@ -824,9 +872,6 @@ func (m *epochMigrator) loadSegs() (start map[snaptype.Enum]uint64, frozenMax ui
 		frozenMax = min(frozenMax, coveredTo)
 		if coveredTo == 0 {
 			m.uncovered = append(m.uncovered, t.Name())
-		}
-		if len(decimal) > 0 {
-			hasDecimal = true
 		}
 	}
 	return start, frozenMax, hasDecimal, nil

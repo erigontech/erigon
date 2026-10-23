@@ -393,10 +393,16 @@ func TestEpochMigration_ResumesIndexingWithNoDecimalLeft(t *testing.T) {
 
 	require.Error(t, migrate(t, m, logger))
 	require.False(t, decimalSegsLeft(t, m), "the repacks already deleted every decimal segment")
+	pending, err := freezeblocks.EpochMigrationPending(m.Ctx, m.DB, m.dirs, m.ChainConfig)
+	require.NoError(t, err)
+	require.True(t, pending, "entry points that only look for decimal segments would skip the resume")
 
-	_, err := snaptype.LoadSalt(m.dirs.Snap, true, logger)
+	_, err = snaptype.LoadSalt(m.dirs.Snap, true, logger)
 	require.NoError(t, err)
 	require.NoError(t, migrate(t, m, logger))
+	pending, err = freezeblocks.EpochMigrationPending(m.Ctx, m.DB, m.dirs, m.ChainConfig)
+	require.NoError(t, err)
+	require.False(t, pending)
 	for _, typ := range snaptype2.BlockSnapshotTypes {
 		for _, idx := range typ.IdxFileNames(true, 1024, 2048) {
 			require.FileExists(t, filepath.Join(m.dirs.Snap, idx))
