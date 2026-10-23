@@ -2378,6 +2378,17 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) (uint64, er
 	return at.d[name].HistoryStartFrom(tx)
 }
 
+// HistoryCoverageStart returns the first txNum the history of a given domain covers
+func (at *AggregatorRoTx) HistoryCoverageStart(name kv.Domain) uint64 {
+	return at.d[name].HistoryCoverageStart()
+}
+
+// HistoryRecordedInDB reports whether the DB holds history records of a given
+// domain for any txNum in [fromTxNum, toTxNum); history files are not consulted.
+func (at *AggregatorRoTx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64, tx kv.Tx) (bool, error) {
+	return at.d[name].ht.iit.HasTxNumsInDB(fromTxNum, toTxNum, tx)
+}
+
 // Returns the first known txNum available in a standalone inverted index (files, then DB)
 func (at *AggregatorRoTx) IIStartFrom(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	iit := at.searchII(name)
