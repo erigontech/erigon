@@ -112,7 +112,7 @@ type pbinLeafAddressRange struct {
 func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, workerRuns *atomic.Int32, emit func(PBinLeaf) error) error {
 	ranges := pbinLeafAddressRanges(workers)
 	const totalBufferBytes = 2 * datasize.GB
-	perWorkerBuffer := totalBufferBytes / datasize.ByteSize(workers)
+	perWorkerBuffer := (totalBufferBytes / datasize.ByteSize(workers)) * 7 / 8
 	collectors := make([]*etl.Collector, workers)
 	for i := range collectors {
 		collectors[i] = etl.NewCollector(fmt.Sprintf("pbin-leaf-stream-%d", i), at.Dirs().Tmp, etl.NewSortableBuffer(perWorkerBuffer), log.Root()).MergeInBackground(true)
@@ -127,7 +127,7 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 	progress := NewPBTProgress(PBTProgressConfig{
 		Message: "PBT leaf stream progress",
 		Phase:   "source leaf walk",
-		Fields:  []any{"workers", workers, "etl_a_buffer_bytes", uint64(totalBufferBytes)},
+		Fields:  []any{"workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", uint64(0)},
 		TempDir: at.Dirs().Tmp,
 	})
 	errs := make(chan error, workers)
@@ -179,6 +179,11 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 		}(worker)
 	}
 	wg.Wait()
+	allocated := 0
+	for _, collector := range collectors {
+		allocated += collector.InMemoryCapacity()
+	}
+	progress.SetFields("workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", uint64(allocated))
 	progress.Done()
 	select {
 	case err := <-errs:

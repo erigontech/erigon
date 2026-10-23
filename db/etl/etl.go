@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -80,6 +81,7 @@ type TransformArgs struct {
 	BufferType      int
 	BufferSize      int
 	EmptyVals       bool // `v=nil` case: `false` means `Del(k)`, `true` means `Put(k, nil)`
+	MergeInputCount *atomic.Uint64
 }
 
 type Progress interface {

@@ -185,6 +185,16 @@ func (c *Collector) InMemorySize() int {
 	return 0
 }
 
+func (c *Collector) InMemoryCapacity() int {
+	if c.buf == nil {
+		return 0
+	}
+	if sized, ok := c.buf.(interface{ AllocatedSize() int }); ok {
+		return sized.AllocatedSize()
+	}
+	return c.InMemorySize()
+}
+
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
@@ -432,6 +442,9 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			if err := common.Stopped(args.Quit); err != nil {
 				return err
 			}
+		}
+		if args.MergeInputCount != nil {
+			args.MergeInputCount.Add(1)
 		}
 
 		element := heapPop(h)

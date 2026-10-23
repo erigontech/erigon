@@ -18,6 +18,7 @@ package etl
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -95,6 +96,7 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 	producerStop := make(chan struct{})
 	producerDone := make(chan struct{})
 	producerResult := make(chan error, 1)
+	var mergedInputs atomic.Uint64
 	var stopMerge sync.Once
 	var stopProducer sync.Once
 	stop := func() {
@@ -158,6 +160,7 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 		}
 		mergeArgs := args
 		mergeArgs.Quit = mergeQuit
+		mergeArgs.MergeInputCount = &mergedInputs
 		err = mergeSortFiles(logPrefix, providers, emit, mergeArgs)
 		if len(current.entries) != 0 {
 			publishErr := publish(current)
@@ -169,11 +172,12 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 		close(ready)
 	}()
 
-	var consumed uint64
+	var checkedInputs uint64
 	for batch := range ready {
 		for i := range batch.entries {
-			consumed++
-			if consumed%1024 == 0 {
+			merged := mergedInputs.Load()
+			if merged-checkedInputs >= 1024 {
+				checkedInputs = merged
 				if err := common.Stopped(args.Quit); err != nil {
 					stop()
 					producerErr := <-producerResult
@@ -195,5 +199,8 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 	}
 	producerErr := <-producerResult
 	<-watchDone
-	return producerErr
+	if producerErr != nil {
+		return producerErr
+	}
+	return common.Stopped(args.Quit)
 }

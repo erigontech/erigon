@@ -172,6 +172,12 @@ func (p *PBTProgress) Done() {
 	p.log(p.done.Load())
 }
 
+func (p *PBTProgress) SetFields(fields ...any) {
+	p.mu.Lock()
+	p.fields = append([]any(nil), fields...)
+	p.mu.Unlock()
+}
+
 func (p *PBTProgress) log(done uint64) {
 	elapsed := time.Since(p.started).Seconds()
 	if elapsed <= 0 {
@@ -194,7 +200,10 @@ func (p *PBTProgress) log(done uint64) {
 	if p.tempDir != "" {
 		ctx = append(ctx, "temp_bytes", pbtDirSize(p.tempDir))
 	}
-	ctx = append(ctx, p.fields...)
+	p.mu.Lock()
+	fields := append([]any(nil), p.fields...)
+	p.mu.Unlock()
+	ctx = append(ctx, fields...)
 	p.logger.Info(p.message, ctx...)
 }
 
