@@ -98,7 +98,7 @@ require (
 	github.com/ugorji/go/codec v1.2.13
 	github.com/urfave/cli/v3 v3.14.0
 	github.com/valyala/fastjson v1.6.10
-	github.com/vektah/gqlparser/v2 v2.5.58
+	github.com/vektah/gqlparser/v2 v2.5.64
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.28.0
@@ -124,7 +124,7 @@ require (
 	filippo.io/keygen v1.0.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
-	github.com/agnivade/levenshtein v1.2.1 // indirect
+	github.com/agnivade/levenshtein v1.2.2 // indirect
 	github.com/alecthomas/assert/v2 v2.11.0 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/alecthomas/repr v0.5.2 // indirect
