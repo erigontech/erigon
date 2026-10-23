@@ -206,13 +206,13 @@ flowchart LR
 - Create: `cmd/integration/commands/commitment_convert_pbt_golden_test.go`
 - Create: `cmd/integration/commands/testdata/pbt-convert-golden/` (generated)
 
-- [ ] state-level corpora (Testing Strategy) and a `-update` path that records the golden data from the current
+- [x] state-level corpora (Testing Strategy) and a `-update` path that records the golden data from the current
       converter.
-- [ ] the comparison test: file names, per-file (key, value) sequence, root, and both modes. It passes on its first
+- [x] the comparison test: file names, per-file (key, value) sequence, root, and both modes. It passes on its first
       run, as a characterization test.
-- [ ] mutation check: perturb one row's range placement in a scratch copy of the writer and confirm the test goes red
+- [x] mutation check: perturb one row's range placement in a scratch copy of the writer and confirm the test goes red
       on the placement assertion; then restore the copy.
-- [ ] run the gate — must pass before Task 2.
+- [x] run the gate — must pass before Task 2.
 
 ### Task 2: Progress in the log for every phase
 **Files:**
