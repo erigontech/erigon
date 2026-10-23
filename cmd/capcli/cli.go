@@ -142,7 +142,7 @@ func (c *Chain) Run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock, nil)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock)
 
 	bRoot, err := bs.BlockRoot()
 	if err != nil {
@@ -693,7 +693,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 		return err
 	}
 
-	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
+	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db, beaconConfig)
 	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
@@ -1430,7 +1430,7 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
+	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db, beaconConfig)
 	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err

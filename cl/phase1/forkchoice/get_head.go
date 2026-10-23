@@ -88,13 +88,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, jus
 			votes[boostRoot] += (boost * f.beaconCfg.ProposerScoreBoost) / 100
 		}
 	} else {
-		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, balance, ok := f.countableVote(justificationState, validatorIndex)
-			if !ok {
-				continue
-			}
-			votes[message.Root] += balance
-		}
+		votes = f.voteTally.votes(f, justifiedCheckpoint, justificationState)
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
 			boost := justificationState.unslashedActiveBalance / justificationState.beaconConfig.SlotsPerEpoch
@@ -186,7 +180,7 @@ func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, uint64, error) {
 func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointState)
 		if err != nil {
 			return ForkChoiceNode{}, 0, err
 		}
@@ -223,8 +217,8 @@ func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	}
 }
 
-func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint) (*checkpointState, error) {
-	cs, err := f.getCheckpointState(justifiedCheckpoint)
+func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint, getCheckpointState func(solid.Checkpoint) (*checkpointState, error)) (*checkpointState, error) {
+	cs, err := getCheckpointState(justifiedCheckpoint)
 	if err != nil {
 		if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
 			return nil, nil

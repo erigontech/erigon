@@ -1413,6 +1413,43 @@ func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
 	require.True(t, result.Operational)
 }
 
+// A first run without the sender checks fails on intrinsic gas for a sender that cannot pay.
+// Serial execution reports the sender failure first, so the tx must re-run with the checks on.
+func TestParallelChargeSenderAtValidationRetriesFirstRunError(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.in = exec.NewQueueWithRetry(16)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{To: &common.Address{0xaa}, GasLimit: 20_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(config, 1, 0), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+
+	be, task := newParallelResultTestBlock(config, txn)
+	be.settledInput[0] = true
+	task.versionMap = be.versionMap
+	task.shouldDelayFeeCalc = true
+	require.True(t, task.Task.(*exec.TxTask).ChargesSenderAtValidation(0))
+
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, result.Err, &abort)
+	require.ErrorIs(t, abort.OriginError, protocol.ErrIntrinsicGas)
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.NoError(t, err)
+	require.Nil(t, blockResult)
+	require.Equal(t, 1, be.txIncarnations[0])
+	require.Equal(t, 1, pe.in.RetriesLen(), "the re-run is queued at incarnation 1, with the sender checks on")
+}
+
 func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	assert := assert.New(t)
 	db := newResumeTestDB(t)
@@ -2346,5 +2383,39 @@ func TestValueTransferRecipientWaitsForValidation(t *testing.T) {
 			require.True(t, s.be.validateTasks.checkComplete(1))
 			require.Equal(t, 2, s.queued(), "successor not dispatched after its predecessor validated")
 		})
+	}
+}
+
+func TestProcessRequestSetsEIP8246FromBlockTime(t *testing.T) {
+	amsterdam := uint64(100)
+	config := chain.AllProtocolChanges.Copy()
+	config.AmsterdamTime = &amsterdam
+	addr := accounts.InternAddress(common.Address{0x82, 0x46})
+	equalVersion := func(r, w state.Version) state.VersionValidity {
+		if r != w {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	for _, tc := range []struct {
+		time uint64
+		want state.VersionValidity
+	}{
+		{amsterdam - 1, state.VersionValid},
+		{amsterdam, state.VersionInvalid},
+	} {
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.blockExecutors = map[uint64]*blockExecutor{0: nil}
+		header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time}
+		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		vm := pe.blockExecutors[1].versionMap
+		vm.WriteBalance(addr, state.Version{TxIndex: 0}, *uint256.NewInt(100), true)
+		vm.WriteSelfDestruct(addr, state.Version{TxIndex: 0}, true, true)
+		reads := state.ReadSet{}
+		reads.SetBalance(addr, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}}})
+		io := state.NewVersionedIO(2)
+		io.RecordReads(state.Version{TxIndex: 1}, reads)
+		require.Equal(t, tc.want, vm.ValidateVersion(1, io, equalVersion, true, false, false, ""), "block time %d", tc.time)
 	}
 }

@@ -108,6 +108,9 @@ func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) 
 	}
 	defer unlock()
 
+	if err := dirs.RenameOldVersions(false); err != nil {
+		return err
+	}
 	return autoCompactDatadir(ctx, dirs, logger)
 }
 
