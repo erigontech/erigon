@@ -2191,7 +2191,8 @@ func (result *execResult) calcFees(
 		// a burnt contract the tx self-destructs loses it.
 		sw, _ := result.TxOut.GetSelfDestruct(burntAddr)
 		_, hasCodeWrite := result.TxOut.GetCodeHash(burntAddr)
-		wasContract := (burntAcc != nil && !burntAcc.IsEmptyCodeHash()) || hasCodeWrite
+		cw, _ := result.TxOut.GetCreateContract(burntAddr)
+		wasContract := (burntAcc != nil && !burntAcc.IsEmptyCodeHash()) || hasCodeWrite || cw != nil && cw.Val
 		burnBurntFee = !chainRules.IsAmsterdam && sw != nil && sw.Val && wasContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
