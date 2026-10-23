@@ -2874,14 +2874,10 @@ const balDispatchWindow = 32
 
 // insertSorted adds tx to the ascending, duplicate-free list l.
 func insertSorted(l []int, tx int) []int {
-	if n := len(l); n == 0 || l[n-1] < tx {
-		return append(l, tx)
+	if i, found := slices.BinarySearch(l, tx); !found {
+		l = slices.Insert(l, i, tx)
 	}
-	i, found := slices.BinarySearch(l, tx)
-	if found {
-		return l
-	}
-	return slices.Insert(l, i, tx)
+	return l
 }
 
 // balSeededPath reports whether a BAL pre-populates cells of path p.
@@ -2891,10 +2887,7 @@ func balSeededPath(p state.AccountPath) bool {
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []int, tx int) []int {
-	i, found := slices.BinarySearch(l, tx)
-	if found {
-		i++
-	}
+	i, _ := slices.BinarySearch(l, tx+1)
 	return l[i:]
 }
 
@@ -3331,11 +3324,8 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // reverse index records for changedTx's changed keys (new ∪ old write-sets), sorted
 // ascending so the cascade order matches the scan.
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
-	// A BAL-seeded cell already holds its final value, so a reader of it stays valid; a
-	// wrong BAL fails the block, and the finalize re-validation still checks dirty readers.
-	skipBALSeeded := be.versionMap.HasBAL
 	set := map[int]struct{}{}
-	add := func(ws *state.WriteSet) {
+	add := func(ws *state.WriteSet, skipBALSeeded bool) {
 		if ws == nil {
 			return
 		}
@@ -3348,8 +3338,11 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			}
 		}
 	}
-	add(newWrites)
-	add(oldWrites)
+	// A BAL-seeded cell the tx still writes already holds its final value, so a reader of
+	// it stays valid; a wrong BAL fails the block. A dropped write may not be in the BAL,
+	// so its readers are always re-checked.
+	add(newWrites, be.versionMap.HasBAL)
+	add(oldWrites, false)
 	return slices.Sorted(maps.Keys(set))
 }
 

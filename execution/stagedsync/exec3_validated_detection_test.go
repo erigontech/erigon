@@ -178,3 +178,19 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 	require.True(t, be.validateTasks.checkComplete(1),
 		"R was committed early trusting the worker verdict; nothing re-checked it after the change")
 }
+
+// A write that a writer's new incarnation drops may not be in the BAL, so the BAL
+// skip must not hide the readers of that dropped cell.
+func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
+	be := newDetExecutor(t, 2)
+	be.versionMap.HasBAL = true
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	oldW := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(0x1111)).build()
+	rReads := state.ReadSet{}
+	rReads.SetHeader(addr, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0, Incarnation: 0}})
+	be.indexReads(1, rReads)
+
+	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
+}
