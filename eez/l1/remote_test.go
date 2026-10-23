@@ -18,7 +18,10 @@ package l1_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,4 +90,57 @@ func TestRemoteConformance(t *testing.T) {
 		h, err := r.Head(context.Background())
 		return err == nil && h.Hash == next.Blocks[0].Hash()
 	}, 10*time.Second, 10*time.Millisecond)
+}
+
+// oneHead streams one header event, then ends.
+type oneHead struct {
+	grpc.ClientStream
+	sent bool
+}
+
+func (s *oneHead) Recv() (*remoteproto.SubscribeReply, error) {
+	if s.sent {
+		return nil, io.EOF
+	}
+	s.sent = true
+	return &remoteproto.SubscribeReply{Type: remoteproto.Event_HEADER}, nil
+}
+
+// restarting is a node whose head stream ends after each event and which
+// refuses the first resubscription.
+type restarting struct {
+	remoteproto.ETHBACKENDClient
+	subscribed atomic.Int32
+}
+
+func (b *restarting) Subscribe(context.Context, *remoteproto.SubscribeRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[remoteproto.SubscribeReply], error) {
+	if b.subscribed.Add(1) == 2 {
+		return nil, errors.New("connection refused")
+	}
+	return &oneHead{}, nil
+}
+
+// TestRemoteResubscribes: head events survive the end of the node's stream.
+func TestRemoteResubscribes(t *testing.T) {
+	backend := &restarting{}
+	ctx, cancel := context.WithCancel(t.Context())
+	heads, err := l1.NewRemoteHeads(backend, time.Millisecond).Heads(ctx)
+	require.NoError(t, err)
+	for range 3 {
+		select {
+		case <-heads:
+		case <-time.After(10 * time.Second):
+			t.Fatal("no head event")
+		}
+	}
+	require.GreaterOrEqual(t, backend.subscribed.Load(), int32(3))
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case _, ok := <-heads:
+			return !ok
+		default:
+			return false
+		}
+	}, 10*time.Second, time.Millisecond)
 }

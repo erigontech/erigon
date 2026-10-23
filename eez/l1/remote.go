@@ -52,6 +52,9 @@ type Remote struct {
 	conn    *grpc.ClientConn
 	db      kv.RoDB
 	backend remoteproto.ETHBACKENDClient
+	logger  log.Logger
+	// headRetry is the first pause before resubscribing to head events.
+	headRetry time.Duration
 }
 
 var _ HeadNotifier = (*Remote)(nil)
@@ -63,7 +66,7 @@ func DialRemote(ctx context.Context, addr string, dirs datadir.Dirs, logger log.
 	if err != nil {
 		return nil, err
 	}
-	r := &Remote{conn: conn, backend: remoteproto.NewETHBACKENDClient(conn)}
+	r := &Remote{conn: conn, backend: remoteproto.NewETHBACKENDClient(conn), logger: logger, headRetry: time.Second}
 	db, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteproto.NewKVClient(conn)).Open()
 	if err != nil {
 		conn.Close()
@@ -103,10 +106,15 @@ func (r *Remote) Close() {
 	r.conn.Close()
 }
 
+// maxHeadRetry bounds the pause between attempts to resubscribe.
+const maxHeadRetry = 30 * time.Second
+
 // Heads delivers a value for each header event of the node, coalescing those
-// not yet received; the channel closes when the stream ends.
+// not yet received. A stream that ends, as when the node restarts, is
+// resubscribed with backoff, and a value is delivered once it resumes for
+// the heads missed meanwhile; the channel closes when ctx ends.
 func (r *Remote) Heads(ctx context.Context) (<-chan struct{}, error) {
-	stream, err := r.backend.Subscribe(ctx, &remoteproto.SubscribeRequest{Type: remoteproto.Event_HEADER})
+	stream, err := r.subscribeHeads(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -114,13 +122,23 @@ func (r *Remote) Heads(ctx context.Context) (<-chan struct{}, error) {
 	go func() {
 		defer close(heads)
 		for {
-			reply, err := stream.Recv()
-			if err != nil {
+			err := forwardHeads(stream, heads)
+			if ctx.Err() != nil {
 				return
 			}
-			if reply.Type != remoteproto.Event_HEADER {
-				continue
+			r.logger.Warn("[eez] L1 head stream ended, resubscribing", "err", err)
+			for pause := r.headRetry; ; pause = min(2*pause, maxHeadRetry) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(pause):
+				}
+				if stream, err = r.subscribeHeads(ctx); err == nil {
+					break
+				}
+				r.logger.Warn("[eez] L1 head stream resubscription failed", "err", err)
 			}
+			r.logger.Info("[eez] L1 head stream resumed")
 			select {
 			case heads <- struct{}{}:
 			default:
@@ -128,4 +146,26 @@ func (r *Remote) Heads(ctx context.Context) (<-chan struct{}, error) {
 		}
 	}()
 	return heads, nil
+}
+
+func (r *Remote) subscribeHeads(ctx context.Context) (remoteproto.ETHBACKEND_SubscribeClient, error) {
+	return r.backend.Subscribe(ctx, &remoteproto.SubscribeRequest{Type: remoteproto.Event_HEADER})
+}
+
+// forwardHeads delivers the header events of stream to heads until the
+// stream ends.
+func forwardHeads(stream remoteproto.ETHBACKEND_SubscribeClient, heads chan<- struct{}) error {
+	for {
+		reply, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if reply.Type != remoteproto.Event_HEADER {
+			continue
+		}
+		select {
+		case heads <- struct{}{}:
+		default:
+		}
+	}
 }
