@@ -21,12 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -62,17 +60,13 @@ func haltError(err error) error {
 	return err
 }
 
-// eezDataDir is where an EEZ chain keeps its data under datadir.
-func eezDataDir(datadir string) string { return filepath.Join(datadir, "eez") }
-
-// configureFollowerNode moves the node to <datadir>/eez and off the P2P
-// network: the follower is the chain's only source of blocks.
+// configureFollowerNode keeps the chain under <datadir>/eez and the node off
+// the P2P network: the follower is the chain's only source of blocks.
 func configureFollowerNode(cfg *nodecfg.Config) error {
 	if slices.Contains(cfg.Http.API, "testing") {
 		return fmt.Errorf("%w: the testing API builds blocks; the follower must be the chain's only driver", eez.ErrConfig)
 	}
-	cfg.Dirs = datadir.New(eezDataDir(cfg.Dirs.DataDir))
-	dir.MustExist(cfg.Dirs.Log)
+	cfg.Dirs = eez.Dirs(cfg.Dirs)
 	cfg.P2P.MaxPeers = 0
 	cfg.P2P.NoDiscovery = true
 	return nil
@@ -116,7 +110,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 		return nil, err
 	}
 	fc := follower.DefaultConfig
-	fc.Dir, fc.Poll, fc.ReorgDepth, fc.LogChunk = dirs.DataDir, cfg.L1Poll, cfg.L1ReorgDepth, cfg.L1LogChunk
+	fc.Dir, fc.Poll, fc.ReorgDepth, fc.LogChunk = eez.Dir(dirs), cfg.L1Poll, cfg.L1ReorgDepth, cfg.L1LogChunk
 	if cfg.SequencerRPC != "" {
 		if fc.Sequencer, err = follower.DialSequencer(ctx, cfg.SequencerRPC, logger); err != nil {
 			return nil, err
@@ -132,6 +126,6 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 		go n.Close()
 	})
 	n.RegisterLifecycle(svc)
-	logger.Info("[eez] follower mode", "datadir", dirs.DataDir, "l1", cmp.Or(cfg.L1RPC, cfg.L1KV))
+	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", cmp.Or(cfg.L1RPC, cfg.L1KV))
 	return svc, nil
 }

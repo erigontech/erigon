@@ -92,10 +92,10 @@ func blockHash(ctx context.Context, url, tag string) (common.Hash, error) {
 	return b.Hash, nil
 }
 
-// TestFollowerBinary runs the erigon binary named by EEZ_ERIGON in follower
-// mode against a composed L1 served over JSON-RPC: it derives the settled
-// blocks under <datadir>/eez, serves no engine API, and exits with status 3
-// when its chain diverges from L1.
+// TestFollowerBinary runs the erigon binary named by EEZ_ERIGON as an EEZ
+// node against a composed L1 served over JSON-RPC: it derives the settled
+// blocks into <datadir>/eez/chaindata, serves no engine API, and exits with
+// status 3 when its chain diverges from L1.
 func TestFollowerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -118,7 +118,7 @@ func TestFollowerBinary(t *testing.T) {
 
 	dir := t.TempDir()
 	httpPort, authPort := freePort(t), freePort(t)
-	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--eez.follower", "--chain=eez-devnet", "--datadir", dir,
+	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", dir,
 		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--http.api=eth,eez", "--authrpc.port", authPort,
 		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t))
 	var output bytes.Buffer
@@ -153,7 +153,9 @@ func TestFollowerBinary(t *testing.T) {
 	waitFor("0x2", first.Blocks[1].Hash())
 	waitFor("latest", second.Blocks[0].Hash())
 	waitFor("safe", second.Blocks[0].Hash())
-	require.DirExists(t, filepath.Join(dir, "eez", "chaindata"))
+	require.FileExists(t, filepath.Join(dir, "eez", "chaindata", "mdbx.dat"))
+	require.DirExists(t, filepath.Join(dir, "snapshots", "eez", "domain"))
+	require.FileExists(t, filepath.Join(dir, "eez", "eez-reconcile-checkpoint"))
 	var status struct {
 		Cursor hexutil.Uint64 `json:"cursor"`
 		Safe   hexutil.Uint64 `json:"safe"`

@@ -28,16 +28,13 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // ErrConfig reports EEZ flags that do not make a configuration.
 var ErrConfig = errors.New("invalid EEZ configuration")
 
 var (
-	FollowerFlag = cli.BoolFlag{
-		Name:  "eez.follower",
-		Usage: "Derive the EEZ chain from its settlements on L1, under <datadir>/eez; turns off the engine API, txpool, downloader and P2P",
-	}
 	L1RPCFlag = cli.StringFlag{
 		Name:  "eez.l1.rpc",
 		Usage: "JSON-RPC endpoint of the L1 node the follower reads",
@@ -96,13 +93,12 @@ var (
 
 // Flags lists the EEZ command-line flags.
 var Flags = []cli.Flag{
-	&EnabledFlag, &FollowerFlag, &L1RPCFlag, &L1KVFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
+	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
 // Config is a node's EEZ configuration.
 type Config struct {
-	Follower     bool
 	L1RPC        string
 	L1KV         string
 	L1Poll       time.Duration
@@ -134,7 +130,6 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 		return nil, nil
 	}
 	c := &Config{
-		Follower:     cmd.Bool(FollowerFlag.Name),
 		L1RPC:        cmd.String(L1RPCFlag.Name),
 		L1KV:         cmd.String(L1KVFlag.Name),
 		L1Poll:       cmd.Duration(L1PollFlag.Name),
@@ -174,13 +169,38 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 		s := uint64(v / time.Second)
 		*d.out = &s
 	}
-	if c.Follower && (c.L1RPC == "") == (c.L1KV == "") {
-		return nil, fmt.Errorf("%w: --%s needs one L1 source, --%s or --%s", ErrConfig, FollowerFlag.Name, L1RPCFlag.Name, L1KVFlag.Name)
-	}
 	if c.L1Poll <= 0 || c.L1LogChunk == 0 || c.L1ReorgDepth <= 0 {
 		return nil, fmt.Errorf("%w: --%s, --%s and --%s must be positive", ErrConfig, L1PollFlag.Name, L1LogChunkFlag.Name, L1ReorgDepthFlag.Name)
 	}
 	return c, nil
+}
+
+// InitGenesis writes the l2 section the EEZ flags set into the genesis init
+// commits, which must then be an EEZ genesis. It requires --eez.enabled.
+func InitGenesis(cmd *cli.Command, genesis *types.Genesis) error {
+	cfg, err := ConfigFromCLI(cmd)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return fmt.Errorf("%w: --%s is not set", ErrConfig, EnabledFlag.Name)
+	}
+	if err := cfg.L2.ApplyGenesis(genesis.Config, genesis.GasLimit); err != nil {
+		return err
+	}
+	if _, ok := genesis.Config.L2.(*config.L2Config); !ok {
+		return fmt.Errorf("%w: --%s needs a genesis with an EEZ l2 section, or the flags that write one", ErrConfig, EnabledFlag.Name)
+	}
+	return nil
+}
+
+// CheckNode reports what a running node lacks: its follower reads exactly
+// one L1 source.
+func (c *Config) CheckNode() error {
+	if (c.L1RPC == "") == (c.L1KV == "") {
+		return fmt.Errorf("%w: the follower needs one L1 source, --%s or --%s", ErrConfig, L1RPCFlag.Name, L1KVFlag.Name)
+	}
+	return nil
 }
 
 // fields pairs each flag-set field with its l2 section field.

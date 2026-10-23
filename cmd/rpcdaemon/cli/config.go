@@ -354,6 +354,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	if eezEnabled {
 		eez.Register()
 		cfg.RenderRegisteredTxTypes = true
+		if cfg.WithDatadir {
+			cfg.Dirs = eez.Dirs(cfg.Dirs)
+		}
 	}
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("either remote db or local db must be specified")

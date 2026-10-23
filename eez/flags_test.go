@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func parse(t *testing.T, args ...string) (*Config, error) {
@@ -74,17 +75,17 @@ func TestConfigFromCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, cfg, "EEZ off")
 
-	cfg, err = parse(t, "--eez.enabled", "--eez.follower", "--eez.l1.kv=127.0.0.1:9090")
+	cfg, err = parse(t, "--eez.enabled", "--eez.l1.kv=127.0.0.1:9090")
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:9090", cfg.L1KV)
+	require.NoError(t, cfg.CheckNode())
 
-	cfg, err = parse(t, "--eez.enabled", "--eez.follower", "--eez.l1.rpc=http://l1:8545", "--eez.l1.poll=1s",
+	cfg, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.poll=1s",
 		"--eez.registry=0x5fbdb2315678afecb367f032d93f642f64180aa3", "--eez.rollupid=1", "--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s")
 	require.NoError(t, err)
 	one, twelve, two := uint64(1), uint64(12), uint64(2)
 	registry := common.HexToAddress("0x5fbdb2315678afecb367f032d93f642f64180aa3")
 	require.Equal(t, &Config{
-		Follower:     true,
 		L1RPC:        "http://l1:8545",
 		L1Poll:       time.Second,
 		L1LogChunk:   100_000,
@@ -93,9 +94,7 @@ func TestConfigFromCLI(t *testing.T) {
 	}, cfg)
 
 	for _, args := range [][]string{
-		{"--eez.follower"},
-		{"--eez.enabled", "--eez.follower"},
-		{"--eez.enabled", "--eez.follower", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
+		{"--eez.l1.rpc=http://l1:8545"},
 		{"--eez.enabled", "--eez.registry=0x12"},
 		{"--eez.enabled", "--eez.l2.blocktime=1500ms"},
 		{"--eez.enabled", "--eez.l1.reorgdepth=0"},
@@ -103,6 +102,43 @@ func TestConfigFromCLI(t *testing.T) {
 		_, err := parse(t, args...)
 		require.ErrorIs(t, err, ErrConfig, "%v", args)
 	}
+
+	// init needs no L1 source; a running node needs exactly one.
+	for _, args := range [][]string{
+		{"--eez.enabled"},
+		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
+	} {
+		cfg, err := parse(t, args...)
+		require.NoError(t, err, "%v", args)
+		require.ErrorIs(t, cfg.CheckNode(), ErrConfig, "%v", args)
+	}
+}
+
+// initGenesis runs InitGenesis on genesis under the flags args.
+func initGenesis(t *testing.T, genesis *types.Genesis, args ...string) error {
+	t.Helper()
+	var err error
+	cmd := &cli.Command{Name: "erigon", Flags: freshFlags(), Action: func(_ context.Context, cmd *cli.Command) error {
+		err = InitGenesis(cmd, genesis)
+		return nil
+	}}
+	require.NoError(t, cmd.Run(t.Context(), append([]string{"erigon"}, args...)))
+	return err
+}
+
+func TestInitGenesis(t *testing.T) {
+	plain := func() *types.Genesis {
+		return &types.Genesis{Config: &chain.Config{ChainName: "plain"}, GasLimit: 30_000_000}
+	}
+
+	require.ErrorIs(t, initGenesis(t, plain()), ErrConfig, "EEZ off")
+	require.ErrorIs(t, initGenesis(t, plain(), "--eez.enabled"), ErrConfig, "no l2 section")
+
+	g := plain()
+	require.NoError(t, initGenesis(t, g, "--eez.enabled", "--eez.l1.chainid=7331", "--eez.registry=0x5fbdb2315678afecb367f032d93f642f64180aa3",
+		"--eez.registry.deployblock=12", "--eez.rollupid=1", "--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s"))
+	require.IsType(t, &config.L2Config{}, g.Config.L2)
+	require.Equal(t, uint64(30_000_000), g.Config.L2.(*config.L2Config).BlockGasLimit)
 }
 
 func TestApplyGenesis(t *testing.T) {
