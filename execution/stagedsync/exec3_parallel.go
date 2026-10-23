@@ -2307,6 +2307,12 @@ func (result *execResult) calcFees(
 	burntOverride := false
 	burntSelfdestructed := false
 	burntWasContract := false
+	burntNonce := uint64(0)
+	burntHasCodeHashWrite := false
+	burntEmptyCodeHash := burntAcc == nil || burntAcc.IsEmptyCodeHash()
+	if burntAcc != nil {
+		burntNonce = burntAcc.Nonce
+	}
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
@@ -2315,9 +2321,14 @@ func (result *execResult) calcFees(
 		if sw, ok := result.TxOut.GetSelfDestruct(burntAddr); ok {
 			burntSelfdestructed = sw.Val
 		}
-		_, burntHasCodeHashWrite := result.TxOut.GetCodeHash(burntAddr)
+		if nw, ok := result.TxOut.GetNonce(burntAddr); ok {
+			burntNonce = nw.Val
+		}
+		if _, ok := result.TxOut.GetCodeHash(burntAddr); ok {
+			burntHasCodeHashWrite = true
+		}
 		_, burntCreatedContract := result.TxOut.GetCreateContract(burntAddr)
-		burntWasContract = (burntAcc != nil && !burntAcc.IsEmptyCodeHash()) || burntHasCodeHashWrite || burntCreatedContract
+		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2358,9 +2369,19 @@ func (result *execResult) calcFees(
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || burntOverride)
+	// A zero base-fee transfer still touches the burnt recipient, so EIP-161 removes
+	// an empty one with its storage. Mirrors coinbaseEmptied above.
+	burntEmptied := hasBurnt && chainRules.IsLondon && !emitBurnt && !burntSelfdestructed && burntAcc != nil &&
+		newBurntBalance.IsZero() && burntNonce == 0 && burntEmptyCodeHash && !burntHasCodeHashWrite &&
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr)
+
 	addWrites := &state.WriteSet{}
 	if coinbaseNetDeleted || coinbaseEmptied {
 		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+	}
+	if burntEmptied {
+		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
 	}
 	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
 	// serial credits the tip before the tx's empty-account sweep, so the account and its
@@ -2435,7 +2456,7 @@ func (result *execResult) calcFees(
 			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
 		})
 	}
-	if hasBurnt && (newBurntBalance != oldBurntBalance || burntOverride) {
+	if emitBurnt {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
