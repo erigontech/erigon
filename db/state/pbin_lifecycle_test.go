@@ -95,6 +95,22 @@ func TestPBinLaggingShadowBuildsItsMissingStepFromDB(t *testing.T) {
 	require.NoError(t, agg.OpenFolder(db))
 	writeDupSortStepBacklog(t, db, agg.d[kv.CommitmentBinDomain], alignStepSize, 4, 8, 1)
 
+	before := agg.BeginFilesRo()
+	var emptyDomains []kv.Domain
+	for id, dt := range before.d {
+		if dt != nil && len(dt.files) == 0 && kv.Domain(id) != kv.CommitmentBinDomain {
+			emptyDomains = append(emptyDomains, kv.Domain(id))
+		}
+	}
+	var emptyIIs []int
+	for i := range agg.standaloneIIs() {
+		if len(before.iis[i].files) == 0 {
+			emptyIIs = append(emptyIIs, i)
+		}
+	}
+	before.Close()
+	require.NotEmpty(t, emptyIIs)
+
 	fin, started := agg.buildFilesInBackground(asTemporalRoDB(db), 4*alignStepSize, false, unboundedFinalityCtx)
 	require.True(t, started)
 	<-fin
@@ -107,6 +123,16 @@ func TestPBinLaggingShadowBuildsItsMissingStepFromDB(t *testing.T) {
 		require.Equal(t, files[i-1].endTxNum, files[i].startTxNum, "commitment-bin visible files have a gap")
 	}
 	require.Equal(t, at.d[kv.CommitmentDomain].files.EndTxNum(), files.EndTxNum())
+	for _, d := range emptyDomains {
+		if len(at.d[d].files) > 0 {
+			require.GreaterOrEqual(t, at.d[d].files[0].startTxNum, uint64(2*alignStepSize), "%s built below the canonical start", d)
+		}
+	}
+	for _, i := range emptyIIs {
+		if len(at.iis[i].files) > 0 {
+			require.GreaterOrEqual(t, at.iis[i].files[0].startTxNum, uint64(2*alignStepSize), "%s built below the canonical start", agg.standaloneIIs()[i].FilenameBase)
+		}
+	}
 }
 
 func TestPBinCanonicalRoleDoesNotChangeHexReferences(t *testing.T) {
