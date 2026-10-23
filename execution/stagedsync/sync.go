@@ -371,8 +371,8 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-// IsOnlyLoopExhausted reports whether err is non-nil and every branch in its
-// unwrap tree ends in ErrLoopExhausted.
+// IsOnlyLoopExhausted reports whether err is non-nil and every branch of its
+// unwrap tree reaches a loop-exhausted boundary (no other error mixed in).
 func IsOnlyLoopExhausted(err error) bool {
 	return commonerrors.IsOnly(err, &ErrLoopExhausted{})
 }
@@ -515,6 +515,9 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
+		// Only a purely-exhausted loop saves progress and continues. errors.AsType
+		// would also match errors.Join(exhausted, waitErr) and silently drop the
+		// real error, so use IsOnlyLoopExhausted (every branch must be exhausted).
 		if IsOnlyLoopExhausted(err) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)

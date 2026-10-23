@@ -31,33 +31,17 @@ import (
 
 var ErrPruned = errors.New("old data not available due to pruning")
 
-// HistoryReaderV3 Implements StateReader and StateWriter.
+// HistoryReaderV3 implements StateReader and StateWriter. Reads chain from
+// most-recent to persisted: blockCache (in-flight per-field parallel-block
+// writes) → sd.GetAsOf (in-batch memory) → ttx.GetAsOf (DB history + snapshots).
 //
-// The read chain, from most-recent to persisted, is:
-//
-//	blockCache (in-flight parallel-block writes, per-field) →
-//	sd.GetAsOf (in-batch memory state) →
-//	ttx.GetAsOf (DB history + snapshot files).
-//
-// blockCache is populated by applyVersionedWrites in the parallel executor
-// for every committed tx in the current block. Those writes do NOT land in
-// sd.mem until Flush at block boundary, so a finalize-time IBS constructed
-// in historic mode (withdrawals, EIP-7002/7251 system calls on a
-// tip-adjacent historic block) would otherwise read the pre-block balance
-// and stomp a prior tx's in-block update. Consulting blockCache first fixes
-// that gap.
-//
-// sd is the SharedDomains for the batch. When non-nil, the reader checks
-// sd.GetAsOf before ttx.GetAsOf so prior-batch writes that haven't been
-// flushed to the history index yet are still visible.
-//
-// RPC and other consumers that want to read strictly persisted history
-// pass sd=nil and blockCache=nil via the legacy NewHistoryReaderV3
-// constructor.
+// blockCache holds writes that have not yet reached sd.mem until the block
+// boundary Flush, so a finalize-time IBS in historic mode would otherwise read
+// pre-block state and stomp a prior tx's in-block update. When sd is nil the
+// reader serves strictly persisted history.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
-	sd          *execctx.SharedDomains
-	blockCache  *BlockStateCache
+	sd          execctx.DomainReader
 	tracePrefix string
 	txNum       uint64
 	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
@@ -73,33 +57,14 @@ func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
 // parallel executor. Reads chain sd.GetAsOf (in-memory batch state) then
 // fall back to ttx.GetAsOf so a tx can see prior-tx writes from the same
 // batch that have not yet been flushed to the history index.
-func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDomains, txNum uint64) *HistoryReaderV3 {
+func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainReader, txNum uint64) *HistoryReaderV3 {
 	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
 }
 
-// NewHistoryReaderV3WithBlockCache is the finalize-time variant used by
-// the parallel executor for historic blocks. In addition to the
-// sd.GetAsOf → ttx.GetAsOf chain, it consults the per-block BlockStateCache
-// first so the block-finalize IBS (withdrawals, EIP-7002/7251 system calls)
-// sees every prior-tx write recorded in the current block, not just the
-// pre-block committed state.
-func NewHistoryReaderV3WithBlockCache(ttx kv.TemporalTx, sd *execctx.SharedDomains, blockCache *BlockStateCache, txNum uint64) *HistoryReaderV3 {
-	return &HistoryReaderV3{ttx: ttx, sd: sd, blockCache: blockCache, txNum: txNum}
-}
-
-// SetBlockStateCache updates the in-flight block cache tier. Used when the
-// reader is reused across blocks in the parallel executor.
-func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
-	hr.blockCache = cache
-}
-
-// getAsOf chains blockCache (in-flight parallel block writes, per-field)
-// before sd.GetAsOf (in-batch memory) and ttx.GetAsOf (DB history +
-// snapshot files). Callers requesting only persisted history construct the
-// reader with sd=nil and blockCache=nil. If sd.mem has inMemHistoryReads
-// disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
-// we silently fall through to ttx so the same reader type is usable in
-// both modes.
+// getAsOf chains sd.GetAsOf (in-batch memory) before ttx.GetAsOf (DB history
+// + snapshots). When sd is nil, or sd.mem has inMemHistoryReads disabled and
+// returns an error, it falls through to ttx so the same reader type serves
+// both the in-batch and persisted-history modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
 	if hr.sd != nil {
 		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
@@ -158,14 +123,6 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 }
 
 func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
-	if hr.blockCache != nil {
-		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(accounts.InternAddress(address)); hit {
-			if hr.trace {
-				fmt.Printf("%sReadAccountData (cache)[%x] => %v\n", hr.tracePrefix, address, acc)
-			}
-			return acc, nil
-		}
-	}
 	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
@@ -185,11 +142,6 @@ func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*acco
 }
 
 func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
-	if hr.blockCache != nil {
-		if acc, hit := hr.blockCache.GetCurrentAccount(accounts.InternAddress(address)); hit {
-			return acc != deletedAccount, nil
-		}
-	}
 	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	return ok && len(enc) > 0, err
@@ -202,14 +154,6 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	if hr.blockCache != nil {
-		if v, hit := hr.blockCache.GetCurrentStorage(address, key); hit {
-			if hr.trace {
-				fmt.Printf("%sReadAccountStorage (cache)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, v.Bytes())
-			}
-			return v, !v.IsZero(), nil
-		}
-	}
 	addressValue := address.Value()
 	keyValue := key.Value()
 	copy(hr.composite[:length.Addr], addressValue[:])
@@ -244,14 +188,6 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, e
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if hr.blockCache != nil {
-		if acc, hit := hr.blockCache.GetCurrentAccount(address); hit {
-			if acc.Incarnation == 0 {
-				return 0, nil
-			}
-			return acc.Incarnation - 1, nil
-		}
-	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
