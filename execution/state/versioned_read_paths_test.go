@@ -1062,3 +1062,42 @@ func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, balance.Val.IsZero())
 }
+
+// A CREATE2 onto an account a prior tx destroyed carries the balance a later tx's
+// fee revived it with, even when this tx first read the account while it was
+// destroyed.
+func TestVersionedRead_CreateCarriesRevivedBalanceAfterEarlierDestroyedRead(t *testing.T) {
+	t.Parallel()
+	for _, firstRead := range []string{"nonce", "balance", "codehash"} {
+		t.Run(firstRead, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			addr := accounts.InternAddress([20]byte{0xc7})
+			vm := NewVersionMap(nil)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+			ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 2)
+
+			var err error
+			switch firstRead {
+			case "nonce":
+				_, err = ibs.GetNonce(addr)
+			case "balance":
+				_, err = ibs.GetBalance(addr)
+			case "codehash":
+				_, err = ibs.GetCodeHash(addr)
+			}
+			require.NoError(t, err)
+
+			revived := accounts.NewAccount()
+			revived.Balance = *uint256.NewInt(1000)
+			vm.WriteBalance(addr, Version{TxIndex: 1}, revived.Balance, true)
+			vm.WriteAddress(addr, Version{TxIndex: 1}, &revived, true)
+
+			require.NoError(t, ibs.CreateAccount(addr, true))
+			bal, err := ibs.GetBalance(addr)
+			require.NoError(t, err)
+			require.EqualValues(t, 1000, bal.Uint64())
+		})
+	}
+}

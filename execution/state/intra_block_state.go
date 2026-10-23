@@ -2359,6 +2359,10 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
+	} else if previous == nil && balSource == MapRead {
+		// This tx already read the account destroyed, so there is no record, but a
+		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
+		newObj.data.Balance.Set(&preTxBalance)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
