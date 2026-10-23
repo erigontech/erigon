@@ -355,7 +355,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	gloasForkSlot := r.cfg.GloasForkEpoch * r.cfg.SlotsPerEpoch
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(r.cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.BuildersDump, kv.Builders, builders); err != nil {
+	if err := ReadBuildersSSZ(kvGetter, slot, gloasForkSlot, r.cfg.BuilderRegistryLimit, builders); err != nil {
 		return nil, fmt.Errorf("failed to read builders: %w", err)
 	}
 	ret.SetBuilders(builders)
@@ -1094,31 +1094,9 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 // forkSlot is read as an empty list, because the first Gloas diff holds the full
 // list. The replay then starts at the dump slot, so a diff stored there is not skipped.
 func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	firstDiffSlot, err := readRequiredDump(kvGetter, slot, forkSlot, dumpTable, out)
 	if err != nil {
 		return err
-	}
-
-	firstDiffSlot := freshDumpSlot + 1
-	if len(compressed) == 0 {
-		if freshDumpSlot > forkSlot {
-			return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
-		}
-		firstDiffSlot = freshDumpSlot
-	} else {
-		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
-		if err != nil {
-			return err
-		}
-		sszEnc, err := io.ReadAll(zstdReader)
-		base_encoding.PutZstdReader(zstdReader)
-		if err != nil {
-			return err
-		}
-		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
-			return err
-		}
 	}
 
 	for currSlot := firstDiffSlot; currSlot <= slot; currSlot++ {
@@ -1132,6 +1110,74 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 		}
 		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
 			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
+		}
+	}
+	return nil
+}
+
+func readRequiredDump[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable string, out *solid.ListSSZ[T]) (uint64, error) {
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	if err != nil {
+		return 0, err
+	}
+
+	firstDiffSlot := freshDumpSlot + 1
+	if len(compressed) == 0 {
+		if freshDumpSlot > forkSlot {
+			return 0, fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
+		}
+		firstDiffSlot = freshDumpSlot
+	} else {
+		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
+		if err != nil {
+			return 0, err
+		}
+		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
+		if err != nil {
+			return 0, err
+		}
+		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
+			return 0, err
+		}
+	}
+	return firstDiffSlot, nil
+}
+
+func ReadBuildersSSZ(kvGetter state_accessors.GetValFn, slot, forkSlot, registryLimit uint64, out *solid.ListSSZ[*cltypes.Builder]) error {
+	firstDiffSlot, err := readRequiredDump(kvGetter, slot, forkSlot, kv.BuildersDump, out)
+	if err != nil {
+		return err
+	}
+
+	for currSlot := slot - slot%clparams.SlotsPerDump; currSlot <= slot; currSlot++ {
+		key := base_encoding.Encode64ToBytes4(currSlot)
+		row, err := kvGetter(kv.Builders, key)
+		if err != nil {
+			return err
+		}
+		if len(row) != 0 {
+			// A loaded dump already includes its own slot's row; checking that row still detects legacy history at dump slots.
+			if currSlot < firstDiffSlot {
+				err = state_accessors.CheckBuildersDiffRow(row)
+			} else {
+				err = state_accessors.ApplyBuildersDiff(row, out, registryLimit)
+			}
+			if err != nil {
+				return fmt.Errorf("read builders diff from table %s at slot %d: %w", kv.Builders, currSlot, err)
+			}
+			continue
+		}
+		if currSlot < forkSlot {
+			continue
+		}
+		slotData, err := kvGetter(kv.SlotData, key)
+		if err != nil {
+			return err
+		}
+		if len(slotData) != 0 {
+			return fmt.Errorf("%w: missing row from table %s at slot %d", state_accessors.ErrHistoryRebuildRequired, kv.Builders, currSlot)
 		}
 	}
 	return nil
