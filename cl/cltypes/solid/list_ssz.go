@@ -395,6 +395,9 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 		leaves[i] = root[:]
 	}
 	d := GetDepth(uint64(l.limit))
+	if 1<<d < l.limit {
+		d++
+	}
 	branch, err := merkle_tree.MerkleProof(int(d), i, leaves...)
 	if err != nil {
 		panic(err)
