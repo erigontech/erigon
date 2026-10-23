@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -79,6 +80,7 @@ type executionPayloadService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	beaconCfg       *clparams.BeaconChainConfig
 	emitters        *beaconevents.EventEmitter
+	gossipManager   gossipmgr.Gossip
 
 	// Cache to track seen envelopes: (beaconBlockRoot, builderIndex) -> struct{}
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
@@ -97,6 +99,7 @@ func NewExecutionPayloadService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitters *beaconevents.EventEmitter,
+	gossipManager gossipmgr.Gossip,
 ) ExecutionPayloadService {
 	seenEnvelopesCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	if err != nil {
@@ -106,6 +109,7 @@ func NewExecutionPayloadService(
 		forkchoiceStore:    forkchoiceStore,
 		beaconCfg:          beaconCfg,
 		emitters:           emitters,
+		gossipManager:      gossipManager,
 		seenEnvelopesCache: seenEnvelopesCache,
 		now:                time.Now,
 	}
@@ -505,5 +509,22 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 			return pendingJobKeep
 		}
 	}
+	if err == nil {
+		s.publishPendingEnvelope(job.envelope)
+	}
 	return pendingJobRemoveThenProcess
+}
+
+// publishPendingEnvelope relays an envelope that gossip ignored, and so did not forward, while its block was unknown.
+func (s *executionPayloadService) publishPendingEnvelope(envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	if s.gossipManager == nil {
+		return
+	}
+	encoded, err := envelope.EncodeSSZ(nil)
+	if err != nil {
+		log.Debug("Failed to encode pending execution payload envelope", "beaconBlockRoot", envelope.Message.BeaconBlockRoot, "err", err)
+		return
+	}
+	// PublishBackground logs its own admission failures.
+	_ = s.gossipManager.PublishBackground(gossip.TopicNameExecutionPayload, encoded, time.Time{})
 }
