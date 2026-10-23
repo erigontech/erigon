@@ -184,9 +184,6 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 			args := baseArgs
 			args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), request.DataDir
 			args.EthConfigTweaker = configureSnapshotCrashRecovery
-			lastSlot := side.payloads[len(side.payloads)-1].ExecutionPayload.SlotNumber
-			require.NotNil(t, lastSlot)
-			args.MockClState = &engineapitester.MockClState{SlotNumber: uint64(*lastSlot) + 1}
 			eat, err := engineapitester.InitialiseEngineApiTester(t.Context(), args)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, eat.Close()) })

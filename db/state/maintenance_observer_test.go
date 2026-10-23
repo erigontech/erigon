@@ -30,14 +30,10 @@ import (
 func TestMaintenanceObserverClose(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		point MaintenancePoint
 		build bool
 	}{
-		{"build_started", MaintenanceBuildStarted, true},
-		{"files_built", MaintenanceFilesBuilt, true},
-		{"files_published", MaintenanceFilesPublished, true},
-		{"prune_ready", MaintenancePruneReady, false},
-		{"prune_committed", MaintenancePruneCommitted, false},
+		{"aggregator_context", true},
+		{"caller_context", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testMaintenanceObserver(t, func(t *testing.T, agg *Aggregator) {
@@ -58,7 +54,7 @@ func TestMaintenanceObserverClose(t *testing.T) {
 				agg.buildingFiles.Store(tc.build)
 				require.True(t, agg.background.TryGo(func() {
 					defer agg.buildingFiles.Store(false)
-					agg.observeMaintenance(operationCtx, MaintenanceEvent{Point: tc.point})
+					agg.observeMaintenance(operationCtx, MaintenanceEvent{})
 					<-finishWork
 				}))
 				synctest.Wait()
