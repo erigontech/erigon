@@ -247,45 +247,53 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
 }
 
-func TestUpdateForkChoiceRejectsSiblingHashes(t *testing.T) {
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{{"synchronous", false}, {"parallel", true}} {
-		t.Run(mode.name, func(t *testing.T) {
-			for _, field := range []string{"safe", "finalized"} {
-				t.Run(field, func(t *testing.T) {
-					m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(mode.parallel))
-					a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
-						b.SetCoinbase(common.Address{0x81})
-					})
-					require.NoError(t, err)
-					b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
-						b.SetCoinbase(common.Address{0x82})
-					})
-					require.NoError(t, err)
-					_, err = m.InsertBlocks(t.Context(), a.Blocks)
-					require.NoError(t, err)
-					_, err = m.InsertBlocks(t.Context(), b.Blocks)
-					require.NoError(t, err)
-					validation, err := m.ValidateChain(t.Context(), a.Blocks[0].Header())
-					require.NoError(t, err)
-					require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+func TestUpdateForkChoiceRecoversAfterRejectingSiblingHashes(t *testing.T) {
+	forEachFlushingMode(t, func(t *testing.T, parallel bool) {
+		for _, field := range []string{"safe", "finalized"} {
+			t.Run(field, func(t *testing.T) {
+				for _, followUp := range []struct {
+					name     string
+					ancestor bool
+				}{{"zero_hashes", false}, {"ancestor_hashes", true}} {
+					t.Run(followUp.name, func(t *testing.T) {
+						m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(parallel))
+						a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+							b.SetCoinbase(common.Address{0x81})
+						})
+						require.NoError(t, err)
+						b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+							b.SetCoinbase(common.Address{0x82})
+						})
+						require.NoError(t, err)
+						_, err = m.InsertBlocks(t.Context(), a.Blocks)
+						require.NoError(t, err)
+						_, err = m.InsertBlocks(t.Context(), b.Blocks)
+						require.NoError(t, err)
+						requireValid(t, m, a.Blocks[0])
 
-					var safe, finalized common.Hash
-					if field == "safe" {
-						safe = b.Blocks[0].Hash()
-					} else {
-						finalized = b.Blocks[0].Hash()
-					}
-					result, err := m.ExecModule.UpdateForkChoice(t.Context(), a.Blocks[0].Hash(), safe, finalized)
-					require.NoError(t, err)
-					m.ExecModule.WaitIdle(t.Context())
-					require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
-				})
-			}
-		})
-	}
+						var safe, finalized common.Hash
+						if field == "safe" {
+							safe = b.Blocks[0].Hash()
+						} else {
+							finalized = b.Blocks[0].Hash()
+						}
+						bad := updateForkChoice(t, m, a.Blocks[0].Hash(), safe, finalized)
+						require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, bad.Status)
+
+						var h common.Hash
+						if followUp.ancestor {
+							h = m.Genesis.Hash()
+						}
+						result := updateForkChoice(t, m, a.Blocks[0].Hash(), h, h)
+						require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+						require.Equal(t, a.Blocks[0].Hash(), result.LatestValidHash)
+						require.Equal(t, a.Blocks[0].Hash(), headBlockHash(t, m))
+						require.Equal(t, a.Blocks[0].Hash(), canonicalHashAt(t, m, 1))
+					})
+				}
+			})
+		}
+	})
 }
 
 func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {

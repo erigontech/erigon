@@ -1556,6 +1556,73 @@ func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
 	})
 }
 
+func TestPreparePayloadLoopRetriesBusySkipAfterPTCDeadline(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		blockWorkEnds time.Duration
+		shouldPrepare bool
+	}{
+		{name: "block work ends before the cutoff", blockWorkEnds: 9100 * time.Millisecond, shouldPrepare: true},
+		{name: "block work ends after the cutoff", blockWorkEnds: 10100 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				config := payloadPreparationLoopConfig(12, 1, 1)
+				currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
+				targetSlot := currentSlot + 1
+				handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
+					t, ctrl, &config, currentSlot, currentSlot, 0,
+				)
+				// Start at the current slot's beginning, so quarter-slot ticks land at 3, 6, 9 and 12 s.
+				currentSlotStart := time.Now()
+				slotDuration := 12 * time.Second
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 {
+					return currentSlot + uint64(time.Since(currentSlotStart)/slotDuration)
+				}).AnyTimes()
+				clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+					return currentSlotStart.Add(time.Duration(slot-currentSlot) * slotDuration)
+				}).AnyTimes()
+				handler.ethClock = clock
+				syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+				forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, currentSlot, nil
+				}
+
+				// Block work holds the gate across the 9 s PTC deadline.
+				go func() {
+					time.Sleep(8999 * time.Millisecond)
+					finish := handler.payloadPreparationGate.beginBlockWork()
+					time.Sleep(test.blockWorkEnds - 8999*time.Millisecond)
+					finish()
+				}()
+
+				ctx, cancel := context.WithTimeout(t.Context(), slotDuration)
+				defer cancel()
+				var attempts []time.Duration
+				handler.preparePayloadLoopWith(ctx, func(
+					_ context.Context,
+					key preparationKey,
+					_ *payloadPreparationScratch,
+				) (preparationKey, error) {
+					require.Equal(t, targetSlot, key.targetSlot)
+					attempts = append(attempts, time.Since(currentSlotStart))
+					return key, nil
+				})
+
+				if !test.shouldPrepare {
+					require.Empty(t, attempts, "no state work may start after the cutoff")
+					return
+				}
+				require.Len(t, attempts, 1, "a busy skip at the PTC deadline must be retried once before the cutoff")
+				require.Greater(t, attempts[0], test.blockWorkEnds)
+				require.Less(t, attempts[0], slotDuration-stateWorkLead(slotDuration))
+			})
+		})
+	}
+}
+
 func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
 	handler := &ApiHandler{}
 	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation(0, 0)
