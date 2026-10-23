@@ -2064,14 +2064,20 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 			// Invalid but no Done writer named: the invalidation is an in-flight
 			// ESTIMATE (MVReadResultDependency), which ValidateReadSet resolves without
 			// calling checkVersion. Find the estimate's writer so the caller waits for
-			// it — re-executing now would re-read the estimate and busy-loop.
-			result.TxIn.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+			// it — re-executing now would re-read the estimate and busy-loop. Validation
+			// also cross-checks the account's AddressPath and SelfDestructPath.
+			noteEstimate := func(a accounts.Address, p state.AccountPath, k accounts.StorageKey) {
 				rr := be.versionMap.ReadStatus(a, p, k, tv.version.TxIndex)
 				if rr.Status() == state.MVReadResultDependency {
 					if b := be.taskIndexOf(rr.DepIdx()); b > blocker && b < tv.index {
 						blocker = b
 					}
 				}
+			}
+			result.TxIn.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+				noteEstimate(a, p, k)
+				noteEstimate(a, state.AddressPath, accounts.NilKey)
+				noteEstimate(a, state.SelfDestructPath, accounts.NilKey)
 				return true
 			})
 		}
