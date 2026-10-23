@@ -408,8 +408,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 	from := s.BlockNumber + 1
 	defer func() {
-		if err == nil {
-			err = writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber)
+		// A loop-exhausted batch still advanced progress past these blocks.
+		if err == nil || IsOnlyLoopExhausted(err) {
+			if werr := writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber); werr != nil {
+				err = werr
+			}
 		}
 	}()
 
