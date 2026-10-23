@@ -45,6 +45,9 @@ type Query struct {
 	Headers  dbservices.HeaderReader
 	Txns     dbservices.TxnReader
 	Receipts *receipts.Generator
+	// Strict fails on a matched transaction whose body or receipt is
+	// missing, which Logs otherwise drops.
+	Strict bool
 }
 
 // Logs returns the logs of blocks [begin, end] that match crit, in order.
@@ -101,6 +104,10 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 				return nil, err
 			}
 			if !ok {
+				// Index -1 is the block's opening system transaction, which has no body.
+				if q.Strict && txIndex >= 0 {
+					return nil, fmt.Errorf("transaction %d of block %d not found", txIndex, blockNum)
+				}
 				continue
 			}
 			if r, err = q.Receipts.GetReceipt(ctx, cfg, tx, header, txn, txIndex, txNum, nil); err != nil {
@@ -108,6 +115,9 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 			}
 		}
 		if r == nil {
+			if q.Strict {
+				return nil, fmt.Errorf("receipt of transaction %d of block %d not found", txIndex, blockNum)
+			}
 			return nil, err
 		}
 		if logs, err = AppendLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults); err != nil {
