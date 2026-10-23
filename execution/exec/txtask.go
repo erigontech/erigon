@@ -220,11 +220,13 @@ type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, 
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum              uint64
-	TxIndex            int // -1 for block initialisation
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
+	TxNum   uint64
+	TxIndex int // -1 for block initialisation
+	Header  *types.Header
+	Txs     types.Transactions
+	Uncles  []*types.Header
+	// SendersRecovery is the block's background sender recovery a worker takes its sender from.
+	SendersRecovery    *SendersRecovery
 	Withdrawals        types.Withdrawals
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
@@ -289,6 +291,11 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
 		t.sender = sender
+		return t.sender, nil
+	}
+	if from, ok := t.SendersRecovery.Take(t.TxIndex); ok {
+		t.sender = accounts.InternAddress(from)
+		t.Tx().SetSender(t.sender)
 		return t.sender, nil
 	}
 	if t.signer == nil {

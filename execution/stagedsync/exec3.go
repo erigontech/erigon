@@ -747,6 +747,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var txTasks []exec.Task
 
 			blockStartTxNum := inputTxNum
+			var sendersRecovery *exec.SendersRecovery
+			if exec.RecoversSenders(header) {
+				sendersRecovery = te.cfg.readAheader.SendersRecovery(b.Hash())
+			}
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
 					inputTxNum++
@@ -762,6 +766,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Txs:             txs,
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
+					SendersRecovery: sendersRecovery,
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,

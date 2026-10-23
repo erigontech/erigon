@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -226,11 +227,37 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 type SendersRecovery struct {
 	done    chan struct{}
 	senders []byte
+	state   []atomic.Uint32 // per tx: senderFree, senderClaimed or senderRecovered
 	err     error
 }
 
+const (
+	senderFree uint32 = iota
+	senderClaimed
+	senderRecovered
+)
+
+// Take returns tx i's sender if the background recovered it. Otherwise it claims tx i,
+// so the background skips it, and the caller recovers the sender itself.
+func (r *SendersRecovery) Take(i int) (common.Address, bool) {
+	if r == nil || i < 0 || i >= len(r.state) || r.state[i].CompareAndSwap(senderFree, senderClaimed) {
+		return common.Address{}, false
+	}
+	for r.state[i].Load() == senderClaimed {
+		select {
+		case <-r.done:
+			if r.state[i].Load() != senderRecovered {
+				return common.Address{}, false
+			}
+		default:
+			runtime.Gosched()
+		}
+	}
+	return common.BytesToAddress(r.senders[i*length.Addr : (i+1)*length.Addr]), true
+}
+
 func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.Transactions) *SendersRecovery {
-	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr)}
+	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr), state: make([]atomic.Uint32, len(txns))}
 	go func() {
 		defer close(r.done)
 		var next atomic.Int64
@@ -242,12 +269,16 @@ func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.
 					if err := groupCtx.Err(); err != nil {
 						return err
 					}
+					if !r.state[i].CompareAndSwap(senderFree, senderClaimed) {
+						continue
+					}
 					from, err := signer.SenderWithContext(cryptoContext, txns[i])
 					if err != nil {
 						return err
 					}
 					fromValue := from.Value()
 					copy(r.senders[i*length.Addr:], fromValue[:])
+					r.state[i].Store(senderRecovered)
 				}
 				return nil
 			})
@@ -259,6 +290,15 @@ func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.
 
 func (bra *BlockReadAheader) AddSendersRecovery(blockHash common.Hash, r *SendersRecovery) {
 	bra.recoveries.Add(blockHash, r)
+}
+
+// SendersRecovery returns the block's background sender recovery, or nil.
+func (bra *BlockReadAheader) SendersRecovery(blockHash common.Hash) *SendersRecovery {
+	if bra == nil {
+		return nil
+	}
+	r, _ := bra.recoveries.Get(blockHash)
+	return r
 }
 
 func (bra *BlockReadAheader) RecoveredSenders(ctx context.Context, blockHash common.Hash) ([]byte, bool) {
