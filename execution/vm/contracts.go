@@ -34,7 +34,6 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	evmone "github.com/erigontech/evmone_precompiles"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
