@@ -94,12 +94,12 @@ func callCode(addr common.Address, value byte) []byte {
 }
 
 // A transaction touches an empty account, by a zero-value call or by paying it
-// a zero tip as the coinbase, so EIP-161 removes it at the end of that
-// transaction. A later transaction in the block, from another sender, uses the
-// account as an EIP-7702 authority, whose gas depends on whether the authority
-// exists: it must cost the same as for an authority that never existed. The
-// touch comes after a long loop, so the parallel executor usually runs the
-// authorization first and must invalidate it.
+// a zero tip as the coinbase or a zero burn as the burnt-fee recipient, so
+// EIP-161 removes it at the end of that transaction. A later transaction in the
+// block, from another sender, uses the account as an EIP-7702 authority, whose
+// gas depends on whether the authority exists: it must cost the same as for an
+// authority that never existed. The touch comes after a long loop, so the
+// parallel executor usually runs the authorization first and must invalidate it.
 func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 	// This test changes dbg.Exec3Parallel and cannot run in parallel.
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
@@ -126,13 +126,19 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 		coinbase common.Address
 		tip      uint64
 		code     []byte
+		burnt    bool
 	}{
-		{"zero-value call", common.Address{1}, 1, append(loop, callCode(authority, 0)...)},
-		{"zero tip", authority, 0, append(loop, byte(vm.STOP))},
+		{"zero-value call", common.Address{1}, 1, append(loop, callCode(authority, 0)...), false},
+		{"zero tip", authority, 0, append(loop, byte(vm.STOP)), false},
+		{"zero burn", common.Address{1}, 1, append(loop, callCode(authority, 0)...), true},
 	} {
 		for _, fork := range eip161TouchForks {
 			t.Run(tc.name+"/"+fork.name, func(t *testing.T) {
 				config := fork.config
+				if tc.burnt {
+					config = config.Copy()
+					config.BurntContract = map[string]common.Address{"0": authority}
+				}
 				signer := types.LatestSignerForChainID(config.ChainID)
 				auth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.HexToAddress("0xcafe"), 0)
 				require.NoError(t, err)
@@ -146,7 +152,11 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 					if withEmptyAuthority {
 						alloc[authority] = types.GenesisAccount{Balance: big.NewInt(0)}
 					}
-					return &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+					gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+					if tc.burnt {
+						gspec.BaseFee = new(uint256.Int)
+					}
+					return gspec
 				}
 				fill := func(b *blockgen.BlockGen) {
 					b.SetCoinbase(tc.coinbase)

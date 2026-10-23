@@ -646,7 +646,11 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		if ibs.IsVersioned() && !isGenesis {
 			var deferredFeeRecipients []accounts.Address
 			if !calcFees {
-				deferredFeeRecipients = []accounts.Address{result.Coinbase, result.ExecutionResult.BurntContractAddress}
+				deferredFeeRecipients = []accounts.Address{result.Coinbase}
+				// calcFees credits the burnt-fee recipient only for a non-zero burn.
+				if !result.ExecutionResult.FeeBurnt.IsZero() {
+					deferredFeeRecipients = append(deferredFeeRecipients, result.ExecutionResult.BurntContractAddress)
+				}
 			}
 			result.TxOut = ibs.FinalizedWrites(rules, deferredFeeRecipients...)
 		} else {
