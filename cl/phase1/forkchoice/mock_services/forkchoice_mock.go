@@ -117,7 +117,7 @@ type ForkChoiceStorageMock struct {
 	ReadEnvelopeFromDiskFunc                           func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetBeaconCommitteeMock                             func(slot, committeeIndex uint64) ([]uint64, error)
 	HeadLacksTargetShuffling                           bool
-	TargetBeaconCommitteeFn                            func(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error)
+	TargetBeaconCommitteeFn                            func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error)
 
 	Pool pool.OperationsPool
 
@@ -351,11 +351,11 @@ func (f *ForkChoiceStorageMock) HeadStateHasTargetShuffling(*state.CachingBeacon
 	return !f.HeadLacksTargetShuffling
 }
 
-func (f *ForkChoiceStorageMock) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+func (f *ForkChoiceStorageMock) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
 	if f.TargetBeaconCommitteeFn == nil {
 		return nil, 0, errors.New("target beacon committee not implemented")
 	}
-	return f.TargetBeaconCommitteeFn(target, slot, committeeIndex)
+	return f.TargetBeaconCommitteeFn(target, slot, committeeIndex, claimBuild)
 }
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {

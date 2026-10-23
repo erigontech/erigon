@@ -75,6 +75,7 @@ type aggregateAndProofServiceImpl struct {
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
+	targetStateBuildClaims *lru.Cache[targetStateBuildClaim, struct{}]
 	validatorParams        *validator_params.ValidatorParams
 
 	awaitingBlock *blockArrivalQueue
@@ -104,6 +105,7 @@ func NewAggregateAndProofService(
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
+		targetStateBuildClaims: newTargetStateBuildClaims(),
 		validatorParams:        validatorParams,
 		awaitingBlock: newBlockArrivalQueue(
 			forkchoiceStore,
@@ -290,6 +292,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	committee, committeesPerSlot, err := beaconCommittee(
 		a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex,
 		a.beaconCfg.SlotsPerEpoch, func() error { return a.verifyAggregateBeforeBuild(aggregateAndProof) },
+		claimTargetStateBuild(a.targetStateBuildClaims, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex, target.Epoch),
 	)
 	if err != nil {
 		return err

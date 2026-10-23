@@ -106,38 +106,77 @@ func (f *ForkChoiceStore) HeadStateHasTargetShuffling(headState *state.CachingBe
 }
 
 // TargetBeaconCommittee returns a committee from the target checkpoint state.
-func (f *ForkChoiceStore) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
-	var targetState *checkpointState
-	if cached, ok := f.checkpointStates.Load(target); ok {
-		targetState = cached.(*checkpointState)
-	} else {
-		if f.targetCommitteeBuilds.Add(1) > maxConcurrentTargetCommitteeBuilds {
-			f.targetCommitteeBuilds.Add(-1)
-			return nil, 0, errors.New("too many target committee builds")
-		}
-		defer f.targetCommitteeBuilds.Add(-1)
-		header, ok := f.forkGraph.GetHeader(target.Root)
-		if !ok {
-			return nil, 0, errors.New("target checkpoint block does not exist")
-		}
-		if header.Slot+maxTargetCheckpointBlockAge*f.beaconCfg.SlotsPerEpoch < slot {
-			return nil, 0, errors.New("target checkpoint block is too old")
-		}
-		if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok &&
-			f.Ancestor(target.Root, finalized.Epoch*f.beaconCfg.SlotsPerEpoch).Root != finalized.Root {
-			return nil, 0, errors.New("target checkpoint does not descend from finalized checkpoint")
-		}
-		var err error
-		targetState, err = f.getCheckpointState(target)
-		if err != nil {
-			return nil, 0, err
-		}
+// claimBuild is called only by the caller that starts an uncached build, and a false result refuses the build.
+func (f *ForkChoiceStore) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+	targetState, err := f.targetCheckpointState(target, slot, claimBuild)
+	if err != nil {
+		return nil, 0, err
 	}
 	if targetState == nil {
 		return nil, 0, errors.New("target state does not exist")
 	}
 	committee, committeesPerSlot := targetState.beaconCommittee(slot, committeeIndex)
 	return committee, committeesPerSlot, nil
+}
+
+type targetStateBuild struct {
+	done  chan struct{}
+	state *checkpointState
+	err   error
+}
+
+func (f *ForkChoiceStore) targetCheckpointState(target solid.Checkpoint, slot uint64, claimBuild func() bool) (*checkpointState, error) {
+	if cached, ok := f.checkpointStates.Load(target); ok {
+		return cached.(*checkpointState), nil
+	}
+	f.targetStateBuildsMu.Lock()
+	if build, ok := f.targetStateBuilds[target]; ok {
+		f.targetStateBuildsMu.Unlock()
+		<-build.done
+		return build.state, build.err
+	}
+	if cached, ok := f.checkpointStates.Load(target); ok {
+		f.targetStateBuildsMu.Unlock()
+		return cached.(*checkpointState), nil
+	}
+	if len(f.targetStateBuilds) >= maxConcurrentTargetCommitteeBuilds {
+		f.targetStateBuildsMu.Unlock()
+		return nil, errors.New("too many target committee builds")
+	}
+	if claimBuild != nil && !claimBuild() {
+		f.targetStateBuildsMu.Unlock()
+		return nil, errors.New("target state build already claimed")
+	}
+	if f.targetStateBuilds == nil {
+		f.targetStateBuilds = make(map[solid.Checkpoint]*targetStateBuild)
+	}
+	build := &targetStateBuild{done: make(chan struct{})}
+	f.targetStateBuilds[target] = build
+	f.targetStateBuildsMu.Unlock()
+
+	defer func() {
+		f.targetStateBuildsMu.Lock()
+		delete(f.targetStateBuilds, target)
+		f.targetStateBuildsMu.Unlock()
+		close(build.done)
+	}()
+	build.state, build.err = f.buildTargetCheckpointState(target, slot)
+	return build.state, build.err
+}
+
+func (f *ForkChoiceStore) buildTargetCheckpointState(target solid.Checkpoint, slot uint64) (*checkpointState, error) {
+	header, ok := f.forkGraph.GetHeader(target.Root)
+	if !ok {
+		return nil, errors.New("target checkpoint block does not exist")
+	}
+	if header.Slot+maxTargetCheckpointBlockAge*f.beaconCfg.SlotsPerEpoch < slot {
+		return nil, errors.New("target checkpoint block is too old")
+	}
+	if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok &&
+		f.Ancestor(target.Root, finalized.Epoch*f.beaconCfg.SlotsPerEpoch).Root != finalized.Root {
+		return nil, errors.New("target checkpoint does not descend from finalized checkpoint")
+	}
+	return f.getCheckpointState(target)
 }
 
 func (f *ForkChoiceStore) ProcessAttestingIndicies(

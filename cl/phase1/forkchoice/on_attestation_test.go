@@ -18,7 +18,9 @@ package forkchoice
 
 import (
 	"encoding/binary"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -179,18 +181,18 @@ func TestTargetBeaconCommitteeUsesCheckpointState(t *testing.T) {
 	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
 	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
 
-	committee, committeesPerSlot, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	committee, committeesPerSlot, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.NoError(t, err)
 	require.Equal(t, fixture.targetState.CommitteeCount(fixture.targetEpoch), committeesPerSlot)
 	require.Equal(t, fixture.targetValidator, committee[fixture.committeePosition])
 	require.NotContains(t, committee, fixture.headValidator)
 
-	committee, count, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, committeesPerSlot)
+	committee, count, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, committeesPerSlot, nil)
 	require.NoError(t, err)
 	require.Nil(t, committee)
 	require.Equal(t, committeesPerSlot, count)
 
-	_, _, err = store.TargetBeaconCommittee(solid.Checkpoint{Epoch: fixture.targetEpoch, Root: common.Hash{0xff}}, fixture.attestationSlot, fixture.committeeIndex)
+	_, _, err = store.TargetBeaconCommittee(solid.Checkpoint{Epoch: fixture.targetEpoch, Root: common.Hash{0xff}}, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.Error(t, err)
 }
 
@@ -205,10 +207,11 @@ func TestTargetBeaconCommitteeRejectsTargetOutsideFinalizedChain(t *testing.T) {
 		solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot},
 		fixture.attestationSlot,
 		fixture.committeeIndex,
+		nil,
 	)
 	require.Error(t, err)
 	require.Empty(t, graph.stateRoots())
-	require.Zero(t, store.targetCommitteeBuilds.Load())
+	require.Empty(t, store.targetStateBuilds)
 
 	t.Run("target is finalized root", func(t *testing.T) {
 		graph := fixture.forkGraph(false)
@@ -220,6 +223,7 @@ func TestTargetBeaconCommitteeRejectsTargetOutsideFinalizedChain(t *testing.T) {
 			solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetDependentRoot},
 			fixture.attestationSlot,
 			fixture.committeeIndex,
+			nil,
 		)
 		require.NoError(t, err)
 		require.Equal(t, []common.Hash{fixture.targetDependentRoot}, graph.stateRoots())
@@ -235,6 +239,7 @@ func TestTargetBeaconCommitteeRejectsTargetOutsideFinalizedChain(t *testing.T) {
 			solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.headDependentRoot},
 			fixture.attestationSlot,
 			fixture.committeeIndex,
+			nil,
 		)
 		require.Error(t, err)
 		require.Empty(t, graph.stateRoots())
@@ -249,33 +254,100 @@ func TestTargetBeaconCommitteeLimitsUncachedBuilds(t *testing.T) {
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
 	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
 
-	store.targetCommitteeBuilds.Store(maxConcurrentTargetCommitteeBuilds)
-	_, _, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	setBuildsInFlight := func(count int) {
+		store.targetStateBuilds = make(map[solid.Checkpoint]*targetStateBuild, count)
+		for epoch := range count {
+			store.targetStateBuilds[solid.Checkpoint{Epoch: uint64(epoch), Root: common.Hash{0xee}}] = &targetStateBuild{done: make(chan struct{})}
+		}
+	}
+
+	setBuildsInFlight(maxConcurrentTargetCommitteeBuilds)
+	_, _, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.Error(t, err)
 	require.Empty(t, graph.stateRoots())
-	require.Equal(t, int32(maxConcurrentTargetCommitteeBuilds), store.targetCommitteeBuilds.Load())
+	require.Len(t, store.targetStateBuilds, maxConcurrentTargetCommitteeBuilds)
 	headerCalls, blockCalls := graph.forkGraphCalls()
 	require.Zero(t, headerCalls)
 	require.Zero(t, blockCalls)
 
-	store.targetCommitteeBuilds.Store(maxConcurrentTargetCommitteeBuilds - 1)
-	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	setBuildsInFlight(maxConcurrentTargetCommitteeBuilds - 1)
+	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.NoError(t, err)
 	require.Equal(t, []common.Hash{fixture.targetRoot}, graph.stateRoots())
-	require.Equal(t, int32(maxConcurrentTargetCommitteeBuilds-1), store.targetCommitteeBuilds.Load())
+	require.Len(t, store.targetStateBuilds, maxConcurrentTargetCommitteeBuilds-1)
 
-	store.targetCommitteeBuilds.Store(maxConcurrentTargetCommitteeBuilds)
-	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	setBuildsInFlight(maxConcurrentTargetCommitteeBuilds)
+	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.NoError(t, err)
 	require.Equal(t, []common.Hash{fixture.targetRoot}, graph.stateRoots())
-	require.Equal(t, int32(maxConcurrentTargetCommitteeBuilds), store.targetCommitteeBuilds.Load())
 
 	errorGraph := fixture.forkGraph(false)
 	errorStore := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, errorGraph)
 	errorStore.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
-	_, _, err = errorStore.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	_, _, err = errorStore.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.Error(t, err)
-	require.Zero(t, errorStore.targetCommitteeBuilds.Load())
+	require.Empty(t, errorStore.targetStateBuilds)
+}
+
+func TestTargetBeaconCommitteeClaimsOnlyUncachedBuilds(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	graph := fixture.forkGraph(false)
+	graph.states[fixture.targetRoot] = fixture.targetState
+	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
+	claims := 0
+	claim := func(granted bool) func() bool {
+		return func() bool {
+			claims++
+			return granted
+		}
+	}
+
+	_, _, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, claim(false))
+	require.Error(t, err)
+	require.Empty(t, graph.stateRoots())
+
+	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, claim(true))
+	require.NoError(t, err)
+	_, _, err = store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, claim(false))
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{fixture.targetRoot}, graph.stateRoots())
+	require.Equal(t, 2, claims)
+}
+
+func TestTargetBeaconCommitteeWaitersShareInFlightBuild(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	graph := fixture.forkGraph(false)
+	graph.states[fixture.targetRoot] = fixture.targetState
+	graph.getStateStarted = make(chan common.Hash, 1)
+	graph.getStateRelease = make(chan struct{})
+	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
+	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
+	var claims atomic.Int32
+	callers := maxConcurrentTargetCommitteeBuilds + 1
+	results := make(chan error, callers)
+	call := func() {
+		_, _, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, func() bool {
+			claims.Add(1)
+			return true
+		})
+		results <- err
+	}
+
+	go call()
+	require.Equal(t, fixture.targetRoot, waitForStateLoad(t, graph.getStateStarted))
+	for range callers - 1 {
+		go call()
+	}
+	require.Never(t, func() bool { return len(results) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	close(graph.getStateRelease)
+	for range callers {
+		require.NoError(t, <-results)
+	}
+	require.Equal(t, int32(1), claims.Load())
+	require.Equal(t, []common.Hash{fixture.targetRoot}, graph.stateRoots())
 }
 
 func TestTargetBeaconCommitteeLimitsCheckpointBlockAge(t *testing.T) {
@@ -317,7 +389,7 @@ func TestTargetBeaconCommitteeLimitsCheckpointBlockAge(t *testing.T) {
 				store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: fixture.targetEpoch - 1, Root: fixture.targetDependentRoot})
 			}
 
-			_, _, err := store.TargetBeaconCommittee(test.target, test.slot, fixture.committeeIndex)
+			_, _, err := store.TargetBeaconCommittee(test.target, test.slot, fixture.committeeIndex, nil)
 			if test.wantRead {
 				require.NoError(t, err)
 				require.Equal(t, []common.Hash{test.target.Root}, graph.stateRoots())
