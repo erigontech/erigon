@@ -316,9 +316,6 @@ func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) 
 func MerkleProof(depth, proofIndex int, schema ...any) ([][32]byte, error) {
 	// Calculate the total number of leaves needed based on the schema length
 	maxDepth := GetDepth(uint64(len(schema)))
-	if utils.PowerOf2(uint64(maxDepth)) != uint64(len(schema)) {
-		maxDepth++
-	}
 
 	if depth != int(maxDepth) { // TODO: Add support for lower depths
 		return nil, fmt.Errorf("depth is different than maximum depth, have %d, want %d", depth, maxDepth)

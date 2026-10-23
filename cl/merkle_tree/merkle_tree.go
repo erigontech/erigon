@@ -172,7 +172,7 @@ func (m *MerkleTree) computeRoot(workers int) common.Hash {
 		if m.limit == nil {
 			return ZeroHashes[0]
 		}
-		return ZeroHashes[ChunkDepth(*m.limit)]
+		return ZeroHashes[GetDepth(*m.limit)]
 	}
 
 	if m.leavesCount <= 3 {

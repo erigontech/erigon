@@ -86,3 +86,28 @@ func TestHashSSZNonPowerOfTwoChunkLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestElementProofNonPowerOfTwoLimit(t *testing.T) {
+	for _, limit := range []int{3, 5} {
+		list := solid.NewStaticListSSZ[*solid.Checkpoint](limit, 40)
+		for i := range 3 {
+			list.Append(&solid.Checkpoint{Epoch: uint64(i + 1)})
+		}
+		listRoot, err := list.HashSSZ()
+		require.NoError(t, err)
+		for index := range list.Len() {
+			leaf, err := list.Get(index).HashSSZ()
+			require.NoError(t, err)
+			branch := list.ElementProof(index)
+			node := leaf
+			for depth, sibling := range branch {
+				if depth == len(branch)-1 || index>>depth&1 == 0 {
+					node = crypto.Sha256(node[:], sibling[:])
+				} else {
+					node = crypto.Sha256(sibling[:], node[:])
+				}
+			}
+			require.Equalf(t, common.Hash(listRoot), common.Hash(node), "limit %d index %d", limit, index)
+		}
+	}
+}
