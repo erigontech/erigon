@@ -29,9 +29,15 @@ instructions as well. See the [Ethereum Foundation announcement](https://blog.et
 - **Faster head updates at epoch boundaries.** Caplin prepares checkpoint states ahead of time and
   reduces epoch-processing work, shortening head-update delays at the first slot of an epoch
   (#25171, #25170, #25163) — by @awskii, @domiwei
+- **Gloas performance.** Caplin reduces hashing and signature-verification costs for block and
+  payload processing on Gloas networks such as Sepolia. It also retries payload preparation sooner
+  when block processing is busy and relays bursts of proposer preferences more reliably
+  (#25175, #25202, #25217, #25255, #25221, #25147, #25246) — by @domiwei, @lystopad
 - **Block-production delays.** `engine_getPayload` stops waiting for the parent block after a head
   change and returns the payload built so far. `engine_newPayload` avoids scanning every header
-  snapshot before validating a new block (#25254, #25242) — by @domiwei, @lystopad
+  snapshot before validating a new block. The new `--caplin.payload-preparation.disable` flag turns
+  off speculative payload preparation while keeping the validator API and normal block production
+  enabled (#25254, #25242, #25180) — by @domiwei, @lystopad, @yperbasis
 - **Head updates and envelope propagation.** Caplin reduces pauses from state dumps and speeds up
   block validation at epoch boundaries. It publishes head changes at the start of a slot, avoiding
   block-production failures caused by a stale head, and republishes Gloas execution payload envelopes
@@ -40,8 +46,9 @@ instructions as well. See the [Ethereum Foundation announcement](https://blog.et
   after restarts, restoring aggregate and sync contribution processing, custody requirements, and
   the correct block fee recipient (#25195) — by @domiwei
 - **Data availability after downtime.** Caplin backfills missing custody columns for blocks imported
-  during forward sync and preserves its highest advertised custody group count across restarts
-  (#25148, #25196) — by @lystopad, @domiwei
+  during forward sync and preserves its highest advertised custody group count across restarts.
+  The backfill covers the current forward-sync range; older gaps outside that range are not repaired
+  automatically (#25148, #25196) — by @lystopad, @domiwei
 - **Blob snapshot protection.** `capcli dump-blobs-snapshots` preserves existing and preverified
   segments by default and no longer replaces valid blob data with empty entries when blob-count
   records have been pruned (#25174) — by @awskii, @lystopad
@@ -49,9 +56,11 @@ instructions as well. See the [Ethereum Foundation announcement](https://blog.et
   responses. Historical block access list requests have bounded re-execution work and a separate
   serving stream, protecting block-body and receipt responses from expensive replay requests
   (#25119, #25107) — by @domiwei, @yperbasis
-- **Beacon API metadata.** `/eth/v1/node/identity` now returns `seq_number` instead of `seq`,
+- **Beacon API compatibility.** `/eth/v1/node/identity` now returns `seq_number` instead of `seq`,
   `0x`-prefixed `attnets` and `syncnets`, and `custody_group_count` from Fulu. Update tooling that
-  parses the previous metadata format (#25194) — by @domiwei
+  parses the previous metadata format. `POST /eth/v1/beacon/pool/sync_committees` now returns HTTP
+  `400` with failing message indices for validators outside the slot's sync committee, instead of
+  silently returning `200` (#25194, #25131) — by @domiwei, @lystopad
 
 ### Caplin archive upgrade notes
 
