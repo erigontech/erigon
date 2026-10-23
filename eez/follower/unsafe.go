@@ -126,17 +126,28 @@ func (o *overlay) step(ctx context.Context) error {
 	if err != nil || len(blocks) == 0 {
 		return err
 	}
-	if err := o.chain.Insert(ctx, blocks); err != nil {
-		return err
-	}
 	tip := blocks[len(blocks)-1]
+	if err := o.chain.Insert(ctx, blocks); err != nil {
+		return o.reject(ctx, number, hash, err)
+	}
 	if err := o.deriver.ForkChoiceTo(ctx, tip.Hash()); err != nil {
-		return fmt.Errorf("sequencer block %d (%x): %w", tip.NumberU64(), tip.Hash(), err)
+		return o.reject(ctx, number, hash, fmt.Errorf("sequencer block %d (%x): %w", tip.NumberU64(), tip.Hash(), err))
 	}
 	if tip.Hash() == hash {
 		o.last = hash
 	}
 	o.logger.Debug("[eez] head follows the sequencer", "event", "eez.node.follower.head.advanced", "number", tip.NumberU64(), "hash", tip.Hash())
+	return nil
+}
+
+// reject keeps the overlay off the sequencer head hash until the sequencer
+// moves on, instead of fetching and executing the same blocks every step.
+func (o *overlay) reject(ctx context.Context, number uint64, hash common.Hash, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	o.last = hash
+	o.logger.Warn("[eez] sequencer head rejected", "event", "eez.node.follower.head.rejected", "number", number, "hash", hash, "err", err)
 	return nil
 }
 

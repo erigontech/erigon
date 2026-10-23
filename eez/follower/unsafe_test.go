@@ -17,17 +17,21 @@
 package follower_test
 
 import (
+	"context"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
@@ -121,4 +125,53 @@ func TestUnsafeHead(t *testing.T) {
 	require.NoError(t, again.Boot(t.Context()))
 	require.NoError(t, again.StepOverlay(t.Context()))
 	n.requireBlocks(t, replaced.Blocks...)
+}
+
+// badHead serves a sequencer chain whose head has a wrong state root, and
+// counts the blocks it serves.
+type badHead struct {
+	follower.Sequencer
+	head   *types.Block
+	served atomic.Int32
+}
+
+func (s *badHead) Head(context.Context) (uint64, common.Hash, error) {
+	return s.head.NumberU64(), s.head.Hash(), nil
+}
+
+func (s *badHead) BlockByNumber(ctx context.Context, number uint64) (*types.Block, error) {
+	s.served.Add(1)
+	if number == s.head.NumberU64() {
+		return s.head, nil
+	}
+	return s.Sequencer.BlockByNumber(ctx, number)
+}
+
+// TestUnsafeHeadRejected: a sequencer head that fails execution is fetched
+// once, not again on every step while the sequencer stays on it.
+func TestUnsafeHeadRejected(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	settled := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	c.Post(derivertest.Posting{Batch: settled})
+	unsettled := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}})
+
+	header := unsettled.Blocks[0].Header()
+	header.Root = common.Hash{1}
+	seq := &badHead{Sequencer: sequencer(t, c.L2), head: unsettled.Blocks[0].WithSeal(header)}
+
+	_, chain := derivertest.NewL2(t)
+	cfg := testConfig
+	cfg.Dir, cfg.Sequencer = t.TempDir(), seq
+	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+
+	require.NoError(t, f.StepOverlay(t.Context()))
+	served := seq.served.Load()
+	require.Positive(t, served)
+	require.NoError(t, f.StepOverlay(t.Context()))
+	require.Equal(t, served, seq.served.Load(), "the rejected head is not fetched again")
+	fc, err := chain.Head(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, settled.Blocks[0].Hash(), fc.Hash())
 }
