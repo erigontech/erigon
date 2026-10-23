@@ -949,17 +949,31 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			}
 		}
 	} else {
+		keysCursor, err := roTx.CursorDupSort(d.ValuesTable)
+		if err != nil {
+			return Collation{}, fmt.Errorf("create %s keys cursorDupsort: %w", d.FilenameBase, err)
+		}
+		defer keysCursor.Close()
 		valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
 		}
 		defer valsCursor.Close()
-		for k, v, err := valsCursor.First(); k != nil; {
+		stepPrefix := make([]byte, 8)
+		binary.BigEndian.PutUint64(stepPrefix, stepVal)
+		for k, v, err := keysCursor.First(); k != nil; k, v, err = keysCursor.NextNoDup() {
 			if err != nil {
 				return coll, err
 			}
+			if binary.BigEndian.Uint64(v[:8]) < stepVal {
+				if v, err = valsCursor.SeekBothRange(k, stepPrefix); err != nil {
+					return coll, err
+				}
+				if v == nil {
+					continue
+				}
+			}
 			if binary.BigEndian.Uint64(v[:8]) != stepVal {
-				k, v, err = valsCursor.Next()
 				continue
 			}
 			if _, err = comp.Write(k); err != nil {
@@ -968,7 +982,6 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			if _, err = comp.Write(v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
 			}
-			k, v, err = valsCursor.NextNoDup()
 		}
 	}
 
