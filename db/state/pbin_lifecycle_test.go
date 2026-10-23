@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -132,6 +133,39 @@ func TestPBinLaggingShadowBuildsItsMissingStepFromDB(t *testing.T) {
 		if len(at.iis[i].files) > 0 {
 			require.GreaterOrEqual(t, at.iis[i].files[0].startTxNum, uint64(2*alignStepSize), "%s built below the canonical start", agg.standaloneIIs()[i].FilenameBase)
 		}
+	}
+}
+
+func TestPBinLaggingShadowBatchesItsMissingSteps(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateDomainFiles(t, "commitment-bin", agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	bin := agg.d[kv.CommitmentBinDomain]
+	want := writeDupSortStepBacklog(t, db, bin, alignStepSize, 7, 40, 5)
+
+	fin, started := agg.buildFilesInBackground(asTemporalRoDB(db), 7*alignStepSize, false, unboundedFinalityCtx)
+	require.True(t, started)
+	<-fin
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	files := at.d[kv.CommitmentBinDomain].files
+	for step := 1; step < 6; step++ {
+		i := slices.IndexFunc(files, func(f visibleFile) bool { return f.startTxNum == uint64(step)*alignStepSize })
+		require.GreaterOrEqual(t, i, 0, "commitment-bin has no file starting at step %d", step)
+		require.Equal(t, uint64(step+1)*alignStepSize, files[i].endTxNum)
+		got := map[string]string{}
+		r := bin.dataReader(files[i].src.decompressor)
+		r.Reset(0)
+		for r.HasNext() {
+			k, _ := r.Next(nil)
+			v, _ := r.Next(nil)
+			got[string(k)] = string(v)
+		}
+		require.Equal(t, want[step], got, "step %d", step)
 	}
 }
 
