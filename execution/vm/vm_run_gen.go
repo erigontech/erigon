@@ -495,7 +495,7 @@ run:
 						continue run
 					}
 				case SHL:
-					if jt[SHL].numPush != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+					if jt[SHL].constantGas != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.LtUint64(256) {
@@ -509,7 +509,7 @@ run:
 						continue run
 					}
 				case SHR:
-					if jt[SHR].numPush != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+					if jt[SHR].constantGas != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.LtUint64(256) {
@@ -523,7 +523,7 @@ run:
 						continue run
 					}
 				case SAR:
-					if jt[SAR].numPush != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+					if jt[SAR].constantGas != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.GtUint64(255) {
@@ -592,7 +592,7 @@ run:
 						continue run
 					}
 				case RETURNDATASIZE:
-					if jt[RETURNDATASIZE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[RETURNDATASIZE].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(uint64(len(evm.returnData)))
 						pc++
@@ -645,7 +645,7 @@ run:
 						continue run
 					}
 				case CHAINID:
-					if jt[CHAINID].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[CHAINID].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						chainId := evm.ChainRules().ChainID
 						callContext.Stack.pushRef().Set(chainId)
@@ -653,7 +653,7 @@ run:
 						continue run
 					}
 				case BASEFEE:
-					if jt[BASEFEE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[BASEFEE].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						baseFee := evm.Context.BaseFee
 						callContext.Stack.push(baseFee)
@@ -661,7 +661,7 @@ run:
 						continue run
 					}
 				case BLOBBASEFEE:
-					if jt[BLOBBASEFEE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[BLOBBASEFEE].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						blobBaseFee := evm.Context.BlobBaseFee
 						callContext.Stack.push(blobBaseFee)
@@ -669,7 +669,7 @@ run:
 						continue run
 					}
 				case PUSH0:
-					if jt[PUSH0].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().Clear()
 						pc++
@@ -693,6 +693,98 @@ run:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(gasLeft)
+						pc++
+						continue run
+					}
+				case BLOBHASH:
+					if jt[BLOBHASH].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						idx := callContext.Stack.peek()
+						if idx.LtUint64(uint64(len(evm.BlobHashes))) {
+							hash := evm.BlobHashes[idx.Uint64()]
+							idx.SetBytes32(hash[:])
+						} else {
+							idx.Clear()
+						}
+						pc++
+						continue run
+					}
+				case DUPN:
+					if jt[DUPN].constantGas != 0 && sLen < stackLimit && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						code := callContext.Contract.Code
+						pc++
+						x := byte(0)
+						if pc < uint64(len(code)) {
+							x = code[pc]
+						}
+
+						if x > 90 && x < 128 {
+							operand := x
+							res, err = nil, &ErrInvalidOpCode{opcode: DUPN, operand: &operand}
+							break run
+						}
+						n := decodeSingle(x)
+
+						if callContext.Stack.len() < n {
+							res, err = nil, &ErrStackUnderflow{stackLen: callContext.Stack.len(), required: n}
+							break run
+						}
+
+						callContext.Stack.dup(n - 1)
+						pc++
+						continue run
+					}
+				case SWAPN:
+					if jt[SWAPN].constantGas != 0 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						code := callContext.Contract.Code
+						pc++
+						x := byte(0)
+						if pc < uint64(len(code)) {
+							x = code[pc]
+						}
+
+						if x > 90 && x < 128 {
+							operand := x
+							res, err = nil, &ErrInvalidOpCode{opcode: SWAPN, operand: &operand}
+							break run
+						}
+						n := decodeSingle(x)
+
+						if callContext.Stack.len() < n+1 {
+							res, err = nil, &ErrStackUnderflow{stackLen: callContext.Stack.len(), required: n + 1}
+							break run
+						}
+
+						callContext.Stack.swap(n)
+						pc++
+						continue run
+					}
+				case EXCHANGE:
+					if jt[EXCHANGE].constantGas != 0 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						code := callContext.Contract.Code
+						pc++
+						x := byte(0)
+						if pc < uint64(len(code)) {
+							x = code[pc]
+						}
+
+						if x > 81 && x < 128 {
+							operand := x
+							res, err = nil, &ErrInvalidOpCode{opcode: EXCHANGE, operand: &operand}
+							break run
+						}
+						n, m := decodePair(x)
+						need := max(n, m) + 1
+
+						if callContext.Stack.len() < need {
+							res, err = nil, &ErrStackUnderflow{stackLen: callContext.Stack.len(), required: need}
+							break run
+						}
+
+						callContext.Stack.exchange(n, m)
 						pc++
 						continue run
 					}
@@ -827,6 +919,10 @@ var isColdOp = [256]bool{
 	PC:             true,
 	MSIZE:          true,
 	GAS:            true,
+	BLOBHASH:       true,
+	DUPN:           true,
+	SWAPN:          true,
+	EXCHANGE:       true,
 	DUP9:           true,
 	DUP10:          true,
 	DUP11:          true,

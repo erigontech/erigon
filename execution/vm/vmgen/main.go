@@ -140,6 +140,10 @@ func coldOps() []fastOp {
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
 		op("GAS", "opGas"),
+		forked(alu("BLOBHASH", "opBlobHash", 1)),
+		forked(fastOp{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1}),
+		forked(fastOp{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep"}),
+		forked(fastOp{name: "EXCHANGE", execute: "opExchange", gas: "GasFastestStep"}),
 	}
 	for n := 9; n <= 16; n++ {
 		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)", minStack: "int(op-DUP1)+1"})
@@ -383,7 +387,7 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 		o := &ops[i]
 		var cond []string
 		if o.fork {
-			cond = append(cond, "jt["+o.name+"].numPush != 0")
+			cond = append(cond, "jt["+o.name+"].constantGas != 0")
 		}
 		switch {
 		case o.minStack != "":
