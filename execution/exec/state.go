@@ -132,6 +132,9 @@ type WorkerContext struct {
 	metrics *WorkerMetrics
 	// per-worker, single-owner domain read-metrics accumulator.
 	readMetrics *kvmetrics.DomainMetrics
+	// collectorAcc keeps this worker's reads for the process-level collector until
+	// a non-blocking TrySend hands them off; Close flushes the rest.
+	collectorAcc *kvmetrics.DomainMetrics
 }
 
 // installWorkerGetHash points the EVM's BLOCKHASH lookup at the worker's own
@@ -171,9 +174,10 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 
 		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 
-		dirs:        dirs,
-		metrics:     metrics,
-		readMetrics: kvmetrics.NewDomainMetrics(),
+		dirs:         dirs,
+		metrics:      metrics,
+		readMetrics:  kvmetrics.NewDomainMetrics(),
+		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
 	return w
@@ -209,6 +213,12 @@ func (rw *WorkerContext) Close() {
 	defer rw.lock.Unlock()
 	rw.ibs.Close()
 	_ = rw.bindTx(nil)
+	if dbg.KVReadLevelledMetrics && rw.rs != nil {
+		if c := rw.rs.Domains().Collector(); c != nil {
+			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
+			rw.collectorAcc = kvmetrics.NewDomainMetrics()
+		}
+	}
 }
 
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
@@ -325,8 +335,13 @@ func (rw *WorkerContext) PublishReadMetrics() {
 	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
 		return
 	}
-	rw.rs.Domains().LogMergeMetrics(rw.readMetrics)
+	doms := rw.rs.Domains()
+	doms.LogMergeMetrics(rw.readMetrics)
+	rw.collectorAcc.Merge(rw.readMetrics)
 	rw.readMetrics.Reset()
+	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+		rw.collectorAcc = kvmetrics.NewDomainMetrics()
+	}
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
