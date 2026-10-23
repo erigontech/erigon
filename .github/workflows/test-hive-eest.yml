@@ -119,15 +119,29 @@ jobs:
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 0
               commitment_mode: parallel
+            # all rlp tests take too long, so only two EIPs run. The two fork
+            # classes, [AC] and [^AC], cover every fork exactly once.
             - sim: consume-rlp
-              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
-              shard: rlp
+              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*fork_[AC]"
+              shard: rlp-ac
               fixtures-tarball: eest_stable
               max-failures: 0
               commitment_mode: serial
             - sim: consume-rlp
-              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
-              shard: rlp
+              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*fork_[AC]"
+              shard: rlp-ac
+              fixtures-tarball: eest_stable
+              max-failures: 0
+              commitment_mode: parallel
+            - sim: consume-rlp
+              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*fork_[^AC]"
+              shard: rlp-rest
+              fixtures-tarball: eest_stable
+              max-failures: 0
+              commitment_mode: serial
+            - sim: consume-rlp
+              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*fork_[^AC]"
+              shard: rlp-rest
               fixtures-tarball: eest_stable
               max-failures: 0
               commitment_mode: parallel
