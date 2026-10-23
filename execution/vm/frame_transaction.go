@@ -80,6 +80,8 @@ func (evm *EVM) ApproveFrame(address accounts.Address, scope uint64) error {
 		if balance.Lt(&ctx.MaxCost) {
 			return ErrExecutionReverted
 		}
+		// Payment approval consumes the nonce set exactly once. The state journal
+		// makes the nonce updates, fee debit and approval context revert together.
 		if err := evm.consumeFrameNonce(); err != nil {
 			return err
 		}
@@ -98,6 +100,8 @@ func (evm *EVM) consumeFrameNonce() error {
 	ibs := evm.intraBlockState
 	if tx.UsesLegacyNonce() {
 		sender := accounts.InternAddress(tx.SenderAddress)
+		// Earlier frames may have changed the account nonce. Increment its current
+		// value rather than assigning the transaction's sequence plus one.
 		nonce, err := ibs.GetNonce(sender)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -117,6 +121,8 @@ func (evm *EVM) consumeFrameNonce() error {
 		}
 		return nil
 	}
+	// Keyed-nonce access is protocol bookkeeping, prepaid in intrinsic gas.
+	// It records normal state accesses but must not warm the address or slots.
 	manager := accounts.InternAddress(types.FrameNonceManager)
 	var slots [types.FrameMaxNonceKeys]accounts.StorageKey
 	var stateGas uint64
@@ -186,6 +192,8 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 			return nil, gas.Execution, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if frame.Mode == types.FrameVerify && codeHash.IsEmpty() {
+			// Signature validity was checked before execution. Default EOA code
+			// still checks that the required signature authorizes this target and scope.
 			scope := frame.Flags & types.FrameApproveBoth
 			index := 1
 			if scope&types.FrameApproveExecution != 0 {

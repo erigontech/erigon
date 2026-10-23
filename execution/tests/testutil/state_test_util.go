@@ -67,6 +67,9 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
+	// When every post has txbytes, those bytes are the input to transaction
+	// validation. The JSON metadata may contain intentionally invalid values,
+	// so decode it into stTransaction only when a post needs the fallback.
 	dec := struct {
 		*stJSON
 		Tx jsoniter.RawMessage `json:"transaction"`

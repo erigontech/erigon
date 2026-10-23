@@ -117,6 +117,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil
+		// Transaction rejection and mempool simulation undo every frame's changes.
+		// Ordinary execution failures use the frame or batch snapshot instead,
+		// preserving approvals and nonce consumption from earlier successful frames.
 		if err != nil || validation != nil {
 			st.state.RevertToSnapshot(snapshot, err)
 		}
@@ -182,10 +185,13 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		}
 		if batchStart >= 0 {
 			if frameErr != nil {
+				// The journal restores state-gas charges, including refills to earlier
+				// frames. Executed frames keep their status and execution-gas usage.
 				st.state.RevertToSnapshot(batchSnapshot, frameErr)
 				for j := batchStart; j <= i; j++ {
 					ctx.Receipts[j].Logs = nil
 				}
+				// The first frame without the flag is still part of this batch.
 				for tx.Frames[i].Flags&types.FrameAtomicBatch != 0 {
 					i++
 					ctx.Receipts[i].Status = types.ReceiptStatusSkipped
@@ -210,6 +216,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if refunds {
 		refund = min(st.state.GetRefund(), used.Total()/params.RefundQuotientEIP3529)
 	}
+	// Refunds reduce the payer's fee, but do not free block execution capacity.
+	// The calldata floor applies to execution gas; state gas is paid in addition.
 	blockExecution := max(used.Execution, floor)
 	paidExecution := floor
 	if used.Execution > refund {

@@ -90,11 +90,10 @@ func builtinTxType(id byte) bool {
 	return false
 }
 
-// hasStandardReceiptPayload reports whether id's receipts are the typed receipt
-// with the built-in payload. Its own list rather than builtinTxType: EIP-2718
-// leaves ReceiptPayload type-specific, so a built-in that adds a consensus
-// receipt field stays off this one. Legacy carries no type byte; a registered
-// type has to opt in.
+// hasStandardReceiptPayload reports whether id uses the standard typed receipt payload.
+// EIP-2718 permits type-specific payloads: frame receipts include the payer and
+// per-frame results, so standard encoding would omit fields and change the receipt root.
+// Legacy receipts carry no type byte. Registered types must explicitly opt in.
 func hasStandardReceiptPayload(id byte) bool {
 	switch id {
 	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:

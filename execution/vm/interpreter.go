@@ -258,6 +258,8 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 
 func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
 	if ctx.frameContext != nil && t == mdgas.StateGas {
+		// All EVM calls within a transaction frame share its state-gas budget.
+		// State charges cannot borrow execution gas or use a per-call reservoir.
 		old := ctx.Gas()
 		if !ctx.frameContext.ChargeStateGas(gas) {
 			return false

@@ -284,7 +284,9 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	return t, nil
 }
 
-// UnwrapTxPlayloadRlp removes the blob sidecar in place, preserving the transaction type.
+// UnwrapTxPlayloadRlp removes a blob or frame transaction's sidecar without copying.
+// The result shares the input buffer, whose wrapper bytes may be overwritten to
+// preserve the transaction type. Unwrapped transactions and other types are unchanged.
 func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if len(blobTxRlp) == 0 || (blobTxRlp[0] != BlobTxType && blobTxRlp[0] != FrameTxType) {
 		return blobTxRlp, nil

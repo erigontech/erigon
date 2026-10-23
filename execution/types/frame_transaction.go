@@ -260,6 +260,8 @@ func (tx *FrameTransaction) GetBlobGas() uint64 {
 func (tx *FrameTransaction) GetGasLimit() uint64 {
 	_, _, limits, err := tx.GasLimits()
 	if err != nil {
+		// The interface cannot return an error. Saturate so invalid limits
+		// cannot wrap to a small value and pass gas-cap checks.
 		return math.MaxUint64
 	}
 	return limits.Total()
@@ -285,6 +287,7 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 	if err != nil {
 		return 0, 0, limits, err
 	}
+	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
 	addData(rlp.AppendUint64(nonceData, tx.Nonce))
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
@@ -457,6 +460,8 @@ func (tx *FrameTransaction) Hash() common.Hash {
 }
 
 func (tx *FrameTransaction) SigningHash(*uint256.Int) common.Hash {
+	// Empty-message entries sign this transaction, so omit their signatures to
+	// avoid self-reference. Signatures over explicit messages stay in the hash.
 	signatures := slices.Clone(tx.Signatures)
 	for i := range signatures {
 		if len(signatures[i].Message) == 0 {

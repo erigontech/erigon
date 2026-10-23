@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// FrameContext journals approvals and state-gas charges with their state changes.
+// Call, frame and atomic-batch rollbacks undo both; execution gas remains charged.
 type FrameContext struct {
 	Transaction    *types.FrameTransaction
 	Receipts       []types.FrameReceipt
@@ -33,7 +35,7 @@ type FrameContext struct {
 	MaxCost        uint256.Int
 	SigningHash    common.Hash
 	NonceKeysHash  common.Hash
-	LegacyNonce    uint64
+	LegacyNonce    uint64 // Sender's account nonce before any frame executes, for TXPARAM.
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8
@@ -101,6 +103,8 @@ func (ctx *FrameContext) RefillStorageGas(address accounts.Address, key accounts
 	if owner == 0 {
 		panic("storage refill without frame owner")
 	}
+	// Return the charge to the frame that created the slot. A later frame may
+	// clear it, but must not gain spendable state gas from an earlier frame.
 	ctx.refillStateGas(int(owner)-1, amount)
 	ctx.setStorageOwner(address, key, 0)
 }

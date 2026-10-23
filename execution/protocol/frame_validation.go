@@ -52,6 +52,8 @@ type frameValidationTracer struct {
 
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
+// ValidateFrameTransaction applies public-mempool policy to the validation prefix,
+// stopping after payment approval and reverting all simulated state changes.
 func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameValidation, error) {
 	validation, err := frameValidationPrefix(tx)
 	if err != nil {
@@ -69,6 +71,8 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	validation.evm = evm
 	validation.dependencies = map[common.Address]struct{}{tx.SenderAddress: {}}
 	if !tx.UsesLegacyNonce() {
+		// Dependencies are tracked by address, so any nonce-manager storage change
+		// triggers revalidation, including changes to this sender's selected keys.
 		validation.dependencies[types.FrameNonceManager] = struct{}{}
 	}
 	config.Tracer = &tracing.Hooks{OnOpcodeV2: validation.onOpcode, OnEnterV2: validation.onEnter}
