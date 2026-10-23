@@ -87,6 +87,28 @@ func TestPBinLaggingShadowDoesNotClampVisibleFiles(t *testing.T) {
 	require.EqualValues(t, alignStepSize, at.d[kv.CommitmentBinDomain].files.EndTxNum())
 }
 
+func TestPBinLaggingShadowBuildsItsMissingStepFromDB(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateDomainFiles(t, "commitment-bin", agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	writeDupSortStepBacklog(t, db, agg.d[kv.CommitmentBinDomain], alignStepSize, 4, 8, 1)
+
+	fin, started := agg.buildFilesInBackground(asTemporalRoDB(db), 4*alignStepSize, false, unboundedFinalityCtx)
+	require.True(t, started)
+	<-fin
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	files := at.d[kv.CommitmentBinDomain].files
+	require.NotEmpty(t, files)
+	for i := 1; i < len(files); i++ {
+		require.Equal(t, files[i-1].endTxNum, files[i].startTxNum, "commitment-bin visible files have a gap")
+	}
+	require.Equal(t, at.d[kv.CommitmentDomain].files.EndTxNum(), files.EndTxNum())
+}
+
 func TestPBinCanonicalRoleDoesNotChangeHexReferences(t *testing.T) {
 	agg := &Aggregator{trieVariant: TrieVariantHexBin}
 	agg.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)

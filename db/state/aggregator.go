@@ -2714,6 +2714,17 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}
 		}
 
+		vis := a.visible.Load()
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			d := a.d[domain]
+			if d == nil || !d.Enabled || vis.d[domain] == nil || a.isDomainFrozen(domain) || a.CommitmentDomainStopped(domain) {
+				continue
+			}
+			if end := vis.d[domain].files.EndTxNum(); end > 0 {
+				step = min(step, kv.Step(end/a.StepSize()))
+			}
+		}
+
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
