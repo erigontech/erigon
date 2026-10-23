@@ -1300,7 +1300,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execFailed = append(executor.execFailed, 0)
 
 		executor.execTasks.pushPending(i)
-		executor.validateTasks.pushPending(i)
 
 		switch {
 		case len(t.Dependencies()) > 0:
