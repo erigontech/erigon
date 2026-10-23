@@ -33,8 +33,7 @@ import (
 
 func TestPBTFileStagesReportIntermediateProgress(t *testing.T) {
 	configurePBTGoldenSuite(t, commitment.PBinHashBlake3, true)
-	source, _ := newPBTConversionSource(t)
-	addPBTGoldenStorageBucket(t, source)
+	source, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 5000, nil)
 	previousHandler := log.Root().GetHandler()
 	previousInterval := state.PBTProgressInterval
 	var logs bytes.Buffer

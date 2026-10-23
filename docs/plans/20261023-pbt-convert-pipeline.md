@@ -304,22 +304,22 @@ flowchart LR
 - Create: `db/state/pbt_row_lanes.go`, `db/state/pbt_row_lanes_test.go`
 - Modify: `db/state/pbt_range_writer.go`, `db/state/pbt_range_writer_test.go`
 
-- [ ] per range: one append-only lane file per partition (`pbinPartitionOf` of the row's path, at most 48) and one
+- [x] per range: one append-only lane file per partition (`pbinPartitionOf` of the row's path, at most 48) and one
       skip collector (ETL with the background merge). A row goes to its lane when its key is above the lane's last
       key. Otherwise it goes to the skip collector, as do rows above bit 12, the global root and the `state` key that
       `buildFiles` injects. ETL D is deleted.
-- [ ] a range's `.kv` input is its lanes concatenated in partition order, merged with the skip collector. An equal or
+- [x] a range's `.kv` input is its lanes concatenated in partition order, merged with the skip collector. An equal or
       decreasing key in the merged output is a named error. Lane files are removed after their range is built, and on
       any failure.
-- [ ] progress per range: lane bytes, skip rows, and their share of the range.
-- [ ] tests:
+- [x] progress per range: lane bytes, skip rows, and their share of the range.
+- [x] tests:
   - lanes plus skip give exactly the sorted sequence for random emission orders that include F9 parents, shallow rows,
     the global root and the `state` key;
   - a duplicate key fails with its error;
   - the golden harness stays green at `MaxOps` 7, 1000 and 100000;
   - a counter shows rows took both paths.
-- [ ] GUARDS: make the merge drop the skip collector, and name the golden assertion that fires.
-- [ ] run the gate — must pass before Task 8.
+- [x] GUARDS: make the merge drop the skip collector, and name the golden assertion that fires.
+- [x] run the gate — must pass before Task 8.
 
 ### Task 8: Parallel file ranges and indexes
 **Files:**

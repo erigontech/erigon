@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -66,9 +65,9 @@ const (
 )
 
 type pbinRange struct {
-	start     uint64
-	end       uint64
-	collector *etl.Collector
+	start uint64
+	end   uint64
+	rows  *pbinRowLanes
 }
 
 type pbinStampSplit struct {
@@ -523,9 +522,9 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			maxBytes:     limits.MaxBytes,
 			stateInFiles: !limits.NoRangePastFrontier,
 			ranges: []pbinRange{{
-				start:     0,
-				end:       endTxNum + 1,
-				collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true),
+				start: 0,
+				end:   endTxNum + 1,
+				rows:  newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("0-%d", endTxNum+1)),
 			}},
 		}, nil
 	}
@@ -539,9 +538,9 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			break
 		}
 		ranges = append(ranges, pbinRange{
-			start:     start,
-			end:       end,
-			collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true),
+			start: start,
+			end:   end,
+			rows:  newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end)),
 		})
 	}
 	if len(ranges) == 0 {
@@ -554,9 +553,9 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			return nil, fmt.Errorf("pbin range writer: end txNum is too large")
 		}
 		ranges = append(ranges, pbinRange{
-			start:     ranges[len(ranges)-1].end,
-			end:       endTxNum + 1,
-			collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true),
+			start: ranges[len(ranges)-1].end,
+			end:   endTxNum + 1,
+			rows:  newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", ranges[len(ranges)-1].end, endTxNum+1)),
 		})
 	}
 	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, stateInFiles: stateInFiles}, nil
@@ -628,7 +627,14 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		if rangeErr != nil {
 			return rangeErr
 		}
-		return w.ranges[rangeIndex].collector.Collect(key, data)
+		route, collectErr := w.ranges[rangeIndex].rows.collect(key, data)
+		if collectErr != nil {
+			return collectErr
+		}
+		if w.pipelineHook != nil {
+			return w.pipelineHook(route, 0)
+		}
+		return nil
 	}
 	serialVisit := func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error {
 		for i, op := range batch {
@@ -728,6 +734,9 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		})
 	}
 	streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream)
+	if streamErr != nil && pipeline != nil {
+		pipeline.stop()
+	}
 	var pipelineErr error
 	if pipeline != nil {
 		pipelineErr = pipeline.close()
@@ -791,7 +800,7 @@ func (w *PBinRangeWriter) rangeForStamp(stamp uint64) (int, error) {
 
 func (w *PBinRangeWriter) closeRanges() {
 	for i := range w.ranges {
-		w.ranges[i].collector.Close()
+		w.ranges[i].rows.close()
 	}
 }
 
@@ -810,20 +819,33 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		collation := Collation{valuesComp: valuesComp, valuesPath: valuesPath}
 		writer := seg.NewWriter(valuesComp, seg.CompressNone)
 		if w.stateInFiles && i == len(w.ranges)-1 && len(state) != 0 {
-			if collectErr := w.ranges[i].collector.Collect(commitment.KeyCommitmentState, state); collectErr != nil {
+			if _, collectErr := w.ranges[i].rows.collect(commitment.KeyCommitmentState, state); collectErr != nil {
 				valuesComp.Close()
 				return collectErr
 			}
 		}
 		rangeProgress := newPbtRangeProgress(w.aggregator.Dirs().Tmp, fmt.Sprintf("range %d-%d", stepFrom, stepTo))
-		kvProgress := rangeProgress.batch(".kv", w.ranges[i].collector.Collected())
-		err = w.ranges[i].collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		rows := w.ranges[i].rows
+		if err = rows.finalize(); err != nil {
+			valuesComp.Close()
+			return err
+		}
+		rowProgress := rangeProgress.stage("rows", rows.count())
+		rowProgress.SetFields("lane_bytes", rows.laneBytes(), "skip_rows", rows.skipRows(), "skip_share", rows.skipShare())
+		rowProgress.Add(rows.count())
+		rowProgress.Done()
+		kvProgress := rangeProgress.batch(".kv", rows.count())
+		err = rows.load(ctx, func(key, value []byte) error {
 			if _, writeErr := writer.Write(key); writeErr != nil {
 				return writeErr
 			}
-			_, valueErr := writer.Write(value)
-			return valueErr
-		}, etl.TransformArgs{Progress: kvProgress})
+			if _, valueErr := writer.Write(value); valueErr != nil {
+				return valueErr
+			}
+			kvProgress.Add(1)
+			return nil
+		})
+		kvProgress.Done()
 		if err != nil {
 			valuesComp.Close()
 			return err
@@ -837,6 +859,9 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		domain.integrateDirtyFiles(static, w.ranges[i].start, w.ranges[i].end)
 		w.aggregator.recalcVisibleFiles(nil)
 		w.aggregator.dirtyFilesLock.Unlock()
+		if err := rows.cleanup(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
