@@ -591,10 +591,6 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
 		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
-	case modexpU256Applicable(base, mod):
-		// A fixed-width uint256 square-and-multiply avoids arbitrary-precision
-		// overhead and the cgo boundary.
-		modexpU256(result, base, exp, mod)
 	default:
 		evmone.ModExp(result, base, exp, mod)
 	}
