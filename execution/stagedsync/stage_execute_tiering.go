@@ -42,8 +42,8 @@ var (
 	mxTieringLagBlocks           = metrics.GetOrCreateGaugeVec("tiering_lag_blocks", []string{"domain", "reason"})
 	mxTieringColdResidentFiles   = metrics.GetOrCreateGaugeVec("tiering_cold_resident_files", []string{"domain"})
 	mxTieringColdResidentBytes   = metrics.GetOrCreateGaugeVec("tiering_cold_resident_bytes", []string{"domain"})
-	mxTieringHDDEndStep          = metrics.GetOrCreateGaugeVec("tiering_hdd_end_step", []string{"domain"})
-	mxTieringSSDStartStep        = metrics.GetOrCreateGaugeVec("tiering_ssd_start_step", []string{"domain"})
+	mxTieringHDDEndBlock         = metrics.GetOrCreateGaugeVec("tiering_hdd_end_block", []string{"domain"})
+	mxTieringSSDStartBlock       = metrics.GetOrCreateGaugeVec("tiering_ssd_start_block", []string{"domain"})
 	mxTieringCommitmentBytes     = metrics.GetOrCreateGaugeVec("tiering_commitment_bytes", []string{"tier", "kind"})
 	mxTieringDuplicateBytes      = metrics.GetOrCreateGaugeVec("tiering_duplicate_bytes", []string{"reason"})
 
@@ -111,8 +111,14 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 	}
 	mxTieringColdResidentFiles.WithLabelValues(name).SetInt(commitmentLag.ColdResident.Files)
 	mxTieringColdResidentBytes.WithLabelValues(name).SetUint64(commitmentLag.ColdResident.Bytes)
-	mxTieringHDDEndStep.WithLabelValues(name).SetUint64(commitmentLag.ColdEnd / stepSize)
-	mxTieringSSDStartStep.WithLabelValues(name).SetUint64(commitmentLag.HotStart / stepSize)
+	hddEnd, ssdStart, err := tierEdgeBlocks(commitmentLag.ColdEnd, commitmentLag.HotStart, func(txNum uint64) (uint64, error) {
+		return blockOfTxNum(ctx, cfg, tx, txNum, head)
+	})
+	if err != nil {
+		return err
+	}
+	mxTieringHDDEndBlock.WithLabelValues(name).SetUint64(hddEnd)
+	mxTieringSSDStartBlock.WithLabelValues(name).SetUint64(ssdStart)
 	mxTieringDuplicateBytes.WithLabelValues("copying").SetUint64(copyingBytes)
 	if err := reportCommitmentTiers(ctx, cfg, tx, files, commitmentLag, boundary, boundaryTxNum); err != nil {
 		return err
@@ -229,4 +235,15 @@ func tieringFiles(visible kv.VisibleFiles) ([]tiering.File, error) {
 
 func usageString(u tiering.Usage) string {
 	return fmt.Sprintf("%d/%s", u.Files, common.ByteCount(u.Bytes))
+}
+
+// tierEdgeBlocks returns the block of the last cold tx (0 when nothing is cold) and the block of the first hot tx.
+func tierEdgeBlocks(coldEnd, hotStart uint64, blockOf func(txNum uint64) (uint64, error)) (hddEnd, ssdStart uint64, err error) {
+	if coldEnd > 0 {
+		if hddEnd, err = blockOf(coldEnd - 1); err != nil {
+			return 0, 0, err
+		}
+	}
+	ssdStart, err = blockOf(hotStart)
+	return hddEnd, ssdStart, err
 }
