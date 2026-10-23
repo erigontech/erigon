@@ -17,6 +17,7 @@ network_params:
   preset: minimal
   num_validator_keys_per_node: 32
   electra_fork_epoch: 1
+  fulu_fork_epoch: 100000
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
