@@ -18,7 +18,9 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -29,12 +31,23 @@ import (
 
 func TestPBTPartitionWriteProgressCountsEachOpOnce(t *testing.T) {
 	previous := log.Root().GetHandler()
+	previousInterval := PBTProgressInterval
 	var logs bytes.Buffer
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
-	t.Cleanup(func() { log.Root().SetHandler(previous) })
-	ops := []pbt.Op{
-		{Key: eip8297.TreeKeyAccount(bytes.Repeat([]byte{1}, 20), eip8297.BasicDataLeafKey), Value: [32]byte{1}},
-		{Key: eip8297.TreeKeyAccount(bytes.Repeat([]byte{2}, 20), eip8297.BasicDataLeafKey), Value: [32]byte{2}},
+	PBTProgressInterval = time.Nanosecond
+	t.Cleanup(func() {
+		log.Root().SetHandler(previous)
+		PBTProgressInterval = previousInterval
+	})
+	const totalOps = 5000
+	address := bytes.Repeat([]byte{1}, 20)
+	ops := make([]pbt.Op, totalOps)
+	for i := range ops {
+		slot := make([]byte, 32)
+		binary.BigEndian.PutUint64(slot[24:], uint64(i))
+		var value [32]byte
+		binary.BigEndian.PutUint64(value[24:], uint64(i))
+		ops[i] = pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: value}
 	}
 	ops = pbinSortedOps(ops)
 	batches, err := pbinRebuildBatches(ops, t.TempDir(), 1, 1<<20)
@@ -44,5 +57,6 @@ func TestPBTPartitionWriteProgressCountsEachOpOnce(t *testing.T) {
 		count += len(batch)
 	}
 	require.Equal(t, len(ops), count)
-	require.Contains(t, logs.String(), `phase="pbin-ops file write" done=2 `, "two written operations must report done=2")
+	require.Contains(t, logs.String(), `phase="pbin-ops file write" done=4096 `, "sampled progress must report the threshold")
+	require.Contains(t, logs.String(), `phase="pbin-ops file write" done=5000 `, "all written operations must report done=5000")
 }
