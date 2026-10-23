@@ -211,14 +211,6 @@ func catchUpPublishingHead(args Args) StageName {
 	return next
 }
 
-func rerunForkChoiceAtTip(cfg *Cfg, args Args) bool {
-	if !args.headUnpublished || args.seenSlot < args.targetSlot || time.Since(cfg.forkChoiceRerunAt) < sleepForSlotRewakeInterval {
-		return false
-	}
-	cfg.forkChoiceRerunAt = time.Now()
-	return true
-}
-
 func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
@@ -404,9 +396,6 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
-					if rerunForkChoiceAtTip(cfg, args) {
-						return ForkChoice
-					}
 					return CleanupAndPruning
 				},
 				ActionFunc: doForkchoiceRoutine,
@@ -417,7 +406,10 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
-					if rerunForkChoiceAtTip(cfg, args) {
+					// Gossip can import the slot's block during ForkChoice or this stage, and SleepForSlot polls the
+					// head only from Gloas on.
+					if args.headUnpublished && args.seenSlot >= args.targetSlot && time.Since(cfg.forkChoiceRerunAt) >= sleepForSlotRewakeInterval {
+						cfg.forkChoiceRerunAt = time.Now()
 						return ForkChoice
 					}
 					return SleepForSlot
