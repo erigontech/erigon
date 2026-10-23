@@ -61,7 +61,7 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	recordAll(io, readSets, writeSets)
 
-	bal := balpkg.Create(0, io, "", log.New())
+	bal := balpkg.Create(0, io, true, "", log.New())
 
 	if len(bal) != 2 {
 		t.Fatalf("expected two accounts in BAL, got %d", len(bal))
@@ -152,7 +152,7 @@ func TestProcessPersistsOfflineBAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := balpkg.Create(100, io, "", log.New())
+	want := balpkg.Create(100, io, true, "", log.New())
 	if decoded.Hash() != want.Hash() {
 		t.Fatalf("persisted BAL hash %s != computed %s", decoded.Hash(), want.Hash())
 	}
@@ -370,7 +370,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 
 	recordAll(vio, readSets, writeSets)
 
-	bal := balpkg.Create(943, vio, "", log.New())
+	bal := balpkg.Create(943, vio, true, "", log.New())
 
 	t.Logf("BAL accounts: %d", len(bal))
 	for i, ac := range bal {

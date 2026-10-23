@@ -28,6 +28,7 @@ var (
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 	mxExecCPUs         = metrics.NewGauge("exec_cpus")
 	mxExecMGasSec      = metrics.NewGauge(`exec_mgas_sec`)
+	mxExecGasUsedTotal = metrics.NewCounter(`exec_gas_used_total`)
 	mxTaskMgasSec      = metrics.NewGauge(`exec_task_mgas_sec`)
 
 	mxExecBlockDuration = metrics.NewGauge("exec_block_dur")
@@ -713,6 +714,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	if te.lastExecutedBlockNum.Load() > 0 {
 		p.prevExecutedTxNum = uint64(te.lastExecutedTxNum.Load())
+		mxExecGasUsedTotal.AddUint64(uint64(te.executedGas.Load() - p.prevExecutedGas))
 		p.prevExecutedGas = te.executedGas.Load()
 		p.prevExecutedBlockNum = te.lastExecutedBlockNum.Load()
 	}

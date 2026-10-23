@@ -323,3 +323,105 @@ func TestGenerateAndUse(t *testing.T) {
 		t.Fatal("records 1-3 changed")
 	}
 }
+
+func TestRewriteReplacesPatchedRecords(t *testing.T) {
+	src, patch, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeBlocks(t, src, 1, 2, 3)
+	w, err := NewWriter(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Append(2, hashOf(2), []byte("fixed-2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Append(3, hashOf(9), []byte("other-fork-3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	patched, err := Rewrite(src, patch, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched != 1 {
+		t.Fatalf("patched = %d, want 1 (a patch for another hash is ignored)", patched)
+	}
+	r, err := OpenReader(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if r.Len() != 3 {
+		t.Fatalf("Len = %d, want 3", r.Len())
+	}
+	for n, want := range map[uint64][]byte{1: {1}, 2: []byte("fixed-2"), 3: {3}} {
+		if got, ok := r.Get(n, hashOf(byte(n))); !ok || !bytes.Equal(got, want) {
+			t.Fatalf("Get(%d) = %q,%v want %q", n, got, ok, want)
+		}
+	}
+}
+
+func TestPatchInPlacePadsShorterRecords(t *testing.T) {
+	store, patch := t.TempDir(), t.TempDir()
+	w, err := NewWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range []struct {
+		n uint64
+		p string
+	}{{1, "one"}, {2, "two-long"}, {3, "six"}} {
+		if err := w.Append(rec.n, hashOf(byte(rec.n)), []byte(rec.p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	pw, err := NewWriter(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Append(2, hashOf(2), []byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Append(3, hashOf(3), []byte("longer-3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	patched, tooBig, err := PatchInPlace(store, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched != 1 || len(tooBig) != 1 || tooBig[0] != 3 {
+		t.Fatalf("patched=%d tooBig=%v, want 1 and [3]", patched, tooBig)
+	}
+	r, err := OpenReader(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if r.Len() != 3 {
+		t.Fatalf("Len = %d, want 3", r.Len())
+	}
+	for n, want := range map[uint64]string{1: "one", 2: "two\x00\x00\x00\x00\x00", 3: "six"} {
+		if got, ok := r.Get(n, hashOf(byte(n))); !ok || string(got) != want {
+			t.Fatalf("Get(%d) = %q,%v want %q", n, got, ok, want)
+		}
+	}
+}
+
+func TestUnpadCutsAtTheEndOfTheRLPItem(t *testing.T) {
+	list := []byte{0xc2, 0x01, 0x00}
+	if got := Unpad(append(append([]byte{}, list...), 0, 0, 0)); !bytes.Equal(got, list) {
+		t.Fatalf("Unpad(padded) = %x, want %x", got, list)
+	}
+	if got := Unpad(list); !bytes.Equal(got, list) {
+		t.Fatalf("Unpad(unpadded) = %x, want %x", got, list)
+	}
+}

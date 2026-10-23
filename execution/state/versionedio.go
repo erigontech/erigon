@@ -2413,10 +2413,20 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet)
 	}
 }
 
+// AsPreEIP8246BlockAccessList is AsBlockAccessList for blocks before EIP-8246,
+// where a SELFDESTRUCT burns the destroyed account's balance.
+func (io *VersionedIO) AsPreEIP8246BlockAccessList() types.BlockAccessList {
+	return io.asBlockAccessList(true)
+}
+
 // AsBlockAccessList assembles the EIP-7928 block access list. EIP-7928 and
 // EIP-8246 both activate with Amsterdam, so balance writes always use the
 // no-burn SELFDESTRUCT semantics.
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
+	return io.asBlockAccessList(false)
+}
+
+func (io *VersionedIO) asBlockAccessList(burnSelfDestructs bool) types.BlockAccessList {
 	if io == nil {
 		return nil
 	}
@@ -2522,6 +2532,14 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 					continue
 				}
 				ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
+			}
+			if burnSelfDestructs {
+				for addr, w := range writes.SelfDestructs() {
+					if addr.IsNil() || !w.Val {
+						continue
+					}
+					ensureAccountState(ac, addr).applyWriteBalance(uint256.Int{}, w.Version.blockAccessIndex())
+				}
 			}
 			for addr, w := range writes.Nonces() {
 				if addr.IsNil() {

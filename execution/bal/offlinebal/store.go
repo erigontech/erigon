@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -389,4 +390,105 @@ func (s Store) Close() error {
 		err = errors.Join(err, s.Reader.Close())
 	}
 	return err
+}
+
+// Rewrite copies the store in srcDir to dstDir, replacing each record that
+// patchDir holds for the same block and hash, and returns how many it replaced.
+func Rewrite(srcDir, patchDir, dstDir string) (patched int, err error) {
+	if _, err := os.Stat(filepath.Join(dstDir, fileName)); !errors.Is(err, os.ErrNotExist) {
+		return 0, fmt.Errorf("offline BAL rewrite: %s already has a log", dstDir)
+	}
+	patches, err := OpenReader(patchDir)
+	if err != nil {
+		return 0, err
+	}
+	defer patches.Close()
+	srcLog, err := os.Open(filepath.Join(srcDir, fileName))
+	if err != nil {
+		return 0, err
+	}
+	defer srcLog.Close()
+	info, err := srcLog.Stat()
+	if err != nil {
+		return 0, err
+	}
+	data, err := mmap.OpenRo(srcLog, int(info.Size()))
+	if err != nil {
+		return 0, err
+	}
+	defer func() { err = errors.Join(err, data.Unmap()) }()
+	if err := mmap.MadviseSequential(data); err != nil {
+		return 0, err
+	}
+	w, err := NewWriter(dstDir)
+	if err != nil {
+		return 0, err
+	}
+	walkRecords(data, func(blockNum uint64, hash common.Hash, recOff, payloadLen int) {
+		if err != nil {
+			return
+		}
+		payload := data[recOff+recPrefix : recOff+recPrefix+payloadLen]
+		if p, ok := patches.Get(blockNum, hash); ok {
+			payload = p
+			patched++
+		}
+		err = w.Append(blockNum, hash, payload)
+	})
+	return patched, errors.Join(err, w.Close())
+}
+
+// PatchInPlace overwrites each store record that patchDir holds for the same
+// block and hash with the patch payload, zero-padded to the old length, so the
+// log layout and index stay valid. Patches longer than the stored record are
+// returned in tooBig and left for Rewrite.
+func PatchInPlace(storeDir, patchDir string) (patched int, tooBig []uint64, err error) {
+	store, err := OpenReader(storeDir)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer store.Close()
+	patches, err := OpenReader(patchDir)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer patches.Close()
+	log, err := os.OpenFile(filepath.Join(storeDir, fileName), os.O_RDWR, 0)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer log.Close()
+	walkRecords(patches.data, func(blockNum uint64, hash common.Hash, recOff, payloadLen int) {
+		if err != nil {
+			return
+		}
+		old, ok := store.Get(blockNum, hash)
+		if !ok {
+			return
+		}
+		if payloadLen > len(old) {
+			tooBig = append(tooBig, blockNum)
+			return
+		}
+		padded := make([]byte, len(old))
+		copy(padded, patches.data[recOff+recPrefix:recOff+recPrefix+payloadLen])
+		oldOff := int64(binary.LittleEndian.Uint64(store.offsets[(blockNum-store.first)*8:])) + recPrefix
+		if _, err = log.WriteAt(padded, oldOff); err == nil {
+			patched++
+		}
+	})
+	if err != nil {
+		return patched, tooBig, err
+	}
+	return patched, tooBig, log.Sync()
+}
+
+// Unpad returns payload cut at the end of its first RLP item, dropping the
+// zero padding PatchInPlace leaves after a shorter record.
+func Unpad(payload []byte) []byte {
+	_, _, rest, err := rlp.Split(payload)
+	if err != nil {
+		return payload
+	}
+	return payload[:len(payload)-len(rest)]
 }

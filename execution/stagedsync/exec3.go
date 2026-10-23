@@ -640,7 +640,7 @@ func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, off
 	if bal == nil && offlineBAL.Reader != nil {
 		if data, ok := offlineBAL.Reader.Get(blockNum, block.Hash()); ok {
 			mxOfflineBALBlocks.WithLabelValues("used").Inc()
-			return types.DecodeBlockAccessListBytes(data)
+			return types.DecodeBlockAccessListBytes(offlinebal.Unpad(data))
 		}
 		mxOfflineBALBlocks.WithLabelValues("missing").Inc()
 		switch end := offlineBAL.Reader.End(); {
