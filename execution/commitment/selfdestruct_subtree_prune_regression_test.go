@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -626,4 +628,74 @@ func TestSelfDestructTrieReset_SameBlockRecreate_NextBlock_Parallel(t *testing.T
 	want, _ := parUpdateBatch(t, oms, workers, ok3, ou3, oblob, "")
 
 	require.Equal(t, want, got)
+}
+
+// When every slot hash shares a leading nibble the storage root is an extension and
+// the first branch sits at hashedKey+extension. The SD reset must still tombstone it
+// with its real prev, and a recreate that rebuilds a branch there must keep that
+// prev, so an unwind across the destruct restores the old branch.
+func TestSelfDestructBranchTombstone_ExtensionRoot(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	sharedNibble := func(n int, from int) []int {
+		var out []int
+		for s := from; len(out) < n; s++ {
+			if crypto.Keccak256(slotHashBytes(s))[0]>>4 == 0x5 {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	oldSlots, newSlots := sharedNibble(40, 0), sharedNibble(40, 100_000)
+
+	ms := NewMockState(t)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for _, s := range oldSlots {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := seqUpdateBatch(t, ms, k1, u1, nil, "")
+
+	addrBytes, err := hex.DecodeString(a)
+	require.NoError(t, err)
+	accPrefix := KeyToHexNibbleHash(addrBytes)
+	original := map[string][]byte{}
+	for k, v := range ms.cm {
+		if hex := nibbles.CompactToHex([]byte(k)); bytes.HasPrefix(hex, accPrefix) && len(hex) > len(accPrefix) {
+			original[k] = bytes.Clone(v)
+		}
+	}
+	require.NotEmpty(t, original, "A must have a persisted storage branch below its extension")
+	_, atAccount := original[string(nibbles.HexToCompact(accPrefix))]
+	require.False(t, atAccount, "precondition: the storage root is an extension, no branch at the account key")
+
+	clean := NewUpdateBuilder()
+	for _, s := range oldSlots {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	ms.putLog = nil
+	ms.recordPuts.Store(true)
+	b2 := NewUpdateBuilder().Balance(a, 7777).Nonce(a, 9)
+	for _, s := range newSlots {
+		b2.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+	}
+	k2, u2 := b2.Build()
+	_, _ = seqUpdateBatch(t, ms, k2, u2, blob, a)
+	ms.recordPuts.Store(false)
+
+	firstPrev := map[string][]byte{}
+	for _, p := range ms.putLog {
+		if _, seen := firstPrev[string(p.prefix)]; !seen {
+			firstPrev[string(p.prefix)] = p.prev
+		}
+	}
+	for k, orig := range original {
+		prev, written := firstPrev[k]
+		require.True(t, written, "old branch %x must be tombstoned or rebuilt", []byte(k))
+		require.Equal(t, orig, prev, "the first write at %x must carry the old branch as prev", []byte(k))
+	}
 }
