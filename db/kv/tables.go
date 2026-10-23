@@ -245,7 +245,7 @@ const (
 
 	// GLOAS (EIP-7732)
 	BuildersDump                      = "BuildersDump"                   // slot => dump
-	Builders                          = "Builders"                       // slot => queue_diffs
+	Builders                          = "Builders"                       // slot => per-index builders diff
 	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
 	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
 	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
