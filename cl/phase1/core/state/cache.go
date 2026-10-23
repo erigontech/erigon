@@ -20,14 +20,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/common/maphash"
-
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -45,7 +43,7 @@ type CachingBeaconState struct {
 	*raw.BeaconState
 
 	// Internals
-	publicKeyIndicies *maphash.NonConcurrentMap[uint64]
+	publicKeyIndices pubkeyIndex
 	// Caches
 	activeValidatorsCache *lru.Cache[uint64, []uint64]
 	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
@@ -268,13 +266,15 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-	b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		pk := validator.PublicKey()
-		b.publicKeyIndicies.Set(pk[:], uint64(i))
-		return true
-	})
+	b.rebuildPubkeyIndex()
+	return b.reinitCaches()
+}
 
+func (b *CachingBeaconState) rebuildPubkeyIndex() {
+	b.publicKeyIndices = newPubkeyIndex(b.ValidatorSet())
+}
+
+func (b *CachingBeaconState) reinitCaches() error {
 	b.totalActiveBalanceCache = nil
 	b._refreshActiveBalancesIfNeeded()
 	b.previousStateRoot = common.Hash{}
