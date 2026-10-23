@@ -502,3 +502,37 @@ func TestSelfDestructSeqSelfHeals_DeepFoldRecreate(t *testing.T) {
 	require.True(t, bytes.Equal(noPrune, want),
 		"seq self-heals: account-key delete alone reproduces the oracle")
 }
+
+// An account with a single slot is one combined account+storage leaf, so the
+// SD-reset marker has no storage branch to drop: the reset must also cut the
+// leaf's hashed extension, which still runs into the old slot's key.
+func TestSelfDestructTrieReset_SingleSlotRecreate_Seq(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 0).Nonce(a, 1).Storage(a, hex.EncodeToString(slotHashBytes(5000)), "01")
+	}
+
+	ms := NewMockState(t)
+	b1 := NewUpdateBuilder().Nonce(a, 0).Balance(sib, 500).Storage(a, hex.EncodeToString(slotHashBytes(0)), "01")
+	k1, u1 := b1.Build()
+	_, blob := seqUpdateBatch(t, ms, k1, u1, nil, "")
+
+	clean := NewUpdateBuilder().DeleteStorage(a, hex.EncodeToString(slotHashBytes(0)))
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	got, _ := seqUpdateBatch(t, ms, k2, u2, blob, a)
+
+	oms := NewMockState(t)
+	ob := NewUpdateBuilder().Balance(sib, 500)
+	recreate(ob)
+	ok, ou := ob.Build()
+	want, _ := seqUpdateBatch(t, oms, ok, ou, nil, "")
+
+	require.Equal(t, want, got)
+}

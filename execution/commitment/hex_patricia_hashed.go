@@ -2363,6 +2363,9 @@ func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	cell.storageAddrLen = 0
 	cell.StorageLen = 0
 	cell.loaded &^= cellLoadStorage
+	// The combined leaf's hashed extension runs into the dropped slot's key; updateCell
+	// rebuilds it from the account key.
+	cell.hashedExtLen = 0
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
