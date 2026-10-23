@@ -1349,10 +1349,6 @@ type rebuiltCommitment struct {
 	LogPrefix     string
 }
 
-const (
-	pbinRebuildOpCollectorBufferBudget = 64 * datasize.MB
-)
-
 type pbinPartition [2]byte
 
 func pbinPartitionOf(key []byte) pbinPartition {
@@ -1401,25 +1397,6 @@ func pbinSameMergeGroup(a, b pbt.Op) bool {
 }
 
 func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error, stream func(func(pbt.Op, uint64) error) error) error {
-	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root()).SortAndFlushInBackground(true)
-	defer collector.Close()
-	var stampBuf [8]byte
-	emit := func(op pbt.Op, stamp uint64) error {
-		key := batchOperationKey(op)
-		encoded, err := pbt.EncodeOp(op)
-		if err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint64(stampBuf[:], stamp)
-		return collector.Collect(key, append(stampBuf[:], encoded...))
-	}
-	if err := stream(emit); err != nil {
-		return err
-	}
-	if err := collector.Flush(); err != nil {
-		return err
-	}
-	var previousOpKey, previousOpValue []byte
 	sortedFile, err := os.CreateTemp(tmpDir, "pbin-ops-*.bin")
 	if err != nil {
 		return err
@@ -1430,45 +1407,58 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		_ = dir.RemoveFile(sortedPath)
 	}()
 	sortedWriter := bufio.NewWriter(sortedFile)
+	var stampBuf [8]byte
 	var lengthBuf [4]byte
 	var partitions []pbinPartitionRange
 	var offset int64
-	mergeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "rebuild op merge", Total: collector.Collected(), TempDir: tmpDir})
-	writeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "pbin-ops file write", Total: collector.Collected(), TempDir: tmpDir})
+	var previousKey []byte
+	var written, reported uint64
+	writeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "pbin-ops file write", TempDir: tmpDir})
 	defer writeProgress.Done()
-	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.Equal(previousOpKey, key) {
-			if !bytes.Equal(previousOpValue, value) {
-				return fmt.Errorf("commitment rebuild: duplicate operation key %x", key)
-			}
-			return nil
+	emit := func(op pbt.Op, stamp uint64) error {
+		key := batchOperationKey(op)
+		if previousKey != nil && bytes.Compare(key, previousKey) <= 0 {
+			return fmt.Errorf("commitment rebuild: operation stream is not strictly ordered: key %x after %x", key, previousKey)
 		}
-		previousOpKey = bytes.Clone(key)
-		previousOpValue = bytes.Clone(value)
-		writeProgress.Add(1)
+		previousKey = bytes.Clone(key)
+		encoded, err := pbt.EncodeOp(op)
+		if err != nil {
+			return err
+		}
+		binary.BigEndian.PutUint64(stampBuf[:], stamp)
 		if partition := pbinPartitionOf(key); len(partitions) == 0 || partitions[len(partitions)-1].partition != partition {
 			partitions = append(partitions, pbinPartitionRange{partition: partition, offset: offset})
 		}
-		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(value)))
+		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(stampBuf)+len(encoded)))
 		if _, err := sortedWriter.Write(lengthBuf[:]); err != nil {
 			return err
 		}
-		if _, err := sortedWriter.Write(value); err != nil {
+		if _, err := sortedWriter.Write(stampBuf[:]); err != nil {
 			return err
 		}
-		writeProgress.Add(1)
-		size := int64(len(lengthBuf) + len(value))
+		if _, err := sortedWriter.Write(encoded); err != nil {
+			return err
+		}
+		size := int64(len(lengthBuf) + len(stampBuf) + len(encoded))
 		offset += size
 		partitions[len(partitions)-1].size += size
 		partitions[len(partitions)-1].count++
+		written++
+		if written-reported >= 4096 {
+			writeProgress.Add(written - reported)
+			reported = written
+		}
 		return nil
-	}, etl.TransformArgs{Progress: mergeProgress}); err != nil {
+	}
+	if err := stream(emit); err != nil {
 		return err
+	}
+	if written != reported {
+		writeProgress.Add(written - reported)
 	}
 	if err := sortedWriter.Flush(); err != nil {
 		return err
 	}
-	collector.Close()
 	if err := sortedFile.Close(); err != nil {
 		return err
 	}

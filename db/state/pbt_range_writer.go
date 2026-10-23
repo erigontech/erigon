@@ -398,9 +398,19 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}
 	stream := func(emit func(pbt.Op, uint64) error) error {
 		progress := NewPBTProgress(PBTProgressConfig{Message: "PBT range writer progress", Phase: "range leaf stream", TempDir: w.aggregator.Dirs().Tmp})
-		defer progress.Done()
+		var progressDone, progressReported uint64
+		defer func() {
+			if progressDone != progressReported {
+				progress.Add(progressDone - progressReported)
+			}
+			progress.Done()
+		}()
 		return leaves(func(leaf PBinLeaf) error {
-			progress.Add(1)
+			progressDone++
+			if progressDone-progressReported >= 4096 {
+				progress.Add(progressDone - progressReported)
+				progressReported = progressDone
+			}
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}
@@ -490,13 +500,14 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 			}
 		}
 		rangeProgress := newPbtRangeProgress(w.aggregator.Dirs().Tmp, fmt.Sprintf("range %d-%d", stepFrom, stepTo))
+		kvProgress := rangeProgress.batch(".kv", w.ranges[i].collector.Collected())
 		err = w.ranges[i].collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			if _, writeErr := writer.Write(key); writeErr != nil {
 				return writeErr
 			}
 			_, valueErr := writer.Write(value)
 			return valueErr
-		}, etl.TransformArgs{Progress: rangeProgress.stage(".kv", w.ranges[i].collector.Collected())})
+		}, etl.TransformArgs{Progress: kvProgress})
 		if err != nil {
 			valuesComp.Close()
 			return err

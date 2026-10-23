@@ -24,6 +24,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -272,7 +274,7 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
 	previousInterval := state.PBTProgressInterval
-	state.PBTProgressInterval = time.Millisecond
+	state.PBTProgressInterval = time.Nanosecond
 	t.Cleanup(func() { state.PBTProgressInterval = previousInterval })
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
@@ -283,7 +285,6 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 		"source leaf walk",
 		"leaf load",
 		"source end verify",
-		"rebuild op merge",
 		"pbin-ops file write",
 		"fold batches",
 		"range leaf stream",
@@ -297,15 +298,29 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 		"attach node root verify",
 		"attach adopt",
 	} {
-		var found bool
+		pattern := regexp.MustCompile(`phase="` + regexp.QuoteMeta(phase) + `(?:"|\s).*done=(\d+)(?:.*total=(\d+))?`)
+		var found, intermediate, increasing bool
+		var previous uint64
 		for line := range strings.SplitSeq(logs.String(), "\n") {
-			if strings.Contains(line, "phase=\""+phase) {
-				found = true
-				require.Contains(t, line, "done=")
-				require.Contains(t, line, "rate=")
+			match := pattern.FindStringSubmatch(line)
+			if len(match) == 0 {
+				continue
 			}
+			found = true
+			require.Contains(t, line, "rate=")
+			done, err := strconv.ParseUint(match[1], 10, 64)
+			require.NoError(t, err)
+			if match[2] != "" {
+				total, err := strconv.ParseUint(match[2], 10, 64)
+				require.NoError(t, err)
+				intermediate = intermediate || done < total
+			} else if done > previous {
+				increasing = true
+			}
+			previous = done
 		}
 		require.True(t, found, "missing progress phase %q in logs:\n%s", phase, logs.String())
+		require.True(t, intermediate || increasing, "phase %q has no intermediate progress in logs:\n%s", phase, logs.String())
 	}
 }
 

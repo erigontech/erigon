@@ -51,6 +51,13 @@ type PBTProgress struct {
 	mu       sync.Mutex
 }
 
+type pbtProgressBatch struct {
+	progress  *PBTProgress
+	threshold uint64
+	done      uint64
+	reported  uint64
+}
+
 type pbtRangeProgress struct {
 	tempDir string
 	prefix  string
@@ -69,6 +76,42 @@ func (p *pbtRangeProgress) stage(suffix string, total uint64) *PBTProgress {
 	})
 }
 
+func (p *pbtRangeProgress) batch(suffix string, total uint64) *pbtProgressBatch {
+	return &pbtProgressBatch{progress: p.stage(suffix, total), threshold: pbtProgressThreshold(total)}
+}
+
+func pbtProgressThreshold(total uint64) uint64 {
+	if total > 1 && total < 8192 {
+		return max(uint64(1), total/2)
+	}
+	return 4096
+}
+
+func (p *pbtProgressBatch) Add(n uint64) {
+	if p == nil {
+		return
+	}
+	p.done += n
+	if p.done-p.reported >= p.threshold {
+		p.progress.Add(p.done - p.reported)
+		p.reported = p.done
+	}
+}
+
+func (p *pbtProgressBatch) ProgressBatchSize() uint64 {
+	return p.threshold
+}
+
+func (p *pbtProgressBatch) Done() {
+	if p == nil {
+		return
+	}
+	if p.done != p.reported {
+		p.progress.Add(p.done - p.reported)
+	}
+	p.progress.Done()
+}
+
 func NewPBTProgress(config PBTProgressConfig) *PBTProgress {
 	if config.Logger == nil {
 		config.Logger = log.Root()
@@ -83,7 +126,7 @@ func NewPBTProgress(config PBTProgressConfig) *PBTProgress {
 		config.Interval = 30 * time.Second
 	}
 	now := time.Now()
-	return &PBTProgress{
+	progress := &PBTProgress{
 		logger:   config.Logger,
 		message:  config.Message,
 		phase:    config.Phase,
@@ -93,6 +136,8 @@ func NewPBTProgress(config PBTProgressConfig) *PBTProgress {
 		started:  now,
 		next:     now.Add(config.Interval),
 	}
+	progress.log(0)
+	return progress
 }
 
 func (p *PBTProgress) Add(n uint64) {

@@ -391,8 +391,18 @@ func (c *Collector) Close() {
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
 func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
+	var progressDone uint64
+	progressThreshold := uint64(4096)
 	if args.Progress != nil {
-		defer args.Progress.Done()
+		if p, ok := args.Progress.(interface{ ProgressBatchSize() uint64 }); ok {
+			progressThreshold = p.ProgressBatchSize()
+		}
+		defer func() {
+			if progressDone != 0 {
+				args.Progress.Add(progressDone)
+			}
+			args.Progress.Done()
+		}()
 	}
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
@@ -426,7 +436,11 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 		element := heapPop(h)
 		if args.Progress != nil {
-			args.Progress.Add(1)
+			progressDone++
+			if progressDone >= progressThreshold {
+				args.Progress.Add(progressDone)
+				progressDone = 0
+			}
 		}
 		provider := providers[element.TimeIdx]
 

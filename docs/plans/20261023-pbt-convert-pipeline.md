@@ -246,11 +246,11 @@ flowchart LR
 - Modify: `db/state/squeeze.go`
 - Modify: `db/state/squeeze_pbin_rebuild_test.go`
 
-- [ ] test first: an out-of-order stream fails with a named error. Today it is silently sorted.
-- [ ] replace ETL B with the in-order partition-file writer; batches and `visit` are unchanged.
-- [ ] tests: the batches equal the old path's on the existing corpora; `import-pbt`'s stream passes the order check;
+- [x] test first: an out-of-order stream fails with a named error. Today it is silently sorted.
+- [x] replace ETL B with the in-order partition-file writer; batches and `visit` are unchanged.
+- [x] tests: the batches equal the old path's on the existing corpora; `import-pbt`'s stream passes the order check;
       the golden harness stays green.
-- [ ] run the gate — must pass before Task 5.
+- [x] run the gate — must pass before Task 5.
 
 ### Task 5: Parallel source walk and stream-root stage
 **Files:**

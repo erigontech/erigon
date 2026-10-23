@@ -85,13 +85,23 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 	emitter := pbt.NewRebuildFeedOpEmitter()
 	var leafCollector [8 + eip8297.ValueLength]byte
 	sourceProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "source leaf walk", TempDir: at.Dirs().Tmp})
-	defer sourceProgress.Done()
+	var sourceDone, sourceReported uint64
+	defer func() {
+		if sourceDone != sourceReported {
+			sourceProgress.Add(sourceDone - sourceReported)
+		}
+		sourceProgress.Done()
+	}()
 	for accountsCursor.ok || codeCursor.ok || storageCursor.ok {
 		address, err := pbinNextAddress(accountsCursor, codeCursor, storageCursor)
 		if err != nil {
 			return err
 		}
-		sourceProgress.Add(1)
+		sourceDone++
+		if sourceDone-sourceReported >= 4096 {
+			sourceProgress.Add(sourceDone - sourceReported)
+			sourceReported = sourceDone
+		}
 		if accountsCursor.ok && bytes.Equal(accountsCursor.key, address) {
 			var account accounts.Account
 			if err := accounts.DeserialiseV3(&account, accountsCursor.value); err != nil {

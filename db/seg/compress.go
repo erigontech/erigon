@@ -130,6 +130,7 @@ type Compressor struct {
 	lvl               log.Lvl
 	trace             bool
 	logger            log.Logger
+	progress          func(uint64)
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
@@ -215,10 +216,11 @@ func (c *Compressor) Close() {
 	c.suffixCollectors = nil
 }
 
-func (c *Compressor) SetTrace(trace bool)            { c.trace = trace }
-func (c *Compressor) FileName() string               { return c.outputFileName }
-func (c *Compressor) WorkersAmount() int             { return c.Workers }
-func (c *Compressor) GetValuesOnCompressedPage() int { return int(c.ValuesOnCompressedPage) }
+func (c *Compressor) SetTrace(trace bool)               { c.trace = trace }
+func (c *Compressor) SetProgress(progress func(uint64)) { c.progress = progress }
+func (c *Compressor) FileName() string                  { return c.outputFileName }
+func (c *Compressor) WorkersAmount() int                { return c.Workers }
+func (c *Compressor) GetValuesOnCompressedPage() int    { return int(c.ValuesOnCompressedPage) }
 func (c *Compressor) SetMetadata(metadata []byte) {
 	if !c.ExpectMetadata {
 		panic("metadata not expected in compressor")
@@ -373,7 +375,7 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
-		if err := compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+		if err := compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger, c.progress); err != nil {
 			return err
 		}
 	} else {
@@ -390,7 +392,7 @@ func (c *Compressor) Compress() error {
 				return err
 			}
 		}
-		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger, c.progress); err != nil {
 			return err
 		}
 	}
