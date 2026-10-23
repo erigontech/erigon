@@ -1099,25 +1099,12 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
 	}
 
-	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
-	apiCfg := httpRpcCfg
-	if config.MCPAddress != "" {
-		apiCfg.API = slices.Clone(httpRpcCfg.API)
-		for _, ns := range mcpNamespaces {
-			if !slices.Contains(apiCfg.API, ns) {
-				apiCfg.API = append(apiCfg.API, ns)
-			}
-		}
-	}
-	// One APIList call even when MCP widens the namespace set, so the HTTP
-	// RPC server and MCP share the BaseApi block/receipt caches instead of
-	// each holding their own.
-	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
-	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
+	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, testingEntry, witnessCache)
 
 	if config.MCPAddress != "" {
 		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
-		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
+		mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
+		for _, api := range apisForNamespaces(s.apiList, mcpNamespaces) {
 			if err := mcpSrv.RegisterAPI(api); err != nil {
 				return err
 			}
