@@ -847,7 +847,11 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 			}
 		}
 		if l == 0 {
-			return hc.flush()
+			err := hc.flush()
+			if err == nil && progress != nil {
+				progress(1)
+			}
+			return err
 		}
 		if c := pos2code[0]; c != nil {
 			if e := hc.encode(c.code, c.codeBits); e != nil {

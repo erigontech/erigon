@@ -40,3 +40,7 @@ func (w *PBinRangeWriter) CheckRowStampsForTest() func() int {
 	}
 	return func() int { return lookups }
 }
+
+func (w *PBinRangeWriter) SetPipelineHookForTest(hook func(string, int) error) {
+	w.pipelineHook = hook
+}

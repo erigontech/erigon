@@ -100,6 +100,18 @@ func (p *pbtProgressBatch) Add(n uint64) {
 	}
 }
 
+func (p *pbtProgressBatch) Reset() {
+	if p == nil {
+		return
+	}
+	p.done = 0
+	p.reported = 0
+	p.progress.done.Store(0)
+	p.progress.mu.Lock()
+	p.progress.next = time.Now().Add(p.progress.interval)
+	p.progress.mu.Unlock()
+}
+
 func (p *pbtProgressBatch) ProgressBatchSize() uint64 {
 	return p.threshold
 }

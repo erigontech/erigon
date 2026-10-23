@@ -1396,6 +1396,23 @@ func pbinSameMergeGroup(a, b pbt.Op) bool {
 	return len(group) != 0 && bytes.Equal(group, pbt.MergeGroupKey(b))
 }
 
+func clonePBinOps(ops []pbt.Op) []pbt.Op {
+	cloned := make([]pbt.Op, len(ops))
+	for i := range ops {
+		cloned[i] = ops[i]
+		cloned[i].Key = bytes.Clone(ops[i].Key)
+	}
+	return cloned
+}
+
+func clonePBinKeys(keys [][]byte) [][]byte {
+	cloned := make([][]byte, len(keys))
+	for i := range keys {
+		cloned[i] = bytes.Clone(keys[i])
+	}
+	return cloned
+}
+
 func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error, stream func(func(pbt.Op, uint64) error) error) error {
 	sortedFile, err := os.CreateTemp(tmpDir, "pbin-ops-*.bin")
 	if err != nil {
@@ -1518,7 +1535,7 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 			}
 		}
 		live = next
-		if err := visit(batch, stamps, lookahead, len(live) == 0); err != nil {
+		if err := visit(clonePBinOps(batch), append([]uint64(nil), stamps...), clonePBinKeys(lookahead), len(live) == 0); err != nil {
 			return err
 		}
 	}

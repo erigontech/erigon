@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
@@ -49,6 +51,7 @@ type PBinRangeWriter struct {
 	stateInFiles bool
 	workerViews  atomic.Int32
 	stampTracker func() pbinStampTracker
+	pipelineHook func(string, int) error
 }
 
 type PBinRangeWriterLimits struct {
@@ -102,7 +105,31 @@ func newPBinRowStampTracker() *pbinRowStampTracker {
 	return &pbinRowStampTracker{partitions: make(map[pbinPartition]*pbinPartitionStamps), upper: make(map[string]uint64)}
 }
 
+func (t *pbinRowStampTracker) clone() pbinStampTracker {
+	cloned := &pbinRowStampTracker{
+		partitions: make(map[pbinPartition]*pbinPartitionStamps, len(t.partitions)),
+		upper:      maps.Clone(t.upper),
+		maximum:    t.maximum,
+	}
+	for key, stamps := range t.partitions {
+		partition := &pbinPartitionStamps{
+			open:     append([]pbinStampSplit(nil), stamps.open...),
+			closed:   maps.Clone(stamps.closed),
+			previous: stamps.previous,
+			last:     stamps.last,
+		}
+		cloned.partitions[key] = partition
+	}
+	return cloned
+}
+
 type pbinRangeWriterWrite struct {
+	data []byte
+	prev []byte
+}
+
+type pbinRangeWriterDetached struct {
+	key  []byte
 	data []byte
 	prev []byte
 }
@@ -114,6 +141,228 @@ type pbinRangeWriterOverlay struct {
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
 	finished func() error
+}
+
+type pbinStampTrackerClone interface {
+	clone() pbinStampTracker
+}
+
+type pbinFoldBatch struct {
+	batch     []pbt.Op
+	stamps    []uint64
+	lookahead [][]byte
+	final     bool
+	index     int
+	tracker   pbinStampTracker
+	rows      []pbinRangeWriterDetached
+}
+
+type pbinFoldPipeline struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	submit      chan *pbinFoldBatch
+	detached    chan *pbinFoldBatchResult
+	completed   chan int
+	tracker     pbinStampTracker
+	compute     func(context.Context, *pbinFoldBatch) error
+	process     func(*pbinFoldBatchResult) error
+	hook        func(string, int) error
+	stopOnce    sync.Once
+	failureLock sync.Mutex
+	failure     pbinFoldFailure
+	wg          sync.WaitGroup
+}
+
+type pbinFoldBatchResult struct {
+	batch *pbinFoldBatch
+	rows  []pbinRangeWriterDetached
+}
+
+type pbinFoldFailure struct {
+	index int
+	err   error
+}
+
+func newPBinFoldPipeline(ctx context.Context, tracker pbinStampTracker, compute func(context.Context, *pbinFoldBatch) error, process func(*pbinFoldBatchResult) error, hook func(string, int) error) (*pbinFoldPipeline, bool) {
+	clone, ok := tracker.(pbinStampTrackerClone)
+	if !ok {
+		return nil, false
+	}
+	pipelineCtx, cancel := context.WithCancel(ctx)
+	p := &pbinFoldPipeline{
+		ctx:       pipelineCtx,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		submit:    make(chan *pbinFoldBatch, 1),
+		detached:  make(chan *pbinFoldBatchResult, 1),
+		completed: make(chan int, 2),
+		tracker:   clone.clone(),
+		compute:   compute,
+		process:   process,
+		hook:      hook,
+	}
+	p.wg.Add(2)
+	go p.computeLoop()
+	go p.processLoop()
+	return p, true
+}
+
+func (p *pbinFoldPipeline) stop() {
+	p.stopOnce.Do(func() {
+		p.cancel()
+		close(p.done)
+	})
+}
+
+func (p *pbinFoldPipeline) fail(index int, err error) {
+	if err == nil {
+		return
+	}
+	p.failureLock.Lock()
+	if p.failure.err == nil || index < p.failure.index {
+		p.failure = pbinFoldFailure{index: index, err: err}
+	}
+	p.failureLock.Unlock()
+	p.stop()
+}
+
+func (p *pbinFoldPipeline) err() error {
+	p.failureLock.Lock()
+	defer p.failureLock.Unlock()
+	if p.failure.err != nil {
+		return p.failure.err
+	}
+	if err := p.ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *pbinFoldPipeline) waitCompleted(index int) error {
+	select {
+	case completed := <-p.completed:
+		if completed != index {
+			return fmt.Errorf("pbin fold pipeline: completed batch %d, want %d", completed, index)
+		}
+		return p.err()
+	case <-p.done:
+		return p.err()
+	}
+}
+
+func (p *pbinFoldPipeline) submitBatch(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool, index int) error {
+	if index >= 2 {
+		if err := p.waitCompleted(index - 2); err != nil {
+			return err
+		}
+		p.tracker.clearClosed()
+	}
+	for i := range batch {
+		if err := p.tracker.observe(batch[i].Key, stamps[i]); err != nil {
+			p.fail(index, err)
+			return err
+		}
+	}
+	if err := p.tracker.advance(lookahead); err != nil {
+		p.fail(index, err)
+		return err
+	}
+	if p.hook != nil {
+		if err := p.hook("stage1", index); err != nil {
+			p.fail(index, err)
+			return err
+		}
+	}
+	cloned, ok := p.tracker.(pbinStampTrackerClone)
+	if !ok {
+		err := fmt.Errorf("pbin fold pipeline: tracker cannot be cloned")
+		p.fail(index, err)
+		return err
+	}
+	queued := &pbinFoldBatch{
+		batch:     clonePBinOps(batch),
+		stamps:    append([]uint64(nil), stamps...),
+		lookahead: clonePBinKeys(lookahead),
+		final:     final,
+		index:     index,
+		tracker:   cloned.clone(),
+	}
+	p.tracker.clearClosed()
+	select {
+	case p.submit <- queued:
+		return nil
+	case <-p.done:
+		return p.err()
+	}
+}
+
+func (p *pbinFoldPipeline) computeLoop() {
+	defer p.wg.Done()
+	defer close(p.detached)
+	for {
+		select {
+		case batch, ok := <-p.submit:
+			if !ok {
+				return
+			}
+			if p.hook != nil {
+				if err := p.hook("stage2", batch.index); err != nil {
+					p.fail(batch.index, err)
+					return
+				}
+			}
+			if err := p.compute(p.ctx, batch); err != nil {
+				p.fail(batch.index, err)
+				return
+			}
+			result := &pbinFoldBatchResult{batch: batch, rows: batch.rows}
+			select {
+			case p.detached <- result:
+			case <-p.done:
+				return
+			}
+		case <-p.done:
+			return
+		}
+	}
+}
+
+func (p *pbinFoldPipeline) processLoop() {
+	defer p.wg.Done()
+	for {
+		select {
+		case result, ok := <-p.detached:
+			if !ok {
+				return
+			}
+			if p.hook != nil {
+				if err := p.hook("stage3", result.batch.index); err != nil {
+					p.fail(result.batch.index, err)
+					return
+				}
+			}
+			sort.Slice(result.rows, func(i, j int) bool { return bytes.Compare(result.rows[i].key, result.rows[j].key) < 0 })
+			if processErr := p.process(result); processErr != nil {
+				p.fail(result.batch.index, processErr)
+				return
+			}
+			result.batch.tracker.clearClosed()
+			select {
+			case p.completed <- result.batch.index:
+			case <-p.done:
+				return
+			}
+		case <-p.done:
+			return
+		}
+	}
+}
+
+func (p *pbinFoldPipeline) close() error {
+	close(p.submit)
+	p.wg.Wait()
+	return p.err()
 }
 
 func (o *pbinRangeWriterOverlay) Absent(key []byte) bool {
@@ -147,25 +396,16 @@ func (v *pbinRangeWriterView) Absent(key []byte) bool {
 }
 
 func (o *pbinRangeWriterOverlay) FlushFinished(lookahead [][]byte) error {
-	nextPaths := make([]eip8297.Bitpath, len(lookahead))
-	for i, key := range lookahead {
-		nextPaths[i] = eip8297.PathFromBits(key, int16(len(key)*8))
+	rows, err := o.detach(pbinRangeWriterSkip(lookahead))
+	if err != nil {
+		return err
 	}
-	return o.flush(func(key []byte) (bool, error) {
-		if bytes.Equal(key, pbt.GlobalRootKey()) {
-			return true, nil
+	for _, row := range rows {
+		if err := o.write(row.key, row.data, row.prev); err != nil {
+			return err
 		}
-		path, err := eip8297.DecodeBitPath(key)
-		if err != nil {
-			return false, err
-		}
-		for i := range nextPaths {
-			if path.BitLen <= nextPaths[i].BitLen && eip8297.CommonPrefixBitsAt(&path, 0, &nextPaths[i]) == path.BitLen {
-				return true, nil
-			}
-		}
-		return false, nil
-	})
+	}
+	return o.finished()
 }
 
 func (o *pbinRangeWriterOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
@@ -187,36 +427,66 @@ func (o *pbinRangeWriterOverlay) PutBranch(prefix, data, prevData []byte) error 
 }
 
 func (o *pbinRangeWriterOverlay) Flush() error {
-	return o.flush(nil)
+	rows, err := o.detach(nil)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := o.write(row.key, row.data, row.prev); err != nil {
+			return err
+		}
+	}
+	return o.finished()
 }
 
-func (o *pbinRangeWriterOverlay) flush(skip func([]byte) (bool, error)) error {
+func pbinRangeWriterSkip(lookahead [][]byte) func([]byte) (bool, error) {
+	nextPaths := make([]eip8297.Bitpath, len(lookahead))
+	for i, key := range lookahead {
+		nextPaths[i] = eip8297.PathFromBits(key, int16(len(key)*8))
+	}
+	return func(key []byte) (bool, error) {
+		if bytes.Equal(key, pbt.GlobalRootKey()) {
+			return true, nil
+		}
+		path, err := eip8297.DecodeBitPath(key)
+		if err != nil {
+			return false, err
+		}
+		for i := range nextPaths {
+			if path.BitLen <= nextPaths[i].BitLen && eip8297.CommonPrefixBitsAt(&path, 0, &nextPaths[i]) == path.BitLen {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+}
+
+func (o *pbinRangeWriterOverlay) detach(skip func([]byte) (bool, error)) ([]pbinRangeWriterDetached, error) {
 	keys := make([]string, 0, len(o.writes))
 	for key := range o.writes {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	rows := make([]pbinRangeWriterDetached, 0, len(keys))
 	for _, key := range keys {
 		if skip != nil {
 			skipped, err := skip([]byte(key))
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if skipped {
 				continue
 			}
 		}
 		write := o.writes[key]
-		if err := o.write([]byte(key), write.data, write.prev); err != nil {
-			return err
-		}
 		if err := o.PatriciaContext.PutBranch([]byte(key), write.data, write.prev); err != nil {
-			return err
+			return nil, err
 		}
+		rows = append(rows, pbinRangeWriterDetached{key: bytes.Clone([]byte(key)), data: bytes.Clone(write.data), prev: bytes.Clone(write.prev)})
 		o.release([]byte(key))
 		delete(o.writes, key)
 	}
-	return o.finished()
+	return rows, nil
 }
 
 func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
@@ -337,19 +607,20 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		tracker = w.stampTracker()
 	}
 	var (
-		overlay *pbinRangeWriterOverlay
-		root    []byte
-		seen    bool
-		state   []byte
+		overlay  *pbinRangeWriterOverlay
+		pipeline *pbinFoldPipeline
+		root     []byte
+		seen     bool
+		state    []byte
 	)
 	foldProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT fold progress", Phase: "fold batches", TempDir: w.aggregator.Dirs().Tmp})
 	defer foldProgress.Done()
-	onRow := func(key, data, _ []byte) error {
+	onRow := func(rowTracker pbinStampTracker, key, data []byte) error {
 		if commitment.IsCommitmentStateKey(key) {
 			state = bytes.Clone(data)
 			return nil
 		}
-		stamp, stampErr := tracker.stamp(key)
+		stamp, stampErr := rowTracker.stamp(key)
 		if stampErr != nil {
 			return stampErr
 		}
@@ -359,9 +630,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		return w.ranges[rangeIndex].collector.Collect(key, data)
 	}
-	visit := func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error {
-		foldProgress.Add(1)
-		seen = true
+	serialVisit := func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error {
 		for i, op := range batch {
 			if observeErr := tracker.observe(op.Key, stamps[i]); observeErr != nil {
 				return observeErr
@@ -387,7 +656,9 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	overlay = &pbinRangeWriterOverlay{
 		writes: make(map[string]pbinRangeWriterWrite),
 		views:  &w.workerViews,
-		write:  onRow,
+		write: func(key, data, _ []byte) error {
+			return onRow(tracker, key, data)
+		},
 		finished: func() error {
 			tracker.clearClosed()
 			return nil
@@ -395,6 +666,43 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		release: func(key []byte) {
 			domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
 		},
+	}
+	pipeline, _ = newPBinFoldPipeline(ctx, tracker,
+		func(pipelineCtx context.Context, batch *pbinFoldBatch) error {
+			domains.GetCommitmentCtx().SetPBinOps(batch.batch)
+			var computeErr error
+			root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiff(pipelineCtx, tx, batch.final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
+				overlay.PatriciaContext = inner
+				return overlay
+			})
+			if computeErr != nil {
+				return computeErr
+			}
+			if batch.final {
+				batch.rows, computeErr = overlay.detach(nil)
+			} else {
+				batch.rows, computeErr = overlay.detach(pbinRangeWriterSkip(batch.lookahead))
+			}
+			return computeErr
+		},
+		func(result *pbinFoldBatchResult) error {
+			for _, row := range result.rows {
+				if rowErr := onRow(result.batch.tracker, row.key, row.data); rowErr != nil {
+					return rowErr
+				}
+			}
+			return nil
+		}, w.pipelineHook)
+	batchIndex := 0
+	visit := func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error {
+		foldProgress.Add(1)
+		seen = true
+		if pipeline == nil {
+			return serialVisit(batch, stamps, lookahead, final)
+		}
+		index := batchIndex
+		batchIndex++
+		return pipeline.submitBatch(batch, stamps, lookahead, final, index)
 	}
 	stream := func(emit func(pbt.Op, uint64) error) error {
 		progress := NewPBTProgress(PBTProgressConfig{Message: "PBT range writer progress", Phase: "range leaf stream", TempDir: w.aggregator.Dirs().Tmp})
@@ -419,8 +727,16 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return emit(pbt.Op{Key: bytes.Clone(leaf.Key), Value: value}, leaf.Stamp)
 		})
 	}
-	if streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream); streamErr != nil {
+	streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream)
+	var pipelineErr error
+	if pipeline != nil {
+		pipelineErr = pipeline.close()
+	}
+	if streamErr != nil {
 		return common.Hash{}, streamErr
+	}
+	if pipelineErr != nil {
+		return common.Hash{}, pipelineErr
 	}
 	if !seen {
 		root = append([]byte(nil), eip8297.EmptyTreeHash[:]...)

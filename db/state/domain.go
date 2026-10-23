@@ -1400,6 +1400,9 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 				if err := rs.ResetNextSalt(); err != nil {
 					return err
 				}
+				if pbtProgress != nil {
+					pbtProgress.Reset()
+				}
 			} else {
 				return fmt.Errorf("build idx: %w", err)
 			}

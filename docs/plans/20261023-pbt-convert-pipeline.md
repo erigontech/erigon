@@ -270,11 +270,11 @@ flowchart LR
 - Modify: `db/state/squeeze.go`, `db/state/pbt_range_writer.go`
 - Create: `db/state/pbt_range_writer_pipeline_test.go`
 
-- [ ] split `FlushFinished` into detach (synchronous) and collect (background).
-- [ ] the three-stage pipeline of D5, with errors propagating from any stage and stopping the others.
-- [ ] tests: equal output to the serial loop on corpora with `MaxOps` 7, 1000 and 100000; an error in each stage;
+- [x] split `FlushFinished` into detach (synchronous) and collect (background).
+- [x] the three-stage pipeline of D5, with errors propagating from any stage and stopping the others.
+- [x] tests: equal output to the serial loop on corpora with `MaxOps` 7, 1000 and 100000; an error in each stage;
       the golden harness stays green; `-race`.
-- [ ] run the gate — must pass before Task 7.
+- [x] run the gate — must pass before Task 7.
 
 ### Task 7: Parallel file ranges and indexes
 **Files:**
