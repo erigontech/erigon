@@ -3944,4 +3944,23 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 		require.NotZero(t, dc.files.EndTxNum())
 		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
 	})
+
+	t.Run("history values files without index files", func(t *testing.T) {
+		t.Parallel()
+		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		collateAndMerge(t, tx, d, 64)
+		for _, table := range []string{d.History.InvertedIndex.KeysTable, d.History.InvertedIndex.ValuesTable, d.History.ValuesTable} {
+			require.NoError(t, tx.ClearTable(table))
+		}
+
+		dc := d.beginForTests()
+		defer dc.Close()
+		require.NotEmpty(t, dc.ht.files)
+		dc.ht.iit.files = nil
+		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
+	})
 }
