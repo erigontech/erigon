@@ -2398,7 +2398,7 @@ func (result *execResult) calcFees(
 			// destruct. Gated to revival cases: an unconditional emit would add a
 			// spurious block-access-list entry for an ordinary fee credit.
 			cbLifecycle, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
-			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
+			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && !coinbaseHasCodeHashWrite && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
 			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
 				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
 					WriteHeader: state.WriteHeader{
