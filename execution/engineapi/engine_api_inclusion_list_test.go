@@ -110,8 +110,9 @@ func signedInclusionList(t *testing.T, cfg *chain.Config) []hexutil.Bytes {
 }
 
 // newInclusionListServer wires an EngineServer whose execution module knows
-// parent, accepts any inserted block and answers ValidateChain with validation.
-func newInclusionListServer(cfg *chain.Config, parent *types.Header, validation execmodule.ValidationResult, maxReorgDepth uint64) (*EngineServer, *[]*types.Block) {
+// parent, accepts any inserted block, answers ValidateChain with validation and
+// InclusionListSatisfied with ilSatisfied.
+func newInclusionListServer(cfg *chain.Config, parent *types.Header, validation execmodule.ValidationResult, ilSatisfied *bool, maxReorgDepth uint64) (*EngineServer, *[]*types.Block) {
 	var inserted []*types.Block
 	stub := &stubExecutionModule{
 		getHeaderFunc: getHeaderReturning(parent.Hash(), parent),
@@ -124,6 +125,9 @@ func newInclusionListServer(cfg *chain.Config, parent *types.Header, validation 
 		},
 		validateChainFunc: func(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
 			return validation, nil
+		},
+		ilSatisfiedFunc: func(context.Context, common.Hash, uint64, types.Transactions) (*bool, error) {
+			return ilSatisfied, nil
 		},
 	}
 	downloader := engine_block_downloader.NewEngineBlockDownloader(context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
@@ -142,10 +146,9 @@ func TestNewPayloadV6InclusionListSatisfied(t *testing.T) {
 			cfg := bogotaChainConfig()
 			parent := makeParentHeader(1000)
 			srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
-				ValidationStatus:       execmodule.ExecutionStatusSuccess,
-				LatestValidHash:        common.Hash{0x1},
-				InclusionListSatisfied: &satisfied,
-			}, ilTestMaxReorgDepth)
+				ValidationStatus: execmodule.ExecutionStatusSuccess,
+				LatestValidHash:  common.Hash{0x1},
+			}, &satisfied, ilTestMaxReorgDepth)
 
 			status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
 			require.NoError(t, err)
@@ -165,7 +168,7 @@ func TestNewPayloadV6ValidWithoutInclusionListResultIsSyncing(t *testing.T) {
 	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
 		ValidationStatus: execmodule.ExecutionStatusSuccess,
 		LatestValidHash:  common.Hash{0x1},
-	}, ilTestMaxReorgDepth)
+	}, nil, ilTestMaxReorgDepth)
 
 	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
 	require.NoError(t, err)
@@ -183,7 +186,7 @@ func TestNewPayloadV6EmptyInclusionListWithoutResultIsSatisfied(t *testing.T) {
 	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
 		ValidationStatus: execmodule.ExecutionStatusSuccess,
 		LatestValidHash:  common.Hash{0x1},
-	}, ilTestMaxReorgDepth)
+	}, nil, ilTestMaxReorgDepth)
 
 	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, []hexutil.Bytes{})
 	require.NoError(t, err)
@@ -308,10 +311,9 @@ func TestNewPayloadV6InclusionListSatisfiedNullUnlessValid(t *testing.T) {
 			name:   "invalid",
 			parent: parent,
 			validation: execmodule.ValidationResult{
-				ValidationStatus:       execmodule.ExecutionStatusBadBlock,
-				LatestValidHash:        parent.Hash(),
-				ValidationError:        "bad block",
-				InclusionListSatisfied: &satisfied,
+				ValidationStatus: execmodule.ExecutionStatusBadBlock,
+				LatestValidHash:  parent.Hash(),
+				ValidationError:  "bad block",
 			},
 			maxReorgDepth: ilTestMaxReorgDepth,
 			want:          engine_types.InvalidStatus,
@@ -332,7 +334,7 @@ func TestNewPayloadV6InclusionListSatisfiedNullUnlessValid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			srv, _ := newInclusionListServer(cfg, tc.parent, tc.validation, tc.maxReorgDepth)
+			srv, _ := newInclusionListServer(cfg, tc.parent, tc.validation, &satisfied, tc.maxReorgDepth)
 
 			status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
 			require.NoError(t, err)
@@ -348,7 +350,7 @@ func TestNewPayloadV6InvalidBlockHashReturnsPayloadStatusV2(t *testing.T) {
 
 	cfg := bogotaChainConfig()
 	parent := makeParentHeader(1000)
-	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{}, ilTestMaxReorgDepth)
+	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{}, nil, ilTestMaxReorgDepth)
 	payload := bogotaPayload(t, parent)
 	payload.BlockHash = common.Hash{0xde, 0xad}
 
@@ -366,7 +368,7 @@ func TestNewPayloadV6ForwardsInclusionListToExecution(t *testing.T) {
 	parent := makeParentHeader(1000)
 	srv, inserted := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
 		ValidationStatus: execmodule.ExecutionStatusSuccess,
-	}, ilTestMaxReorgDepth)
+	}, nil, ilTestMaxReorgDepth)
 	inclusionList := signedInclusionList(t, cfg)
 
 	_, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, inclusionList)
@@ -386,7 +388,7 @@ func TestNewPayloadV6SkipsUndecodableInclusionListEntries(t *testing.T) {
 	parent := makeParentHeader(1000)
 	srv, inserted := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
 		ValidationStatus: execmodule.ExecutionStatusSuccess,
-	}, ilTestMaxReorgDepth)
+	}, nil, ilTestMaxReorgDepth)
 
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -424,9 +426,8 @@ func TestNewPayloadV6AcceptsEmptyInclusionList(t *testing.T) {
 	cfg := bogotaChainConfig()
 	parent := makeParentHeader(1000)
 	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
-		ValidationStatus:       execmodule.ExecutionStatusSuccess,
-		InclusionListSatisfied: &satisfied,
-	}, ilTestMaxReorgDepth)
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+	}, &satisfied, ilTestMaxReorgDepth)
 
 	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, []hexutil.Bytes{})
 	require.NoError(t, err)
@@ -465,9 +466,8 @@ func TestNewPayloadV6JSONRPC(t *testing.T) {
 	cfg := bogotaChainConfig()
 	parent := makeParentHeader(1000)
 	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
-		ValidationStatus:       execmodule.ExecutionStatusSuccess,
-		InclusionListSatisfied: &satisfied,
-	}, ilTestMaxReorgDepth)
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+	}, &satisfied, ilTestMaxReorgDepth)
 	client := newEngineInProcClient(t, srv)
 
 	var status engine_types.PayloadStatusV2
@@ -485,9 +485,8 @@ func TestNewPayloadV6JSONRPCClient(t *testing.T) {
 	cfg := bogotaChainConfig()
 	parent := makeParentHeader(1000)
 	srv, inserted := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
-		ValidationStatus:       execmodule.ExecutionStatusSuccess,
-		InclusionListSatisfied: &satisfied,
-	}, ilTestMaxReorgDepth)
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+	}, &satisfied, ilTestMaxReorgDepth)
 	client := &JsonRpcClient{rpcClient: newEngineInProcClient(t, srv)}
 	inclusionList := signedInclusionList(t, cfg)
 

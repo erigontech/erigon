@@ -1103,7 +1103,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			}
-			status, _, latestValidHash, ilSatisfied, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1122,7 +1122,7 @@ func (e *EngineServer) HandleNewPayload(
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			} else {
-				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash, InclusionListSatisfied: ilSatisfied}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
 			}
 		} else {
 			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
@@ -1144,7 +1144,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, ilSatisfied, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1169,9 +1169,6 @@ func (e *EngineServer) HandleNewPayload(
 		Status:          convertGrpcStatusToEngineStatus(status),
 		LatestValidHash: &latestValidHash,
 	}
-	if resp.Status == engine_types.ValidStatus {
-		resp.InclusionListSatisfied = ilSatisfied
-	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
@@ -1180,7 +1177,7 @@ func (e *EngineServer) HandleNewPayload(
 }
 
 func (e *EngineServer) resolveInclusionListSatisfied(ctx context.Context, resp *engine_types.PayloadStatusV2, blockHash common.Hash, blockNumber uint64, il types.Transactions) error {
-	if il == nil || resp.Status != engine_types.ValidStatus || resp.InclusionListSatisfied != nil {
+	if il == nil || resp.Status != engine_types.ValidStatus {
 		return nil
 	}
 	if len(il) == 0 {

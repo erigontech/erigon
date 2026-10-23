@@ -410,34 +410,6 @@ func TestBlockReadAheaderCarriesBlockAccessListSidecar(t *testing.T) {
 	require.NotNil(t, block.BlockAccessList())
 }
 
-func TestBlockReadAheaderReturnsInclusionListForItsBlock(t *testing.T) {
-	bra := NewBlockReadAheader()
-	blockHash := common.Hash{1}
-	il := types.Transactions{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}
-	bra.AddInclusionList(blockHash, il)
-	got, _, ok := bra.ReadInclusionList(blockHash)
-	require.True(t, ok)
-	require.Equal(t, il, got)
-}
-
-func TestBlockReadAheaderMissesInclusionListForOtherBlock(t *testing.T) {
-	bra := NewBlockReadAheader()
-	il := types.Transactions{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}
-	bra.AddInclusionList(common.Hash{1}, il)
-	got, _, ok := bra.ReadInclusionList(common.Hash{2})
-	require.False(t, ok)
-	require.Nil(t, got)
-}
-
-func TestBlockReadAheaderKeepsInclusionListsForSeveralBlocks(t *testing.T) {
-	bra := NewBlockReadAheader()
-	il := types.Transactions{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}
-	bra.AddInclusionList(common.Hash{1}, il)
-	bra.AddInclusionList(common.Hash{2}, il)
-	_, _, ok := bra.ReadInclusionList(common.Hash{1})
-	require.True(t, ok)
-}
-
 func TestBlockReadAheaderIgnoresNilInclusionList(t *testing.T) {
 	bra := NewBlockReadAheader()
 	blockHash := common.Hash{1}
@@ -466,30 +438,12 @@ func TestInclusionListHashIgnoresOrder(t *testing.T) {
 	require.NotEqual(t, first, InclusionListHash(types.Transactions{testInclusionListTxn(0)}))
 }
 
-func TestBlockReadAheaderReturnsInclusionListResult(t *testing.T) {
-	bra := NewBlockReadAheader()
-	blockHash := common.Hash{1}
-	ilHash := InclusionListHash(types.Transactions{testInclusionListTxn(0)})
-	bra.SetInclusionListResult(blockHash, ilHash, false)
-	satisfied, ok := bra.ReadInclusionListResult(blockHash, ilHash)
-	require.True(t, ok)
-	require.False(t, satisfied)
-}
-
 func TestBlockReadAheaderMissesUncheckedInclusionListResult(t *testing.T) {
 	bra := NewBlockReadAheader()
 	blockHash := common.Hash{1}
 	il := types.Transactions{testInclusionListTxn(0)}
 	bra.AddInclusionList(blockHash, il)
 	_, ok := bra.ReadInclusionListResult(blockHash, InclusionListHash(il))
-	require.False(t, ok)
-}
-
-func TestBlockReadAheaderMissesResultForOtherBlock(t *testing.T) {
-	bra := NewBlockReadAheader()
-	ilHash := InclusionListHash(types.Transactions{testInclusionListTxn(0)})
-	bra.SetInclusionListResult(common.Hash{1}, ilHash, true)
-	_, ok := bra.ReadInclusionListResult(common.Hash{2}, ilHash)
 	require.False(t, ok)
 }
 

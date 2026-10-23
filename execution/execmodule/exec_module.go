@@ -580,16 +580,14 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
-	satisfied, ilPending := e.inclusionListResult(blockHash)
-	if ilPending {
+	if e.inclusionListPending(blockHash) {
 		e.forkValidator.ForgetValidHash(blockHash)
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
 		return ValidationResult{
-			ValidationStatus:       ExecutionStatusSuccess,
-			LatestValidHash:        blockHash,
-			InclusionListSatisfied: satisfied,
+			ValidationStatus: ExecutionStatusSuccess,
+			LatestValidHash:  blockHash,
 		}, nil
 	}
 	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
@@ -709,22 +707,19 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,
 	}
-	result.InclusionListSatisfied, _ = e.inclusionListResult(blockHash)
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
 	return result, nil
 }
 
-func (e *ExecModule) inclusionListResult(blockHash common.Hash) (satisfied *bool, pending bool) {
+func (e *ExecModule) inclusionListPending(blockHash common.Hash) bool {
 	_, ilHash, ok := e.readAheader.ReadInclusionList(blockHash)
 	if !ok {
-		return nil, false
+		return false
 	}
-	if res, checked := e.readAheader.ReadInclusionListResult(blockHash, ilHash); checked {
-		return &res, false
-	}
-	return nil, true
+	_, checked := e.readAheader.ReadInclusionListResult(blockHash, ilHash)
+	return !checked
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {

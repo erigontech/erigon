@@ -1025,7 +1025,8 @@ func TestValidateChainReportsInclusionListSatisfied(t *testing.T) {
 		gen.AddTx(ilTxn)
 	})
 	require.NoError(t, err)
-	block := chainPack.Blocks[0].WithInclusionList(types.Transactions{ilTxn})
+	il := types.Transactions{ilTxn}
+	block := chainPack.Blocks[0].WithInclusionList(il)
 
 	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 	require.NoError(t, err)
@@ -1033,8 +1034,10 @@ func TestValidateChainReportsInclusionListSatisfied(t *testing.T) {
 	validation, err := m.ValidateChain(t.Context(), block.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	require.NotNil(t, validation.InclusionListSatisfied)
-	require.True(t, *validation.InclusionListSatisfied)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.True(t, *satisfied)
 }
 
 func TestValidateChainReportsInclusionListUnsatisfied(t *testing.T) {
@@ -1042,7 +1045,8 @@ func TestValidateChainReportsInclusionListUnsatisfied(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	chainPack, err := m.GenerateChain(1, nil)
 	require.NoError(t, err)
-	block := chainPack.Blocks[0].WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	block := chainPack.Blocks[0].WithInclusionList(il)
 
 	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 	require.NoError(t, err)
@@ -1050,8 +1054,10 @@ func TestValidateChainReportsInclusionListUnsatisfied(t *testing.T) {
 	validation, err := m.ValidateChain(t.Context(), block.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	require.NotNil(t, validation.InclusionListSatisfied)
-	require.False(t, *validation.InclusionListSatisfied)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
 }
 
 func TestValidateChainChecksNewInclusionListForValidatedSideFork(t *testing.T) {
@@ -1075,14 +1081,17 @@ func TestValidateChainChecksNewInclusionListForValidatedSideFork(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 
-	insertRes, err = m.InsertBlocks(t.Context(), []*types.Block{sideBlock.WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})})
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	insertRes, err = m.InsertBlocks(t.Context(), []*types.Block{sideBlock.WithInclusionList(il)})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
 	validation, err = m.ValidateChain(t.Context(), sideBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	require.NotNil(t, validation.InclusionListSatisfied)
-	require.False(t, *validation.InclusionListSatisfied)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), sideBlock.Hash(), sideBlock.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
 }
 
 func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T) {
@@ -1098,7 +1107,8 @@ func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
 
-	sideBlock := fork.TopBlock.WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	sideBlock := fork.TopBlock.WithInclusionList(il)
 	for range 2 {
 		insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{sideBlock})
 		require.NoError(t, err)
@@ -1106,25 +1116,11 @@ func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T)
 		validation, err := m.ValidateChain(t.Context(), sideBlock.Header())
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-		require.NotNil(t, validation.InclusionListSatisfied)
-		require.False(t, *validation.InclusionListSatisfied)
+		satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), sideBlock.Hash(), sideBlock.NumberU64(), il)
+		require.NoError(t, err)
+		require.NotNil(t, satisfied)
+		require.False(t, *satisfied)
 	}
-}
-
-func TestValidateChainWithoutInclusionListReportsNothing(t *testing.T) {
-	t.Parallel()
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	chainPack, err := m.GenerateChain(1, nil)
-	require.NoError(t, err)
-	block := chainPack.Blocks[0]
-
-	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
-	validation, err := m.ValidateChain(t.Context(), block.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	require.Nil(t, validation.InclusionListSatisfied)
 }
 
 func TestInclusionListSatisfiedForCanonicalBlockMissingTxn(t *testing.T) {
