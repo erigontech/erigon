@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -1583,7 +1583,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	// when they halt via cancelWorkers rather than a worker sharing the controller's
 	// context — the exit path calls cancelWorkers so workers can't outlive it.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
-	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
+	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
 	pe.cancelExecLoop = execLoopCtxCancel
 
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
@@ -1663,10 +1663,7 @@ func (pe *parallelExecutor) wait() error {
 	if pe.execLoopGroup == nil {
 		return nil
 	}
-	if err := pe.execLoopGroup.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	return nil
+	return pe.execLoopGroup.Wait()
 }
 
 type applyResult any
