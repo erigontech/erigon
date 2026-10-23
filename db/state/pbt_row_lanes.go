@@ -27,6 +27,7 @@ import (
 	"sort"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -362,7 +363,7 @@ func (r *pbinRowLanes) cleanup() error {
 	if r.skip != nil {
 		r.skip.Close()
 	}
-	return os.RemoveAll(r.tmpDir)
+	return dir.RemoveAll(r.tmpDir)
 }
 
 func (r *pbinRowLanes) close() {

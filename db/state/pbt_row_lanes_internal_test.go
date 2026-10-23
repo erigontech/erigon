@@ -32,7 +32,7 @@ import (
 )
 
 func TestPBinRowLanesRandomOrder(t *testing.T) {
-	for seed := int64(0); seed < 10; seed++ {
+	for seed := range int64(10) {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
 			rng := rand.New(rand.NewSource(seed))
 			rows, err := newPBinRowLanes(t.TempDir(), fmt.Sprintf("random-%d", seed))
@@ -40,8 +40,8 @@ func TestPBinRowLanesRandomOrder(t *testing.T) {
 			defer rows.close()
 			keys := make([][]byte, 0, 3004)
 			values := make(map[string][]byte, 3004)
-			for partition := byte(0); partition < 20; partition++ {
-				for index := 0; index < 150; index++ {
+			for partition := range byte(20) {
+				for index := range 150 {
 					pathBytes := make([]byte, 33)
 					pathBytes[0] = partition / 16
 					pathBytes[1] = (partition % 16) << 4

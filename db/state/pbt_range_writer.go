@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -984,9 +984,9 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 	cleanup := func() {
 		for i := range plans {
 			plans[i].static.CleanupOnError()
-			_ = os.Remove(plans[i].valuesPath)
-			_ = os.Remove(plans[i].kviPath)
-			_ = os.Remove(plans[i].idtPath)
+			_ = dir.RemoveFile(plans[i].valuesPath)
+			_ = dir.RemoveFile(plans[i].kviPath)
+			_ = dir.RemoveFile(plans[i].idtPath)
 		}
 		w.closeRanges()
 	}

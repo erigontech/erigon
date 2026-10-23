@@ -1060,8 +1060,8 @@ func (d *Domain) buildFileRangeWithWorkers(ctx context.Context, stepFrom, stepTo
 		idtProgress = pbtRange.batch(".idt", uint64(valuesComp.Count()))
 		valuesComp.SetProgress(idtProgress.Add)
 		if pbtRange.hook != nil {
-			if err = pbtRange.hook("idt"); err != nil {
-				return StaticFiles{}, err
+			if hookErr := pbtRange.hook("idt"); hookErr != nil {
+				return StaticFiles{}, hookErr
 			}
 		}
 	}
@@ -1084,8 +1084,8 @@ func (d *Domain) buildFileRangeWithWorkers(ctx context.Context, stepFrom, stepTo
 		if pbtRange != nil {
 			kviProgress = pbtRange.batch(".kvi", uint64(collation.valuesCount))
 			if pbtRange.hook != nil {
-				if err = pbtRange.hook("kvi"); err != nil {
-					return StaticFiles{}, err
+				if hookErr := pbtRange.hook("kvi"); hookErr != nil {
+					return StaticFiles{}, hookErr
 				}
 			}
 		}
