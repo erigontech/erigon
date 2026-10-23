@@ -570,3 +570,60 @@ func TestSelfDestructTrieReset_SingleSlotRecreate_Parallel(t *testing.T) {
 
 	require.Equal(t, want, got)
 }
+
+// A same-block recreate's rebuilt branches must survive the flush on the parallel
+// engine: a forked child checks its branch in before the parent's tombstone at the
+// same prefix, so a later block would read the tombstone (or the old cells) instead.
+func TestSelfDestructTrieReset_SameBlockRecreate_NextBlock_Parallel(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const nOld, workers = 1500, 4
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 7777).Nonce(a, 9)
+		for s := 5000; s < 6600; s++ {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+		}
+	}
+	next := func(ub *UpdateBuilder) {
+		for s := 5000; s < 6600; s += 7 {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "dd")
+		}
+	}
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for s := range nOld {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := parUpdateBatch(t, ms, workers, k1, u1, nil, "")
+	clean := NewUpdateBuilder()
+	for s := range nOld {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	_, blob = parUpdateBatch(t, ms, workers, k2, u2, blob, a)
+	b3 := NewUpdateBuilder()
+	next(b3)
+	k3, u3 := b3.Build()
+	got, _ := parUpdateBatch(t, ms, workers, k3, u3, blob, "")
+
+	oms := NewMockState(t)
+	oms.SetConcurrentCommitment(true)
+	ob := NewUpdateBuilder().Balance(sib, 500)
+	recreate(ob)
+	ok, ou := ob.Build()
+	_, oblob := parUpdateBatch(t, oms, workers, ok, ou, nil, "")
+	o3 := NewUpdateBuilder()
+	next(o3)
+	ok3, ou3 := o3.Build()
+	want, _ := parUpdateBatch(t, oms, workers, ok3, ou3, oblob, "")
+
+	require.Equal(t, want, got)
+}
