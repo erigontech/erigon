@@ -199,6 +199,71 @@ func TestForwardBeaconDownloaderRequiresDistinctPeersForEmptyTipRange(t *testing
 	require.True(t, downloader.CaughtUpTo(12))
 }
 
+func TestForwardBeaconDownloaderRequiresDistinctPeersForEmptyFullRange(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTipTimeout := forwardTipEnvelopeTimeout
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardTipEnvelopeTimeout = 25 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardTipEnvelopeTimeout = previousTipTimeout
+	})
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
+	var fullRangePeer, tipRangePeer atomic.Value
+	fullRangePeer.Store("lagging-peer")
+	tipRangePeer.Store("peer-b")
+	var tipRangeCalls atomic.Int32
+	downloader.requestBlocksByRange = func(_ context.Context, start, _ uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		if start == 11 {
+			return []*cltypes.SignedBeaconBlock{}, fullRangePeer.Load().(string), nil
+		}
+		if tipRangeCalls.Add(1)%2 == 0 {
+			return []*cltypes.SignedBeaconBlock{}, "peer-c", nil
+		}
+		return []*cltypes.SignedBeaconBlock{}, tipRangePeer.Load().(string), nil
+	}
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+	requestMore := func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+		downloader.RequestMore(ctx)
+	}
+
+	requestMore()
+	require.Zero(t, tipRangeCalls.Load())
+	require.Zero(t, processCalls.Load())
+	require.False(t, downloader.CaughtUpTo(50))
+	start, pending := downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(11), start)
+
+	fullRangePeer.Store("peer-a")
+	tipRangePeer.Store("peer-c")
+	requestMore()
+	require.Zero(t, processCalls.Load())
+	require.False(t, downloader.CaughtUpTo(50))
+	start, pending = downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(44), start)
+
+	tipRangePeer.Store("peer-b")
+	downloader.RequestMore(t.Context())
+	require.Equal(t, int32(1), processCalls.Load())
+	require.True(t, downloader.CaughtUpTo(50))
+}
+
 func TestForwardBeaconDownloaderRequiresMatchingEmptyTipRanges(t *testing.T) {
 	previousInterval := forwardBeaconRequestInterval
 	previousTipTimeout := forwardTipEnvelopeTimeout

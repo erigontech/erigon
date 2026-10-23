@@ -68,8 +68,8 @@ type ForwardBeaconDownloader struct {
 	mu                       sync.Mutex
 	gloasLookahead           *cltypes.SignedBeaconBlock
 	gloasLookaheadPeer       string
-	gloasTipEmptyPeer        string
-	gloasTipEmptyThrough     uint64
+	gloasEmptyPeer           string
+	gloasEmptyThrough        uint64
 	gloasNextUnscanned       uint64
 	gloasTipProcessedThrough uint64
 }
@@ -479,9 +479,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 							return
 						}
 						if hadGloasPending && completedReqCount == reqCount {
-							emptyResponse = &emptyRangeResult{
-								lastSlot: lastSlotInRange(reqSlot, completedReqCount),
-								apply:    func() { f.advanceGloasScanPast(lastSlotInRange(reqSlot, completedReqCount)) },
+							lastSlot := lastSlotInRange(reqSlot, reqCount)
+							if f.confirmEmptyRange(peerId, lastSlot) != nil {
+								emptyResponse = &emptyRangeResult{
+									lastSlot: lastSlot,
+									apply:    func() { f.advanceGloasScanPast(lastSlot) },
+								}
 							}
 							return
 						}
@@ -743,8 +746,8 @@ Process:
 	}
 	if nextGloasLookahead != nil && nextGloasLookahead.Block.Slot > f.highestSlotProcessed {
 		if f.gloasLookahead != nextGloasLookahead {
-			f.gloasTipEmptyPeer = ""
-			f.gloasTipEmptyThrough = 0
+			f.gloasEmptyPeer = ""
+			f.gloasEmptyThrough = 0
 		}
 		f.gloasLookahead = nextGloasLookahead
 		f.gloasLookaheadPeer = pid
@@ -761,25 +764,33 @@ func (f *ForwardBeaconDownloader) tipWithoutSuccessorResponse(peerID string, ran
 	if !hadGloasPending || completedCount >= rangeCount {
 		return nil
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.gloasLookahead == nil {
-		return nil
-	}
-	lastSlot := lastSlotInRange(rangeStart, rangeCount)
-	if peerID != "http-fallback" && (f.gloasTipEmptyPeer == "" || f.gloasTipEmptyPeer == peerID || f.gloasTipEmptyThrough != lastSlot) {
-		f.gloasTipEmptyPeer = peerID
-		f.gloasTipEmptyThrough = lastSlot
+	lookahead := f.confirmEmptyRange(peerID, lastSlotInRange(rangeStart, rangeCount))
+	if lookahead == nil {
 		return nil
 	}
 	return &peerAndBlocks{
 		peerId:              peerID,
-		blocks:              []*cltypes.SignedBeaconBlock{f.gloasLookahead},
+		blocks:              []*cltypes.SignedBeaconBlock{lookahead},
 		rangeStart:          rangeStart,
 		rangeCount:          rangeCount,
 		hadGloasPending:     true,
 		tipWithoutSuccessor: true,
 	}
+}
+
+// confirmEmptyRange returns the held lookahead once two distinct P2P peers, or the HTTP fallback, answered empty through lastSlot.
+func (f *ForwardBeaconDownloader) confirmEmptyRange(peerID string, lastSlot uint64) *cltypes.SignedBeaconBlock {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gloasLookahead == nil {
+		return nil
+	}
+	if peerID != "http-fallback" && (f.gloasEmptyPeer == "" || f.gloasEmptyPeer == peerID || f.gloasEmptyThrough != lastSlot) {
+		f.gloasEmptyPeer = peerID
+		f.gloasEmptyThrough = lastSlot
+		return nil
+	}
+	return f.gloasLookahead
 }
 
 func waitForForwardRequestRetry(ctx context.Context) {
@@ -854,8 +865,8 @@ func (f *ForwardBeaconDownloader) advanceGloasScanPast(lastSlot uint64) {
 func (f *ForwardBeaconDownloader) clearGloasScan() {
 	f.gloasLookahead = nil
 	f.gloasLookaheadPeer = ""
-	f.gloasTipEmptyPeer = ""
-	f.gloasTipEmptyThrough = 0
+	f.gloasEmptyPeer = ""
+	f.gloasEmptyThrough = 0
 	f.gloasNextUnscanned = 0
 }
 
