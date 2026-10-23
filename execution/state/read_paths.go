@@ -271,10 +271,10 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 // wrappers consume the result. skipStorage suppresses the storage-read fallback on a
 // miss, for callers that resolve the value themselves. Result is written into *r
 // (caller stack, passed pre-zeroed) to avoid a return-value copy per read.
-func (s *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
-	_, created := s.versionedWrites.GetCreateContract(addr)
-	_, destructed := s.versionedWrites.GetSelfDestruct(addr)
-	_, recorded := s.versionedWrites.GetAddress(addr)
+func (ibs *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
+	_, created := ibs.versionedWrites.GetCreateContract(addr)
+	_, destructed := ibs.versionedWrites.GetSelfDestruct(addr)
+	_, recorded := ibs.versionedWrites.GetAddress(addr)
 	return created || destructed || recorded
 }
 
