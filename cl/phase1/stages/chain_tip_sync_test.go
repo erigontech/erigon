@@ -9,25 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
-	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -140,6 +133,8 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	noPeers.peers = 0
 	atTip := unpublished
 	atTip.seenSlot = 68
+	atTipPublished := atTip
+	atTipPublished.headUnpublished = false
 	epochsBehind := unpublished
 	epochsBehind.seenSlot, epochsBehind.seenEpoch, epochsBehind.targetEpoch = 3, 0, 1
 
@@ -162,9 +157,11 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "sleep ended at the slot start, head unpublished", stage: SleepForSlot, args: unpublished, want: ForkChoice},
 		// ForkChoice may fail to publish; going straight back to ForkChoice would stop fetching blocks.
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
-		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: ForkChoice},
+		// CleanupAndPruning reruns ForkChoice for a block that gossip imported during either stage.
+		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: CleanupAndPruning},
 		{name: "cleanup and pruning at tip, head unpublished", stage: CleanupAndPruning, args: atTip, want: ForkChoice},
-		{name: "fork choice at tip, rerun just happened", stage: ForkChoice, args: atTip, forkChoiceRerunAt: time.Now(), want: CleanupAndPruning},
+		{name: "cleanup and pruning at tip, head published", stage: CleanupAndPruning, args: atTipPublished, want: SleepForSlot},
+		{name: "cleanup and pruning, no peers, head unpublished", stage: CleanupAndPruning, args: noPeers, want: SleepForSlot},
 		{name: "cleanup and pruning at tip, rerun just happened", stage: CleanupAndPruning, args: atTip, forkChoiceRerunAt: time.Now(), want: SleepForSlot},
 	}
 	stages := ConsensusClStages().Stages
@@ -174,6 +171,16 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 			require.Equal(t, tt.want, stages[tt.stage].TransitionFunc(cfg, tt.args, tt.err))
 		})
 	}
+}
+
+// A publish that keeps failing at the tip must not rerun ForkChoice back to back.
+func TestCleanupAndPruningRerunsForkChoiceOncePerInterval(t *testing.T) {
+	atTip := Args{hasDownloaded: true, peers: 1, seenSlot: 68, seenEpoch: 2, targetSlot: 68, targetEpoch: 1, headUnpublished: true}
+	transition := ConsensusClStages().Stages[CleanupAndPruning].TransitionFunc
+	cfg := &Cfg{}
+
+	require.Equal(t, ForkChoice, transition(cfg, atTip, nil))
+	require.Equal(t, SleepForSlot, transition(cfg, atTip, nil))
 }
 
 // The proposer boost expires when a slot starts, so the head can move without a block. The stage args must tick fork
@@ -188,12 +195,7 @@ func TestStageArgsTickForkChoiceToTheTargetSlot(t *testing.T) {
 	require.NoError(t, anchorState.SetSlot(anchorSlot))
 	anchorState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: anchorSlot})
 	syncedData := synced_data.NewSyncedDataManager(&beaconCfg, true)
-	graph, err := fork_graph.NewForkGraphDisk(anchorState, syncedData, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	store, err := forkchoice.NewForkChoiceStore(clock, anchorState, nil, pool.NewOperationsPool(&beaconCfg), graph,
-		beaconevents.NewEventEmitter(), syncedData, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		validator_params.NewValidatorParams(), false, nil)
-	require.NoError(t, err)
+	store := newAnchorForkChoiceStore(t, &beaconCfg, anchorState, nil)
 	require.Equal(t, uint64(anchorSlot), store.Slot())
 	cfg := &Cfg{
 		rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock),
