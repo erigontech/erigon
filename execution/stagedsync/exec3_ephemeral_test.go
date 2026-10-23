@@ -293,3 +293,31 @@ func TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock(t *testing.T) {
 	require.Equal(t, writerTxIndex-startTxIndex, blocker,
 		"blocker must be in dense task-list space, not versionMap block-TxIndex space")
 }
+
+// TestSelfLoopEvaluateBlockerOnSelfDestructEstimate pins that a read invalidated
+// only by a lower tx's in-flight self-destruct estimate names that tx as the
+// blocker. The read itself is a Done origin cell, so a blocker search over the
+// read's own path finds nothing and the worker re-executes in a busy loop until
+// it hits the incarnation limit.
+func TestSelfLoopEvaluateBlockerOnSelfDestructEstimate(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000deadbeef"))
+	origin := state.Version{TxIndex: -2}
+	vm := state.NewVersionMap(nil)
+	vm.WriteAddress(addr, origin, &accounts.Account{}, true)
+	vm.WriteSelfDestruct(addr, state.Version{TxIndex: 0, Incarnation: -1}, true, false)
+
+	var rs state.ReadSet
+	rs.SetAddress(addr, state.VersionedRead[state.AccountView]{
+		ReadHeader: state.ReadHeader{Source: state.MapRead, Version: origin},
+		Val:        state.NewAccountView(&accounts.Account{}),
+	})
+	be := &blockExecutor{
+		versionMap: vm,
+		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: -1}, index: 0}},
+	}
+	tv := &taskVersion{execTask: &execTask{index: 2}, version: state.Version{TxIndex: 1}}
+
+	valid, _, blocker := be.selfLoopEvaluate(tv, &exec.TxResult{TxIn: rs})
+	require.False(t, valid)
+	require.Equal(t, 1, blocker, "the self-destruct estimate's writer must be the blocker")
+}
