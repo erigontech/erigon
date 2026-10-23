@@ -144,11 +144,12 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	epochsBehind.seenSlot, epochsBehind.seenEpoch, epochsBehind.targetEpoch = 3, 0, 1
 
 	tests := []struct {
-		name  string
-		stage string
-		args  Args
-		err   error
-		want  string
+		name              string
+		stage             string
+		args              Args
+		err               error
+		forkChoiceRerunAt time.Time
+		want              string
 	}{
 		{name: "forward sync, head unpublished", stage: ForwardSync, args: unpublished, want: ForkChoice},
 		{name: "forward sync, no peers, head unpublished", stage: ForwardSync, args: noPeers, want: ForkChoice},
@@ -161,11 +162,16 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "sleep ended at the slot start, head unpublished", stage: SleepForSlot, args: unpublished, want: ForkChoice},
 		// ForkChoice may fail to publish; going straight back to ForkChoice would stop fetching blocks.
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
+		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: ForkChoice},
+		{name: "cleanup and pruning at tip, head unpublished", stage: CleanupAndPruning, args: atTip, want: ForkChoice},
+		{name: "fork choice at tip, rerun just happened", stage: ForkChoice, args: atTip, forkChoiceRerunAt: time.Now(), want: CleanupAndPruning},
+		{name: "cleanup and pruning at tip, rerun just happened", stage: CleanupAndPruning, args: atTip, forkChoiceRerunAt: time.Now(), want: SleepForSlot},
 	}
 	stages := ConsensusClStages().Stages
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, stages[tt.stage].TransitionFunc(&Cfg{}, tt.args, tt.err))
+			cfg := &Cfg{forkChoiceRerunAt: tt.forkChoiceRerunAt}
+			require.Equal(t, tt.want, stages[tt.stage].TransitionFunc(cfg, tt.args, tt.err))
 		})
 	}
 }
