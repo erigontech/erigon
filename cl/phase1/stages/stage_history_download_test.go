@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
@@ -359,16 +360,17 @@ func (d *countingHistoryDownloader) RequestMore(context.Context) error {
 	return d.err
 }
 
+var failingIndexBuilder = snaptype.IndexBuilderFunc(func(context.Context, snaptype.FileInfo, uint32, *chain.Config, string, *background.Progress, log.Lvl, log.Logger) error {
+	return errors.New("no space left in tmpdir")
+})
+
 func TestHistoryDownloadStartsDownloaderWhenIndexBuildFails(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	writeUnindexedBeaconBlocks(t, dirs, 0, snaptype.CaplinMergeLimit)
 	cfg := clparams.MainnetBeaconConfig
 	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(sn.Close)
-	buildErr := errors.New("no space left in tmpdir")
-	sn.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(context.Context, snaptype.FileInfo, uint32, *chain.Config, string, *background.Progress, log.Lvl, log.Logger) error {
-		return buildErr
-	}))
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, failingIndexBuilder)
 
 	stop := errors.New("stop after the first request")
 	downloader := &countingHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: stop}}
@@ -384,6 +386,50 @@ func TestHistoryDownloadStartsDownloaderWhenIndexBuildFails(t *testing.T) {
 		require.Equal(t, pass, downloader.requests, "a failed index build must not keep the downloader from starting")
 		require.ErrorIs(t, err, stop)
 	}
+}
+
+func TestHistoryDownloadKeepsBackfillingBelowUnindexedLeadingSegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	dirs := datadir.New(t.TempDir())
+	writeUnindexedBeaconBlocks(t, dirs, 0, limit)
+	writeUnindexedBeaconBlocks(t, dirs, limit, 2*limit)
+	indexed, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 2*limit))
+	require.True(t, ok)
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), indexed, 0, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
+
+	cfg := clparams.MainnetBeaconConfig
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, failingIndexBuilder)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	t.Cleanup(db.Close)
+
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = limit
+	var segmentsMax uint64
+	var finished bool
+	var blockErr error
+	stop := errors.New("stop after the first block")
+	downloader := &firstBlockHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: stop}}
+	downloader.deliver = func(onNewBlock network.OnNewBlock) {
+		segmentsMax = sn.SegmentsMax()
+		finished, blockErr = onNewBlock(block, nil)
+	}
+
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:          &cfg,
+		downloader:         downloader,
+		sn:                 sn,
+		waitForAllRoutines: true,
+		startingSlot:       2 * limit,
+		indiciesDB:         db,
+		caplinConfig:       clparams.CaplinConfig{ArchiveBlocks: true},
+		logger:             log.New(),
+	}, t.Context(), log.New())
+	require.ErrorIs(t, err, stop)
+	require.NoError(t, blockErr)
+	require.Equal(t, uint64(2*limit-1), segmentsMax)
+	require.False(t, finished, "slots below an unindexed leading segment must still be backfilled")
 }
 
 func TestHistoryDownloadSkipsEngineWaitWithoutBlocksArchive(t *testing.T) {

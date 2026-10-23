@@ -141,6 +141,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		cfg.caplinConfig.ArchiveBlocks = false // disable backfilling if not on a supported network
 	}
 
+	segmentsMax := cfg.sn.SegmentsMax
 	if cfg.caplinConfig.ArchiveBlocks {
 		if err := waitForEngineReady(ctx, cfg.engine, logger); err != nil {
 			return err
@@ -148,6 +149,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		logger.Info("[Caplin] Building missing snapshot indices")
 		if err := cfg.sn.BuildMissingIndices(ctx, logger); err != nil {
 			logger.Warn("[Caplin] Could not build missing snapshot indices", "err", err)
+			segmentsMax = func() uint64 { return 0 }
 		}
 	}
 
@@ -216,7 +218,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		slot := blk.Block.Slot
-		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
+		isInCLSnapshots := segmentsMax() > blk.Block.Slot
 		// Skip blocks that are already in the snapshots
 		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, blk, true); err != nil {
@@ -314,7 +316,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			return true, tx.Commit()
 		}
 		return hasDownloadEnoughForImmediateBlobsBackfilling &&
-				(!cfg.caplinConfig.ArchiveBlocks || slot <= cfg.sn.SegmentsMax()) &&
+				(!cfg.caplinConfig.ArchiveBlocks || slot <= segmentsMax()) &&
 				(elBackfillFinished(slot, uint64(currEth1Progress.Load()), destinationSlotForEL, destinationBlockForEL) || isInElSnapshots),
 			tx.Commit()
 	})
