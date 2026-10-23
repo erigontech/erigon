@@ -88,6 +88,7 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
+	forkChoiceRerunAt            time.Time
 	chainTipRejections           *chainTipRejections
 }
 
@@ -209,6 +210,14 @@ func catchUpAfterImport(args Args) StageName {
 		return ForkChoice
 	}
 	return next
+}
+
+func rerunForkChoiceAtTip(cfg *Cfg, args Args) bool {
+	if !args.headUnpublished || args.seenSlot < args.targetSlot || time.Since(cfg.forkChoiceRerunAt) < sleepForSlotRewakeInterval {
+		return false
+	}
+	cfg.forkChoiceRerunAt = time.Now()
+	return true
 }
 
 func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
@@ -394,6 +403,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
+					if rerunForkChoiceAtTip(cfg, args) {
+						return ForkChoice
+					}
 					return CleanupAndPruning
 				},
 				ActionFunc: doForkchoiceRoutine,
@@ -403,6 +415,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
+					}
+					if rerunForkChoiceAtTip(cfg, args) {
+						return ForkChoice
 					}
 					return SleepForSlot
 				},
