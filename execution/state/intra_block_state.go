@@ -1373,6 +1373,10 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 	}
 	ibs.stateReader.SetTrace(false, "")
 	if err != nil {
+		// Route a committed-base read failure (e.g. a corrupt account record) operationally
+		// like the origin* readers, so the executor surfaces it instead of letting the
+		// EVM swallow it as a gas failure and condemn the block as invalid.
+		ibs.recordStateReadError(err)
 		return nil, err
 	}
 	if ibs.committedBase == nil {
