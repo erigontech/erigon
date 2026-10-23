@@ -37,6 +37,7 @@ type ForkChoiceStorage interface {
 type ForkChoiceStorageReader interface {
 	// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
 	Ancestor(root common.Hash, slot uint64) ForkChoiceNode
+	AttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool)
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
 	AnchorExecutionPayloadBuilderIndex() (uint64, bool)

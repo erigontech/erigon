@@ -45,6 +45,7 @@ import (
 type ForkChoiceStorageMock struct {
 	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
+	AttestationDataFn                     func(common.Hash, uint64) (solid.AttestationData, bool)
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AncestorFn                            func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode
 	AncestorCalls                         atomic.Int64
@@ -306,6 +307,13 @@ func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoi
 		return f.AncestorFn(root, slot)
 	}
 	return f.Ancestors[slot]
+}
+
+func (f *ForkChoiceStorageMock) AttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+	if f.AttestationDataFn == nil {
+		return solid.AttestationData{}, false
+	}
+	return f.AttestationDataFn(headRoot, slot)
 }
 
 func (f *ForkChoiceStorageMock) AnchorSlot() uint64 {
