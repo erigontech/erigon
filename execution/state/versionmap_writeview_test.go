@@ -6,6 +6,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -222,4 +225,44 @@ func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
 		seen++
 	}
 	require.Equal(t, 2, seen)
+}
+
+// An account absent before the tx that the tx creates and self-destructs leaves no
+// state, so its writes are dropped; a CREATE onto a pre-funded address, or one an
+// earlier tx of the block funded, still deletes the account.
+func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
+	run := func(t *testing.T, reader StateReader, vm *VersionMap) *WriteSet {
+		t.Helper()
+		ibs := NewWithVersionMap(reader, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 1)
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract))
+		require.NoError(t, ibs.SetCode(addr, []byte{0x33, 0xff}, tracing.CodeChangeContractCreation))
+		_, err := ibs.Selfdestruct(addr, false)
+		require.NoError(t, err)
+		ws := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true, IsCancun: true})
+		vm.FlushVersionedWrites(ws, true, "")
+		out, err := WithoutVanished(ws, vm, 1, false, reader)
+		require.NoError(t, err)
+		return out
+	}
+	hasAddr := func(ws *WriteSet) bool {
+		for h := range ws.AllHeaders() {
+			if h.Address == addr {
+				return true
+			}
+		}
+		return false
+	}
+	require.False(t, hasAddr(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx and gone after it")
+	require.True(t, hasAddr(run(t, newAccountStateReader(addr), NewVersionMap(nil))), "a CREATE onto a pre-funded address must still delete it")
+
+	funded := NewVersionMap(nil)
+	w := &WriteSet{}
+	w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
+	funded.FlushVersionedWrites(w, true, "")
+	require.True(t, hasAddr(run(t, &minimalStateReader{}, funded)), "an earlier tx of the block funded the address")
 }

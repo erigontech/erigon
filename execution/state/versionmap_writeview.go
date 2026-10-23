@@ -193,3 +193,44 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 }
 
 var _ WriteSetView = (*versionMapWriteView)(nil)
+
+// WithoutVanished returns ws without the accounts tx txIdx created and self-destructed
+// that did not exist before it: they leave no state, so publishing their deletes would
+// only cost domain lookups and commitment work. preBlock reads the state before the block.
+func WithoutVanished(ws *WriteSet, vm *VersionMap, txIdx int, eip8246 bool, preBlock StateReader) (*WriteSet, error) {
+	var vanished map[accounts.Address]bool
+	for addr := range ws.SelfDestructs() {
+		gone, err := vanishedInTx(ws, vm, addr, txIdx, eip8246, preBlock)
+		if err != nil {
+			return nil, err
+		}
+		if gone {
+			if vanished == nil {
+				vanished = map[accounts.Address]bool{}
+			}
+			vanished[addr] = true
+		}
+	}
+	if vanished == nil {
+		return ws, nil
+	}
+	return ws.Filter(func(h WriteHeader) bool { return !vanished[h.Address] }), nil
+}
+
+func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int, eip8246 bool, preBlock StateReader) (bool, error) {
+	if sd, res, ok := vm.ReadSelfDestruct(addr, txIdx+1); !ok || !res.resolved() || !sd {
+		return false, nil
+	}
+	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
+		return false, nil
+	}
+	if bal, res, ok := vm.ReadBalance(addr, txIdx+1); eip8246 && ok && (!res.resolved() || !bal.IsZero()) {
+		return false, nil
+	}
+	// An earlier tx of the block may have funded addr where preBlock cannot see it.
+	if vm.accountLiveAt(addr, txIdx) {
+		return false, nil
+	}
+	acc, err := preBlock.ReadAccountData(addr)
+	return acc == nil, err
+}

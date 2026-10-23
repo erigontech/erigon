@@ -3058,12 +3058,13 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		}
 	}
 
-	{
-		// A read-only versionMap-slice view over the tx's raw write-set; apply and
-		// the calculator resolve each account's base from the versionMap.
-		rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-		txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
+	// A read-only versionMap-slice view over the tx's raw write-set; apply and
+	// the calculator resolve each account's base from the versionMap.
+	rawWrites, err := state.WithoutVanished(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap, txVersion.TxIndex, txTask.Rules().IsAmsterdam, *stateReader)
+	if err != nil {
+		return nil, err
 	}
+	txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
 
 	// Snapshot before pushing so the publish loop can't see a later incarnation if
 	// be.results[tx] is overwritten by a concurrent worker.
