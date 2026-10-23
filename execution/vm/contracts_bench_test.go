@@ -248,3 +248,29 @@ func BenchmarkModExpShapes(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkModExpSmallExp runs MODEXP with tiny exponents on moduli between 33 and 255 bytes.
+func BenchmarkModExpSmallExp(b *testing.B) {
+	p := &bigModExp{osaka: true}
+	operand := func(bits int, seed byte) []byte {
+		out := bytes.Repeat([]byte{seed | 0x81}, (bits+7)/8)
+		out[0] = (0x80 | seed) >> ((8 - bits%8) % 8)
+		return out
+	}
+	for _, modBits := range []int{264, 512, 768, 1024, 1536, 2040} {
+		for _, expBits := range []int{2, 8, 17, 65} {
+			base, exp, mod := operand(modBits-1, 0x13), operand(expBits, 0x25), operand(modBits, 0x37)
+			header := make([]byte, 96)
+			header[31], header[63], header[95] = byte(len(base)), byte(len(exp)), byte(len(mod))
+			header[30], header[62], header[94] = byte(len(base)>>8), byte(len(exp)>>8), byte(len(mod)>>8)
+			input := append(append(append(header, base...), exp...), mod...)
+			b.Run(fmt.Sprintf("mod%d_exp%d", modBits, expBits), func(b *testing.B) {
+				for b.Loop() {
+					if _, err := p.Run(input); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
