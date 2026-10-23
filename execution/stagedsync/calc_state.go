@@ -30,7 +30,6 @@ type calcAccountState struct {
 	Incarnation uint64
 	Deleted     bool
 	dirty       bool
-	absent      bool // no leaf in the trie as of the last flush
 }
 
 // calcDomainReader provides lazy-load reads for calcState through the
@@ -127,9 +126,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 			if cs.logger != nil {
 				cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: lazy-load ReadAccountData failed", "addr", addr, "err", err)
 			}
-		} else if dbAcc == nil {
-			acc.absent = true
-		} else {
+		} else if dbAcc != nil {
 			acc.Balance = dbAcc.Balance
 			acc.Nonce = dbAcc.Nonce
 			acc.CodeHash = dbAcc.CodeHash.Value()
@@ -347,18 +344,13 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
 		// field is zero; one that still holds a non-zero balance/nonce/code (or a
 		// retained incarnation) keeps its leaf via a regular UPDATE.
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
-		removesLeaf := acc.Deleted && acc.Incarnation == 0 && isAllZero
-		if removesLeaf && acc.absent && len(cs.storageDirty[addr]) == 0 {
-			continue
-		}
-		acc.absent = removesLeaf
 		var u commitment.Update
 		// A deleted account removes its leaf (DeleteUpdate) only when it is fully
 		// zero AND holds no retained incarnation; a retained incarnation keeps the
 		// leaf via the default zero-valued UPDATE (which, under isAllZero, writes the
 		// same zeros).
 		switch {
-		case removesLeaf:
+		case acc.Deleted && acc.Incarnation == 0 && isAllZero:
 			u = commitment.Update{
 				Flags:    commitment.DeleteUpdate,
 				CodeHash: empty.CodeHash,

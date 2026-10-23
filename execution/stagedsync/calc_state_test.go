@@ -798,31 +798,3 @@ func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testin
 	assert.Equal(t, accounts.SerialiseV3(&expected), enc,
 		"record must be balance-only: nonce, code hash and incarnation cleared")
 }
-
-// A self-destruct of an account that was never in the trie (CREATE then SELFDESTRUCT in
-// one tx) has no leaf to remove; once a block has flushed the account, a destruct deletes it.
-func TestFlushToUpdates_SelfDestructOfAbsentAccount(t *testing.T) {
-	cs := newTestCalcState()
-	addr := accounts.InternAddress([20]byte{0xd2})
-	key := addr.Value()
-	cs.accounts[addr] = &calcAccountState{CodeHash: empty.CodeHash, absent: true}
-
-	sd := &state.WriteSet{}
-	sd.SetSelfDestruct(addr, &state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath}, Val: true})
-	cs.ApplyWrites(sd)
-	updates := newTestUpdates()
-	cs.FlushToUpdates(updates)
-	assert.Empty(t, updatesSnapshot(t, updates), "an account absent from the trie has no leaf to delete")
-	cs.ResetBlockFlags()
-
-	create := &state.WriteSet{}
-	create.SetNonce(addr, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: 1})
-	cs.ApplyWrites(create)
-	cs.FlushToUpdates(newTestUpdates())
-	cs.ResetBlockFlags()
-
-	cs.ApplyWrites(sd)
-	updates = newTestUpdates()
-	cs.FlushToUpdates(updates)
-	assert.Equal(t, commitment.DeleteUpdate, lookupKeyUpdate(t, updates, string(key[:])).Flags)
-}
