@@ -68,6 +68,9 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	defer evm.ResetBetweenBlocks(evm.Context, txContext, evm.IntraBlockState(), config, evm.ChainRules())
 	validation.evm = evm
 	validation.dependencies = map[common.Address]struct{}{tx.SenderAddress: {}}
+	if !tx.UsesLegacyNonce() {
+		validation.dependencies[types.FrameNonceManager] = struct{}{}
+	}
 	config.Tracer = &tracing.Hooks{OnOpcodeV2: validation.onOpcode, OnEnterV2: validation.onEnter}
 	evm.ResetBetweenBlocks(evm.Context, NewEVMTxContext(msg), evm.IntraBlockState(), config, evm.ChainRules())
 	st := NewTxnExecutor(evm, msg, NewGasPool(tx.GetGasLimit(), tx.GetBlobGas()))

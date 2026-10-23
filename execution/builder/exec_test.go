@@ -116,7 +116,7 @@ func TestFrameFilterAllowsSponsoredSender(t *testing.T) {
 			if deployed {
 				sim.account = &accounts.Account{CodeHash: accounts.InternCodeHash(common.Hash{1})}
 			}
-			tx := &types.FrameTransaction{ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, Fees: types.FrameFees{FeeCap: *uint256.NewInt(1)}}
+			tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, Fees: types.FrameFees{FeeCap: *uint256.NewInt(1)}}
 			got, err := filterBadTransactions([]types.Transaction{tx}, uint256.NewInt(1), chain.AllProtocolChanges, 1, &types.Header{BaseFee: uint256.NewInt(0)}, sim, sim, log.New(), nil)
 			require.NoError(t, err)
 			require.Len(t, got, 1)

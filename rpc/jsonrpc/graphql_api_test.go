@@ -128,7 +128,8 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 		}}},
 		{"setCode", &types.SetCodeTransaction{DynamicFeeTransaction: dynamicFee()}},
 		{"frame", &types.FrameTransaction{
-			ChainID: *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x01"),
+			NonceKeys: []uint256.Int{{}},
+			ChainID:   *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x01"),
 			Frames: []types.Frame{{}}, Fees: types.FrameFees{TipCap: *tipCap, FeeCap: *feeCap},
 		}},
 	} {

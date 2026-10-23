@@ -50,14 +50,29 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if err != nil {
 		return nil, err
 	}
-	if nonce < tx.Nonce {
-		return nil, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}
-	}
-	if nonce > tx.Nonce {
-		return nil, &nonceError{ErrNonceTooLow, sender, tx.Nonce, nonce}
-	}
-	if nonce == math.MaxUint64 {
+	if tx.Nonce == math.MaxUint64 {
 		return nil, ErrNonceMax
+	}
+	if tx.UsesLegacyNonce() {
+		if nonce < tx.Nonce {
+			return nil, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}
+		}
+		if nonce > tx.Nonce {
+			return nil, &nonceError{ErrNonceTooLow, sender, tx.Nonce, nonce}
+		}
+	} else {
+		for _, key := range tx.NonceKeys {
+			sequence, err := st.state.GetState(accounts.InternAddress(types.FrameNonceManager), accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, key)))
+			if err != nil {
+				return nil, err
+			}
+			if sequence.LtUint64(tx.Nonce) {
+				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
+			}
+			if sequence.GtUint64(tx.Nonce) {
+				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooLow, key.String(), tx.Nonce, sequence.String())
+			}
+		}
 	}
 	if err := CheckEip1559TxGasFeeCap(sender, &tx.Fees.FeeCap, &tx.Fees.TipCap, &st.evm.Context.BaseFee, false); err != nil {
 		return nil, err
@@ -98,6 +113,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	snapshot := st.state.PushSnapshot()
 	defer st.state.PopSnapshot(snapshot)
 	ctx := st.state.NewFrameContext(tx, maxCost)
+	ctx.LegacyNonce = nonce
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil

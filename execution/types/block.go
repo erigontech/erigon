@@ -1476,7 +1476,7 @@ var txnFieldCount = map[byte]int{
 	BlobTxType:       14,
 	SetCodeTxType:    13,
 
-	FrameTxType: 7,
+	FrameTxType: 8,
 }
 
 // checkTxnShape reports whether binary is framed as one transaction of a type this code knows: the

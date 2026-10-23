@@ -32,6 +32,8 @@ type FrameContext struct {
 	SenderApproved bool
 	MaxCost        uint256.Int
 	SigningHash    common.Hash
+	NonceKeysHash  common.Hash
+	LegacyNonce    uint64
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8
@@ -43,7 +45,7 @@ type frameStorageSlot struct {
 }
 
 func (ibs *IntraBlockState) NewFrameContext(tx *types.FrameTransaction, maxCost uint256.Int) *FrameContext {
-	ctx := &FrameContext{Transaction: tx, Receipts: make([]types.FrameReceipt, len(tx.Frames)), MaxCost: maxCost, SigningHash: tx.SigningHash(nil), journal: ibs.journal}
+	ctx := &FrameContext{Transaction: tx, Receipts: make([]types.FrameReceipt, len(tx.Frames)), MaxCost: maxCost, SigningHash: tx.SigningHash(nil), NonceKeysHash: tx.NonceKeysHash(), journal: ibs.journal}
 	ctx.undo.frame = ctx
 	ctx.storageOwners = make(map[frameStorageSlot]uint8)
 	return ctx

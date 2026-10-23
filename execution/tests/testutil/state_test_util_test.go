@@ -17,6 +17,7 @@
 package testutil
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -24,6 +25,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 )
+
+func TestStateTestLoadsInvalidEncodedTransaction(t *testing.T) {
+	input := []byte(`{"transaction":{"maxFeePerGas":"0x10000000000000000000000000000000000000000000000000000000000000000"},"post":{"Bogota":[{"txbytes":"0x06","expectException":"TransactionException.RLP_STRUCTURES_ENCODING"}]}}`)
+	var test StateTest
+	require.NoError(t, json.Unmarshal(input, &test))
+	require.Equal(t, []byte{6}, []byte(test.Json.Post["Bogota"][0].Tx))
+}
 
 func TestStateTestExpectedErrorIgnoresPostState(t *testing.T) {
 	test := StateTest{

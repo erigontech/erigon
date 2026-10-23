@@ -62,6 +62,14 @@ func opTxParam(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		param.SetUint64(uint64(len(tx.Signatures)))
 	case 12:
 		param.SetUint64(ctx.StateGasLeft())
+	case 13:
+		param.SetUint64(ctx.LegacyNonce)
+	case 14:
+		param.SetUint64(uint64(len(tx.NonceKeys)))
+	case 15:
+		param.SetBytes(ctx.NonceKeysHash[:])
+	case 16:
+		param.Set(&tx.NonceKeys[0])
 	default:
 		return pc, nil, ErrFrameParameter
 	}

@@ -41,7 +41,9 @@ func TestFrameTransactionEncoding(t *testing.T) {
 	t.Parallel()
 	sender := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	payload, err := rlp.EncodeToBytes([]any{
-		uint64(1), uint64(7), sender,
+		uint64(1),
+		[]uint64{1, 2},
+		uint64(7), sender,
 		[]any{[]any{uint64(1), uint64(3), []byte{}, []uint64{100, 0}, uint64(0), []byte{}}},
 		[]any{},
 		[]uint64{2, 20, 0},
@@ -63,11 +65,31 @@ func TestFrameTransactionEncoding(t *testing.T) {
 	require.NoError(t, txn.MarshalBinary(&binary))
 	require.Equal(t, encoded, binary.Bytes())
 	require.Equal(t, len(encoded), txn.EncodingSize())
+	require.NoError(t, checkTxnShape(encoded))
 	var enveloped bytes.Buffer
 	require.NoError(t, txn.EncodeRLP(&enveloped))
 	decoded, err := DecodeTransaction(enveloped.Bytes())
 	require.NoError(t, err)
 	require.Equal(t, txn.Hash(), decoded.Hash())
+}
+
+func TestFrameTransactionNonceKeys(t *testing.T) {
+	for name, keys := range map[string][]uint256.Int{
+		"empty":                 nil,
+		"too many":              make([]uint256.Int, 17),
+		"duplicate":             {{1}, {1}},
+		"descending":            {{2}, {1}},
+		"zero with another key": {{}, {1}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx := &FrameTransaction{NonceKeys: keys, Frames: []Frame{{}}}
+			require.Error(t, tx.Validate())
+			var data bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&data))
+			_, err := DecodeTransaction(data.Bytes())
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestFrameTransactionConstraints(t *testing.T) {
@@ -103,7 +125,7 @@ func TestFrameTransactionConstraints(t *testing.T) {
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
-			tx := FrameTransaction{ChainID: *uint256.NewInt(1), Frames: []Frame{{Mode: 1, Flags: 3, Limits: mdgas.MdGas{Execution: 100}}}}
+			tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []Frame{{Mode: 1, Flags: 3, Limits: mdgas.MdGas{Execution: 100}}}}
 			rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1)}
 			_, err := tx.AsMessage(Signer{}, nil, rules)
 			require.NoError(t, err)
@@ -119,7 +141,7 @@ func TestFrameTransactionSignatureValidation(t *testing.T) {
 	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1)}
 	for _, scheme := range []uint8{FrameSignatureSecp256k1, FrameSignatureP256} {
 		t.Run(string(rune('0'+scheme)), func(t *testing.T) {
-			tx := FrameTransaction{ChainID: *uint256.NewInt(1), Frames: []Frame{{}}, Signatures: []FrameSignature{{Scheme: scheme}}}
+			tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []Frame{{}}, Signatures: []FrameSignature{{Scheme: scheme}}}
 			var highS []byte
 			if scheme == FrameSignatureSecp256k1 {
 				key, err := crypto.GenerateKey()
@@ -175,7 +197,7 @@ func TestFrameTransactionMalformedSignature(t *testing.T) {
 		"p256 scalars":     {Scheme: 2, Signature: make([]byte, 128)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			tx := FrameTransaction{Frames: []Frame{{}}, Signatures: []FrameSignature{sig}}
+			tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, Signatures: []FrameSignature{sig}}
 			_, err := tx.AsMessage(Signer{}, nil, &chain.Rules{IsBogota: true, ChainID: new(uint256.Int)})
 			require.Error(t, err)
 		})
@@ -185,7 +207,8 @@ func TestFrameTransactionMalformedSignature(t *testing.T) {
 func TestFrameTransactionAsMessage(t *testing.T) {
 	t.Parallel()
 	tx := FrameTransaction{
-		ChainID: *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"),
+		NonceKeys: []uint256.Int{{}},
+		ChainID:   *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"),
 		Frames: []Frame{{Mode: FrameVerify, Flags: FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
 		Fees:   FrameFees{TipCap: *uint256.NewInt(2), FeeCap: *uint256.NewInt(20)},
 	}
@@ -202,33 +225,44 @@ func TestFrameTransactionAsMessage(t *testing.T) {
 
 func TestFrameTransactionExpiryRequiresExplicitTarget(t *testing.T) {
 	t.Parallel()
-	tx := FrameTransaction{SenderAddress: FrameExpiryVerifier, Frames: []Frame{{Mode: FrameVerify, Flags: FrameApproveBoth}}}
+	tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, SenderAddress: FrameExpiryVerifier, Frames: []Frame{{Mode: FrameVerify, Flags: FrameApproveBoth}}}
 	require.NoError(t, tx.Validate())
 }
 
 func TestFrameTransactionGasLimit(t *testing.T) {
 	t.Parallel()
+	t.Run("keyed nonce access", func(t *testing.T) {
+		tx := FrameTransaction{NonceKeys: []uint256.Int{{1}, {2}}, Nonce: 128, Frames: []Frame{{}}}
+		intrinsic, floor, limits, err := tx.GasLimits()
+		require.NoError(t, err)
+		require.Equal(t, uint64(12_000+475+5*16+2*12_100), intrinsic)
+		require.Equal(t, uint64(12_000+475+5*64+2*12_100), floor)
+		require.Equal(t, floor, limits.Execution)
+	})
 	t.Run("intrinsic", func(t *testing.T) {
 		tx := FrameTransaction{
+			NonceKeys:  []uint256.Int{{}},
 			Frames:     []Frame{{Limits: mdgas.MdGas{Execution: 10_000, State: 1_000}, Data: []byte{0, 1}}},
 			Signatures: []FrameSignature{{Signature: []byte{0, 2}}},
 		}
-		require.Equal(t, uint64(12_000+475+40+100+10_000+1_000), tx.GetGasLimit())
+		require.Equal(t, uint64(12_000+475+48+40+100+10_000+1_000), tx.GetGasLimit())
 	})
 	t.Run("calldata floor", func(t *testing.T) {
 		tx := FrameTransaction{
-			Frames: []Frame{{Limits: mdgas.MdGas{Execution: 100, State: 1_000}, Data: make([]byte, 100)}},
+			NonceKeys: []uint256.Int{{}},
+			Frames:    []Frame{{Limits: mdgas.MdGas{Execution: 100, State: 1_000}, Data: make([]byte, 100)}},
 		}
-		require.Equal(t, uint64(12_000+475+100*64+1_000), tx.GetGasLimit())
+		require.Equal(t, uint64(12_000+475+103*64+1_000), tx.GetGasLimit())
 	})
 	t.Run("value transfer", func(t *testing.T) {
 		target := common.HexToAddress("0x1234")
 		tx := FrameTransaction{
-			Frames: []Frame{{Mode: 2, Target: &target, Value: *uint256.NewInt(1)}},
+			NonceKeys: []uint256.Int{{}},
+			Frames:    []Frame{{Mode: 2, Target: &target, Value: *uint256.NewInt(1)}},
 		}
-		require.Equal(t, uint64(12_000+475+6_000), tx.GetGasLimit())
+		require.Equal(t, uint64(12_000+475+192+6_000), tx.GetGasLimit())
 		tx.Frames[0].Target = nil
-		require.Equal(t, uint64(12_000+475), tx.GetGasLimit())
+		require.Equal(t, uint64(12_000+475+192), tx.GetGasLimit())
 	})
 }
 
@@ -237,7 +271,9 @@ func TestFrameTransactionSigningHash(t *testing.T) {
 	sender := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	explicitMessage := bytes.Repeat([]byte{1}, 32)
 	fields := []any{
-		uint64(1), uint64(7), sender,
+		uint64(1),
+		[]uint64{1, 2},
+		uint64(7), sender,
 		[]any{[]any{uint64(1), uint64(3), []byte{}, []uint64{100, 0}, uint64(0), []byte{}}},
 		[]any{
 			[]any{uint64(0), []byte{}, []byte{}, []byte{1, 2, 3}},
@@ -251,7 +287,7 @@ func TestFrameTransactionSigningHash(t *testing.T) {
 	encoded := append([]byte{0x06}, payload...)
 	txn, err := DecodeTransaction(encoded)
 	require.NoError(t, err)
-	fields[4] = []any{
+	fields[5] = []any{
 		[]any{uint64(0), []byte{}, []byte{}, []byte{}},
 		[]any{uint64(0), []byte{}, explicitMessage, []byte{4, 5}},
 	}
@@ -267,7 +303,7 @@ func TestFrameTransactionSigningHash(t *testing.T) {
 
 func TestFrameTransactionSigner(t *testing.T) {
 	t.Parallel()
-	tx := &FrameTransaction{ChainID: *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"), Frames: []Frame{{}}}
+	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"), Frames: []Frame{{}}}
 	signer := LatestSignerForChainID(uint256.NewInt(1))
 	sender, err := signer.Sender(tx)
 	require.NoError(t, err)
@@ -280,11 +316,12 @@ func TestFrameTransactionSigner(t *testing.T) {
 
 func TestFrameTransactionJSON(t *testing.T) {
 	t.Parallel()
-	input := []byte(`{"type":"0x6","chainId":"0x1","nonce":"0x7","sender":"0x0000000000000000000000000000000000001234","frames":[{"mode":"0x1","flags":"0x3","target":null,"gasLimit":"0x64","stateGasLimit":"0x0","value":"0x0","data":"0x0102"}],"signatures":[{"scheme":"0x0","signer":"0x","msg":"0x","signature":"0xaabb"}],"maxPriorityFeePerGas":"0x2","maxFeePerGas":"0x14","maxFeePerBlobGas":"0x0","blobVersionedHashes":[]}`)
+	input := []byte(`{"type":"0x6","chainId":"0x1","nonce":"0x7","nonceKeys":["0x1","0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],"sender":"0x0000000000000000000000000000000000001234","frames":[{"mode":"0x1","flags":"0x3","target":null,"gasLimit":"0x64","stateGasLimit":"0x0","value":"0x0","data":"0x0102"}],"signatures":[{"scheme":"0x0","signer":"0x","msg":"0x","signature":"0xaabb"}],"maxPriorityFeePerGas":"0x2","maxFeePerGas":"0x14","maxFeePerBlobGas":"0x0","blobVersionedHashes":[]}`)
 	tx, err := UnmarshalTransactionFromJSON(input)
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), tx.GetNonce())
 	require.Equal(t, []byte{1, 2}, tx.(*FrameTransaction).Frames[0].Data)
+	require.Equal(t, []uint256.Int{{1}, *new(uint256.Int).SetAllOne()}, tx.(*FrameTransaction).NonceKeys)
 	out, err := json.Marshal(tx)
 	require.NoError(t, err)
 	decoded, err := UnmarshalTransactionFromJSON(out)
@@ -294,7 +331,7 @@ func TestFrameTransactionJSON(t *testing.T) {
 
 func TestFrameTransactionBlobWrapper(t *testing.T) {
 	t.Parallel()
-	tx := &FrameTransaction{Frames: []Frame{{}}, BlobVersionedHashes: []common.Hash{{1}}}
+	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, BlobVersionedHashes: []common.Hash{{1}}}
 	payload, err := rlp.EncodeToBytes([]any{(*frameTransactionRLP)(tx), uint64(1), Blobs{{}}, BlobKzgs{{}}, make(KZGProofs, 128)})
 	require.NoError(t, err)
 	wrapped := append([]byte{FrameTxType}, payload...)
@@ -316,7 +353,7 @@ func TestFrameTransactionBlobWrapper(t *testing.T) {
 }
 
 func TestFrameTransactionUnwrapSidecar(t *testing.T) {
-	tx := &FrameTransaction{Frames: []Frame{{}}, BlobVersionedHashes: []common.Hash{{1}}}
+	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, BlobVersionedHashes: []common.Hash{{1}}}
 	wrapper := &FrameTxWrapper{FrameTransaction: tx, WrapperVersion: 1, Blobs: Blobs{{}}, Commitments: BlobKzgs{{}}, Proofs: make(KZGProofs, 128)}
 	var wrapped, canonical bytes.Buffer
 	require.NoError(t, wrapper.MarshalBinaryWrapped(&wrapped))
@@ -331,7 +368,7 @@ func TestFrameTransactionUnwrapSidecar(t *testing.T) {
 }
 
 func TestFrameTransactionCopySidecar(t *testing.T) {
-	tx := &FrameTxWrapper{FrameTransaction: &FrameTransaction{Frames: []Frame{{}}, BlobVersionedHashes: []common.Hash{{1}}}, WrapperVersion: 1, Blobs: Blobs{{}}, Commitments: BlobKzgs{{}}, Proofs: make(KZGProofs, 128)}
+	tx := &FrameTxWrapper{FrameTransaction: &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, BlobVersionedHashes: []common.Hash{{1}}}, WrapperVersion: 1, Blobs: Blobs{{}}, Commitments: BlobKzgs{{}}, Proofs: make(KZGProofs, 128)}
 	copied := CopyTxs(Transactions{tx})
 	require.IsType(t, tx, copied[0])
 	wrapper := copied[0].(*FrameTxWrapper)
@@ -341,7 +378,7 @@ func TestFrameTransactionCopySidecar(t *testing.T) {
 }
 
 func TestFrameTransactionDisabled(t *testing.T) {
-	tx := &FrameTransaction{Frames: []Frame{{}}, ChainID: *uint256.NewInt(1)}
+	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, ChainID: *uint256.NewInt(1)}
 	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1), DisabledEIPs: []int{8141}}
 	_, err := tx.AsMessage(Signer{}, nil, rules)
 	require.ErrorIs(t, err, ErrTxTypeNotSupported)

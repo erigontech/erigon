@@ -52,9 +52,9 @@ func TestTransactionTestGasLimitPriceOverflow(t *testing.T) {
 }
 
 func TestFrameTransactionFixtureGas(t *testing.T) {
-	tx := &types.FrameTransaction{ChainID: *uint256.NewInt(1), Frames: []types.Frame{{}}}
+	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []types.Frame{{}}}
 	var data bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&data))
-	test := TransactionTest{RLP: data.Bytes(), Forks: ttForks{"Bogota": {Sender: tx.SenderAddress, Hash: tx.Hash(), IntrinsicGas: (*math.HexOrDecimal256)(big.NewInt(12_475))}}}
+	test := TransactionTest{RLP: data.Bytes(), Forks: ttForks{"Bogota": {Sender: tx.SenderAddress, Hash: tx.Hash(), IntrinsicGas: (*math.HexOrDecimal256)(big.NewInt(12_523))}}}
 	require.NoError(t, test.Run(uint256.NewInt(1)))
 }

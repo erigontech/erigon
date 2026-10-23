@@ -29,7 +29,7 @@ import (
 
 func TestFrameRPCReceipt(t *testing.T) {
 	payer := common.Address{1}
-	tx := &types.FrameTransaction{SenderAddress: payer, Frames: []types.Frame{{}}}
+	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, SenderAddress: payer, Frames: []types.Frame{{}}}
 	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: types.Logs{}}}}
 	result := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(0)}, true, false)
 	data, err := json.Marshal(result)

@@ -55,7 +55,8 @@ func TestFrameTransactionDefaultTransfer(t *testing.T) {
 	require.NoError(t, ibs.SetBalance(from, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified))
 	require.NoError(t, ibs.SetBalance(to, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	tx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, SenderAddress: sender,
+		NonceKeys: []uint256.Int{{}},
+		ChainID:   *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 			{Mode: types.FrameSender, Target: &recipient, Limits: mdgas.MdGas{Execution: 10_000}, Value: *uint256.NewInt(123)},
@@ -90,7 +91,7 @@ func frameTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	evm := newTestEVM(ibs, cfg, 30_000_000)
 	sender := common.HexToAddress("0x1000")
 	require.NoError(t, ibs.SetBalance(accounts.InternAddress(sender), *uint256.NewInt(10_000_000), tracing.BalanceChangeUnspecified))
-	return evm, &types.FrameTransaction{ChainID: *cfg.ChainID, SenderAddress: sender}
+	return evm, &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender}
 }
 
 func applyFrameTest(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction) (*evmtypes.ExecutionResult, error) {
@@ -114,6 +115,34 @@ func TestFrameTransactionContractApproval(t *testing.T) {
 	nonce, err := evm.IntraBlockState().GetNonce(sender)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), nonce)
+}
+
+func TestFrameTransactionKeyedNonce(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	sender := accounts.InternAddress(tx.SenderAddress)
+	manager := accounts.InternAddress(common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7"))
+	slot := accounts.InternKey(crypto.Keccak256Hash(append(common.LeftPadBytes(tx.SenderAddress[:], 32), common.LeftPadBytes([]byte{1}, 32)...)))
+	require.NoError(t, ibs.SetNonce(sender, 9, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(sender, program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetNonce(manager, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(manager, common.FromHex("60006000fd"), tracing.CodeChangeUnspecified))
+	tx.NonceKeys = []uint256.Int{{1}}
+	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}}
+	result, err := applyFrameTest(t, evm, tx)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	nonce, err := ibs.GetNonce(sender)
+	require.NoError(t, err)
+	require.EqualValues(t, 9, nonce)
+	sequence, err := ibs.GetState(manager, slot)
+	require.NoError(t, err)
+	require.Equal(t, uint256.Int{1}, sequence)
+	require.EqualValues(t, params.StateGasPerStorageSet, result.BlockStateGasUsed)
+	require.EqualValues(t, params.StateGasPerStorageSet, result.FrameReceipts[0].GasUsed.State)
+	require.False(t, ibs.AddressInAccessList(manager))
+	_, warm := ibs.SlotInAccessList(manager, slot)
+	require.False(t, warm)
 }
 
 func TestFrameTransactionStateBudget(t *testing.T) {
@@ -277,11 +306,11 @@ func TestFrameTransactionMakeReceipt(t *testing.T) {
 }
 
 func TestFrameBlockGasLimits(t *testing.T) {
-	tx := &types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 10_000, State: 50_000}}}}
+	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 10_000, State: 50_000}}}}
 	limits, err := TransactionGasLimits(tx, true)
 	require.NoError(t, err)
-	require.Equal(t, mdgas.MdGas{Execution: 22_475, State: 50_000}, limits)
-	require.NoError(t, CheckBlockGasInclusion(NewBlockGasPool(22_475, 50_000, 0), limits.Execution, limits.State, 0))
+	require.Equal(t, mdgas.MdGas{Execution: 22_523, State: 50_000}, limits)
+	require.NoError(t, CheckBlockGasInclusion(NewBlockGasPool(22_523, 50_000, 0), limits.Execution, limits.State, 0))
 }
 
 func TestFrameTransactionStateFailureIsFatal(t *testing.T) {

@@ -53,6 +53,7 @@ const (
 	FrameMaxCount         = 64
 	FrameIntrinsicGas     = 12_000
 	FrameOverheadGas      = 475
+	FrameMaxNonceKeys     = 16
 )
 
 const (
@@ -62,6 +63,8 @@ const (
 )
 
 var FrameExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c577D57FfFf")
+
+var FrameNonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
 
 type Frame struct {
 	Mode   uint8
@@ -88,6 +91,7 @@ type FrameFees struct {
 type FrameTransaction struct {
 	TransactionMisc     `rlp:"-"`
 	ChainID             uint256.Int
+	NonceKeys           []uint256.Int
 	Nonce               uint64
 	SenderAddress       common.Address
 	Frames              []Frame
@@ -169,11 +173,17 @@ func (sig *FrameSignature) validate(sender common.Address, hash common.Hash) boo
 }
 
 func (tx *FrameTransaction) Validate() error {
+	if err := tx.validateNonceKeys(); err != nil {
+		return err
+	}
 	if len(tx.Frames) == 0 || len(tx.Frames) > FrameMaxCount {
 		return errors.New("invalid frame count")
 	}
 	if len(tx.BlobVersionedHashes) == 0 && !tx.Fees.BlobFeeCap.IsZero() {
 		return errors.New("blob fee without blobs")
+	}
+	if len(tx.BlobVersionedHashes) > params.MaxBlobsPerTxn {
+		return errors.New("too many frame transaction blobs")
 	}
 	for _, hash := range tx.BlobVersionedHashes {
 		if hash[0] != 1 {
@@ -257,6 +267,9 @@ func (tx *FrameTransaction) GetGasLimit() uint64 {
 
 func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.MdGas, err error) {
 	base := uint64(FrameIntrinsicGas + FrameOverheadGas*len(tx.Frames))
+	if !tx.UsesLegacyNonce() {
+		base += uint64(len(tx.NonceKeys)) * (params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038)
+	}
 	var dataGas, dataLen, total uint64
 	addData := func(data []byte) {
 		dataLen += uint64(len(data))
@@ -268,6 +281,11 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 			}
 		}
 	}
+	nonceData, err := rlp.EncodeToBytes(tx.NonceKeys)
+	if err != nil {
+		return 0, 0, limits, err
+	}
+	addData(rlp.AppendUint64(nonceData, tx.Nonce))
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
 		var overflow bool
@@ -365,7 +383,45 @@ func (tx *FrameTransaction) AsMessage(_ Signer, baseFee *uint256.Int, rules *cha
 }
 
 func (tx *FrameTransaction) DecodeRLP(s *rlp.Stream) error {
-	return s.Decode((*frameTransactionRLP)(tx))
+	if err := s.Decode((*frameTransactionRLP)(tx)); err != nil {
+		return err
+	}
+	return tx.validateNonceKeys()
+}
+
+func (tx *FrameTransaction) validateNonceKeys() error {
+	if len(tx.NonceKeys) == 0 || len(tx.NonceKeys) > FrameMaxNonceKeys {
+		return errors.New("invalid nonce key count")
+	}
+	if len(tx.NonceKeys) > 1 && tx.NonceKeys[0].IsZero() {
+		return errors.New("zero nonce key alongside other keys")
+	}
+	for i := 1; i < len(tx.NonceKeys); i++ {
+		if !tx.NonceKeys[i-1].Lt(&tx.NonceKeys[i]) {
+			return errors.New("nonce keys not strictly increasing")
+		}
+	}
+	return nil
+}
+
+func (tx *FrameTransaction) UsesLegacyNonce() bool {
+	return len(tx.NonceKeys) == 1 && tx.NonceKeys[0].IsZero()
+}
+
+func FrameNonceSlot(sender common.Address, key uint256.Int) common.Hash {
+	var input [64]byte
+	copy(input[12:32], sender[:])
+	key.PutUint256(input[32:])
+	return crypto.Keccak256Hash(input[:])
+}
+
+func (tx *FrameTransaction) NonceKeysHash() common.Hash {
+	input := make([]byte, 32*(1+len(tx.NonceKeys)))
+	uint256.NewInt(uint64(len(tx.NonceKeys))).PutUint256(input[:32])
+	for i := range tx.NonceKeys {
+		tx.NonceKeys[i].PutUint256(input[32*(i+1):])
+	}
+	return crypto.Keccak256Hash(input)
 }
 
 func (tx *FrameTransaction) MarshalBinary(w io.Writer) error {
@@ -408,7 +464,7 @@ func (tx *FrameTransaction) SigningHash(*uint256.Int) common.Hash {
 		}
 	}
 	return prefixedRlpHash(FrameTxType, []any{
-		tx.ChainID, tx.Nonce, tx.SenderAddress, tx.Frames,
+		tx.ChainID, tx.NonceKeys, tx.Nonce, tx.SenderAddress, tx.Frames,
 		signatures, tx.Fees, tx.BlobVersionedHashes,
 	})
 }

@@ -86,7 +86,7 @@ func TestFrameCallDoesNotSpillStateGas(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	tx := &types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount - 1}}}}
+	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount - 1}}}}
 	evm.FrameContext = ibs.NewFrameContext(tx, uint256.Int{})
 	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, tx.Frames[0].Limits)
 	defer evm.putCallContext(scope)

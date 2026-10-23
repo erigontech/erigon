@@ -52,6 +52,20 @@ func TestFrameValidationStopsAfterPayment(t *testing.T) {
 	require.Zero(t, nonce, "validation must not commit approval")
 }
 
+func TestFrameValidationKeyedNonceDependency(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	tx.NonceKeys = []uint256.Int{{1}}
+	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: 97_920}}}
+	result, err := ValidateFrameTransaction(evm, tx)
+	require.NoError(t, err)
+	require.Contains(t, result.Dependencies, types.FrameNonceManager)
+	sequence, err := ibs.GetState(accounts.InternAddress(types.FrameNonceManager), accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, tx.NonceKeys[0])))
+	require.NoError(t, err)
+	require.True(t, sequence.IsZero(), "validation must not consume the key")
+}
+
 func TestFrameValidationPolicy(t *testing.T) {
 	t.Parallel()
 	for name, code := range map[string][]byte{

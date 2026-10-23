@@ -1821,6 +1821,16 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	if found != nil {
 		if mt.TxnSlot.TxType() == FrameTxnType || found.TxnSlot.TxType() == FrameTxnType {
+			previousKeys, replacementKeys := []uint256.Int{{}}, []uint256.Int{{}}
+			if frame, ok := found.TxnSlot.Txn.(*types.FrameTransaction); ok {
+				previousKeys = frame.NonceKeys
+			}
+			if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
+				replacementKeys = frame.NonceKeys
+			}
+			if !slices.Equal(previousKeys, replacementKeys) {
+				return txpoolcfg.InvalidFrame
+			}
 			if !frameReplacementFee(found.TxnSlot.GetTipCap(), mt.TxnSlot.GetTipCap(), p.cfg.PriceBump) || !frameReplacementFee(found.TxnSlot.GetFeeCap(), mt.TxnSlot.GetFeeCap(), p.cfg.PriceBump) {
 				return txpoolcfg.NotReplaced
 			}
@@ -2201,6 +2211,13 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) error {
 	noncesToRemove := map[uint64]uint64{}
 	for _, txn := range minedTxns {
+		if txn.hasKeyedNonce() {
+			if mt := p.byHash[string(txn.IDHash[:])]; mt != nil {
+				p.removeFromSubPool(mt, "remove-mined")
+				p.discardLocked(mt, txpoolcfg.Mined)
+			}
+			continue
+		}
 		nonce, ok := noncesToRemove[txn.SenderID]
 		if !ok || txn.Nonce > nonce {
 			noncesToRemove[txn.SenderID] = txn.Nonce // TODO: after 7702 nonce can be incremented more than once, may affect this
@@ -2213,6 +2230,9 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 
 	for senderID, nonce := range noncesToRemove {
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
+			if mt.TxnSlot.hasKeyedNonce() {
+				return true
+			}
 			if mt.TxnSlot.Nonce > nonce {
 				if mt.TxnSlot.Traced {
 					p.logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", mt.TxnSlot.Nonce, "sender.nonce", nonce)
@@ -2260,6 +2280,22 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	var toDelReasons []txpoolcfg.DiscardReason // parallel reasons slice for toDel
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
+		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
+			mt.minFeeCap = *frame.GetFeeCap()
+			mt.minTip = math.MaxUint64
+			if frame.GetTipCap().IsUint64() {
+				mt.minTip = frame.GetTipCap().Uint64()
+			}
+			mt.nonceDistance, mt.cumulativeBalanceDistance = 0, 0
+			mt.subPool |= NoNonceGaps | EnoughBalance
+			mt.subPool &^= NotTooMuchGas
+			_, _, limits, err := frame.GasLimits()
+			if err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
+				mt.subPool |= NotTooMuchGas
+			}
+			p.updateInSubPool(mt)
+			return true
+		}
 		deleteAndContinueReasonLog := ""
 		discardReason := txpoolcfg.NonceTooLow
 		switch {

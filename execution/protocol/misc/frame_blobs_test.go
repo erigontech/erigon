@@ -19,6 +19,8 @@ package misc
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -27,6 +29,6 @@ import (
 
 func TestFrameBlobHashes(t *testing.T) {
 	hashes := []common.Hash{{1, 2}}
-	txs := []types.Transaction{&types.FrameTransaction{Frames: []types.Frame{{}}, BlobVersionedHashes: hashes}}
+	txs := []types.Transaction{&types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes}}
 	require.NoError(t, ValidateBlobs(params.GasPerBlob, params.GasPerBlob, 1, hashes, &txs))
 }

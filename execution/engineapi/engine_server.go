@@ -329,10 +329,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			continue
 		}
-		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
+		limits, gasErr := protocol.TransactionGasLimits(transactions[i], e.config.IsAmsterdam(uint64(req.Timestamp)))
+		if gasErr == nil && (limits.Execution > uint64(req.GasLimit) || limits.State > uint64(req.GasLimit)) {
+			gasErr = protocol.ErrGasLimitReached
+		}
+		if gasErr != nil {
 			invalidTransactionStatus = &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
+				ValidationError: engine_types.NewStringifiedError(gasErr),
 			}
 		}
 	}

@@ -58,7 +58,8 @@ func TestFrameTransactionInsertChain(t *testing.T) {
 				b.SetCoinbase(common.Address{1})
 				for nonce := range uint64(2) {
 					b.AddTx(&types.FrameTransaction{
-						ChainID: *cfg.ChainID, SenderAddress: sender, Nonce: nonce,
+						NonceKeys: []uint256.Int{{}},
+						ChainID:   *cfg.ChainID, SenderAddress: sender, Nonce: nonce,
 						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}, {Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 30_000, State: params.StateGasPerStorageSet}}},
 						Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000), TipCap: *uint256.NewInt(1_000_000_000)},
 					})
@@ -101,7 +102,8 @@ func TestFrameValidationUsesHeadWithdrawals(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
 	tx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, SenderAddress: sender,
+		NonceKeys: []uint256.Int{{}},
+		ChainID:   *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
 		Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
 	}

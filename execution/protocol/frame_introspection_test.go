@@ -24,7 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -54,6 +56,10 @@ func TestFrameIntrospection(t *testing.T) {
 		"current frame":     {word(program.New().Push(10).Op(txparam)), *uint256.NewInt(1)},
 		"signatures":        {word(program.New().Push(11).Op(txparam)), *uint256.NewInt(2)},
 		"state pool":        {word(program.New().Push(12).Op(txparam)), *uint256.NewInt(888)},
+		"legacy nonce":      {word(program.New().Push(13).Op(txparam)), uint256.Int{}},
+		"nonce key count":   {word(program.New().Push(14).Op(txparam)), *uint256.NewInt(2)},
+		"nonce keys hash":   {word(program.New().Push(15).Op(txparam)), *new(uint256.Int).SetBytes(crypto.Keccak256(common.FromHex("000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002")))},
+		"first nonce key":   {word(program.New().Push(16).Op(txparam)), *uint256.NewInt(1)},
 		"target":            {word(program.New().Push(0).Push(0).Op(frameparam)), *uint256.NewInt(0x1000)},
 		"execution limit":   {word(program.New().Push(1).Push(0).Op(frameparam)), *uint256.NewInt(55)},
 		"mode":              {word(program.New().Push(2).Push(0).Op(frameparam)), *uint256.NewInt(2)},
@@ -95,6 +101,7 @@ func introspectionEnv(t *testing.T, code []byte) (*vm.EVM, *types.FrameTransacti
 	t.Helper()
 	evm, tx := frameTestEnv(t)
 	tx.Nonce = 7
+	tx.NonceKeys = []uint256.Int{{1}, {2}}
 	tx.Fees = types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2), BlobFeeCap: *uint256.NewInt(3)}
 	tx.BlobVersionedHashes = []common.Hash{{1}}
 	tx.Frames = []types.Frame{
@@ -109,4 +116,28 @@ func introspectionEnv(t *testing.T, code []byte) (*vm.EVM, *types.FrameTransacti
 	evm.FrameContext.Index = 1
 	evm.FrameContext.Receipts[0] = types.FrameReceipt{Status: 1, GasUsed: mdgas.MdGas{Execution: 11, State: 12}}
 	return evm, tx
+}
+
+func TestFrameTransactionLegacyNonceSnapshot(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	sender := accounts.InternAddress(tx.SenderAddress)
+	target := common.HexToAddress("0x2000")
+	tx.Nonce = 7
+	require.NoError(t, ibs.SetNonce(sender, tx.Nonce, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(sender, program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Push(13).Op(vm.TXPARAM).Push0().Op(vm.SSTORE).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 20_000, State: params.StateGasPerStorageSet}},
+	}
+	result, err := applyFrameTest(t, evm, tx)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	stored, err := ibs.GetState(accounts.InternAddress(target), accounts.InternKey(common.Hash{}))
+	require.NoError(t, err)
+	require.Equal(t, uint256.Int{7}, stored)
+	nonce, err := ibs.GetNonce(sender)
+	require.NoError(t, err)
+	require.EqualValues(t, 8, nonce)
 }

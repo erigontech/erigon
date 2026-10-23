@@ -26,6 +26,12 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
 func (x *RPCTransaction) writeJSONFields(s *jsonstream.Stream) error {
+	if len(x.NonceKeys) > 0 {
+		s.Field("nonceKeys")
+		if err := x.NonceKeys.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
 	if x.Sender != nil {
 		ethjson.Data(s, "sender", x.Sender[:])
 	}

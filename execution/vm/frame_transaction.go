@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -78,22 +80,8 @@ func (evm *EVM) ApproveFrame(address accounts.Address, scope uint64) error {
 		if balance.Lt(&ctx.MaxCost) {
 			return ErrExecutionReverted
 		}
-		nonce, err := evm.intraBlockState.GetNonce(sender)
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		if nonce == math.MaxUint64 {
-			return ErrExecutionReverted
-		}
-		empty, err := evm.intraBlockState.Empty(sender)
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		if empty && !ctx.ChargeStateGas(params.StateGasNewAccount) {
-			return ErrOutOfGas
-		}
-		if err := evm.intraBlockState.SetNonce(sender, nonce+1, tracing.NonceChangeEoACall); err != nil {
-			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		if err := evm.consumeFrameNonce(); err != nil {
+			return err
 		}
 		if err := evm.intraBlockState.SubBalance(target, ctx.MaxCost, tracing.BalanceDecreaseGasBuy); err != nil {
 			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -101,6 +89,56 @@ func (evm *EVM) ApproveFrame(address accounts.Address, scope uint64) error {
 		payer = target
 	}
 	ctx.SetApproval(approved, payer)
+	return nil
+}
+
+func (evm *EVM) consumeFrameNonce() error {
+	ctx := evm.FrameContext
+	tx := ctx.Transaction
+	ibs := evm.intraBlockState
+	if tx.UsesLegacyNonce() {
+		sender := accounts.InternAddress(tx.SenderAddress)
+		nonce, err := ibs.GetNonce(sender)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		if nonce == math.MaxUint64 {
+			return ErrNonceUintOverflow
+		}
+		empty, err := ibs.Empty(sender)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		if empty && !ctx.ChargeStateGas(params.StateGasNewAccount) {
+			return ErrOutOfGas
+		}
+		if err := ibs.SetNonce(sender, nonce+1, tracing.NonceChangeEoACall); err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		return nil
+	}
+	manager := accounts.InternAddress(types.FrameNonceManager)
+	var slots [types.FrameMaxNonceKeys]accounts.StorageKey
+	var stateGas uint64
+	for i, key := range tx.NonceKeys {
+		slots[i] = accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, key))
+		sequence, err := ibs.GetState(manager, slots[i])
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		if sequence.IsZero() {
+			stateGas += params.StateGasPerStorageSet
+		}
+	}
+	if !ctx.ChargeStateGas(stateGas) {
+		return ErrOutOfGas
+	}
+	sequence := *uint256.NewInt(tx.Nonce + 1)
+	for _, slot := range slots[:len(tx.NonceKeys)] {
+		if err := ibs.SetState(manager, slot, sequence); err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+	}
 	return nil
 }
 

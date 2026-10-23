@@ -50,16 +50,44 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster}, nil
 }
 
-func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64) *TxnSlot {
+func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
 	t.Helper()
+	if len(keys) == 0 {
+		keys = []uint256.Int{{}}
+	}
 	tx := &types.FrameTransaction{
-		ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		NonceKeys: keys,
+		ChainID:   *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
 		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip), FeeCap: *uint256.NewInt(fee)},
 	}
 	var data bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&data))
 	return &TxnSlot{Txn: tx, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
+}
+
+func TestFramePoolKeyedNonceIndependent(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	slot := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.Success, reasons[0])
+	pool.onSenderStateChange(slot.SenderID, 9, *uint256.NewInt(1_000_000), accounts.EmptyCodeHash, 1_000_000, pool.logger)
+	require.Equal(t, 1, pool.pending.Len())
+	require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+}
+
+func TestFramePoolKeyedNonceIsNotAccountNonce(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.Success, reasons[0])
+	_, ok := pool.NonceFromAddress(sender)
+	require.False(t, ok)
 }
 
 func TestFramePoolReservationsAndReplacement(t *testing.T) {
@@ -122,4 +150,57 @@ func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
 	reasons, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.NotReplaced, reasons[0])
+}
+
+func TestFramePoolReplacementRequiresSameKeys(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.Success, reasons[0])
+	txns.Txns[0] = framePoolSlot(t, sender, 2, 4, uint256.Int{2})
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.InvalidFrame, reasons[0])
+	txns.Txns[0] = framePoolSlot(t, sender, 2, 4, uint256.Int{1})
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.Success, reasons[0])
+}
+
+func TestFramePoolMinedNonceDomains(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		pending, mined uint64
+		remaining      int
+	}{
+		{"same key", 1, 1, 0},
+		{"different keys", 1, 2, 1},
+		{"keyed pending, legacy mined", 1, 0, 1},
+		{"legacy pending, keyed mined", 0, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			slot := framePoolSlot(t, sender, 1, 2, *uint256.NewInt(tc.pending))
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, txpoolcfg.Success, reasons[0])
+			mined := framePoolSlot(t, sender, 1, 2, *uint256.NewInt(tc.mined))
+			mined.SenderID = slot.SenderID
+			require.NoError(t, pool.removeMined(pool.all, []*TxnSlot{mined}))
+			require.Equal(t, tc.remaining, pool.pending.Len())
+		})
+	}
+}
+
+func keyedFramePoolEnv(t *testing.T) (context.Context, *TxPool, common.Address) {
+	t.Helper()
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.chainConfig = pool.chainConfig.Copy()
+	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	pool.ethBackend = &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+	return ctx, pool, sender
 }

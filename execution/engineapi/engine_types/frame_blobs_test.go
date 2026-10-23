@@ -19,13 +19,15 @@ package engine_types
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFrameBlobsBundle(t *testing.T) {
-	tx := &types.FrameTxWrapper{FrameTransaction: &types.FrameTransaction{BlobVersionedHashes: []common.Hash{{1}}}, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+	tx := &types.FrameTxWrapper{FrameTransaction: &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, BlobVersionedHashes: []common.Hash{{1}}}, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
 	bundle, err := BlobsBundleFromTransactions(types.Transactions{tx})
 	require.NoError(t, err)
 	require.Len(t, bundle.Blobs, 1)

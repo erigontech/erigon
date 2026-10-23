@@ -83,6 +83,7 @@ func (sig *FrameSignature) UnmarshalJSON(input []byte) error {
 type frameTransactionJSON struct {
 	Type                 hexutil.Uint64   `json:"type"`
 	ChainID              *hexutil.U256    `json:"chainId"`
+	NonceKeys            FrameNonceKeys   `json:"nonceKeys"`
 	Nonce                *hexutil.Uint64  `json:"nonce"`
 	Sender               *common.Address  `json:"sender"`
 	Frames               []Frame          `json:"frames"`
@@ -97,7 +98,8 @@ type frameTransactionJSON struct {
 func (tx *FrameTransaction) MarshalJSON() ([]byte, error) {
 	return json.Marshal(frameTransactionJSON{
 		Type: FrameTxType, ChainID: (*hexutil.U256)(&tx.ChainID), Nonce: (*hexutil.Uint64)(&tx.Nonce), Sender: &tx.SenderAddress,
-		Frames: tx.Frames, Signatures: tx.Signatures, MaxPriorityFeePerGas: (*hexutil.U256)(&tx.Fees.TipCap),
+		NonceKeys: tx.NonceKeys,
+		Frames:    tx.Frames, Signatures: tx.Signatures, MaxPriorityFeePerGas: (*hexutil.U256)(&tx.Fees.TipCap),
 		MaxFeePerGas: (*hexutil.U256)(&tx.Fees.FeeCap), MaxFeePerBlobGas: (*hexutil.U256)(&tx.Fees.BlobFeeCap),
 		BlobVersionedHashes: tx.BlobVersionedHashes, Hash: tx.Hash(),
 	})
@@ -113,7 +115,8 @@ func (tx *FrameTransaction) UnmarshalJSON(input []byte) error {
 	}
 	*tx = FrameTransaction{
 		ChainID: uint256.Int(*dec.ChainID), Nonce: uint64(*dec.Nonce), SenderAddress: *dec.Sender,
-		Frames: dec.Frames, Signatures: dec.Signatures, BlobVersionedHashes: dec.BlobVersionedHashes,
+		NonceKeys: dec.NonceKeys,
+		Frames:    dec.Frames, Signatures: dec.Signatures, BlobVersionedHashes: dec.BlobVersionedHashes,
 		Fees: FrameFees{uint256.Int(*dec.MaxPriorityFeePerGas), uint256.Int(*dec.MaxFeePerGas), uint256.Int(*dec.MaxFeePerBlobGas)},
 	}
 	return tx.Validate()
@@ -122,6 +125,37 @@ func (tx *FrameTransaction) UnmarshalJSON(input []byte) error {
 type Frames []Frame
 
 type FrameSignatures []FrameSignature
+
+type FrameNonceKeys []uint256.Int
+
+func (keys FrameNonceKeys) MarshalJSON() ([]byte, error) {
+	values := make([]hexutil.U256, len(keys))
+	for i := range keys {
+		values[i] = hexutil.U256(keys[i])
+	}
+	return json.Marshal(values)
+}
+
+func (keys *FrameNonceKeys) UnmarshalJSON(input []byte) error {
+	var values []hexutil.U256
+	if err := json.Unmarshal(input, &values); err != nil {
+		return err
+	}
+	*keys = make(FrameNonceKeys, len(values))
+	for i := range values {
+		(*keys)[i] = uint256.Int(values[i])
+	}
+	return nil
+}
+
+func (keys FrameNonceKeys) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	data, err := keys.MarshalJSON()
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(data)
+	return nil
+}
 
 func (frames Frames) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	data, err := json.Marshal(frames)

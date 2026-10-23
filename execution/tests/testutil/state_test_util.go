@@ -67,7 +67,21 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return jsoniter.ConfigFastest.Unmarshal(in, &t.Json)
+	dec := struct {
+		*stJSON
+		Tx jsoniter.RawMessage `json:"transaction"`
+	}{stJSON: &t.Json}
+	if err := jsoniter.ConfigFastest.Unmarshal(in, &dec); err != nil {
+		return err
+	}
+	for _, posts := range t.Json.Post {
+		for i := range posts {
+			if len(posts[i].Tx) == 0 {
+				return jsoniter.ConfigFastest.Unmarshal(dec.Tx, &t.Json.Tx)
+			}
+		}
+	}
+	return nil
 }
 
 type stJSON struct {

@@ -38,6 +38,11 @@ type frameReservation struct {
 	paymasters uint64
 }
 
+func (tx *TxnSlot) hasKeyedNonce() bool {
+	frame, ok := tx.Txn.(*types.FrameTransaction)
+	return ok && !frame.UsesLegacyNonce()
+}
+
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardReason, error) {
 	if !p.chainConfig.IsEIPEnabled(8141, uint64(time.Now().Unix())) {
 		return txpoolcfg.TypeNotActivated, nil

@@ -604,6 +604,7 @@ func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 func TestProvideTxnsRejectsFrameAboveExecutionGasTarget(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
 	frameTxn := &types.FrameTransaction{
+		NonceKeys:     []uint256.Int{{}},
 		SenderAddress: common.Address{1}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 87_525}}},
 	}
 	pool.pending.best.ms[0].TxnSlot.Txn = frameTxn
