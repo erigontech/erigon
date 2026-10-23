@@ -480,8 +480,8 @@ github.com/lufia/plan9stats v0.0.0-20251013123823-9fd1530e3ec3/go.mod h1:autxFIv
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/marcopolo/simnet v0.0.7 h1:DpH8BMGsF9+1w13L8rvCaAhb6nYJdY+dIXncDrssvUs=
 github.com/marcopolo/simnet v0.0.7/go.mod h1:tfQF1u2DmaB6WHODMtQaLtClEf3a296CKQLq5gAsIS0=
-github.com/mark3labs/mcp-go v1.2.1 h1:gd8VD3feMAVycwAM0x1nhv42Q1oLLjfOyowoUzHULB8=
-github.com/mark3labs/mcp-go v1.2.1/go.mod h1:r2fW4o3wsoJ7IMsx1Wuq5xeP8PRGXPDfNveoGAYbb/s=
+github.com/mark3labs/mcp-go v1.3.0 h1:0nqegnwaTULVV1pCQLBmDjD2+0/lSXRt6eTHS7bH1o0=
+github.com/mark3labs/mcp-go v1.3.0/go.mod h1:r2fW4o3wsoJ7IMsx1Wuq5xeP8PRGXPDfNveoGAYbb/s=
 github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd h1:br0buuQ854V8u83wA0rVZ8ttrq5CpaPZdvrK0LP2lOk=
 github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd/go.mod h1:QuCEs1Nt24+FYQEqAAncTDPJIuGs+LxK1MCiFL25pMU=
 github.com/mattn/go-colorable v0.1.15 h1:+u9SLTRGnXv73cEsnsmoZBom+dMU88B2M0aDcWy0/jY=
