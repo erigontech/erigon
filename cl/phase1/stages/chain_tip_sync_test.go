@@ -180,7 +180,6 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 // choice to the slot they target, even before the fork choice clock ticker reaches it.
 func TestStageArgsTickForkChoiceToTheTargetSlot(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
-	beaconCfg.GloasForkEpoch = math.MaxUint64
 	const anchorSlot = 100
 	genesisTime := uint64(time.Now().Unix()) - (anchorSlot+1)*beaconCfg.SecondsPerSlot
 	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
