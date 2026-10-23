@@ -317,3 +317,89 @@ func TestEpochMigration_TailDurableBeforeIndexes(t *testing.T) {
 	require.True(t, headerInDB(t, m, migrationTailBlock))
 	requireEpochOnly(t, m)
 }
+
+// dumpDecimalTypes writes decimal segments of the given types split at bounds, chaining BaseTxnID
+// across bodies segments from block 0 so that any subset of ranges stays numbered as the chain is.
+func dumpDecimalTypes(t *testing.T, m *migrationFixture, bounds []uint64, logger log.Logger, types ...snaptype.Type) {
+	t.Helper()
+	for _, typ := range types {
+		var firstTxNum uint64
+		if typ.Enum() == snaptype2.Bodies.Enum() && bounds[0] > 0 {
+			firstTxNum = dumpDecimalSeg(t, m, 0, bounds[0], typ, 0, logger)
+			require.NoError(t, dir.RemoveFile(filepath.Join(m.dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, 0, bounds[0], typ.Enum()))))
+		}
+		for i := 0; i+1 < len(bounds); i++ {
+			firstTxNum = dumpDecimalSeg(t, m, bounds[i], bounds[i+1], typ, firstTxNum, logger)
+		}
+	}
+}
+
+func decimalSegsLeft(t *testing.T, m *migrationFixture) bool {
+	t.Helper()
+	left, err := freezeblocks.HasDecimalBlockSegments(m.dirs, m.ChainConfig)
+	require.NoError(t, err)
+	return left
+}
+
+// A type whose segments start inside the last full epoch segment would come out with none at all,
+// and the visible-file calculation then hides every other type too. Refuse before touching anything.
+func TestEpochMigration_RefusesToLeaveATypeWithoutSegments(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpDecimalTypes(t, m, decimalBounds, logger, snaptype2.Headers, snaptype2.Bodies)
+	dumpDecimalTypes(t, m, []uint64{2000, 3000}, logger, snaptype2.Transactions)
+	before, err := os.ReadDir(m.dirs.Snap)
+	require.NoError(t, err)
+
+	require.ErrorContains(t, migrate(t, m, logger), "transactions")
+
+	after, err := os.ReadDir(m.dirs.Snap)
+	require.NoError(t, err)
+	require.Equal(t, len(before), len(after), "nothing is converted or deleted")
+	require.True(t, decimalSegsLeft(t, m))
+}
+
+// A crash can leave a merged decimal segment beside the segments it was merged from. Conversion reads
+// the merged one; cleanup must remove both, or the datadir still looks unconverted.
+func TestEpochMigration_RemovesMergeLeftovers(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpAllDecimal(t, m, logger)
+	dumpDecimalTypes(t, m, []uint64{0, 2000}, logger, snaptype2.BlockSnapshotTypes...)
+
+	require.NoError(t, migrate(t, m, logger))
+	require.False(t, decimalSegsLeft(t, m), "the merge inputs are decimal segments too")
+	requireEpochOnly(t, m)
+}
+
+// When the frontier is a multiple of both 1000 and 1024 there is no straddling segment, so the
+// repacks delete every decimal segment before the indexes are built. A failure there must not let the
+// next start take the datadir for converted.
+func TestEpochMigration_ResumesIndexingWithNoDecimalLeft(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpDecimalTypes(t, m, []uint64{0, 1000, 2000, 2048}, logger, snaptype2.BlockSnapshotTypes...)
+	salt := filepath.Join(m.dirs.Snap, "salt-blocks.txt")
+	require.NoError(t, dir.RemoveFile(salt)) // index building needs it; conversion does not
+
+	require.Error(t, migrate(t, m, logger))
+	require.False(t, decimalSegsLeft(t, m), "the repacks already deleted every decimal segment")
+
+	_, err := snaptype.LoadSalt(m.dirs.Snap, true, logger)
+	require.NoError(t, err)
+	require.NoError(t, migrate(t, m, logger))
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for _, idx := range typ.IdxFileNames(true, 1024, 2048) {
+			require.FileExists(t, filepath.Join(m.dirs.Snap, idx))
+		}
+	}
+}

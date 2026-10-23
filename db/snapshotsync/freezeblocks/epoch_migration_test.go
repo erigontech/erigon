@@ -205,6 +205,7 @@ func TestRepackWordPerBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, hasDecimal)
 	const frozenMax = 2000 // isolating headers; the real orchestrator takes the min over all block types
+	m.plan, _ = planEpochSegments(0, frozenMax, m.snCfg)
 
 	var tail []uint64
 	require.NoError(t, m.repackWordPerBlock(t.Context(), snaptype2.Headers, 0, frozenMax,
@@ -249,6 +250,7 @@ func TestRepackWordPerBlockResume(t *testing.T) {
 	}
 	_, _, _, err := m.loadSegs()
 	require.NoError(t, err)
+	m.plan, _ = planEpochSegments(0, 2000, m.snCfg)
 	var tail []uint64
 	require.NoError(t, m.repackWordPerBlock(t.Context(), snaptype2.Headers, 1024, 2000,
 		func(bn uint64, w []byte) error { tail = append(tail, binary.BigEndian.Uint64(w)); return nil }))
@@ -373,6 +375,7 @@ func TestRepackTransactions(t *testing.T) {
 	}
 	_, _, _, err := m.loadSegs()
 	require.NoError(t, err)
+	m.plan, _ = planEpochSegments(0, 2000, m.snCfg)
 	type tailBlk struct {
 		base uint64
 		n    int
@@ -584,29 +587,36 @@ func TestMigrateRefusesTypeWithNoSegments(t *testing.T) {
 }
 
 // Every transactions segment needs a bodies segment with the same from and to, because that is how
-// its index gets built. So a pruned type resumes at the next cut in the shared plan, which is not
-// the same as the next multiple of 1024.
-func TestStartOnPlan(t *testing.T) {
-	plan, tailFrom := planEpochSegments(0, 20_000, snapcfg.KnownCfgOrDevnet(networkname.Mainnet))
-	require.Equal(t, [][2]uint64{{0, 8192}, {8192, 16384}, {16384, 17408}, {17408, 18432}, {18432, 19456}}, plan)
+// its index gets built. A pruned type resumes at the first 1,024-block boundary above its data, and
+// that boundary joins the one tiling every type converts on. Snapping to the plan's next cut instead
+// would drop up to a whole top-tier segment of blocks a pruned node is meant to keep.
+func TestPlanEpochConversionAlignsPrunedStarts(t *testing.T) {
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
+	start := map[snaptype.Enum]uint64{snaptype2.Enums.Headers: 0, snaptype2.Enums.Bodies: 0, snaptype2.Enums.Transactions: 9_000}
+
+	plan, tailFrom := planEpochConversion(start, 20_000, snCfg)
+	require.Equal(t, uint64(9_216), start[snaptype2.Enums.Transactions], "the first boundary at or above 9000, not 16384")
+	require.Equal(t, uint64(0), start[snaptype2.Enums.Headers])
 	require.Equal(t, uint64(19_456), tailFrom)
 
-	require.Equal(t, uint64(0), startOnPlan(plan, 0))
-	require.Equal(t, uint64(8192), startOnPlan(plan, 1), "1 is on no boundary; the next one is 8192")
-	require.Equal(t, uint64(16384), startOnPlan(plan, 9_000), "9216 would be 1024-aligned but is not a boundary")
-	require.Equal(t, uint64(16384), startOnPlan(plan, 16_384))
-	require.Equal(t, uint64(18432), startOnPlan(plan, 17_409))
+	var at uint64
+	var cut bool
+	for _, r := range plan {
+		require.Equal(t, at, r[0], "the plan tiles [0, tailFrom) without gaps")
+		require.Zero(t, r[0]%snaptype.EpochMinSegmentSize)
+		cut = cut || r[0] == 9_216
+		at = r[1]
+	}
+	require.Equal(t, tailFrom, at)
+	require.True(t, cut, "the aligned start is a boundary every type shares")
 }
 
-// A pruned type can start inside the sub-1024 tail, where the plan has no later boundary. Returning
-// the last boundary there puts the resume point below the type's own data, so its words would be
-// paired with earlier blocks. Keeping the frontier leaves the range tail-only, with no segment.
-func TestStartOnPlanKeepsFrontierPastLastBoundary(t *testing.T) {
-	plan, tailFrom := planEpochSegments(0, 86_000, snapcfg.KnownCfgOrDevnet(networkname.Mainnet))
-	require.Equal(t, uint64(84_992), tailFrom)
-
-	require.Equal(t, uint64(85_000), startOnPlan(plan, 85_000),
-		"no boundary at or above the frontier: keep it, do not fall back below it")
-	require.Equal(t, uint64(84_992), startOnPlan(plan, 84_992), "an exact boundary is kept")
-	require.Equal(t, uint64(0), startOnPlan(nil, 0))
+// A start inside the last full segment aligns to its end, the tail: that type would come out with no
+// segment, which run refuses. It must never fall back below the type's own data.
+func TestPlanEpochConversionStartInLastSegment(t *testing.T) {
+	start := map[snaptype.Enum]uint64{snaptype2.Enums.Headers: 0, snaptype2.Enums.Transactions: 2_000}
+	plan, tailFrom := planEpochConversion(start, 3_000, snapcfg.KnownCfgOrDevnet(networkname.Mainnet))
+	require.Equal(t, [][2]uint64{{0, 1024}, {1024, 2048}}, plan)
+	require.Equal(t, uint64(2_048), tailFrom)
+	require.Equal(t, tailFrom, start[snaptype2.Enums.Transactions])
 }

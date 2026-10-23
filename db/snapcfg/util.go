@@ -335,25 +335,26 @@ func (p Preverified) MaxBlock(version ver.Version) (uint64, error) {
 		if ext != ".seg" {
 			continue
 		}
+		name := fileName[:len(fileName)-len(ext)]
 
-		to, err := ExtractBlockFromName(fileName[:len(fileName)-len(ext)], version)
+		to, err := ExtractBlockFromName(name, version)
 		if err != nil {
 			if errors.Is(err, errWrongVersion) {
 				continue
 			}
 			return 0, err
 		}
-
-		if _max < to {
-			_max = to
+		unit := uint64(snaptype.Erigon2MinSegmentSize)
+		if strings.HasSuffix(name, "-"+snaptype.EpochMarker) {
+			unit = snaptype.EpochMinSegmentSize
 		}
-
+		_max = max(_max, to*unit)
 	}
 	if _max == 0 { // to prevent underflow
 		return 0, nil
 	}
 
-	return _max*1_000 - 1, nil
+	return _max - 1, nil
 }
 
 var errWrongVersion = errors.New("wrong version")

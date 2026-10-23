@@ -32,10 +32,15 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type bundle struct {
@@ -1597,4 +1602,26 @@ func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasState)
 	require.False(t, broken)
+}
+
+// The commands that open snapshots here mostly run without the datadir lock, possibly beside a node,
+// so a datadir still holding decimal block segments is refused rather than converted under it.
+func TestOpenSnapsRefusesUnconvertedDatadir(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteCanonicalHash(tx, chainspec.Mainnet.GenesisHash, 0); err != nil {
+			return err
+		}
+		if err := rawdb.WriteChainConfig(tx, chainspec.Mainnet.GenesisHash, chainspec.Mainnet.Config); err != nil {
+			return err
+		}
+		return stages.SaveStageProgress(tx, stages.Snapshots, 1) // the legacy download finished
+	}))
+	segment := filepath.Join(dirs.Snap, "v1.1-000000-000500-headers.seg")
+	require.NoError(t, os.WriteFile(segment, []byte{1}, 0o644)) // an empty file is skipped as a download placeholder
+
+	_, _, err := openSnaps(t.Context(), ethconfig.NewSnapCfg(false, true, true, "mainnet"), dirs, db, log.New())
+	require.ErrorContains(t, err, "legacy decimal block segments")
+	require.FileExists(t, segment)
 }

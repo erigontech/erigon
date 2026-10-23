@@ -231,3 +231,21 @@ func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
 	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, false, 0),
 		"core types must still resolve through the preverified scan")
 }
+
+// An epoch name counts its range in 1,024-block units, so its upper bound decodes differently from a
+// decimal one printing the same digits.
+func TestMaxBlockDecodesEpochNames(t *testing.T) {
+	decimal := Preverified{Items: []PreverifiedItem{{Name: "v1.1-000000-000500-headers.seg"}}}
+	got, err := decimal.MaxBlock(version.ZeroVersion)
+	require.NoError(t, err)
+	require.Equal(t, uint64(499_999), got)
+
+	epoch := Preverified{Items: []PreverifiedItem{
+		{Name: "v1.1-000000-000512-headers-ep.seg"},
+		{Name: "v1.1-000512-000576-headers-ep.seg"},
+		{Name: "v1.1-000000-000512-headers-ep.idx"},
+	}}
+	got, err = epoch.MaxBlock(version.ZeroVersion)
+	require.NoError(t, err)
+	require.Equal(t, uint64(576*1024-1), got)
+}

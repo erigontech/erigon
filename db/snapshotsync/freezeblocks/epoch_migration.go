@@ -24,10 +24,12 @@ package freezeblocks
 // renamed, so anything on disk is complete and a re-run after a crash just carries on.
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -43,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -146,17 +149,36 @@ func coverage(epoch, decimal []snaptype.FileInfo) (start, coveredTo uint64, runL
 	}
 }
 
-// startOnPlan returns the first boundary of plan at or above frontier. Every block type converts on
-// one shared tiling, because the transactions index is built by walking a bodies segment of the
-// identical range; a pruned type therefore resumes on a boundary, dropping the blocks below it. A
-// type starting inside the sub-1024 tail has no boundary above it and keeps its own frontier.
-func startOnPlan(plan [][2]uint64, frontier uint64) uint64 {
-	for _, r := range plan {
-		if r[0] >= frontier {
-			return r[0]
+// planEpochConversion aligns each type's start up to the first smallest-tier boundary at or above it
+// and tiles [0, frozenMax) so that every aligned start is a boundary. All types convert on this one
+// tiling, because the transactions index is built by walking a bodies segment of the identical range.
+// A pruned type gives up the blocks below its aligned start, fewer than one smallest tier.
+func planEpochConversion(start map[snaptype.Enum]uint64, frozenMax uint64, snCfg *snapcfg.Cfg) (plan [][2]uint64, tailFrom uint64) {
+	cuts := make([]uint64, 0, len(start))
+	for t, s := range start {
+		if r := s % snaptype.EpochMinSegmentSize; r != 0 {
+			s += snaptype.EpochMinSegmentSize - r
 		}
+		start[t] = s
+		cuts = append(cuts, s)
 	}
-	return frontier // no boundary at or above it: tail-only range, nothing to convert
+	slices.Sort(cuts)
+	var from uint64
+	for _, cut := range slices.Compact(cuts) {
+		if cut <= from || cut >= frozenMax {
+			continue
+		}
+		segs, end := planEpochSegments(from, cut, snCfg)
+		plan, from = append(plan, segs...), end
+	}
+	segs, tailFrom := planEpochSegments(from, frozenMax, snCfg)
+	return append(plan, segs...), tailFrom
+}
+
+// planFrom is the part of the shared plan a type starting at startBlock converts.
+func (m *epochMigrator) planFrom(startBlock uint64) [][2]uint64 {
+	i, _ := slices.BinarySearchFunc(m.plan, startBlock, func(r [2]uint64, b uint64) int { return cmp.Compare(r[0], b) })
+	return m.plan[i:]
 }
 
 // removeDecimalSegFiles deletes each decimal segment and everything with its range and type: the .seg,
@@ -242,7 +264,16 @@ type epochMigrator struct {
 	// is left for the final cleanup. Repacks trim decimalSegs as they delete. loadSegs fills both.
 	decimalSegs   map[snaptype.Enum][]snaptype.FileInfo
 	contiguousLen map[snaptype.Enum]int
+	// allDecimal is every decimal segment the scan found, including those a merged segment contains:
+	// a crash between a merge and its cleanup leaves both, and cleanup has to remove both.
+	allDecimal map[snaptype.Enum][]snaptype.FileInfo
+	hasEpoch   map[snaptype.Enum]bool
+	plan       [][2]uint64 // the one tiling every type converts on
 }
+
+// epochMigrationKey marks a conversion that has started and not finished. Once the repacks delete the
+// last decimal segment, the files alone no longer show that the indexes are still to be built.
+var epochMigrationKey = []byte("epochMigrationInProgress")
 
 func (m *epochMigrator) segsToMigrate(t snaptype.Enum) []snaptype.FileInfo {
 	return m.decimalSegs[t][:m.contiguousLen[t]]
@@ -260,7 +291,7 @@ func (m *epochMigrator) repackWordPerBlock(ctx context.Context, t snaptype.Type,
 		return nil
 	}
 	segs := m.segsToMigrate(t.Enum())
-	plan, _ := planEpochSegments(startBlock, frozenMax, m.snCfg)
+	plan := m.planFrom(startBlock)
 	sw := newSeqWords(segs)
 	defer sw.Close()
 
@@ -405,7 +436,7 @@ func (m *epochMigrator) repackTransactions(ctx context.Context, startBlock, froz
 	txSegs := m.segsToMigrate(snaptype2.Transactions.Enum())
 	bodyFirstFrom := bodySegs[0].From
 	txFirstFrom := txSegs[0].From
-	plan, _ := planEpochSegments(startBlock, frozenMax, m.snCfg)
+	plan := m.planFrom(startBlock)
 
 	bodies := newSeqWords(bodySegs)
 	defer bodies.Close()
@@ -620,8 +651,19 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	inProgress, err := m.inProgress(ctx)
+	if err != nil {
+		return err
+	}
 	if !hasDecimal {
-		return nil
+		if !inProgress {
+			return nil
+		}
+		// Every block is in an epoch segment or the DB tail; what may be missing is their indexes.
+		if err := m.buildEpochIndexes(ctx); err != nil {
+			return err
+		}
+		return m.setInProgress(ctx, false)
 	}
 	if frozenMax == 0 {
 		// Every block type must be present and reachable: the visible-file calculation drops every
@@ -629,17 +671,25 @@ func (m *epochMigrator) run(ctx context.Context) error {
 		return fmt.Errorf("epoch-migration: no usable segments for %s; refusing to convert a datadir that is already unopenable",
 			strings.Join(m.uncovered, ", "))
 	}
-	m.logger.Info("[epoch-migration] converting decimal block segments to epoch", "upto", frozenMax)
 
-	// One tiling for every type: a pruned type resumes on a boundary of it, never between two.
-	plan, _ := planEpochSegments(0, frozenMax, m.snCfg)
+	frontier := maps.Clone(start)
+	var tailFrom uint64
+	m.plan, tailFrom = planEpochConversion(start, frozenMax, m.snCfg)
 	for _, t := range snaptype2.BlockSnapshotTypes {
-		if s := start[t.Enum()]; s > 0 {
-			start[t.Enum()] = startOnPlan(plan, s)
+		// The same visible-file rule: a type left with no segment hides every other type's.
+		if start[t.Enum()] >= tailFrom && !m.hasEpoch[t.Enum()] {
+			return fmt.Errorf("epoch-migration: %s segments start at block %d, too close to the frozen frontier %d to fill one epoch segment; "+
+				"converting would leave the datadir unopenable", t.Name(), frontier[t.Enum()], frozenMax)
 		}
 	}
+	if err := m.warnDropped(ctx, frontier, start, frozenMax); err != nil {
+		return err
+	}
+	if err := m.setInProgress(ctx, true); err != nil {
+		return err
+	}
+	m.logger.Info("[epoch-migration] converting decimal block segments to epoch", "upto", frozenMax)
 
-	tailFrom := frozenMax - frozenMax%snaptype.EpochMinSegmentSize
 	tailHeaders := make(map[uint64][]byte)
 	tailBodies := make(map[uint64][]byte)
 	tailTxs := make(map[uint64][][]byte)
@@ -675,7 +725,7 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	}
 	tailHeaders, tailBodies, tailTxs = nil, nil, nil
 
-	if err := m.buildEpochIndexes(ctx, frozenMax); err != nil {
+	if err := m.buildEpochIndexes(ctx); err != nil {
 		return err
 	}
 
@@ -683,7 +733,63 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	if err := m.deleteDecimalSegs(frozenMax); err != nil {
 		return err
 	}
+	if err := m.setInProgress(ctx, false); err != nil {
+		return err
+	}
 	m.logger.Info("[epoch-migration] done", "upto", frozenMax, "tailToDB", [2]uint64{tailFrom, frozenMax})
+	return nil
+}
+
+func (m *epochMigrator) inProgress(ctx context.Context) (started bool, err error) {
+	if m.db == nil {
+		return false, nil
+	}
+	err = m.db.View(ctx, func(tx kv.Tx) error {
+		v, getErr := tx.GetOne(kv.DatabaseInfo, epochMigrationKey)
+		started = len(v) > 0
+		return getErr
+	})
+	return started, err
+}
+
+func (m *epochMigrator) setInProgress(ctx context.Context, started bool) error {
+	if m.db == nil {
+		return nil
+	}
+	return m.db.Update(ctx, func(tx kv.RwTx) error {
+		if started {
+			return tx.Put(kv.DatabaseInfo, epochMigrationKey, []byte{1})
+		}
+		return tx.Delete(kv.DatabaseInfo, epochMigrationKey)
+	})
+}
+
+// warnDropped logs the blocks a pruned type gives up to start on the epoch grid, and how many of them
+// the node's block retention still covers. Those are fewer than one smallest tier, the oldest the node
+// keeps, and would be pruned once the chain advances by as many blocks.
+func (m *epochMigrator) warnDropped(ctx context.Context, frontier, start map[snaptype.Enum]uint64, frozenMax uint64) error {
+	var mode prune.Mode
+	if m.db != nil {
+		if err := m.db.View(ctx, func(tx kv.Tx) (err error) {
+			mode, err = prune.Get(tx)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	for _, t := range snaptype2.BlockSnapshotTypes {
+		from, to := frontier[t.Enum()], start[t.Enum()]
+		if from == to {
+			continue
+		}
+		var retained uint64
+		if mode.Blocks != nil && mode.Blocks.Enabled() {
+			if cutoff := mode.Blocks.PruneTo(frozenMax); to > cutoff {
+				retained = to - max(cutoff, from)
+			}
+		}
+		m.logger.Warn("[epoch-migration] dropping blocks below the epoch grid", "type", t.Name(), "from", from, "to", to, "stillRetained", retained)
+	}
 	return nil
 }
 
@@ -697,12 +803,20 @@ func (m *epochMigrator) loadSegs() (start map[snaptype.Enum]uint64, frozenMax ui
 	}
 	m.decimalSegs = make(map[snaptype.Enum][]snaptype.FileInfo)
 	m.contiguousLen = make(map[snaptype.Enum]int)
+	m.allDecimal = make(map[snaptype.Enum][]snaptype.FileInfo)
+	m.hasEpoch = make(map[snaptype.Enum]bool)
 	start = make(map[snaptype.Enum]uint64)
 	frozenMax = ^uint64(0)
 	for _, t := range snaptype2.BlockSnapshotTypes {
 		epoch, decimal := classifyByType(all, t.Enum())
 		typeStart, coveredTo, contiguousLen := coverage(epoch, decimal)
 		m.decimalSegs[t.Enum()] = decimal
+		m.hasEpoch[t.Enum()] = len(epoch) > 0
+		for i := range all {
+			if f := &all[i]; f.Type != nil && f.Type.Enum() == t.Enum() && !f.Epoch {
+				m.allDecimal[t.Enum()] = append(m.allDecimal[t.Enum()], *f)
+			}
+		}
 		m.contiguousLen[t.Enum()] = contiguousLen
 		start[t.Enum()] = typeStart
 		frozenMax = min(frozenMax, coveredTo)
@@ -725,10 +839,10 @@ func hasEpochIndexes(info snaptype.FileInfo, names []string) bool {
 	return true
 }
 
-// buildEpochIndexes builds the epoch indexes that are missing. It runs after every segment is on disk
-// (the transactions index needs the epoch bodies), and skips any segment whose index already exists so
-// a re-run doesn't rebuild everything.
-func (m *epochMigrator) buildEpochIndexes(ctx context.Context, frozenMax uint64) error {
+// buildEpochIndexes builds the indexes the epoch segments on disk lack. It runs after every segment is
+// written, as the transactions index needs the epoch bodies of the same range, and skips the ones
+// already built so a re-run does not rebuild everything.
+func (m *epochMigrator) buildEpochIndexes(ctx context.Context) error {
 	des, err := os.ReadDir(m.dirs.Snap)
 	if err != nil {
 		return err
@@ -737,14 +851,14 @@ func (m *epochMigrator) buildEpochIndexes(ctx context.Context, frozenMax uint64)
 	for _, de := range des {
 		names = append(names, de.Name())
 	}
-	plan, _ := planEpochSegments(0, frozenMax, m.snCfg)
+	all, err := snaptype.Segments(m.dirs.Snap)
+	if err != nil {
+		return err
+	}
 	for _, t := range snaptype2.BlockSnapshotTypes {
-		for _, r := range plan {
-			info := t.FileInfo(m.dirs.Snap, true, r[0], r[1])
-			// A pruned type has no segment below its frontier; there is nothing to index there.
-			if !slices.Contains(names, filepath.Base(info.Path)) {
-				continue
-			}
+		epoch, _ := classifyByType(all, t.Enum())
+		for i := range epoch {
+			info := epoch[i]
 			if hasEpochIndexes(info, names) {
 				continue
 			}
@@ -774,7 +888,7 @@ func (m *epochMigrator) deleteDecimalSegs(frozenMax uint64) error {
 					"file", f.Name(), "from", f.From, "to", f.To, "frozenMax", frozenMax)
 			}
 		}
-		if err := removeDecimalSegFiles(m.decimalSegs[t.Enum()]); err != nil {
+		if err := removeDecimalSegFiles(m.allDecimal[t.Enum()]); err != nil {
 			return err
 		}
 		m.decimalSegs[t.Enum()] = nil

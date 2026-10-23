@@ -3073,11 +3073,14 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	// Convert legacy decimal block segments to the epoch layout before opening them.
-	if err = freezeblocks.CheckLegacyDownloadFinished(chainDB, dirs, chainConfig); err != nil {
+	// Most commands here run without the datadir lock, possibly beside a node, so they must not convert.
+	var unconverted bool
+	if unconverted, err = freezeblocks.HasDecimalBlockSegments(dirs, chainConfig); err != nil {
 		return
 	}
-	if err = freezeblocks.MigrateDecimalToEpoch(ctx, dirs, chainDB, chainConfig, estimate.CompressSnapshot.Workers(), logger); err != nil {
+	if unconverted {
+		err = fmt.Errorf("datadir %s still has legacy decimal block segments: start erigon once (or run `erigon seg retire --datadir=%s`) to convert them",
+			dirs.DataDir, dirs.DataDir)
 		return
 	}
 
@@ -3453,6 +3456,14 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	// The caller holds the datadir lock, so this is the one command here that converts.
+	if err := freezeblocks.CheckLegacyDownloadFinished(db, dirs, chainConfig); err != nil {
+		return err
+	}
+	if err := freezeblocks.MigrateDecimalToEpoch(ctx, dirs, db, chainConfig, estimate.CompressSnapshot.Workers(), logger); err != nil {
+		return err
+	}
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
