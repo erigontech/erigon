@@ -266,6 +266,75 @@ func TestNewPayloadV6KnownCanonicalBlockAsksExecution(t *testing.T) {
 	require.Equal(t, payload.BlockHash, askedHash)
 }
 
+func TestNewPayloadV6ValidatedSideBlockWithUncheckedInclusionList(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	payload := bogotaPayload(t, parent)
+	inclusionList := signedInclusionList(t, cfg)
+
+	for _, tc := range []struct {
+		name         string
+		cached       bool
+		wantInserted int
+	}{
+		{"unchecked inclusion list re-executes the block", false, 1},
+		{"cached result answers from the quick path", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			satisfied := false
+			validated := false
+			var inserted []*types.Block
+			stub := &stubExecutionModule{
+				getHeaderFunc: func(_ context.Context, blockHash *common.Hash, _ *uint64) (*types.Header, error) {
+					if blockHash != nil && (*blockHash == parent.Hash() || *blockHash == payload.BlockHash) {
+						return parent, nil
+					}
+					return nil, nil
+				},
+				currentHeaderFunc: func(context.Context) (*types.Header, error) {
+					return parent, nil
+				},
+				isValidatedFunc: func(common.Hash) bool {
+					return true
+				},
+				insertBlocksFunc: func(_ context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+					inserted = append(inserted, blocks...)
+					return execmodule.ExecutionStatusSuccess, nil
+				},
+				validateChainFunc: func(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+					validated = true
+					return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusSuccess, LatestValidHash: payload.BlockHash}, nil
+				},
+				ilSatisfiedFunc: func(context.Context, common.Hash, uint64, types.Transactions) (*bool, error) {
+					if !tc.cached && !validated {
+						return nil, nil
+					}
+					return &satisfied, nil
+				},
+			}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, ilTestMaxReorgDepth)
+			srv.test = true
+
+			status, err := srv.NewPayloadV6(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, inclusionList)
+			require.NoError(t, err)
+			require.NotNil(t, status)
+			require.Equal(t, engine_types.ValidStatus, status.Status)
+			require.NotNil(t, status.InclusionListSatisfied)
+			require.False(t, *status.InclusionListSatisfied)
+			require.Len(t, inserted, tc.wantInserted)
+			if tc.wantInserted > 0 {
+				require.True(t, validated)
+				require.Len(t, inserted[0].InclusionList(), len(inclusionList))
+			}
+		})
+	}
+}
+
 func TestNewPayloadV6InclusionListCheckErrorIsReturned(t *testing.T) {
 	t.Parallel()
 

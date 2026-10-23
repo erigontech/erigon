@@ -559,7 +559,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if err := e.resolveInclusionListSatisfied(ctx, status, blockHash, uint64(req.BlockNumber), il); err != nil {
 			return nil, err
 		}
-		return status, nil
+		if possibleStatus.Status != engine_types.ValidStatus || status.Status != engine_types.SyncingStatus {
+			return status, nil
+		}
+		canonical, err := e.chainRW.IsCanonicalHash(ctx, blockHash)
+		if err != nil {
+			return nil, err
+		}
+		if canonical {
+			return status, nil
+		}
+		e.logger.Debug("[NewPayload] re-executing validated side block for an unchecked inclusion list", "hash", blockHash)
 	}
 
 	e.lock.Lock()

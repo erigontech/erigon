@@ -67,6 +67,7 @@ type stubExecutionModule struct {
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
 	ilSatisfiedFunc        func(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error)
+	isValidatedFunc        func(hash common.Hash) bool
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -166,7 +167,10 @@ func (s *stubExecutionModule) IsCanonicalHash(ctx context.Context, hash common.H
 	return false, nil
 }
 
-func (s *stubExecutionModule) IsValidated(_ common.Hash) bool {
+func (s *stubExecutionModule) IsValidated(hash common.Hash) bool {
+	if s.isValidatedFunc != nil {
+		return s.isValidatedFunc(hash)
+	}
 	return false
 }
 
