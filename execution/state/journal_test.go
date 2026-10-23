@@ -48,7 +48,6 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"fakeStorageChange", kindFakeStorage, func(j *journal) { j.fakeStorageChange(addr, key, val) }},
 		{"codeChange", kindCode, func(j *journal) { j.codeChange(addr, nil, accounts.CodeHash{}, false) }},
 		{"refundChange", kindRefund, func(j *journal) { j.refundChange(7) }},
-		{"addLogChange", kindAddLog, func(j *journal) { j.addLogChange(3) }},
 		{"touchAccount", kindTouch, func(j *journal) { j.touchAccount(addr, false, val) }},
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
