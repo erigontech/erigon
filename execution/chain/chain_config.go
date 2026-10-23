@@ -141,8 +141,6 @@ func (c *Config) IsEIPEnabled(eip int, time uint64) bool {
 		return false
 	}
 	switch eip {
-	case 8141:
-		return c.IsBogota(time)
 	case 7708, 7928:
 		return c.IsAmsterdam(time)
 	default:
@@ -947,8 +945,6 @@ func (r *Rules) IsEIPEnabled(eip int) bool {
 		return false
 	}
 	switch eip {
-	case 8141:
-		return r.IsBogota
 	case 7708, 7928:
 		return r.IsAmsterdam
 	case 161, 170:

@@ -44,7 +44,7 @@ func (tx *TxnSlot) hasKeyedNonce() bool {
 }
 
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardReason, error) {
-	if !p.chainConfig.IsEIPEnabled(8141, uint64(time.Now().Unix())) {
+	if !p.chainConfig.IsBogota(uint64(time.Now().Unix())) {
 		return txpoolcfg.TypeNotActivated, nil
 	}
 	frame := txn.Txn.(*types.FrameTransaction)

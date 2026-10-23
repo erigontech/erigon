@@ -43,7 +43,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		return &Signer{}
 	}
 	return makeSigner(config.ChainID, signerForks{
-		bogota:         config.IsEIPEnabled(8141, blockTime),
+		bogota:         config.IsBogota(blockTime),
 		prague:         config.IsPrague(blockTime),
 		cancun:         config.IsCancun(blockTime),
 		london:         config.IsLondon(blockNumber),
@@ -63,7 +63,7 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 		chainID = rules.ChainID
 	}
 	return makeSigner(chainID, signerForks{
-		bogota:         rules.IsEIPEnabled(8141),
+		bogota:         rules.IsBogota,
 		prague:         rules.IsPrague,
 		cancun:         rules.IsCancun,
 		london:         rules.IsLondon,
@@ -157,7 +157,7 @@ func LatestSigner(config *chain.Config) *Signer {
 		if config.SpuriousDragonBlock != nil {
 			signer.protected = true
 		}
-		signer.frame = config.BogotaTime != nil && config.IsEIPEnabled(8141, *config.BogotaTime)
+		signer.frame = config.BogotaTime != nil
 		if config.PragueTime != nil {
 			signer.setCode = true
 		}

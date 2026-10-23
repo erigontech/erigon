@@ -376,12 +376,3 @@ func TestFrameTransactionCopySidecar(t *testing.T) {
 	wrapper.Blobs[0][0] = 1
 	require.Zero(t, tx.Blobs[0][0])
 }
-
-func TestFrameTransactionDisabled(t *testing.T) {
-	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, ChainID: *uint256.NewInt(1)}
-	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1), DisabledEIPs: []int{8141}}
-	_, err := tx.AsMessage(Signer{}, nil, rules)
-	require.ErrorIs(t, err, ErrTxTypeNotSupported)
-	_, err = MakeSignerFromRules(nil, rules).Sender(tx)
-	require.ErrorIs(t, err, ErrTxTypeNotSupported)
-}

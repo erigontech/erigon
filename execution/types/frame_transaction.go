@@ -359,7 +359,7 @@ func (tx *FrameTransaction) WithSignature(Signer, []byte) (Transaction, error) {
 }
 
 func (tx *FrameTransaction) AsMessage(_ Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
-	if !rules.IsEIPEnabled(8141) {
+	if !rules.IsBogota {
 		return nil, ErrTxTypeNotSupported
 	}
 	if rules.ChainID != nil && !tx.ChainID.Eq(rules.ChainID) {

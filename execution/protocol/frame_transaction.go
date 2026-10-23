@@ -35,7 +35,7 @@ import (
 
 func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
-	if !rules.IsEIPEnabled(8141) {
+	if !rules.IsBogota {
 		return nil, types.ErrTxTypeNotSupported
 	}
 	intrinsic, floor, limits, err := tx.GasLimits()

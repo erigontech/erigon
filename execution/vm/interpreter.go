@@ -447,7 +447,7 @@ func LookupInstructionSet(rules *chain.Rules) JumpTable {
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	var jt *JumpTable
 	switch {
-	case chainRules.IsEIPEnabled(8141):
+	case chainRules.IsBogota:
 		jt = &bogotaInstructionSet
 	case chainRules.IsAmsterdam:
 		jt = &amsterdamInstructionSet
