@@ -18,7 +18,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -1206,8 +1205,8 @@ func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) 
 }
 
 func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
-	for _, hasValidators := range []bool{true, false} {
-		t.Run(fmt.Sprintf("validators=%v", hasValidators), func(t *testing.T) {
+	for _, validatorSource := range []string{"none", "fee recipient", "attached"} {
+		t.Run(validatorSource, func(t *testing.T) {
 			saveSignatureGlobals(t)
 			blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
 
@@ -1243,8 +1242,11 @@ func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
 			verifier.Start()
 			opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
 			validatorParams := validator_params.NewValidatorParams()
-			if hasValidators {
+			switch validatorSource {
+			case "fee recipient":
 				validatorParams.SetFeeRecipient(localValidator, common.Address{})
+			case "attached":
+				validatorParams.AddAttachedValidator(localValidator)
 			}
 			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
 			service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoiceMock, clock, cfg, opPool, false, verifier, validatorParams)
@@ -1254,7 +1256,7 @@ func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
 				_, ok := opPool.AttestationsPool.Get(agg.SignedAggregateAndProof.Message.Aggregate.Signature)
 				return ok
 			}
-			if !hasValidators {
+			if validatorSource == "none" {
 				require.ErrorIs(t, err, ErrIgnore)
 				require.False(t, stored())
 				return
