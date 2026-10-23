@@ -226,7 +226,7 @@ flowchart LR
 - [x] wire it into the ETL merge (via `TransformArgs`), the partition-file write, the fold, each range's file stages,
       every verify pass, and attach.
 - [x] log-capture test with a short interval: every phase emits a line.
-- [ ] run the gate — must pass before Task 3.
+- [x] run the gate — must pass before Task 3.
 
 ### Task 3: Background ETL merge
 **Files:**

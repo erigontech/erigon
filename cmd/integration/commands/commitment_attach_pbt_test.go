@@ -298,7 +298,7 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 		"attach adopt",
 	} {
 		var found bool
-		for _, line := range strings.Split(logs.String(), "\n") {
+		for line := range strings.SplitSeq(logs.String(), "\n") {
 			if strings.Contains(line, "phase=\""+phase) {
 				found = true
 				require.Contains(t, line, "done=")
