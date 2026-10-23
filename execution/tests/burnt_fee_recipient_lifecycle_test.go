@@ -179,3 +179,23 @@ func TestBurntFeeBurnedWithDestroyedRecipient(t *testing.T) {
 		})
 	}
 }
+
+// With a zero base fee the fee transfer is a zero-value touch of the burnt-fee
+// recipient, so EIP-161 removes an empty one with its storage.
+func TestZeroBaseFeeRemovesEmptyBurntRecipient(t *testing.T) {
+	alloc := types.GenesisAlloc{
+		burntRecipient: {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{common.BytesToHash([]byte{1}): common.BytesToHash([]byte{1})}},
+	}
+	keys := revivalKeys(t, alloc, 1)
+	gspec := &types.Genesis{Config: burntFeeConfig(pragueConfig()), GasLimit: 30_000_000, Alloc: alloc, BaseFee: uint256.NewInt(0)}
+	chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 1, []revivalCall{{to: common.HexToAddress("0xbeef")}})
+	require.True(t, chainPack.TopBlock.BaseFee().IsZero())
+	check := func(t *testing.T, st *state.IntraBlockState) {
+		exists, err := st.Exist(accounts.InternAddress(burntRecipient))
+		require.NoError(t, err)
+		require.False(t, exists)
+		require.Equal(t, uint256.Int{}, storageAt(t, st, burntRecipient, 1))
+	}
+	importSerially(t, gspec, keys[0], chainPack, check)
+	importInParallel(t, gspec, keys[0], chainPack, check)
+}
