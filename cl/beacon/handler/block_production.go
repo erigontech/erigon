@@ -605,33 +605,6 @@ func attemptsMade(attempts int) string {
 	return fmt.Sprintf("%d attempts", attempts)
 }
 
-func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	stopCh := time.After(time.Second)
-	for {
-		headSlot := a.syncedData.HeadSlot()
-		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
-			return
-		}
-		_, ok, err := a.attestationProducer.CachedAttestationData(slot)
-		if err != nil {
-			log.Warn("Failed to get attestation data", "err", err)
-		}
-		if ok {
-			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
-			return
-		}
-
-		time.Sleep(1 * time.Millisecond)
-		select {
-		case <-stopCh:
-			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
-			return
-		default:
-		}
-
-	}
-}
-
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -665,11 +638,17 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
 
-	a.waitForHeadSlot(*slot)
-
-	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot)
-	if err != nil {
-		log.Warn("Failed to get attestation data", "err", err)
+	var attestationData solid.AttestationData
+	var ok, cached bool
+	if head, _, err := a.forkchoiceStore.GetHeadNode(); err == nil {
+		attestationData, ok = a.forkchoiceStore.AttestationData(head.Root, *slot)
+	}
+	if !ok {
+		attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot)
+		cached = ok
+		if err != nil {
+			log.Warn("Failed to get attestation data", "err", err)
+		}
 	}
 
 	defer func() {
@@ -683,7 +662,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			a.beaconChainCfg.SlotsPerEpoch, 64,
 		)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
-			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
+			"committee_index", *committeeIndex, "subnet", subnet, "cached", cached, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
 	}()
 
