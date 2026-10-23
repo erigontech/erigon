@@ -26,13 +26,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -69,25 +69,20 @@ func TestDomain_CollationMatchesFullScanOnChaindata(t *testing.T) {
 		d.DisableFsync()
 		steps, rows := dupSortTableSteps(t, roTx, cfg.ValuesTable)
 		t.Logf("%s: %d rows, %d steps %v..%v", cfg.ValuesTable, rows, len(steps), steps[0], steps[len(steps)-1])
-		for _, step := range steps {
-			want := fullScanCollation(t, roTx, cfg.ValuesTable, step)
-			coll, err := d.collate(t.Context(), step, uint64(step)*stepSize, uint64(step+1)*stepSize, roTx)
+		for from := 0; from < len(steps); from += maxCollationBatchSteps {
+			to := min(from+maxCollationBatchSteps, len(steps))
+			comps, err := d.collateValuesBatch(t.Context(), steps[from], steps[to-1]+1, roTx)
 			require.NoError(t, err)
-			sf, err := d.buildFiles(t.Context(), step, coll, background.NewProgressSet())
-			require.NoError(t, err)
-			var got [][]byte
-			g := d.dataReader(sf.valuesDecomp)
-			g.Reset(0)
-			for g.HasNext() {
-				w, _ := g.Next(nil)
-				got = append(got, w)
+			for _, step := range steps[from:to] {
+				want := fullScanCollation(t, roTx, cfg.ValuesTable, step)
+				for _, values := range []*seg.Compressor{nil, comps[step-steps[from]]} {
+					got := collatedValueWords(t, d, step, stepSize, roTx, values)
+					require.Equal(t, len(want), len(got), "%s step %d batched=%t: word count", cfg.ValuesTable, step, values != nil)
+					for i := range want {
+						require.True(t, bytes.Equal(want[i], got[i]), "%s step %d batched=%t: word %d differs", cfg.ValuesTable, step, values != nil, i)
+					}
+				}
 			}
-			require.Equal(t, len(want), len(got), "%s step %d: word count", cfg.ValuesTable, step)
-			for i := range want {
-				require.True(t, bytes.Equal(want[i], got[i]), "%s step %d: word %d differs", cfg.ValuesTable, step, i)
-			}
-			sf.CleanupOnError()
-			coll.Close()
 		}
 		d.Close()
 	}

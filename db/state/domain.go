@@ -888,7 +888,14 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
+	return d.collateWithValues(ctx, step, txFrom, txTo, roTx, nil)
+}
+
+func (d *Domain) collateWithValues(ctx context.Context, step kv.Step, txFrom, txTo uint64, roTx kv.Tx, values *seg.Compressor) (coll Collation, err error) {
 	if !d.Enabled {
+		if values != nil {
+			values.Close()
+		}
 		return Collation{}, nil
 	}
 
@@ -906,6 +913,9 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 
 	coll.HistoryCollation, err = d.History.collate(ctx, step, txFrom, txTo, roTx)
 	if err != nil {
+		if values != nil {
+			values.Close()
+		}
 		return Collation{}, err
 	}
 
@@ -917,6 +927,13 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	}()
 
 	coll.valuesPath = d.kvNewFilePath(step, step+1)
+	if values != nil {
+		coll.valuesComp = values
+		closeCollation = false
+		coll.valuesCount = coll.valuesComp.Count() / 2
+		mxCollationSize.SetUint64(uint64(coll.valuesCount))
+		return coll, nil
+	}
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.FilenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.FilenameBase, err)
 	}
@@ -989,6 +1006,94 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	coll.valuesCount = coll.valuesComp.Count() / 2
 	mxCollationSize.SetUint64(uint64(coll.valuesCount))
 	return coll, nil
+}
+
+func (d *Domain) collateValuesBatch(ctx context.Context, stepFrom, stepTo kv.Step, roTx kv.Tx) (comps []*seg.Compressor, err error) {
+	if !d.Enabled || d.LargeValues || stepTo <= stepFrom {
+		return nil, nil
+	}
+	defer func() {
+		if err != nil {
+			for _, comp := range comps {
+				comp.Close()
+			}
+			comps = nil
+		}
+	}()
+	writers := make([]*seg.Writer, 0, int(stepTo-stepFrom))
+	for step := stepFrom; step < stepTo; step++ {
+		comp, err := seg.NewCompressor(ctx, d.FilenameBase+".domain.collate", d.kvNewFilePath(step, step+1), d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger)
+		if err != nil {
+			return comps, fmt.Errorf("create %s values compressor: %w", d.FilenameBase, err)
+		}
+		comps = append(comps, comp)
+		writers = append(writers, seg.NewWriter(comp, seg.CompressNone))
+	}
+	keysCursor, err := roTx.CursorDupSort(d.ValuesTable)
+	if err != nil {
+		return comps, fmt.Errorf("create %s keys cursorDupsort: %w", d.FilenameBase, err)
+	}
+	defer keysCursor.Close()
+	valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
+	if err != nil {
+		return comps, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
+	}
+	defer valsCursor.Close()
+	newest, oldest := ^uint64(stepTo-1), ^uint64(stepFrom)
+	newestPrefix := make([]byte, 8)
+	binary.BigEndian.PutUint64(newestPrefix, newest)
+	write := func(k, v []byte) error {
+		w := writers[^binary.BigEndian.Uint64(v[:8])-uint64(stepFrom)]
+		if _, err := w.Write(k); err != nil {
+			return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
+		}
+		if _, err := w.Write(v[8:]); err != nil {
+			return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
+		}
+		return nil
+	}
+	for k, v, err := keysCursor.First(); k != nil; k, v, err = keysCursor.NextNoDup() {
+		if err != nil {
+			return comps, err
+		}
+		stepVal := binary.BigEndian.Uint64(v[:8])
+		if stepVal > oldest {
+			continue
+		}
+		dups, err := keysCursor.CountDuplicates()
+		if err != nil {
+			return comps, err
+		}
+		if dups == 1 {
+			if stepVal >= newest {
+				if err := write(k, v); err != nil {
+					return comps, err
+				}
+			}
+			continue
+		}
+		if v, err = valsCursor.SeekBothRange(k, newestPrefix); err != nil {
+			return comps, err
+		}
+		written := false
+		var lastStepVal uint64
+		for v != nil {
+			stepVal = binary.BigEndian.Uint64(v[:8])
+			if stepVal > oldest {
+				break
+			}
+			if !written || stepVal != lastStepVal {
+				if err := write(k, v); err != nil {
+					return comps, err
+				}
+				written, lastStepVal = true, stepVal
+			}
+			if _, v, err = valsCursor.NextDup(); err != nil {
+				return comps, err
+			}
+		}
+	}
+	return comps, nil
 }
 
 type StaticFiles struct {
