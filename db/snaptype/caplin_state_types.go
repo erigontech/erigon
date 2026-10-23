@@ -64,6 +64,7 @@ var (
 	BuilderPendingPaymentsTable       = newCaplinStateType(MinCaplinEnum+32, kv.BuilderPendingPaymentsTable)
 	PtcWindowTable                    = newCaplinStateType(MinCaplinEnum+33, kv.PtcWindowTable)
 	LatestExecutionPayloadBidTable    = newCaplinStateType(MinCaplinEnum+34, kv.LatestExecutionPayloadBidTable)
+	PtcWindowEpoch                    = newCaplinStateType(MinCaplinEnum+35, kv.PtcWindowEpochTable)
 
 	CaplinStateSnapshotTypes = []Type{
 		ValidatorEffectiveBalance,
@@ -99,5 +100,6 @@ var (
 		BuilderPendingPaymentsTable,
 		PtcWindowTable,
 		LatestExecutionPayloadBidTable,
+		PtcWindowEpoch,
 	}
 )
