@@ -262,8 +262,11 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		block.Coinbase = accounts.InternAddress(common.HexToAddress("0x0b"))
 		block.GasLimit, block.BlockNumber, block.Time = 21, 22, 23
 		block.Difficulty, block.BaseFee, block.BlobBaseFee = *uint256.NewInt(24), *uint256.NewInt(25), *uint256.NewInt(26)
-		txCtx := evmtypes.TxContext{Origin: accounts.InternAddress(common.HexToAddress("0x0a")), GasPrice: *uint256.NewInt(27),
-			BlobHashes: []common.Hash{common.HexToHash("0x28"), common.HexToHash("0x29")}}
+		txCtx := evmtypes.TxContext{
+			Origin:     accounts.InternAddress(common.HexToAddress("0x0a")),
+			GasPrice:   *uint256.NewInt(27),
+			BlobHashes: []common.Hash{common.HexToHash("0x28"), common.HexToHash("0x29")},
+		}
 		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
 		c.Code = code
