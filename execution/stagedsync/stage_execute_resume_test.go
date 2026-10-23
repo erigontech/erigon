@@ -20,11 +20,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestResolveExecResumePoint covers the second exec cycle on a DB that already has
@@ -78,4 +86,36 @@ func TestResolveExecResumePoint(t *testing.T) {
 		require.Equal(t, commitmentBlock, blockNum, "commitment boundary is authoritative outside exec-only mode")
 		require.Equal(t, commitmentTxNum, txNum)
 	})
+}
+
+// Execution writes the senders of a BAL block that the Senders stage left to the exec workers.
+func TestWriteSendersRecoveredByExec(t *testing.T) {
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	config := chain.AllProtocolChanges
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), *types.MakeSigner(config, 1, 0), key)
+	require.NoError(t, err)
+
+	var zero uint64
+	h := common.Hash{0x01}
+	header := &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(1), WithdrawalsHash: &h, BlobGasUsed: &zero,
+		ExcessBlobGas: &zero, ParentBeaconBlockRoot: &h, RequestsHash: &h, BlockAccessListHash: &h}
+	hash := header.Hash()
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, 1))
+	require.NoError(t, rawdb.WriteBody(tx, hash, 1, &types.Body{Transactions: []types.Transaction{txn}}))
+
+	cfg := ExecuteBlockCfg{chainConfig: config, blockReader: br, readAheader: exec.NewBlockReadAheader()}
+	require.NoError(t, writeSendersRecoveredByExec(ctx, tx, cfg, 1, 1))
+
+	senders, err := rawdb.ReadSenders(tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{crypto.PubkeyToAddress(key.PublicKey)}, senders)
 }
