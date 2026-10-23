@@ -480,7 +480,7 @@ func (t *attestationTestSuite) TestElectraAttestationUsesTargetShuffling() {
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		t.Require().Equal([]string{"bls"}, callOrder)
 		callOrder = append(callOrder, "target")
 		t.Require().Equal(data.Target, target)
@@ -506,7 +506,7 @@ func (t *attestationTestSuite) TestElectraAttestationRejectsInvalidSignatureBefo
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	targetCalls := 0
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64, func() bool) ([]uint64, uint64, error) {
 		targetCalls++
 		return []uint64{attester}, headState.CommitteeCount(epoch), nil
 	}
@@ -529,7 +529,7 @@ func (t *attestationTestSuite) TestElectraAttestationAlreadySeenBeforeTargetShuf
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	targetCalls := 0
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64, func() bool) ([]uint64, uint64, error) {
 		targetCalls++
 		return []uint64{attester}, headState.CommitteeCount(epoch), nil
 	}
@@ -554,7 +554,7 @@ func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberOfTargetCom
 	attester := headCommittee[0]
 	targetCommittee := []uint64{validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)}
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
 		t.Require().Equal(singleAttestation.CommitteeIndex, committeeIndex)
@@ -570,6 +570,59 @@ func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberOfTargetCom
 	t.Require().NotErrorIs(err, ErrIgnore)
 }
 
+func cachingTargetBeaconCommittee(committee []uint64, committeesPerSlot uint64, builds *int) func(solid.Checkpoint, uint64, uint64, func() bool) ([]uint64, uint64, error) {
+	cached := make(map[solid.Checkpoint]bool)
+	return func(target solid.Checkpoint, _, _ uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+		if !cached[target] {
+			if claimBuild != nil && !claimBuild() {
+				return nil, 0, errors.New("target state build already claimed")
+			}
+			*builds++
+			cached[target] = true
+		}
+		return committee, committeesPerSlot, nil
+	}
+}
+
+func (t *attestationTestSuite) TestElectraAttestationBuildsUncachedTargetOncePerAttesterAndEpoch() {
+	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	t.ethClock.EXPECT().GetEpochAtSlot(slot).Return(epoch).Times(1)
+	t.ethClock.EXPECT().GetCurrentSlot().Return(slot).Times(1)
+	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
+	t.Require().NoError(err)
+	t.Require().NotEmpty(headCommittee)
+	attester := headCommittee[0]
+	targetCommittee := []uint64{validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)}
+	builds := 0
+	t.mockForkChoice.TargetBeaconCommitteeFn = cachingTargetBeaconCommittee(targetCommittee, headState.CommitteeCount(epoch), &builds)
+	first := t.targetShufflingAttestationData(slot, epoch)
+	t.addTargetShufflingAncestors(first)
+	second := t.targetShufflingAttestationData(slot, epoch)
+	second.BeaconBlockRoot = common.Hash{0x83}
+	second.Target.Root = common.Hash{0x84}
+	t.mockForkChoice.Headers[second.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: second.Slot}
+	t.mockForkChoice.AncestorFn = func(root common.Hash, gotSlot uint64) forkchoice.ForkChoiceNode {
+		if root == second.BeaconBlockRoot && gotSlot == epoch*t.beaconConfig.SlotsPerEpoch {
+			return forkchoice.ForkChoiceNode{Root: second.Target.Root}
+		}
+		return t.mockForkChoice.Ancestors[gotSlot]
+	}
+
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: first},
+		ImmediateProcess:  true,
+	})
+	t.Require().ErrorContains(err, "attester is not a member of the committee")
+	t.Require().NotErrorIs(err, ErrIgnore)
+
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: second},
+		ImmediateProcess:  true,
+	})
+	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().Equal(1, builds)
+}
+
 func (t *attestationTestSuite) TestElectraAttestationBuildsVotedBlockTargetBeforeRejectingMessageTarget() {
 	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
 	data := t.targetShufflingAttestationData(slot, epoch)
@@ -578,7 +631,7 @@ func (t *attestationTestSuite) TestElectraAttestationBuildsVotedBlockTargetBefor
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	derivedRoot := common.Hash{0x82}
 	var gotTarget solid.Checkpoint
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		gotTarget = target
 		t.Require().Equal(slot, gotSlot)
 		t.Require().Zero(committeeIndex)
@@ -608,7 +661,7 @@ func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberBeforeFinal
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), committee)
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
 		t.Require().Equal(singleAttestation.CommitteeIndex, committeeIndex)
@@ -670,7 +723,7 @@ func (t *attestationTestSuite) TestAttestationIgnoresUnknownVotedBlockTargetAnce
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
 	targetCalls := 0
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		targetCalls++
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
@@ -701,7 +754,7 @@ func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetCheckpoint
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
 	targetCalls := 0
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		targetCalls++
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
@@ -729,7 +782,7 @@ func (t *attestationTestSuite) TestAttestationKeepsHeadShufflingFastPath() {
 	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
 	t.Require().NoError(err)
 	t.mockForkChoice.HeadLacksTargetShuffling = false
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64, func() bool) ([]uint64, uint64, error) {
 		t.T().Fatal("target committee lookup used on the head fast path")
 		return nil, 0, nil
 	}
@@ -773,7 +826,7 @@ func (t *attestationTestSuite) TestPreElectraAttestationUsesTargetCommitteeMembe
 	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
-	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
 		t.Require().Equal(data.CommitteeIndex, committeeIndex)

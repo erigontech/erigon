@@ -155,7 +155,8 @@ type ForkChoiceStore struct {
 	localValidators    *validator_params.ValidatorParams
 
 	checkpointStateBuilds singleflight.Group
-	targetCommitteeBuilds atomic.Int32
+	targetStateBuildsMu   sync.Mutex
+	targetStateBuilds     map[solid.Checkpoint]*targetStateBuild
 
 	latestMessages    *latestMessagesStore
 	voteTally         voteTally

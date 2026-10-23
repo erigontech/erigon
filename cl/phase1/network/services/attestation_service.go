@@ -74,6 +74,7 @@ func beaconCommittee(
 	committeeIndex,
 	slotsPerEpoch uint64,
 	verifyBeforeBuild func() error,
+	claimBuild func() bool,
 ) ([]uint64, uint64, error) {
 	var (
 		committee         []uint64
@@ -109,11 +110,35 @@ func beaconCommittee(
 			return nil, 0, err
 		}
 	}
-	committee, committeesPerSlot, err = fc.TargetBeaconCommittee(target, slot, committeeIndex)
+	committee, committeesPerSlot, err = fc.TargetBeaconCommittee(target, slot, committeeIndex, claimBuild)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: target beacon committee: %w", ErrIgnore, err)
 	}
 	return committee, committeesPerSlot, nil
+}
+
+// Each entry is added by an uncached target state build, so a signer's claim is only evicted after that many other builds.
+const targetStateBuildClaimCacheSize = 16_384
+
+type targetStateBuildClaim struct {
+	epoch          uint64
+	validatorIndex uint64
+}
+
+func newTargetStateBuildClaims() *lru.Cache[targetStateBuildClaim, struct{}] {
+	claims, err := lru.New[targetStateBuildClaim, struct{}]("target_state_build_claims", targetStateBuildClaimCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	return claims
+}
+
+// claimTargetStateBuild lets a signer start one uncached target state build per target epoch.
+func claimTargetStateBuild(claims *lru.Cache[targetStateBuildClaim, struct{}], validatorIndex, targetEpoch uint64) func() bool {
+	return func() bool {
+		claimed, _ := claims.ContainsOrAdd(targetStateBuildClaim{epoch: targetEpoch, validatorIndex: validatorIndex}, struct{}{})
+		return !claimed
+	}
 }
 
 func attestationSignatureData(
@@ -162,6 +187,7 @@ type attestationService struct {
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	validatorClaimMu         sync.Mutex
+	targetStateBuildClaims   *lru.Cache[targetStateBuildClaim, struct{}]
 	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	awaitingBlock *blockArrivalQueue
 }
@@ -203,6 +229,7 @@ func NewAttestationService(
 		emitters:                 emitters,
 		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
+		targetStateBuildClaims:   newTargetStateBuildClaims(),
 		// attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 		awaitingBlock: newBlockArrivalQueue(forkchoiceStore, maxAttestationsAwaitingBlock, time.Duration(beaconCfg.SecondsPerSlot)*time.Second),
 	}
@@ -342,8 +369,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBlockNotSeen, root)
 	}
 
-	var verifyBeforeBuild func() error
+	var (
+		verifyBeforeBuild func() error
+		claimBuild        func() bool
+	)
 	if clVersion >= clparams.ElectraVersion {
+		claimBuild = claimTargetStateBuild(s.targetStateBuildClaims, att.SingleAttestation.AttesterIndex, targetEpoch)
 		verifyBeforeBuild = func() error {
 			validatorIndex := att.SingleAttestation.AttesterIndex
 			if epochLastTime, ok := s.validatorAttestationSeen.Get(validatorIndex); ok && epochLastTime == targetEpoch {
@@ -371,7 +402,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	committee, committeesPerSlot, err := beaconCommittee(
 		s.forkchoiceStore, s.syncedDataManager, data.Target, root, slot, committeeIndex,
-		s.beaconCfg.SlotsPerEpoch, verifyBeforeBuild,
+		s.beaconCfg.SlotsPerEpoch, verifyBeforeBuild, claimBuild,
 	)
 	if err != nil {
 		return err
