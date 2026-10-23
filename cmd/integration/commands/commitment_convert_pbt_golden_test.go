@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execfinality"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
@@ -147,8 +146,7 @@ func pbtGoldenCorpora() []pbtGoldenCorpus {
 		}},
 		{name: "large-storage-bucket", newSource: func(t *testing.T, _ string) pbtConversionSource {
 			configurePBTGoldenSuite(t, commitment.PBinHashBlake3, true)
-			source, _ := newPBTConversionSource(t)
-			addPBTGoldenStorageBucket(t, source)
+			source, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 256, nil)
 			return source
 		}},
 		{name: "empty-zones", newSource: func(t *testing.T, _ string) pbtConversionSource {
@@ -166,6 +164,7 @@ func addPBTGoldenStorageBucket(t *testing.T, source pbtConversionSource) {
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
 	agg := dbstate.New(source.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
 	require.NoError(t, agg.OpenFolder(rawDB))
+	files := agg.Files()
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -186,6 +185,11 @@ func addPBTGoldenStorageBucket(t *testing.T, source pbtConversionSource) {
 	require.NoError(t, tx.Commit())
 	domains.Close()
 	tx.Rollback()
+	agg.CloseFilesNoReopen()
+	for _, file := range files {
+		require.NoError(t, os.Remove(file))
+	}
+	require.NoError(t, agg.ReloadFiles())
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
 	db.Close()
@@ -199,11 +203,8 @@ func newPBTGoldenAcceptanceSource(t *testing.T, hash string) pbtConversionSource
 	for i := range sharedCode {
 		sharedCode[i] = byte(i + 1)
 	}
-	fixture, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, true, true, sharedCode)
-	require.NoError(t, err)
-	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
-	buildPBTAcceptanceFiles(t, fixture)
-	return pbtConversionSource{Dirs: fixture.Tester.Dirs}
+	source, _ := newPBTConversionSourceAtWithRows(t, 15, 0, 0, sharedCode)
+	return source
 }
 
 func configurePBTGoldenSuite(t *testing.T, hash string, keepHex bool) {

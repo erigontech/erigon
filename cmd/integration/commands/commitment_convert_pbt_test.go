@@ -19,6 +19,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io/fs"
 	"maps"
@@ -1154,6 +1155,10 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 }
 
 func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafStamp uint64) (pbtConversionSource, common.Hash) {
+	return newPBTConversionSourceAtWithRows(t, stateTx, futureLeafStamp, 0, nil)
+}
+
+func newPBTConversionSourceAtWithRows(t *testing.T, stateTx, futureLeafStamp, storageSlots uint64, sharedCode []byte) (pbtConversionSource, common.Hash) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	refs := false
@@ -1195,12 +1200,22 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	require.NoError(t, err)
 	address := bytes.Repeat([]byte{0x11}, length.Addr)
 	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	if len(sharedCode) != 0 {
+		account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(sharedCode))
+	}
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, probeTx, address, accounts.SerialiseV3(&account), 1, nil))
+	if len(sharedCode) != 0 {
+		require.NoError(t, domains.DomainPut(kv.CodeDomain, probeTx, address, sharedCode, 1, nil))
+	}
 	slot := append(bytes.Clone(address), bytes.Repeat([]byte{0x22}, 32)...)
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, probeTx, slot, []byte{1}, 1, nil))
 	updates := commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
 	updates.TouchPlainKey(string(address), accounts.SerialiseV3(&account), updates.TouchAccount)
+	if len(sharedCode) != 0 {
+		updates.TouchPlainKey(string(address), sharedCode, updates.TouchCode)
+	}
 	updates.TouchPlainKey(string(slot), []byte{1}, updates.TouchStorage)
+	require.NoError(t, putPBTConversionStorageRows(domains, probeTx, address, 1, storageSlots, updates))
 	ctx := domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	ctx.SetUpdates(updates)
 	multiRange := stateTx == 15
@@ -1213,6 +1228,9 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	secondAddress := bytes.Repeat([]byte{0x33}, length.Addr)
 	secondSlot := append(bytes.Clone(secondAddress), bytes.Repeat([]byte{0x44}, 32)...)
 	secondAccount := accounts.Account{Nonce: 2, Balance: *uint256.NewInt(2), CodeHash: accounts.EmptyCodeHash}
+	if len(sharedCode) != 0 {
+		secondAccount.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(sharedCode))
+	}
 	finalRoot := hexRoot
 	finalBlock := uint64(1)
 	if multiRange {
@@ -1220,9 +1238,15 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	}
 	if multiRange {
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, probeTx, secondAddress, accounts.SerialiseV3(&secondAccount), 9, nil))
+		if len(sharedCode) != 0 {
+			require.NoError(t, domains.DomainPut(kv.CodeDomain, probeTx, secondAddress, sharedCode, 9, nil))
+		}
 		require.NoError(t, domains.DomainPut(kv.StorageDomain, probeTx, secondSlot, []byte{2}, 9, nil))
 		updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
 		updates.TouchPlainKey(string(secondAddress), accounts.SerialiseV3(&secondAccount), updates.TouchAccount)
+		if len(sharedCode) != 0 {
+			updates.TouchPlainKey(string(secondAddress), sharedCode, updates.TouchCode)
+		}
 		updates.TouchPlainKey(string(secondSlot), []byte{2}, updates.TouchStorage)
 		ctx.SetUpdates(updates)
 		finalRoot, err = ctx.ComputeCommitment(t.Context(), probeTx, false, finalBlock, 15, "conversion-source", nil)
@@ -1234,7 +1258,12 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	require.NoError(t, err)
 	defer tx.Rollback()
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
-	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{}))
+	chainConfig := &chainpkg.Config{}
+	if len(sharedCode) != 0 {
+		binaryTrieTime := uint64(0)
+		chainConfig.BinaryTrieTime = &binaryTrieTime
+	}
+	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, chainConfig))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 7))
 	if multiRange {
@@ -1242,7 +1271,14 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	}
 	domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
+	account.CodeHash = accounts.EmptyCodeHash
+	if len(sharedCode) != 0 {
+		account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(sharedCode))
+	}
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, nil))
+	if len(sharedCode) != 0 {
+		require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, address, sharedCode, 1, nil))
+	}
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{1}, 1, nil))
 	hexState, err := commitment.EncodeCommitmentV3State(finalRoot, finalBlock, stateTx, nil)
 	require.NoError(t, err)
@@ -1255,7 +1291,11 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	}
 	updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
 	updates.TouchPlainKey(string(address), accounts.SerialiseV3(&account), updates.TouchAccount)
+	if len(sharedCode) != 0 {
+		updates.TouchPlainKey(string(address), sharedCode, updates.TouchCode)
+	}
 	updates.TouchPlainKey(string(slot), []byte{1}, updates.TouchStorage)
+	require.NoError(t, putPBTConversionStorageRows(domains, tx, address, 1, storageSlots, updates))
 	ctx = domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	ctx.SetUpdates(updates)
 	computedRoot, err := ctx.ComputeCommitment(t.Context(), tx, true, 1, firstCommitmentTx, "conversion-source", nil)
@@ -1263,9 +1303,15 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	require.Equal(t, hexRoot, computedRoot)
 	if multiRange {
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, secondAddress, accounts.SerialiseV3(&secondAccount), 9, nil))
+		if len(sharedCode) != 0 {
+			require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, secondAddress, sharedCode, 9, nil))
+		}
 		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, secondSlot, []byte{2}, 9, nil))
 		updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
 		updates.TouchPlainKey(string(secondAddress), accounts.SerialiseV3(&secondAccount), updates.TouchAccount)
+		if len(sharedCode) != 0 {
+			updates.TouchPlainKey(string(secondAddress), sharedCode, updates.TouchCode)
+		}
 		updates.TouchPlainKey(string(secondSlot), []byte{2}, updates.TouchStorage)
 		ctx.SetUpdates(updates)
 		computedRoot, err = ctx.ComputeCommitment(t.Context(), tx, false, finalBlock, 15, "conversion-source", nil)
@@ -1291,7 +1337,11 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	agg.WaitForFiles()
 	at := agg.BeginFilesRo()
 	require.NotEmpty(t, at.Files(kv.AccountsDomain))
-	builder, err := eip8297.NewStreamRootBuilder(func(data []byte) common.Hash { return common.Hash(blake3.Sum256(data)) })
+	hashFn := func(data []byte) common.Hash { return common.Hash(blake3.Sum256(data)) }
+	if len(sharedCode) != 0 {
+		hashFn = eip8297.HashBytes
+	}
+	builder, err := eip8297.NewStreamRootBuilder(hashFn)
 	require.NoError(t, err)
 	readTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -1302,12 +1352,34 @@ func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafSta
 	pbtRoot, err := builder.RootHash()
 	require.NoError(t, err)
 	readTx.Rollback()
+	if len(sharedCode) != 0 {
+		require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+			header := &types.Header{Number: *uint256.NewInt(finalBlock), Time: 1, Root: pbtRoot}
+			if err := rawdb.WriteHeader(tx, header); err != nil {
+				return err
+			}
+			return rawdb.WriteCanonicalHash(tx, header.Hash(), finalBlock)
+		}))
+	}
 	at.Close()
 	db.Close()
 	agg.Close()
 	rawDB.Close()
 	closed = true
 	return pbtConversionSource{Dirs: dirs}, pbtRoot
+}
+
+func putPBTConversionStorageRows(domains *execctx.SharedDomains, tx kv.TemporalTx, address []byte, txNum, count uint64, updates *commitment.Updates) error {
+	for slotIndex := uint64(eip8297.HeaderStorageSlots); slotIndex < eip8297.HeaderStorageSlots+count; slotIndex++ {
+		slot := append(bytes.Clone(address), make([]byte, 32)...)
+		binary.BigEndian.PutUint64(slot[length.Addr+24:], slotIndex)
+		value := []byte{byte(slotIndex)}
+		if err := domains.DomainPut(kv.StorageDomain, tx, slot, value, txNum, nil); err != nil {
+			return err
+		}
+		updates.TouchPlainKey(string(slot), value, updates.TouchStorage)
+	}
+	return nil
 }
 
 func newPBTEmptyConversionSource(t *testing.T) pbtConversionSource {
