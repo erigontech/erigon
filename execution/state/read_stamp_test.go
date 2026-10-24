@@ -81,3 +81,28 @@ func TestReadStamp_ResumeChangesStamp(t *testing.T) {
 	// GetState does not journal, so wakeGen is the only field that can have moved.
 	require.NotEqual(t, before, after, "a dep-wait resume must change the stamp (wakeGen) so the slot cache invalidates")
 }
+
+// A read that waits on an in-flight estimate and wakes after the writer commits
+// must return the committed value and must not leave a dependency verdict.
+func TestDepWait_ResumeReadsCommittedValue(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+	ibs.SetVersion(0)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 2}, uint256.Int{}, false)
+
+	ibs.SetWaitCommit(func(int) bool {
+		mvhm.WriteStorage(addr, key, Version{TxIndex: 2}, *uint256.NewInt(7), true)
+		return true
+	})
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), v)
+	require.False(t, ibs.HadInvalidRead(), "a successful wait must not force a re-execution")
+}

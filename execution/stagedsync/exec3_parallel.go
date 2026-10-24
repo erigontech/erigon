@@ -3489,11 +3489,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-		// Remove entries the previous incarnation wrote but this one dropped.
+		// Remove entries the previous incarnation wrote but this one dropped. Like
+		// selfLoopFlush, tolerate a net-zero BAL write that was never materialized.
 		for h := range prevWrites.AllHeaders() {
 			if !res.TxOut.Has(h) {
 				hasWriteChange = true
-				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
+				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
 			}
 		}
 

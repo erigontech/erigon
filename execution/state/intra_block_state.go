@@ -855,6 +855,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := ibs.stateReader.ReadAccountCodeSize(addr)
+		ibs.recordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}

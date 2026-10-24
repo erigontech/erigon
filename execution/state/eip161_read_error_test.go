@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -69,4 +70,27 @@ func TestEncodeExistingEmptyRemovals_BailsOnBaseReadError(t *testing.T) {
 	sd, ok := writes.GetSelfDestruct(addr)
 	require.False(t, ok && sd.Val, "a failed base read must not be rewritten as a self-destruct")
 	require.ErrorIs(t, ibs.StateReadError(), readErr, "the base read error must surface, not be swallowed as an empty account")
+}
+
+type failingCodeSizeReader struct {
+	minimalStateReader
+	err error
+}
+
+func (r *failingCodeSizeReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return &accounts.Account{CodeHash: accounts.InternCodeHash(common.HexToHash("0x01"))}, nil
+}
+
+func (r *failingCodeSizeReader) ReadAccountCodeSize(accounts.Address) (int, error) {
+	return 0, r.err
+}
+
+func TestGetCodeSize_RecordsReadError(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("code size read failed")
+	ibs := New(&failingCodeSizeReader{err: readErr})
+	_, err := ibs.GetCodeSize(getAddress(1))
+	require.ErrorIs(t, err, readErr)
+	require.ErrorIs(t, ibs.StateReadError(), readErr)
 }
