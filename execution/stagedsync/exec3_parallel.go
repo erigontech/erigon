@@ -1387,7 +1387,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		pe.blockExecMetrics.BlockCount.Add(1)
 		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe)
 	}
@@ -1734,7 +1733,6 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 		// Already running (or scheduled).
 		return
 	}
-	pe.blockExecMetrics.BlockCount.Add(1)
 	next.execStarted = time.Now()
 	next.scheduleExecution(ctx, pe)
 }
