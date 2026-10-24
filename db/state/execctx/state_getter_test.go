@@ -375,12 +375,31 @@ func TestCachedTemporalTxStateGetterRefusesWrappedWritableTx(t *testing.T) {
 	defer rwTx.Rollback()
 
 	counting := &countingLatestTx{TemporalTx: rwTx}
-	getter := execctx.NewCachedTemporalTxStateGetter(roWrappingRwTx{TemporalTx: counting, under: rwTx}, stateCache)
+	wrapped := roWrappingRwTx{TemporalTx: counting, under: rwTx}
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.NoError(t, domains.InitBlockOverlay(rwTx))
 	key := make([]byte, 20)
-	for i := 1; i <= 2; i++ {
-		_, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-		require.NoError(t, err)
-		require.Equal(t, i, counting.reads)
+	for _, tc := range []struct {
+		name string
+		tx   kv.TemporalTx
+	}{
+		{"read-only facade", wrapped},
+		{"overlay read view", domains.BlockOverlay().NewReadView(wrapped)},
+		{"temporal overlay read view", domains.BlockOverlay().NewTemporalReadView(wrapped)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			counting.reads = 0
+			getter := execctx.NewCachedTemporalTxStateGetter(tc.tx, stateCache)
+			for i := 1; i <= 2; i++ {
+				_, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, i, counting.reads)
+			}
+			_, hit := stateCache.View(nil).Get(kv.AccountsDomain, key)
+			require.False(t, hit, "a writable backing transaction must not fill the shared cache")
+		})
 	}
 }
 
@@ -414,19 +433,35 @@ func TestCachedTemporalTxStateGetterServesRepeatPositiveReadFromCache(t *testing
 	db, stateCache := committedCacheState(t)
 	key := bytes.Repeat([]byte{0xdd}, 20)
 	commitAccount(t, db, stateCache, key, encAccount(2), 6)
-	stateCache.Applier().Clear()
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
 	tx := &countingLatestTx{TemporalTx: roTx}
-	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
-	for range 2 {
-		v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-		require.NoError(t, err)
-		require.Equal(t, encAccount(2), v)
+	domains, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.NoError(t, domains.InitBlockOverlay(roTx))
+	for _, tc := range []struct {
+		name string
+		tx   kv.TemporalTx
+	}{
+		{"plain transaction", tx},
+		{"overlay read view", domains.BlockOverlay().NewReadView(tx)},
+		{"temporal overlay read view", domains.BlockOverlay().NewTemporalReadView(tx)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateCache.Applier().Clear()
+			tx.reads = 0
+			getter := execctx.NewCachedTemporalTxStateGetter(tc.tx, stateCache)
+			for range 2 {
+				v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, encAccount(2), v)
+			}
+			require.Equal(t, 1, tx.reads, "the second read must hit the shared cache")
+		})
 	}
-	require.Equal(t, 1, tx.reads)
 }
 
 // indexBlock1 maps block 1 to the txNums the tests commit at.
