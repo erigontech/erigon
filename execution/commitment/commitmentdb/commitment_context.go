@@ -392,6 +392,11 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		traceW:           sdc.traceW,
 		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
 	}
+	if directPutter, ok := putter.(interface {
+		PutCommitmentBranchDirect([]byte, []byte, []byte, uint64) error
+	}); ok {
+		mainTtx.directPutter = directPutter
+	}
 	switch {
 	case stateReader != nil:
 		mainTtx.stateReader = stateReader
@@ -1508,7 +1513,10 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	putter           kv.TemporalPutDel
+	putter       kv.TemporalPutDel
+	directPutter interface {
+		PutCommitmentBranchDirect([]byte, []byte, []byte, uint64) error
+	}
 	commitmentDomain kv.Domain
 	txNum            uint64
 	blockNum         uint64
@@ -1600,6 +1608,16 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 		return sdc.localCollector.Collect(prefix, data)
 	}
 	return sdc.putter.DomainPut(sdc.commitmentDomainValue(), prefix, data, sdc.txNum, prevData)
+}
+
+func (sdc *TrieContext) PutBranchDirect(prefix []byte, data []byte, prevData []byte) error {
+	if sdc.stateReader.WithHistory() {
+		return nil
+	}
+	if sdc.directPutter == nil {
+		return sdc.PutBranch(prefix, data, prevData)
+	}
+	return sdc.directPutter.PutCommitmentBranchDirect(prefix, data, prevData, sdc.txNum)
 }
 
 func (sdc *TrieContext) commitmentDomainValue() kv.Domain {

@@ -47,21 +47,22 @@ import (
 )
 
 type PBinRangeWriter struct {
-	aggregator   *Aggregator
-	domain       kv.Domain
-	endTxNum     uint64
-	baseTxNum    uint64
-	leafStamp    uint64
-	ranges       []pbinRange
-	maxOps       int
-	maxBytes     int
-	workers      int
-	state        []byte
-	stateInFiles bool
-	resume       bool
-	workerViews  atomic.Int32
-	stampTracker func() pbinStampTracker
-	pipelineHook func(string, int) error
+	aggregator      *Aggregator
+	domain          kv.Domain
+	endTxNum        uint64
+	baseTxNum       uint64
+	leafStamp       uint64
+	ranges          []pbinRange
+	maxOps          int
+	maxBytes        int
+	workers         int
+	state           []byte
+	stateInFiles    bool
+	resume          bool
+	workerViews     atomic.Int32
+	stampTracker    func() pbinStampTracker
+	pipelineHook    func(string, int) error
+	detachMDBXReads *atomic.Uint64
 }
 
 type PBinRangeWriterLimits struct {
@@ -69,6 +70,7 @@ type PBinRangeWriterLimits struct {
 	MaxBytes            int
 	NoRangePastFrontier bool
 	Workers             int
+	DetachMDBXReads     *atomic.Uint64
 }
 
 const (
@@ -147,12 +149,17 @@ type pbinRangeWriterDetached struct {
 
 type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
-	writes   map[string]pbinRangeWriterWrite
-	views    *atomic.Int32
-	base     bool
-	release  func([]byte)
-	write    func([]byte, []byte, []byte) error
-	finished func() error
+	writes          map[string]pbinRangeWriterWrite
+	views           *atomic.Int32
+	base            bool
+	release         func([]byte)
+	write           func([]byte, []byte, []byte) error
+	finished        func() error
+	detachMDBXReads *atomic.Uint64
+}
+
+type pbinDirectBranchWriter interface {
+	PutBranchDirect([]byte, []byte, []byte) error
 }
 
 type pbinStampTrackerClone interface {
@@ -486,6 +493,7 @@ func (o *pbinRangeWriterOverlay) detach(skip func([]byte) (bool, error)) ([]pbin
 	}
 	sort.Strings(keys)
 	rows := make([]pbinRangeWriterDetached, 0, len(keys))
+	putter, direct := o.PatriciaContext.(pbinDirectBranchWriter)
 	for _, key := range keys {
 		if skip != nil {
 			skipped, err := skip([]byte(key))
@@ -497,7 +505,16 @@ func (o *pbinRangeWriterOverlay) detach(skip func([]byte) (bool, error)) ([]pbin
 			}
 		}
 		write := o.writes[key]
-		if err := o.PatriciaContext.PutBranch([]byte(key), write.data, write.prev); err != nil {
+		var err error
+		if direct {
+			err = putter.PutBranchDirect([]byte(key), write.data, write.prev)
+		} else {
+			if o.detachMDBXReads != nil {
+				o.detachMDBXReads.Add(1)
+			}
+			err = o.PatriciaContext.PutBranch([]byte(key), write.data, write.prev)
+		}
+		if err != nil {
 			return nil, err
 		}
 		rows = append(rows, pbinRangeWriterDetached{key: bytes.Clone([]byte(key)), data: bytes.Clone(write.data), prev: bytes.Clone(write.prev)})
@@ -895,6 +912,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			}
 			return nil
 		},
+		detachMDBXReads: w.detachMDBXReads,
 		release: func(key []byte) {
 			domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
 		},

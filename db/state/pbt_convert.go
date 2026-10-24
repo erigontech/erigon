@@ -185,34 +185,22 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 			}
 			return PBinResumeLeaves(ctx, sourceFiles, resume, emit)
 		}
-		rootInput := make(chan PBinLeaf, 1024)
-		rootDone := make(chan struct{})
-		go func() {
-			defer close(rootDone)
-			streamRoot, streamErr = PBinRootFromStream(opts.Hash, func(add func(PBinLeaf) error) error {
-				for leaf := range rootInput {
-					if addErr := add(leaf); addErr != nil {
-						return addErr
-					}
-				}
-				return nil
-			})
-		}()
-		defer func() {
-			close(rootInput)
-			<-rootDone
-		}()
+		rootBuilder, err := eip8297.NewParallelStreamRoot(opts.Hash, workers)
+		if err != nil {
+			return err
+		}
 		returnErr := ForEachPBinLeafWithWorkers(sourceFiles, opts.SourceTx, true, workers, opts.SourceWorkerRuns, func(leaf PBinLeaf) error {
-			rootLeaf := PBinLeaf{Key: bytes.Clone(leaf.Key), Value: bytes.Clone(leaf.Value), Stamp: leaf.Stamp}
 			select {
-			case rootInput <- rootLeaf:
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-rootDone:
-				return streamErr
+			default:
+			}
+			if err := rootBuilder.AddContext(ctx, leaf.Key, leaf.Value); err != nil {
+				return err
 			}
 			return emit(leaf)
 		})
+		streamRoot, streamErr = rootBuilder.RootHash()
 		if returnErr != nil {
 			return returnErr
 		}
@@ -239,6 +227,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if err != nil {
 		return common.Hash{}, err
 	}
+	writer.detachMDBXReads = limits.DetachMDBXReads
 	root, err := writer.WriteAtBlock(ctx, opts.TargetTx, domains, leaves, opts.BlockNum)
 	if opts.WorkerViews != nil {
 		opts.WorkerViews.Add(writer.workerViews.Load())
