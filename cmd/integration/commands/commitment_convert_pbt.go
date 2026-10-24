@@ -1048,27 +1048,9 @@ func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) erro
 		{domain: kv.StorageDomain, table: kv.TblStorageVals},
 	}
 	for _, item := range tables {
-		cursor, err := tx.CursorDupSort(item.table)
-		if err != nil {
-			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", item.domain, err)
+		if err := pbtResumeRejectMDBXTable(tx, item.domain, item.table, stepSize, sourceEnd); err != nil {
+			return err
 		}
-		defer cursor.Close()
-		for key, value, cursorErr := cursor.First(); key != nil; key, value, cursorErr = cursor.NextNoDup() {
-			if cursorErr != nil {
-				cursor.Close()
-				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", item.domain, cursorErr)
-			}
-			if len(value) < 8 {
-				cursor.Close()
-				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s row %x has invalid step", item.domain, key)
-			}
-			step := kv.Step(^binary.BigEndian.Uint64(value[:8]))
-			if err := pbtResumeCheckMDBXRow(item.domain, key, step, stepSize, sourceEnd); err != nil {
-				cursor.Close()
-				return err
-			}
-		}
-		cursor.Close()
 	}
 	cursor, err := tx.Cursor(kv.TblCodeVals)
 	if err != nil {
@@ -1097,6 +1079,30 @@ func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) erro
 		}
 	}
 	cursor.Close()
+	return nil
+}
+
+func pbtResumeRejectMDBXTable(tx kv.TemporalTx, domain kv.Domain, table string, stepSize, sourceEnd uint64) error {
+	cursor, err := tx.CursorDupSort(table)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, err)
+	}
+	defer cursor.Close()
+	for key, value, cursorErr := cursor.First(); key != nil; key, value, cursorErr = cursor.NextNoDup() {
+		if cursorErr != nil {
+			cursor.Close()
+			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, cursorErr)
+		}
+		if len(value) < 8 {
+			cursor.Close()
+			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s row %x has invalid step", domain, key)
+		}
+		step := kv.Step(^binary.BigEndian.Uint64(value[:8]))
+		if err := pbtResumeCheckMDBXRow(domain, key, step, stepSize, sourceEnd); err != nil {
+			cursor.Close()
+			return err
+		}
+	}
 	return nil
 }
 
