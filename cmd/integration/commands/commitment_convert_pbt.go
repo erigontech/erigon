@@ -600,6 +600,7 @@ func pbtResumeRejectOutputMDBXState(ctx context.Context, dirs datadir.Dirs) erro
 		if cursorErr != nil {
 			return fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, cursorErr)
 		}
+		defer cursor.Close()
 		key, _, cursorErr := cursor.First()
 		cursor.Close()
 		if cursorErr != nil {
