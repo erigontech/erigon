@@ -647,7 +647,15 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites(rules)
+			var deferredFeeRecipients []accounts.Address
+			if !calcFees {
+				deferredFeeRecipients = []accounts.Address{result.Coinbase}
+				// calcFees credits the burnt-fee recipient only for a non-zero burn.
+				if !result.ExecutionResult.FeeBurnt.IsZero() {
+					deferredFeeRecipients = append(deferredFeeRecipients, result.ExecutionResult.BurntContractAddress)
+				}
+			}
+			result.TxOut = ibs.FinalizedWrites(rules, deferredFeeRecipients...)
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)

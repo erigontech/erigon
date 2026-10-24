@@ -1017,26 +1017,11 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_acce
 		}
 		return common.BytesToHash(intraRandaoMix), nil
 	}
-	needFromGenesis := true
-	var epochLookup uint64
-	if index <= epochSubIndex {
-		if epoch > (epochSubIndex - index) {
-			needFromGenesis = false
-			epochLookup = epoch - (epochSubIndex - index)
-		}
-	} else {
-		if epoch > (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index)) {
-			needFromGenesis = false
-			epochLookup = epoch - (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index))
-		}
+	distance := (epochSubIndex + r.cfg.EpochsPerHistoricalVector - index) % r.cfg.EpochsPerHistoricalVector
+	if distance > epoch || epoch-distance < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
+		return r.genesisState.GetRandaoMix(int(index)), nil
 	}
-	if epochLookup < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
-		needFromGenesis = true
-	}
-
-	if needFromGenesis {
-		return r.genesisState.GetRandaoMixes(epoch), nil
-	}
+	epochLookup := epoch - distance
 	mixBytes, err := kvGetter(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
 	if err != nil {
 		return common.Hash{}, err
