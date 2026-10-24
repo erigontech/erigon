@@ -131,7 +131,9 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return fmt.Errorf("commitment convert-pbt: output datadir %s overlaps source datadir %s", outputDirs.DataDir, sourceDirs.DataDir)
 	}
 	var outputHasFiles bool
+	var outputExists bool
 	if _, statErr := os.Stat(outputDirs.DataDir); statErr == nil {
+		outputExists = true
 		outputHasFiles, err = datadirHasFiles(outputDirs.DataDir)
 		if err != nil {
 			return err
@@ -148,7 +150,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldHash, oldSchema
 	}()
 
-	removeOutput := !resume || !outputHasFiles
+	removeOutput := !resume || (!outputHasFiles && !outputExists)
 	defer func() {
 		if removeOutput {
 			_ = dir.RemoveAll(outputDirs.DataDir)
@@ -199,6 +201,11 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		}
 		if outputHasFiles && (keepHex != (resumeBase.settings.TrieVariantName() == dbstate.TrieVariantHexBin)) {
 			return fmt.Errorf("commitment convert-pbt: --keep-hex does not match the resume base trie variant %q", resumeBase.settings.TrieVariantName())
+		}
+		if outputHasFiles {
+			if err := pbtResumeRejectOutputMDBXState(ctx, outputDirs); err != nil {
+				return err
+			}
 		}
 	}
 	if resume {
@@ -300,6 +307,9 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 			return fmt.Errorf("commitment convert-pbt: resume base block %d is before Cancun", resumeBase.point.BlockNum)
 		}
 		resumeBytecodeRewrite = chainConfig.Aura != nil || chainConfig.ChainName == "gnosis" || chainConfig.ChainName == "chiado"
+		if resumeBytecodeRewrite {
+			return errors.New("commitment convert-pbt: resume source has a bytecode rewrite")
+		}
 		logger.Info("PBT resume source", "X", resumeBase.point.TxNum, "Y", sourceEnd, "base_block", resumeBase.point.BlockNum, "source_block", point.BlockNum)
 	}
 	variant := dbstate.TrieVariantHex
@@ -566,6 +576,39 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	removeOutput = false
+	return nil
+}
+
+func pbtResumeRejectOutputMDBXState(ctx context.Context, dirs datadir.Dirs) error {
+	if _, err := os.Stat(dirs.Chaindata); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("commitment convert-pbt: inspect output MDBX: %w", err)
+	}
+	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: inspect output MDBX: %w", err)
+	}
+	defer db.Close()
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: inspect output MDBX: %w", err)
+	}
+	defer tx.Rollback()
+	for _, table := range []string{kv.TblCommitmentVals, kv.TblCommitmentBinVals} {
+		cursor, cursorErr := tx.CursorDupSort(table)
+		if cursorErr != nil {
+			return fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, cursorErr)
+		}
+		key, _, cursorErr := cursor.First()
+		cursor.Close()
+		if cursorErr != nil {
+			return fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, cursorErr)
+		}
+		if key != nil {
+			return fmt.Errorf("commitment convert-pbt: output MDBX rows are present in %s", table)
+		}
+	}
 	return nil
 }
 

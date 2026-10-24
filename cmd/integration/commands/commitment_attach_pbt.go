@@ -145,6 +145,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err != nil {
 		return fmt.Errorf("%w; remove only %s and rerun attach-pbt --from %s", err, dbstate.PBTAttachMarkerPath(nodeDirs), publishedPath)
 	}
+	legacyMarker := marker != nil && marker.NodeHexRoot == "" && marker.HeaderRoot == ""
 	nodeV3 := false
 	if marker == nil {
 		if nodeV3, err = dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
@@ -263,11 +264,21 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
 		}
 	} else {
-		nodeBlock, nodeTx, ok, err = marker.Settings.ConversionPoint()
-		if err != nil {
-			return err
+		if legacyMarker {
+			nodeBlock, nodeTx, nodeHexRoot, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, false, logger)
+			if err != nil {
+				return fmt.Errorf("commitment attach-pbt: legacy attach marker has no roots; restore the node before retry: %w", err)
+			}
+		} else {
+			nodeBlock, nodeTx, ok, err = marker.Settings.ConversionPoint()
+			if err != nil {
+				return err
+			}
+			if !ok || nodeBlock != blockNum || nodeTx != txNum {
+				return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
+			}
 		}
-		if !ok || nodeBlock != blockNum || nodeTx != txNum {
+		if nodeBlock != blockNum || nodeTx != txNum {
 			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
 		}
 	}
@@ -285,9 +296,11 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if marker.ManifestBlake3 != manifestDigest {
 			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
 		}
-		nodeHexRoot, err = parsePBTAttachHash("marker node hex root", marker.NodeHexRoot)
-		if err != nil {
-			return err
+		if !legacyMarker {
+			nodeHexRoot, err = parsePBTAttachHash("marker node hex root", marker.NodeHexRoot)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
@@ -295,12 +308,14 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return err
 	}
 	if marker != nil {
-		markerHeaderRoot, markerErr := parsePBTAttachHash("marker header root", marker.HeaderRoot)
-		if markerErr != nil {
-			return markerErr
-		}
-		if headerRoot != markerHeaderRoot {
-			return fmt.Errorf("commitment attach-pbt: current header root %s differs from marker root %s", headerRoot, markerHeaderRoot)
+		if !legacyMarker {
+			markerHeaderRoot, markerErr := parsePBTAttachHash("marker header root", marker.HeaderRoot)
+			if markerErr != nil {
+				return markerErr
+			}
+			if headerRoot != markerHeaderRoot {
+				return fmt.Errorf("commitment attach-pbt: current header root %s differs from marker root %s", headerRoot, markerHeaderRoot)
+			}
 		}
 	}
 	if marker == nil {
@@ -396,6 +411,13 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	if marker != nil {
 		finalSettings = marker.Settings
+		if legacyMarker {
+			marker.NodeHexRoot = nodeHexRoot.Hex()
+			marker.HeaderRoot = headerRoot.Hex()
+			if err := dbstate.WritePBTAttachMarker(nodeDirs, marker); err != nil {
+				return err
+			}
+		}
 	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, ManifestBlake3: manifestDigest, NodeHexRoot: nodeHexRoot.Hex(), HeaderRoot: headerRoot.Hex(), Settings: finalSettings}); err != nil {
 		return err
 	}

@@ -228,6 +228,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, err
 	}
 	writer.detachMDBXReads = limits.DetachMDBXReads
+	writer.absentProbe = limits.AbsentProbe
 	root, err := writer.WriteAtBlock(ctx, opts.TargetTx, domains, leaves, opts.BlockNum)
 	if opts.WorkerViews != nil {
 		opts.WorkerViews.Add(writer.workerViews.Load())
@@ -242,6 +243,14 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 }
 
 func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain) (common.Hash, error) {
+	return verifyPBinDomainRoot(ctx, tx, aggregator, domain, nil)
+}
+
+func VerifyPBinDomainRootWithStats(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain, stats *pbt.VerifyStats) (common.Hash, error) {
+	return verifyPBinDomainRoot(ctx, tx, aggregator, domain, stats)
+}
+
+func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain, stats *pbt.VerifyStats) (common.Hash, error) {
 	if tx == nil || aggregator == nil {
 		return common.Hash{}, fmt.Errorf("pbin verification: missing database input")
 	}
@@ -274,6 +283,10 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	if progressTrie, ok := trie.(interface{ SetVerifyProgress(func([]byte)) }); ok {
 		progressTrie.SetVerifyProgress(func([]byte) { progress.Add(1) })
 		defer progressTrie.SetVerifyProgress(nil)
+	}
+	if statsTrie, ok := trie.(interface{ SetVerifyStats(*pbt.VerifyStats) }); ok {
+		statsTrie.SetVerifyStats(stats)
+		defer statsTrie.SetVerifyStats(nil)
 	}
 	factory, release := commitmentCtx.VerificationContextFactory(tx)
 	defer release()

@@ -21,13 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
@@ -43,6 +43,7 @@ func (t *Trie) newVerifier() *Trie {
 		suppressBucketRecords: t.suppressBucketRecords,
 		verifyOnly:            true,
 		verifyProgress:        t.verifyProgress,
+		verifyStats:           t.verifyStats,
 	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
@@ -72,6 +73,21 @@ func (t *Trie) VerifyContext(ctx context.Context, workers int, factory commitmen
 }
 
 const verifyChainBits = 12
+
+type VerifyRangeReader interface {
+	ReadVerifyRange(from, to []byte, emit func([]byte, []byte) error) (uint64, error)
+}
+
+type VerifyStats struct {
+	PointLookups atomic.Uint64
+	RangeTasks   atomic.Uint64
+	RangeReads   atomic.Uint64
+	RangeRows    atomic.Uint64
+}
+
+func (t *Trie) SetVerifyStats(stats *VerifyStats) {
+	t.verifyStats = stats
+}
 
 type verifiedChain struct {
 	row    *rowNode
@@ -154,9 +170,15 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 					worker.verifiedBucketKeys = make(map[string]struct{})
 				}
 				chain := verifiedChain{}
-				chain.row, chain.err = worker.loadRow(paths[i])
+				chain.err = worker.loadVerifyRows(paths[i])
+				if chain.err == nil {
+					chain.row, chain.err = worker.loadRow(paths[i])
+				}
 				if chain.err == nil {
 					chain.result, chain.err = worker.verifyRow(chain.row)
+				}
+				if chain.err == nil {
+					chain.err = worker.verifyRowsComplete()
 				}
 				if chain.err != nil {
 					for failed := firstFailed.Load(); int64(i) < failed && !firstFailed.CompareAndSwap(failed, int64(i)); failed = firstFailed.Load() {
@@ -181,6 +203,107 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 		}
 	}
 	return nil
+}
+
+func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
+	reader, ok := t.ctx.(VerifyRangeReader)
+	if !ok {
+		return nil
+	}
+	if t.verifyStats != nil {
+		t.verifyStats.RangeTasks.Add(1)
+	}
+	from, to := verifyRangeBounds(&path)
+	rows := make(map[string][]byte)
+	count, err := reader.ReadVerifyRange(from, to, func(key, value []byte) error {
+		rowPath, decodeErr := eip8297.DecodeBitPath(key)
+		if decodeErr != nil || rowPath.BitLen < path.BitLen || !rowPath.HasPrefix(&path) {
+			return nil
+		}
+		rows[string(key)] = value
+		return nil
+	})
+	if t.verifyStats != nil {
+		t.verifyStats.RangeReads.Add(1)
+		t.verifyStats.RangeRows.Add(count)
+	}
+	if err != nil {
+		return err
+	}
+	t.verifyRows = rows
+	t.verifyRowsUsed = make(map[string]struct{}, len(rows))
+	t.verifyRowsExact = false
+	return nil
+}
+
+func (t *Trie) loadVerifyExact(key []byte) error {
+	reader, ok := t.ctx.(VerifyRangeReader)
+	if !ok {
+		return nil
+	}
+	if t.verifyStats != nil {
+		t.verifyStats.RangeTasks.Add(1)
+	}
+	from := bytes.Clone(key)
+	to := append(bytes.Clone(key), 0)
+	rows := make(map[string][]byte, 1)
+	count, err := reader.ReadVerifyRange(from, to, func(rowKey, value []byte) error {
+		if bytes.Equal(rowKey, key) {
+			rows[string(rowKey)] = value
+		}
+		return nil
+	})
+	if t.verifyStats != nil {
+		t.verifyStats.RangeReads.Add(1)
+		t.verifyStats.RangeRows.Add(count)
+	}
+	if err != nil {
+		return err
+	}
+	t.verifyRows = rows
+	t.verifyRowsUsed = make(map[string]struct{}, len(rows))
+	t.verifyRowsExact = true
+	return nil
+}
+
+func (t *Trie) verifyRowsComplete() error {
+	for key := range t.verifyRows {
+		if _, ok := t.verifyRowsUsed[key]; !ok {
+			return fmt.Errorf("unreferenced verification row %x", []byte(key))
+		}
+	}
+	return nil
+}
+
+func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
+	if t.verifyOnly && t.verifyRows != nil {
+		data, ok := t.verifyRows[string(key)]
+		if !ok && t.verifyRowsExact {
+			if err := t.loadVerifyExact(key); err != nil {
+				return nil, 0, err
+			}
+			data, ok = t.verifyRows[string(key)]
+		}
+		if ok {
+			t.verifyRowsUsed[string(key)] = struct{}{}
+		}
+		return data, 0, nil
+	}
+	if t.verifyOnly && t.verifyStats != nil {
+		t.verifyStats.PointLookups.Add(1)
+	}
+	data, step, err := t.ctx.Branch(key)
+	return data, step, err
+}
+
+func verifyRangeBounds(path *eip8297.Bitpath) ([]byte, []byte) {
+	from := path.AppendPackedBits(nil)
+	to := append([]byte(nil), from...)
+	if used := path.BitLen % 8; used != 0 {
+		to[len(to)-1] |= byte(0xff >> uint(used))
+	}
+	to = append(to, bytes.Repeat([]byte{0xff}, eip8297.StorageKeyLength+1-len(to))...)
+	return from, to
 }
 
 func (t *Trie) collectChainPaths(row *rowNode, paths *[]eip8297.Bitpath) error {
@@ -313,7 +436,11 @@ func (t *Trie) verifyRootRecord() error {
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(record, decoded) {
+	canonical, err := EncodeRecord(rootKey, &decoded)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, canonical) {
 		return fmt.Errorf("root record round trip changed its value")
 	}
 	return nil
@@ -335,7 +462,11 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 	if err != nil {
 		return FoldResult{}, err
 	}
-	if !reflect.DeepEqual(record, decoded) {
+	canonical, err := EncodeRecord(row.key, &decoded)
+	if err != nil {
+		return FoldResult{}, err
+	}
+	if !bytes.Equal(data, canonical) {
 		return FoldResult{}, fmt.Errorf("row %x is not canonical", row.key)
 	}
 	for slot := range row.cells {
@@ -426,7 +557,7 @@ func (t *Trie) verifyBucketRecordPath(path *eip8297.Bitpath, descriptor bucketDe
 }
 
 func (t *Trie) verifyBucketRecord(key []byte, descriptor bucketDescriptor) error {
-	data, _, err := t.ctx.Branch(key)
+	data, _, err := t.verifyBranch(key)
 	if err != nil {
 		return err
 	}

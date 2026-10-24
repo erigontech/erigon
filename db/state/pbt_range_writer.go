@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -63,6 +64,7 @@ type PBinRangeWriter struct {
 	stampTracker    func() pbinStampTracker
 	pipelineHook    func(string, int) error
 	detachMDBXReads *atomic.Uint64
+	absentProbe     PBinAbsentProbeFunc
 }
 
 type PBinRangeWriterLimits struct {
@@ -71,7 +73,10 @@ type PBinRangeWriterLimits struct {
 	NoRangePastFrontier bool
 	Workers             int
 	DetachMDBXReads     *atomic.Uint64
+	AbsentProbe         PBinAbsentProbeFunc
 }
+
+type PBinAbsentProbeFunc func(func([]byte) bool)
 
 const (
 	pbinRangeWriterMaxOps   = 100_000
@@ -556,10 +561,25 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 	if len(baseFiles) == 0 {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no files", domain)
 	}
+	frontier := baseTxNum
+	fileInfos := make([]os.FileInfo, 0, len(baseFiles))
 	for _, file := range baseFiles {
-		if file.StartRootNum() > endTxNum {
-			return nil, fmt.Errorf("pbin resume range writer: target %s file range %d-%d is past selected end txNum %d", domain, file.StartRootNum(), file.EndRootNum(), endTxNum)
+		info, infoErr := os.Stat(file.Fullpath())
+		if infoErr != nil {
+			return nil, fmt.Errorf("pbin resume range writer: inspect target %s file range %d-%d: %w", domain, file.StartRootNum(), file.EndRootNum(), infoErr)
 		}
+		duplicate := false
+		for _, previous := range fileInfos {
+			if os.SameFile(previous, info) {
+				duplicate = true
+				break
+			}
+		}
+		if file.StartRootNum() > baseTxNum && (file.StartRootNum() > frontier || duplicate) {
+			return nil, fmt.Errorf("pbin resume range writer: target %s file range %d-%d is past selected base txNum %d", domain, file.StartRootNum(), file.EndRootNum(), baseTxNum)
+		}
+		fileInfos = append(fileInfos, info)
+		frontier = max(frontier, file.EndRootNum())
 	}
 	if len(baseState) == 0 {
 		state, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
@@ -843,6 +863,13 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		seen     bool
 		state    []byte
 	)
+	probeDone := false
+	runProbe := func() {
+		if w.absentProbe != nil && !probeDone {
+			w.absentProbe(overlay.Absent)
+			probeDone = true
+		}
+	}
 	foldProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT fold progress", Phase: "fold batches", TempDir: w.aggregator.Dirs().Tmp})
 	defer foldProgress.Done()
 	onRow := func(rowTracker pbinStampTracker, key, data []byte) error {
@@ -886,6 +913,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		var computeErr error
 		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiff(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 			overlay.PatriciaContext = inner
+			runProbe()
 			return overlay
 		})
 		if computeErr != nil {
@@ -923,6 +951,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			var computeErr error
 			root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiff(pipelineCtx, tx, batch.final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 				overlay.PatriciaContext = inner
+				runProbe()
 				return overlay
 			})
 			if computeErr != nil {

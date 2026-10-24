@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -391,6 +392,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		blockNum:         blockNum,
 		traceW:           sdc.traceW,
 		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
+		verifyRange:      verifyRangeReader(tx, sdc.CommitmentDomain()),
 	}
 	if directPutter, ok := putter.(interface {
 		PutCommitmentBranchDirect([]byte, []byte, []byte, uint64) error
@@ -460,6 +462,7 @@ func (sdc *SharedDomainsCommitmentContext) VerificationContextFactory(tx kv.Temp
 			stateReader:      NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
 			commitmentDomain: sdc.CommitmentDomain(),
 			stepSize:         sdc.sharedDomains.StepSize(),
+			verifyRange:      verifyRangeReader(roTx, sdc.CommitmentDomain()),
 		}, roTx.Rollback
 	}
 	return factory, pin.Close
@@ -1529,7 +1532,44 @@ type TrieContext struct {
 	// binary trie hashes code_size, and the extra CodeDomain read is not free.
 	readCodeSize bool
 
-	branchBuf []byte // reused across Branch calls; see the ownership note on Branch
+	branchBuf   []byte // reused across Branch calls; see the ownership note on Branch
+	verifyRange func([]byte, []byte, func([]byte, []byte) error) (uint64, error)
+}
+
+func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain) func([]byte, []byte, func([]byte, []byte) error) (uint64, error) {
+	agg, ok := tx.AggTx().(interface {
+		DebugRangeLatest(kv.Tx, kv.Domain, []byte, []byte, int) (stream.KV, error)
+	})
+	roTx, roOK := tx.(kv.Tx)
+	if !ok || !roOK {
+		return nil
+	}
+	return func(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
+		it, err := agg.DebugRangeLatest(roTx, domain, from, to, -1)
+		if err != nil {
+			return 0, err
+		}
+		defer it.Close()
+		var rows uint64
+		for it.HasNext() {
+			key, value, nextErr := it.Next()
+			if nextErr != nil {
+				return rows, nextErr
+			}
+			if emitErr := emit(key, value); emitErr != nil {
+				return rows, emitErr
+			}
+			rows++
+		}
+		return rows, nil
+	}
+}
+
+func (sdc *TrieContext) ReadVerifyRange(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
+	if sdc.verifyRange == nil {
+		return 0, errors.New("verification range reader is unavailable")
+	}
+	return sdc.verifyRange(from, to, emit)
 }
 
 func (sdc *TrieContext) SetReadCodeSize(v bool) { sdc.readCodeSize = v }

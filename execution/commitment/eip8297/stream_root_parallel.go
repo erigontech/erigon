@@ -21,6 +21,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -36,24 +37,35 @@ type streamRootSubtree struct {
 }
 
 type parallelStreamRootLeaf struct {
-	shard int
-	key   []byte
-	value []byte
+	keyStart    int
+	keyLength   int
+	valueStart  int
+	valueLength int
+}
+
+type parallelStreamRootBatch struct {
+	shard  int
+	arena  []byte
+	leaves []parallelStreamRootLeaf
 }
 
 type ParallelStreamRoot struct {
-	sum        HashFn
-	workers    int
-	inputs     []chan parallelStreamRootLeaf
-	parts      []map[int]streamRootSubtree
-	workerErrs []error
-	wg         sync.WaitGroup
-	closed     bool
-	lastShard  int
-	hasShard   bool
-	err        error
-	root       common.Hash
-	rootReady  bool
+	sum         HashFn
+	workers     int
+	inputs      chan *parallelStreamRootBatch
+	parts       []map[int]streamRootSubtree
+	workerErrs  []error
+	wg          sync.WaitGroup
+	closed      bool
+	lastShard   int
+	hasShard    bool
+	err         error
+	root        common.Hash
+	rootReady   bool
+	current     *parallelStreamRootBatch
+	buildActive *atomic.Int32
+	buildMax    *atomic.Int32
+	buildStart  func()
 }
 
 func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error) {
@@ -66,12 +78,11 @@ func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error)
 	b := &ParallelStreamRoot{
 		sum:        sum,
 		workers:    workers,
-		inputs:     make([]chan parallelStreamRootLeaf, workers),
+		inputs:     make(chan *parallelStreamRootBatch, workers+2),
 		parts:      make([]map[int]streamRootSubtree, workers),
 		workerErrs: make([]error, workers),
 	}
 	for worker := range workers {
-		b.inputs[worker] = make(chan parallelStreamRootLeaf, 1024)
 		b.parts[worker] = make(map[int]streamRootSubtree)
 		b.wg.Add(1)
 		go b.run(worker)
@@ -99,15 +110,44 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 		b.err = errors.New("eip8297: stream keys are not strictly ascending")
 		return b.err
 	}
+	if b.current == nil || b.current.shard != shard {
+		if err := b.flush(ctx); err != nil {
+			return err
+		}
+		b.current = &parallelStreamRootBatch{shard: shard, arena: make([]byte, 0, len(key)+len(value)), leaves: make([]parallelStreamRootLeaf, 0, 1024)}
+	}
+	keyStart := len(b.current.arena)
+	b.current.arena = append(b.current.arena, key...)
+	valueStart := len(b.current.arena)
+	b.current.arena = append(b.current.arena, value...)
+	b.current.leaves = append(b.current.leaves, parallelStreamRootLeaf{keyStart: keyStart, keyLength: len(key), valueStart: valueStart, valueLength: len(value)})
 	b.lastShard = shard
 	b.hasShard = true
+	return nil
+}
+
+func (b *ParallelStreamRoot) SetBuildConcurrencyCounters(active, max *atomic.Int32) {
+	b.buildActive = active
+	b.buildMax = max
+}
+
+func (b *ParallelStreamRoot) SetBuildStartHook(hook func()) {
+	b.buildStart = hook
+}
+
+func (b *ParallelStreamRoot) flush(ctx context.Context) error {
+	if b.current == nil {
+		return nil
+	}
+	batch := b.current
+	b.current = nil
 	select {
-	case b.inputs[shard%b.workers] <- parallelStreamRootLeaf{shard: shard, key: key, value: value}:
+	case b.inputs <- batch:
+		return nil
 	case <-ctx.Done():
 		b.err = ctx.Err()
 		return b.err
 	}
-	return nil
 }
 
 func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
@@ -118,9 +158,10 @@ func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
 		return common.Hash{}, b.err
 	}
 	b.closed = true
-	for _, input := range b.inputs {
-		close(input)
+	if b.err == nil {
+		_ = b.flush(context.Background())
 	}
+	close(b.inputs)
 	b.wg.Wait()
 	if b.err != nil {
 		return common.Hash{}, b.err
@@ -156,27 +197,42 @@ func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
 
 func (b *ParallelStreamRoot) run(worker int) {
 	defer b.wg.Done()
-	builders := make(map[int]*StreamRootBuilder)
-	for leaf := range b.inputs[worker] {
-		builder := builders[leaf.shard]
-		if builder == nil {
-			var err error
-			builder, err = NewStreamRootBuilder(b.sum)
-			if err != nil {
-				b.workerErrs[worker] = err
-				continue
-			}
-			builders[leaf.shard] = builder
-		}
-		if err := builder.Add(leaf.key, leaf.value); err != nil {
-			b.workerErrs[worker] = err
-		}
-	}
-	for shard, builder := range builders {
+	for batch := range b.inputs {
 		if b.workerErrs[worker] != nil {
 			return
 		}
-		b.parts[worker][shard] = builder.subtree()
+		active := int32(0)
+		if b.buildActive != nil {
+			active = b.buildActive.Add(1)
+			if b.buildMax != nil {
+				for max := b.buildMax.Load(); active > max && !b.buildMax.CompareAndSwap(max, active); max = b.buildMax.Load() {
+				}
+			}
+		}
+		if b.buildStart != nil {
+			b.buildStart()
+		}
+		builder, err := NewStreamRootBuilder(b.sum)
+		if err == nil {
+			for _, leaf := range batch.leaves {
+				key := batch.arena[leaf.keyStart : leaf.keyStart+leaf.keyLength]
+				value := batch.arena[leaf.valueStart : leaf.valueStart+leaf.valueLength]
+				if err = builder.Add(key, value); err != nil {
+					break
+				}
+			}
+		}
+		if err != nil {
+			if b.buildActive != nil {
+				b.buildActive.Add(-1)
+			}
+			b.workerErrs[worker] = err
+			return
+		}
+		if b.buildActive != nil {
+			b.buildActive.Add(-1)
+		}
+		b.parts[worker][batch.shard] = builder.subtree()
 	}
 }
 
