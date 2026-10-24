@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -309,32 +308,7 @@ func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err != nil {
 		return err
 	}
-	var stopped []kv.Domain
-	if err := chainDB.View(ctx, func(tx kv.Tx) error {
-		for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-			ok, err := rawdb.ReadCommitmentDomainStopped(tx, d)
-			if err != nil {
-				return err
-			}
-			if ok {
-				stopped = append(stopped, d)
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := rawdbreset.ResetExec(ctx, tdb); err != nil {
-		return err
-	}
-	return chainDB.Update(ctx, func(tx kv.RwTx) error {
-		for _, d := range stopped {
-			if err := rawdb.WriteCommitmentDomainStopped(tx, d); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	return rawdbreset.ResetExecKeepStoppedCommitment(ctx, tdb)
 }
 
 func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, logger log.Logger, fn func(*state.Aggregator) error) error {
