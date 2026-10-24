@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -55,6 +56,7 @@ import (
 var (
 	convertPBTKeepHex       bool
 	convertPBTOutputDatadir string
+	convertPBTResume        bool
 	convertPBTSkipVerify    bool
 	convertPBTWorkers       int
 )
@@ -67,6 +69,7 @@ type pbtConvertHooks struct {
 	workerViews          *atomic.Int32
 	sourceWorkerRuns     *atomic.Int32
 	workers              int
+	resume               bool
 	skipVerify           bool
 }
 
@@ -78,6 +81,7 @@ func init() {
 	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTKeepHex, "keep-hex", false, "keep the source v3 hex commitment files")
 	cmdCommitmentConvertPBT.Flags().StringVar(&convertPBTOutputDatadir, "output.datadir", "", "new datadir for the converted commitment files")
 	cmdCommitmentConvertPBT.Flags().IntVar(&convertPBTWorkers, "workers", dbg.PBTWorkers, "source walk and commitment workers")
+	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTResume, "resume", false, "resume a binary commitment conversion from its state point")
 	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTSkipVerify, "skip-verify", false, "build only: check the source end by file ranges instead of a leaf pass, and skip re-verifying the written rows and root")
 	must(cmdCommitmentConvertPBT.MarkFlagDirname("output.datadir"))
 	must(cmdCommitmentConvertPBT.MarkFlagRequired("output.datadir"))
@@ -90,13 +94,20 @@ var cmdCommitmentConvertPBT = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		return convertPBTWithOptions(ctx, datadirCli, convertPBTOutputDatadir, convertPBTKeepHex, chain, logger, pbtConvertHooks{skipVerify: convertPBTSkipVerify, workers: convertPBTWorkers})
+		return convertPBTWithOptions(ctx, datadirCli, convertPBTOutputDatadir, convertPBTKeepHex, chain, logger, pbtConvertHooks{resume: convertPBTResume, skipVerify: convertPBTSkipVerify, workers: convertPBTWorkers})
 	},
 }
 
 type pbinConversionPoint struct {
 	BlockNum uint64
 	TxNum    uint64
+}
+
+type pbtResumeBase struct {
+	settings *dbstate.ErigonDBSettings
+	point    pbinConversionPoint
+	state    []byte
+	stateEnd uint64
 }
 
 func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger) (err error) {
@@ -109,6 +120,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	sourceDirs := datadir.Open(sourcePath)
 	outputDirs := datadir.Open(outputPath)
+	resume := hooks.resume || convertPBTResume
 	if err := checkPBTChainName(ctx, sourceDirs, chainName, "commitment convert-pbt", "source"); err != nil {
 		return err
 	}
@@ -120,9 +132,10 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := os.MkdirAll(outputDirs.DataDir, 0o755); err != nil {
 		return err
 	}
-	if hasFiles, err := datadirHasFiles(outputDirs.DataDir); err != nil {
+	outputHasFiles, err := datadirHasFiles(outputDirs.DataDir)
+	if err != nil {
 		return err
-	} else if hasFiles {
+	} else if outputHasFiles && !resume {
 		return fmt.Errorf("commitment convert-pbt: output datadir %s is not empty", outputDirs.DataDir)
 	}
 
@@ -131,7 +144,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldHash, oldSchema
 	}()
 
-	removeOutput := true
+	removeOutput := !resume || !outputHasFiles
 	defer func() {
 		if removeOutput {
 			_ = dir.RemoveAll(outputDirs.DataDir)
@@ -157,9 +170,32 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := validatePBTFileAccessors(sourceDirs, "source", fmt.Sprintf("ERIGON_COMMITMENT_V3=true erigon snapshots index --datadir=%s", sourceDirs.DataDir)); err != nil {
 		return err
 	}
-	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
-	if err != nil {
-		return err
+	var point pbinConversionPoint
+	if !resume {
+		point, err = readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
+		if err != nil {
+			return err
+		}
+	}
+	var resumeBase pbtResumeBase
+	if resume {
+		resumeBase, err = readPBTResumeBase(ctx, sourceDirs, outputDirs, outputHasFiles, sourceSettings, logger)
+		if err != nil {
+			return err
+		}
+		resumeSourceSettings := sourceSettings
+		if resumeSourceSettings == nil {
+			resumeSourceSettings = resumeBase.settings
+		}
+		if err := pbtResumeValidateSourceLayout(sourceDirs, resumeSourceSettings, resumeBase.point.TxNum); err != nil {
+			return err
+		}
+		if sourceSettings != nil && sourceSettings.TrieVariantName() != dbstate.TrieVariantHex && resumeBase.settings.TrieHashName() != sourceSettings.TrieHashName() {
+			return fmt.Errorf("commitment convert-pbt: resume base trie_hash %q differs from source settings %q", resumeBase.settings.TrieHashName(), sourceSettings.TrieHashName())
+		}
+		if outputHasFiles && (keepHex != (resumeBase.settings.TrieVariantName() == dbstate.TrieVariantHexBin)) {
+			return fmt.Errorf("commitment convert-pbt: --keep-hex does not match the resume base trie variant %q", resumeBase.settings.TrieVariantName())
+		}
 	}
 	if err := os.MkdirAll(outputDirs.Snap, 0o755); err != nil {
 		return err
@@ -167,13 +203,27 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := os.MkdirAll(outputDirs.Tmp, 0o755); err != nil {
 		return err
 	}
+	if resume {
+		if err := preparePBTResumeOutput(sourceDirs, outputDirs, outputHasFiles, resumeBase, keepHex); err != nil {
+			return err
+		}
+		resumeSourceSettings := sourceSettings
+		if resumeSourceSettings == nil {
+			resumeSourceSettings = resumeBase.settings
+		}
+		if err := pbtResumeValidateBaseLayout(sourceDirs, outputDirs, resumeSourceSettings, resumeBase.settings, keepHex, outputHasFiles, resumeBase.point.TxNum); err != nil {
+			return err
+		}
+	}
 	if hooks.afterOutput != nil {
 		if err := hooks.afterOutput(); err != nil {
 			return err
 		}
 	}
-	if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, outputDirs.Snap); err != nil {
-		return err
+	if !resume {
+		if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, outputDirs.Snap); err != nil {
+			return err
+		}
 	}
 	sourceRawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), true)
 	if err != nil {
@@ -202,11 +252,71 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := sourceAgg.ReloadFiles(); err != nil {
 		return fmt.Errorf("commitment convert-pbt: reload source files: %w", err)
 	}
+	sourceWalkAgg := sourceAgg
+	if resume && sourceSettings != nil && sourceSettings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		walkSettings := *sourceSettings
+		walkVariant := dbstate.TrieVariantHex
+		walkSettings.TrieVariant = &walkVariant
+		walkSettings.TrieHash = nil
+		sourceWalkAgg, err = dbstate.NewPBTStateAggregator(sourceDirs, &walkSettings, logger).Open(ctx)
+		if err != nil {
+			return fmt.Errorf("commitment convert-pbt: open resume source walk: %w", err)
+		}
+		if err := sourceWalkAgg.OpenFolder(nil); err != nil {
+			sourceWalkAgg.Close()
+			return fmt.Errorf("commitment convert-pbt: open resume source walk files: %w", err)
+		}
+		defer sourceWalkAgg.Close()
+	}
 	sourceTx, err := sourceDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer sourceTx.Rollback()
+	var resumeSourceEnd uint64
+	var resumePostCancun, resumeBytecodeRewrite bool
+	if resume {
+		sourceEnd, sourceEndErr := pbtResumeSourceFilesEnd(sourceDirs, sourceAgg.StepSize())
+		if sourceEndErr != nil {
+			return sourceEndErr
+		}
+		if sourceEnd <= resumeBase.point.TxNum {
+			return fmt.Errorf("commitment convert-pbt: resume base txNum %d is at or past source files end %d", resumeBase.point.TxNum, sourceEnd)
+		}
+		resumeSourceEnd = sourceEnd
+		if mdbxErr := pbtResumeRejectMDBXState(sourceTx, sourceAgg.StepSize(), sourceEnd); mdbxErr != nil {
+			return mdbxErr
+		}
+		blockNum, found, blockErr := blockReader.TxnumReader().FindBlockNum(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, sourceEnd-1)
+		if blockErr != nil {
+			return fmt.Errorf("commitment convert-pbt: find source block at txNum %d: %w", sourceEnd, blockErr)
+		}
+		if !found {
+			return fmt.Errorf("commitment convert-pbt: source files end txNum %d has no block", sourceEnd)
+		}
+		point = pbinConversionPoint{BlockNum: blockNum, TxNum: sourceEnd}
+		genesisHash, chainErr := rawdb.ReadCanonicalHash(sourceTx, 0)
+		if chainErr != nil {
+			return fmt.Errorf("commitment convert-pbt: read source genesis: %w", chainErr)
+		}
+		chainConfig, chainErr := rawdb.ReadChainConfig(sourceTx, genesisHash)
+		if chainErr != nil {
+			return fmt.Errorf("commitment convert-pbt: read source chain config: %w", chainErr)
+		}
+		baseHeader, headerErr := blockReader.HeaderByNumber(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, resumeBase.point.BlockNum)
+		if headerErr != nil {
+			return fmt.Errorf("commitment convert-pbt: read resume base header: %w", headerErr)
+		}
+		if chainConfig == nil || baseHeader == nil {
+			return errors.New("commitment convert-pbt: resume chain config or base header is missing")
+		}
+		resumePostCancun = chainConfig.IsCancun(baseHeader.Time)
+		if !resumePostCancun {
+			return fmt.Errorf("commitment convert-pbt: resume base block %d is before Cancun", resumeBase.point.BlockNum)
+		}
+		resumeBytecodeRewrite = chainConfig.Aura != nil || chainConfig.ChainName == "gnosis" || chainConfig.ChainName == "chiado"
+		logger.Info("PBT resume source", "X", resumeBase.point.TxNum, "Y", sourceEnd, "base_block", resumeBase.point.BlockNum, "source_block", point.BlockNum)
+	}
 	variant := dbstate.TrieVariantHex
 	if sourceSettings != nil {
 		variant = sourceSettings.TrieVariantName()
@@ -219,7 +329,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 			return err
 		}
 		logger.Warn("PBT verification check skipped", "check", "C-a", "replacement", "source file ranges")
-	} else if err := requirePBinSourceEndWithWorkers(ctx, sourceAgg, point.TxNum, hooks.workers, logger); err != nil {
+	} else if err := requirePBinSourceEndWithWorkers(ctx, sourceWalkAgg, point.TxNum, hooks.workers, logger); err != nil {
 		return err
 	}
 	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, blockReader, point)
@@ -230,6 +340,9 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return fmt.Errorf("commitment convert-pbt: bin-only output requires a conversion point after the binary trie fork")
 	}
 	hashName := requestedHash
+	if resume {
+		hashName = resumeBase.settings.TrieHashName()
+	}
 	if hashName == "" && sourceSettings != nil && (variant == dbstate.TrieVariantBin || variant == dbstate.TrieVariantHexBin) {
 		hashName = sourceSettings.TrieHashName()
 	}
@@ -244,7 +357,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	statecfg.ConfigureCommitmentV3Records(keepHex)
 	trieVariant := dbstate.TrieVariantBin
 	targetDomain := kv.CommitmentDomain
-	if keepHex {
+	if keepHex || resume && outputHasFiles && resumeBase.settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		trieVariant = dbstate.TrieVariantHexBin
 		targetDomain = kv.CommitmentBinDomain
 	}
@@ -265,11 +378,20 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	defer targetRaw.Close()
-	targetAgg, err := openPBTState(ctx, outputDirs, targetSettings, targetRaw, logger)
+	targetFolderDB := kv.RwDB(targetRaw)
+	if resume {
+		targetFolderDB = nil
+	}
+	targetAgg, err := openPBTState(ctx, outputDirs, targetSettings, targetFolderDB, logger)
 	if err != nil {
 		return err
 	}
 	defer targetAgg.Close()
+	if resume {
+		if err := targetAgg.ReloadFiles(); err != nil {
+			return err
+		}
+	}
 	targetDB, err := dbtemporal.New(targetRaw, targetAgg, nil)
 	if err != nil {
 		return err
@@ -284,8 +406,26 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if hooks.sequentialCommitment {
 		parallelDB = nil
 	}
+	var resumeOptions *dbstate.PBinResumeOptions
+	var gapProgress *dbstate.PBTProgress
+	var gapKeyCount atomic.Uint64
+	if resume {
+		gapProgress = dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Message: "PBT resume progress", Phase: "resume gap walk", TempDir: sourceDirs.Tmp})
+		defer gapProgress.Done()
+		resumeOptions = &dbstate.PBinResumeOptions{
+			BaseTxNum:       resumeBase.point.TxNum,
+			BaseState:       resumeBase.state,
+			BaseStateEnd:    resumeBase.stateEnd,
+			SourceTxNum:     resumeSourceEnd,
+			Workers:         hooks.workers,
+			PostCancun:      resumePostCancun,
+			BytecodeRewrite: resumeBytecodeRewrite,
+			Progress:        gapProgress.Add,
+			GapKeys:         &gapKeyCount,
+		}
+	}
 	root, err := dbstate.ConvertPBin(ctx, dbstate.PBinConvertOptions{
-		SourceAggregator:  sourceAgg,
+		SourceAggregator:  sourceWalkAgg,
 		SourceTx:          sourceTx,
 		TargetAggregator:  targetAgg,
 		TargetTx:          targetTx,
@@ -298,16 +438,26 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		WorkerViews:       hooks.workerViews,
 		Workers:           hooks.workers,
 		SourceWorkerRuns:  hooks.sourceWorkerRuns,
+		Resume:            resumeOptions,
 	})
 	targetTx.Rollback()
 	if err != nil {
 		return err
 	}
+	if resume {
+		targetAgg.WaitForFiles()
+		logger.Info("PBT resume merge", "X", resumeBase.point.TxNum, "Y", resumeSourceEnd)
+		if err := targetAgg.MergeLoop(ctx); err != nil {
+			return err
+		}
+		targetAgg.WaitForFiles()
+		logger.Info("PBT resume gap", "X", resumeBase.point.TxNum, "Y", resumeSourceEnd, "gap_keys", gapKeyCount.Load())
+	}
 	targetAgg.Close()
 	if blockEnd && afterFork && root != header.Root {
 		return fmt.Errorf("commitment convert-pbt: root %x differs from header root %x", root, header.Root)
 	}
-	visibleRanges := pbtVisibleSnapshotFiles(sourceAgg, sourceDirs)
+	visibleRanges := pbtVisibleSnapshotFiles(sourceWalkAgg, sourceDirs)
 	if keepHex {
 		if err := linkPBinHexFiles(sourceDirs.SnapDomain, outputDirs.SnapDomain); err != nil {
 			return err
@@ -327,6 +477,15 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	if err := validatePBTFileAccessors(outputDirs, "published", ""); err != nil {
 		return err
+	}
+	if resume {
+		resumeSourceSettings := sourceSettings
+		if resumeSourceSettings == nil {
+			resumeSourceSettings = resumeBase.settings
+		}
+		if err := pbtResumeValidateFinalLayout(sourceDirs, outputDirs, resumeSourceSettings, resumeBase.settings, keepHex, outputHasFiles); err != nil {
+			return err
+		}
 	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
 	finalSettings := &dbstate.ErigonDBSettings{
@@ -433,6 +592,380 @@ func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		variant = settings.TrieVariantName()
 	}
 	return readPBinConversionPointFromFiles(at, variant, keepHex)
+}
+
+func readPBTResumeBase(ctx context.Context, sourceDirs, outputDirs datadir.Dirs, outputHasFiles bool, sourceSettings *dbstate.ErigonDBSettings, logger log.Logger) (pbtResumeBase, error) {
+	if outputHasFiles {
+		settings, err := dbstate.ReadErigonDBSettings(outputDirs)
+		if err != nil {
+			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume output settings: %w", err)
+		}
+		if settings.TrieVariantName() != dbstate.TrieVariantBin && settings.TrieVariantName() != dbstate.TrieVariantHexBin {
+			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume output has no binary commitment domain: %s", settings.TrieVariantName())
+		}
+		manifestPath := filepath.Join(outputDirs.Snap, "pbt-manifest.toml")
+		sources, err := pbtAttachManifestSources(outputDirs)
+		if err != nil {
+			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume manifest files: %w", err)
+		}
+		manifest, err := dbstate.ReadPBTManifest(manifestPath, sources...)
+		if err != nil {
+			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume manifest: %w", err)
+		}
+		if manifest.TrieHash != settings.TrieHashName() {
+			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume manifest trie_hash %q differs from settings %q", manifest.TrieHash, settings.TrieHashName())
+		}
+		point, err := readPBinSourcePoint(ctx, outputDirs, settings, false, logger)
+		if err != nil {
+			return pbtResumeBase{}, err
+		}
+		state, stateEnd, stateErr := readPBTResumeState(ctx, outputDirs, settings, logger)
+		if stateErr != nil {
+			return pbtResumeBase{}, stateErr
+		}
+		if manifest.Point.Block != point.BlockNum || manifest.Point.TxNum != point.TxNum {
+			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume manifest point is (%d, %d), want (%d, %d)", manifest.Point.Block, manifest.Point.TxNum, point.BlockNum, point.TxNum)
+		}
+		return pbtResumeBase{settings: settings, point: point, state: state, stateEnd: stateEnd}, nil
+	}
+	if sourceSettings == nil || sourceSettings.TrieVariantName() == dbstate.TrieVariantHex {
+		return pbtResumeBase{}, errors.New("commitment convert-pbt: empty resume output requires a source binary commitment domain")
+	}
+	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, false, logger)
+	if err != nil {
+		return pbtResumeBase{}, err
+	}
+	state, stateEnd, stateErr := readPBTResumeState(ctx, sourceDirs, sourceSettings, logger)
+	if stateErr != nil {
+		return pbtResumeBase{}, stateErr
+	}
+	return pbtResumeBase{settings: sourceSettings, point: point, state: state, stateEnd: stateEnd}, nil
+}
+
+func readPBTResumeState(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) ([]byte, uint64, error) {
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("commitment convert-pbt: open resume state: %w", err)
+	}
+	if err := agg.OpenFolder(nil); err != nil {
+		agg.Close()
+		return nil, 0, err
+	}
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	domain := kv.CommitmentDomain
+	if settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		domain = kv.CommitmentBinDomain
+	}
+	state, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
+	if err != nil {
+		return nil, 0, fmt.Errorf("commitment convert-pbt: read resume state: %w", err)
+	}
+	if !found || len(state) == 0 {
+		return nil, 0, fmt.Errorf("commitment convert-pbt: resume binary commitment state is missing from files")
+	}
+	return bytes.Clone(state), stateEnd, nil
+}
+
+func preparePBTResumeOutput(sourceDirs, outputDirs datadir.Dirs, outputHasFiles bool, base pbtResumeBase, keepHex bool) error {
+	if outputHasFiles {
+		if err := clearPBTResumeNonCommitmentFiles(outputDirs); err != nil {
+			return fmt.Errorf("commitment convert-pbt: clear resume state files: %w", err)
+		}
+		if keepHex {
+			if err := removePBTFiles(outputDirs, func(file pbtAttachFile) bool { return file.domain == kv.CommitmentDomain }); err != nil {
+				return fmt.Errorf("commitment convert-pbt: clear resume hex files: %w", err)
+			}
+		}
+	}
+	if _, err := linkSnapshotsExceptCommitmentWithSalt(sourceDirs.Snap, outputDirs.Snap, outputHasFiles); err != nil {
+		return err
+	}
+	if outputHasFiles {
+		return nil
+	}
+	return linkPBTResumeBaseFiles(sourceDirs, outputDirs, base, keepHex)
+}
+
+func clearPBTResumeNonCommitmentFiles(dirs datadir.Dirs) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	commitmentPaths := make(map[string]struct{})
+	for _, file := range files {
+		if file.domain == kv.CommitmentDomain || file.domain == kv.CommitmentBinDomain {
+			commitmentPaths[file.path] = struct{}{}
+		}
+	}
+	touched := make(map[string]struct{})
+	err = filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := entry.Name()
+		if _, commitmentFile := commitmentPaths[path]; commitmentFile || name == dbstate.ERIGONDB_SETTINGS_FILE || name == "pbt-manifest.toml" || name == "salt-state.txt" || name == "salt.txt" {
+			return nil
+		}
+		if err := dir.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		touched[filepath.Dir(path)] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return fsyncPBTDirs(touched)
+}
+
+func linkPBTResumeBaseFiles(sourceDirs, outputDirs datadir.Dirs, base pbtResumeBase, keepHex bool) error {
+	sourceDomain := kv.CommitmentDomain
+	if base.settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		sourceDomain = kv.CommitmentBinDomain
+	}
+	targetDomain := kv.CommitmentDomain
+	if keepHex {
+		targetDomain = kv.CommitmentBinDomain
+	}
+	files, err := pbtAttachFiles(sourceDirs)
+	if err != nil {
+		return err
+	}
+	linked := 0
+	for _, file := range pbtAttachVisibleFiles(files) {
+		if file.domain != sourceDomain || !pbtAttachAdoptsFile(file) || file.from*base.settings.StepSize > base.point.TxNum {
+			continue
+		}
+		rel, relErr := filepath.Rel(sourceDirs.Snap, file.path)
+		if relErr != nil {
+			return relErr
+		}
+		name := filepath.Base(rel)
+		if sourceDomain != targetDomain {
+			name = strings.Replace(name, sourceDomain.String(), targetDomain.String(), 1)
+		}
+		destination := filepath.Join(outputDirs.Snap, filepath.Dir(rel), name)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return err
+		}
+		if info, statErr := os.Stat(destination); statErr == nil {
+			sourceInfo, sourceErr := os.Stat(file.path)
+			if sourceErr != nil {
+				return sourceErr
+			}
+			if !os.SameFile(sourceInfo, info) {
+				return fmt.Errorf("commitment convert-pbt: resume base file %s conflicts with source %s", destination, file.path)
+			}
+			continue
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return statErr
+		}
+		if err := os.Link(file.path, destination); err != nil {
+			return fmt.Errorf("commitment convert-pbt: link resume base file %s: %w", file.path, err)
+		}
+		linked++
+	}
+	if linked == 0 {
+		return fmt.Errorf("commitment convert-pbt: source binary commitment files at txNum %d are missing", base.point.TxNum)
+	}
+	return nil
+}
+
+func pbtResumeSourceDomain(settings *dbstate.ErigonDBSettings) (kv.Domain, error) {
+	if settings == nil {
+		return kv.Domain(0), errors.New("commitment convert-pbt: resume source binary commitment settings are missing")
+	}
+	switch settings.TrieVariantName() {
+	case dbstate.TrieVariantBin:
+		return kv.CommitmentDomain, nil
+	case dbstate.TrieVariantHexBin:
+		return kv.CommitmentBinDomain, nil
+	default:
+		return kv.Domain(0), fmt.Errorf("commitment convert-pbt: resume source has no binary commitment domain: %s", settings.TrieVariantName())
+	}
+}
+
+func pbtResumeLayoutSourceDomain(settings *dbstate.ErigonDBSettings) (kv.Domain, error) {
+	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		return kv.CommitmentDomain, nil
+	}
+	domain, err := pbtResumeSourceDomain(settings)
+	if err == nil {
+		return domain, nil
+	}
+	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHex {
+		return kv.AccountsDomain, nil
+	}
+	return kv.Domain(0), err
+}
+
+func pbtResumeTargetDomain(base *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool) kv.Domain {
+	if keepHex || outputHasFiles && base != nil && base.TrieVariantName() == dbstate.TrieVariantHexBin {
+		return kv.CommitmentBinDomain
+	}
+	return kv.CommitmentDomain
+}
+
+func pbtResumeCommitmentFiles(dirs datadir.Dirs, domain kv.Domain) ([]pbtAttachFile, error) {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return nil, err
+	}
+	visible := pbtAttachVisibleFiles(files)
+	result := make([]pbtAttachFile, 0, len(visible))
+	for _, file := range visible {
+		if file.domain == domain && pbtAttachAdoptsFile(file) && (filepath.Ext(file.path) == ".kv" || filepath.Ext(file.path) == ".kvi") {
+			result = append(result, file)
+		}
+	}
+	return result, nil
+}
+
+func pbtResumeLayoutKey(file pbtAttachFile) string {
+	return fmt.Sprintf("%d:%d", file.from, file.to)
+}
+
+func pbtResumeValidateSourceLayout(dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, baseTxNum uint64) error {
+	domain, err := pbtResumeLayoutSourceDomain(settings)
+	if err != nil {
+		return err
+	}
+	files, err := pbtResumeCommitmentFiles(dirs, domain)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: resume source commitment files: %w", err)
+	}
+	stepSize := settings.StepSize
+	if stepSize == 0 {
+		return errors.New("commitment convert-pbt: resume source step size is zero")
+	}
+	for _, file := range files {
+		if file.from == 0 && file.to*stepSize > baseTxNum {
+			return fmt.Errorf("commitment convert-pbt: source %s file range %d-%d starts at step 0 and spans resume txNum %d", domain, file.from, file.to, baseTxNum)
+		}
+	}
+	return nil
+}
+
+func pbtResumeValidateBaseLayout(sourceDirs, outputDirs datadir.Dirs, sourceSettings, baseSettings *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool, baseTxNum uint64) error {
+	sourceDomain, err := pbtResumeLayoutSourceDomain(sourceSettings)
+	if err != nil {
+		return err
+	}
+	targetDomain := pbtResumeTargetDomain(baseSettings, keepHex, outputHasFiles)
+	sourceFiles, err := pbtResumeCommitmentFiles(sourceDirs, sourceDomain)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: resume source commitment files: %w", err)
+	}
+	outputFiles, err := pbtResumeCommitmentFiles(outputDirs, targetDomain)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: resume base commitment files: %w", err)
+	}
+	outputRanges := make(map[string]struct{}, len(outputFiles))
+	for _, file := range outputFiles {
+		outputRanges[pbtResumeLayoutKey(file)] = struct{}{}
+	}
+	stepSize := sourceSettings.StepSize
+	for _, file := range sourceFiles {
+		if file.to*stepSize > baseTxNum {
+			continue
+		}
+		key := pbtResumeLayoutKey(file)
+		if _, ok := outputRanges[key]; !ok {
+			return fmt.Errorf("commitment convert-pbt: resume base is missing commitment file range %d-%d", file.from, file.to)
+		}
+	}
+	return nil
+}
+
+func pbtResumeValidateFinalLayout(sourceDirs, outputDirs datadir.Dirs, sourceSettings, baseSettings *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool) error {
+	sourceDomain, err := pbtResumeLayoutSourceDomain(sourceSettings)
+	if err != nil {
+		return err
+	}
+	targetDomain := pbtResumeTargetDomain(baseSettings, keepHex, outputHasFiles)
+	sourceFiles, err := pbtResumeCommitmentFiles(sourceDirs, sourceDomain)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: resume source commitment files: %w", err)
+	}
+	outputFiles, err := pbtResumeCommitmentFiles(outputDirs, targetDomain)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: resume output commitment files: %w", err)
+	}
+	sourceRanges := make(map[string]struct{}, len(sourceFiles))
+	for _, file := range sourceFiles {
+		sourceRanges[pbtResumeLayoutKey(file)] = struct{}{}
+	}
+	outputRanges := make(map[string]struct{}, len(outputFiles))
+	for _, file := range outputFiles {
+		outputRanges[pbtResumeLayoutKey(file)] = struct{}{}
+	}
+	for key := range sourceRanges {
+		if _, ok := outputRanges[key]; !ok {
+			return fmt.Errorf("commitment convert-pbt: resume output commitment layout is missing %s", key)
+		}
+	}
+	for key := range outputRanges {
+		if _, ok := sourceRanges[key]; !ok {
+			return fmt.Errorf("commitment convert-pbt: resume output commitment layout has extra %s", key)
+		}
+	}
+	return nil
+}
+
+func pbtResumeSourceFilesEnd(dirs datadir.Dirs, stepSize uint64) (uint64, error) {
+	if stepSize == 0 {
+		return 0, errors.New("commitment convert-pbt: source state file step size is zero")
+	}
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return 0, err
+	}
+	var end uint64
+	for _, file := range pbtAttachVisibleFiles(files) {
+		if !file.data || filepath.Ext(file.path) != ".kv" || !pbtAttachStateDomain(file.domain) {
+			continue
+		}
+		fileEnd := file.to * stepSize
+		if fileEnd > 0 {
+			end = max(end, fileEnd-1)
+		}
+	}
+	if end == 0 {
+		return 0, errors.New("commitment convert-pbt: source state file end is missing")
+	}
+	return end, nil
+}
+
+func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) error {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		iter, err := tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
+		if err != nil {
+			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, err)
+		}
+		for iter.HasNext() {
+			key, _, nextErr := iter.Next()
+			if nextErr != nil {
+				iter.Close()
+				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, nextErr)
+			}
+			_, step, found, getErr := tx.Debug().GetLatestFromDB(domain, key)
+			if getErr != nil {
+				iter.Close()
+				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, getErr)
+			}
+			if found && step.ToTxNum(stepSize) > sourceEnd {
+				iter.Close()
+				return fmt.Errorf("commitment convert-pbt: source MDBX %s row %x is past source files end txNum %d", domain, key, sourceEnd)
+			}
+		}
+		iter.Close()
+	}
+	return nil
 }
 
 func configurePBTSourceVariant(settings *dbstate.ErigonDBSettings) {
@@ -928,7 +1461,9 @@ func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.D
 	for _, file := range at.AllFiles() {
 		add(sourceAgg.Dirs().Snap, file.Fullpath())
 	}
-	files, err := pbtSnapshotFiles(sourceDirs, func(domain kv.Domain) bool { return domain == kv.CommitmentDomain })
+	files, err := pbtSnapshotFiles(sourceDirs, func(domain kv.Domain) bool {
+		return domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain
+	})
 	if err != nil {
 		return visibleRanges
 	}

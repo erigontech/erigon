@@ -438,24 +438,24 @@ flowchart LR
 - Modify: `cmd/integration/commands/commitment_convert_pbt.go`
 - Modify: `cmd/integration/commands/commitment_convert_pbt_test.go`
 
-- [ ] `--resume` takes the base PBT from one of two places:
+- [x] `--resume` takes the base PBT from one of two places:
   - the output datadir, from an earlier convert;
   - when the output is empty, the source's own commitment-bin domain (a hex+bin node whose bin domain stopped).
   X is the bin state record in the base files.
-- [ ] the output's bin file layout equals the source's commitment layout, which attach requires:
+- [x] the output's bin file layout equals the source's commitment layout, which attach requires:
   - link a base bin file whose range matches;
   - merge base bin files where the source merged them;
   - refuse a merge that starts at step 0 and spans X.
   The state files are linked again from the source at Y. The settings and the manifest are written at Y.
-- [ ] progress lines for the gap walk, the fold, the merges and the files. The log names X, Y and the gap's key
+- [x] progress lines for the gap walk, the fold, the merges and the files. The log names X, Y and the gap's key
       count.
-- [ ] tests:
+- [x] tests:
   - resume of an earlier output;
   - resume of a stopped hex+bin source;
   - a source that merged across X;
   - attach of the resumed output on a node at Y passes;
   - the golden harness stays green.
-- [ ] run the gate — must pass before Task 14.
+- [x] run the gate — must pass before Task 14.
 
 ### Task 14: Scale benchmark
 **Files:**

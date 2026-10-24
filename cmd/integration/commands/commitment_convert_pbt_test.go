@@ -79,6 +79,168 @@ func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 	require.True(t, isCommitmentFileName("v1.0-commitment-bin.0-1024.kv"), "the converter must exclude commitment-bin files from its source links")
 }
 
+func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
+	selectPBTCommandSuite(t)
+	base, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, 1, []int{1, 1})
+	require.NoError(t, err)
+	require.NoError(t, base.Tester.InsertChain(base.Chain))
+	base.Tester.Close()
+	baseEnd := pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata)
+	buildPBTAcceptanceFilesAt(t, base, baseEnd)
+	baseOutput := filepath.Join(t.TempDir(), "base-output")
+	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, baseOutput, true, "", log.New()))
+	source, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, 1, []int{1, 1, 1, 1})
+	require.NoError(t, err)
+	source.Tester.Close()
+	copyPBTStateSalt(t, base, source)
+	source.Tester = execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	source.Tester.Close()
+	sourceEnd := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
+	buildPBTAcceptanceFilesAt(t, source, sourceEnd)
+	freshOutput := filepath.Join(t.TempDir(), "fresh-output")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New()))
+	require.NotEqual(t, readPBTBinRows(t, baseOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata))
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, baseOutput, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+	baseBinFiles := pbtCommitmentBinKVBytes(t, baseOutput)
+	freshBinFiles := pbtCommitmentBinKVBytes(t, freshOutput)
+	require.Equal(t, pbtSortedBinFileNames(freshBinFiles), pbtSortedBinFileNames(baseBinFiles))
+	resumedSettings, resumedSettingsErr := dbstate.ReadErigonDBSettings(datadir.Open(baseOutput))
+	require.NoError(t, resumedSettingsErr)
+	resumedAgg, resumedAggErr := openPBTState(t.Context(), datadir.Open(baseOutput), resumedSettings, nil, log.New())
+	require.NoError(t, resumedAggErr)
+	resumedAt := resumedAgg.BeginFilesRo()
+	resumedAt.Close()
+	resumedAgg.Close()
+	require.Equal(t, readPBTBinLeaves(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinLeaves(t, baseOutput, source.Tester.Dirs.Chaindata))
+	freshRows, resumedRows := readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, baseOutput, source.Tester.Dirs.Chaindata)
+	require.Equal(t, freshRows, resumedRows)
+	require.Equal(t, readPBTBinRoot(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinRoot(t, baseOutput, source.Tester.Dirs.Chaindata))
+	salt, saltErr := os.ReadFile(filepath.Join(datadir.Open(baseOutput).Snap, "salt-state.txt"))
+	require.NoError(t, saltErr)
+	require.NoError(t, os.WriteFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"), salt, 0o644))
+	setExecutionProgress(t, source.Tester.Dirs.Chaindata, 1)
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.Tester.Dirs.DataDir, baseOutput, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
+}
+
+func TestConvertPBTResumeFromStoppedHexBinSource(t *testing.T) {
+	runPBTResumeFromStoppedHexBinSource(t, 1, false)
+}
+
+func TestConvertPBTResumeFromMergedHexBinSource(t *testing.T) {
+	runPBTResumeFromStoppedHexBinSource(t, 2, true)
+}
+
+func runPBTResumeFromStoppedHexBinSource(t *testing.T, stepsInFrozenFile uint64, merge bool) {
+	selectPBTCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, stepsInFrozenFile, 4)
+	require.NoError(t, err)
+	source.Tester.Close()
+	sourceSalt, err := os.ReadFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"))
+	require.NoError(t, err)
+	base, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, stepsInFrozenFile, 2)
+	require.NoError(t, err)
+	base.Tester.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(base.Tester.Dirs.Snap, "salt-state.txt"), sourceSalt, 0o644))
+	base.Tester = execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(base.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(base.Genesis),
+		execmoduletester.WithKey(base.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, base.Tester.InsertChain(base.Chain))
+	base.Tester.Close()
+	baseEnd := pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata)
+	buildPBTResumeFiles(t, base, baseEnd, merge)
+	source.Tester = execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	source.Tester.Close()
+	sourceSettings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	sourceEnd := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
+	buildPBTResumeFiles(t, source, sourceEnd, merge)
+	freshOutput := filepath.Join(t.TempDir(), "fresh-output")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New()))
+	baseSettings, err := dbstate.ReadErigonDBSettings(base.Tester.Dirs)
+	require.NoError(t, err)
+	basePoint, err := readPBinSourcePoint(t.Context(), base.Tester.Dirs, baseSettings, false, log.New())
+	require.NoError(t, err)
+	require.NoError(t, removePBTFiles(source.Tester.Dirs, func(file pbtAttachFile) bool {
+		return file.domain == kv.CommitmentBinDomain
+	}))
+	for _, roots := range [][2]string{
+		{base.Tester.Dirs.Snap, source.Tester.Dirs.Snap},
+		{base.Tester.Dirs.SnapDomain, source.Tester.Dirs.SnapDomain},
+		{base.Tester.Dirs.SnapHistory, source.Tester.Dirs.SnapHistory},
+		{base.Tester.Dirs.SnapIdx, source.Tester.Dirs.SnapIdx},
+		{base.Tester.Dirs.SnapAccessors, source.Tester.Dirs.SnapAccessors},
+	} {
+		require.NoError(t, filepath.WalkDir(roots[0], func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.IsDir() {
+				return walkErr
+			}
+			parsed, _, ok := snaptype.ParseFileName(roots[0], entry.Name())
+			if !ok || parsed.TypeString != kv.CommitmentBinDomain.String() {
+				return nil
+			}
+			return os.Link(path, filepath.Join(roots[1], entry.Name()))
+		}))
+	}
+	stoppedFiles, err := pbtAttachFiles(source.Tester.Dirs)
+	require.NoError(t, err)
+	var stoppedBinFiles int
+	for _, file := range stoppedFiles {
+		if file.domain == kv.CommitmentBinDomain {
+			stoppedBinFiles++
+		}
+	}
+	require.NotZero(t, stoppedBinFiles)
+	stoppedPoint, err := readPBinSourcePoint(t.Context(), source.Tester.Dirs, sourceSettings, false, log.New())
+	require.NoError(t, err)
+	require.Equal(t, basePoint, stoppedPoint)
+	for _, file := range stoppedFiles {
+		if file.domain == kv.CommitmentBinDomain {
+			require.LessOrEqual(t, file.from*sourceSettings.StepSize, stoppedPoint.TxNum, file.path)
+		}
+	}
+	fileEnd, err := pbtResumeSourceFilesEnd(source.Tester.Dirs, sourceSettings.StepSize)
+	require.NoError(t, err)
+	require.Greater(t, fileEnd, stoppedPoint.TxNum)
+	output := filepath.Join(t.TempDir(), "resumed-output")
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+	require.Equal(t, pbtSortedBinFileNames(pbtCommitmentBinKVBytes(t, freshOutput)), pbtSortedBinFileNames(pbtCommitmentBinKVBytes(t, output)))
+	require.Equal(t, readPBTBinLeaves(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinLeaves(t, output, source.Tester.Dirs.Chaindata))
+	require.Equal(t, readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, output, source.Tester.Dirs.Chaindata))
+	require.Equal(t, readPBTBinRoot(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinRoot(t, output, source.Tester.Dirs.Chaindata))
+	setExecutionProgress(t, source.Tester.Dirs.Chaindata, 1)
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.Tester.Dirs.DataDir, output, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
+}
+
+func buildPBTResumeFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain, endTxNum uint64, merge bool) {
+	t.Helper()
+	if merge {
+		buildPBTAcceptanceFilesAtWithMerge(t, fixture, endTxNum, true)
+		return
+	}
+	buildPBTAcceptanceFilesAt(t, fixture, endTxNum)
+}
+
 func TestPBTRealChainTxNumConvention(t *testing.T) {
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
@@ -1900,6 +2062,15 @@ func pbtCommitmentBinKVBytes(t *testing.T, output string) map[string][]byte {
 		bytesByRange[name] = value
 	}
 	return bytesByRange
+}
+
+func pbtSortedBinFileNames(files map[string][]byte) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func readPBTBinLeaves(t *testing.T, output, rawPath string) map[string][]byte {

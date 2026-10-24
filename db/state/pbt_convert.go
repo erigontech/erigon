@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 type PBinConvertOptions struct {
@@ -48,6 +49,55 @@ type PBinConvertOptions struct {
 	SourceWorkerRuns  *atomic.Int32
 	Resume            *PBinResumeOptions
 }
+
+type pbinConversionResumeStateReader struct {
+	at         *AggregatorRoTx
+	state      []byte
+	baseTxNum  uint64
+	limitTxNum uint64
+	stepSize   uint64
+}
+
+func (r *pbinConversionResumeStateReader) WithHistory() bool { return false }
+
+func (r *pbinConversionResumeStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *pbinConversionResumeStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain {
+		if bytes.Equal(key, commitment.KeyCommitmentState) {
+			if len(r.state) != 0 {
+				return bytes.Clone(r.state), kv.Step((r.baseTxNum + 1) / stepSize), nil
+			}
+		}
+		if bytes.Equal(key, pbt.GlobalRootKey()) {
+			state := r.state
+			if len(state) != 0 {
+				if !commitment.IsPBinState(state) && len(state) >= 18 {
+					state = state[18:]
+				}
+				if len(state) >= 5 {
+					return bytes.Clone(state[5:]), kv.Step((r.baseTxNum + 1) / stepSize), nil
+				}
+			}
+		}
+	}
+	value, found, _, endTxNum, err := r.at.DebugGetLatestFromFiles(domain, key, r.limitTxNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !found {
+		return nil, 0, nil
+	}
+	return bytes.Clone(value), kv.Step(endTxNum / r.stepSize), nil
+}
+
+func (r *pbinConversionResumeStateReader) Clone(kv.TemporalTx) commitmentdb.StateReader { return r }
+
+func (r *pbinConversionResumeStateReader) CloneForWorker(context.Context, kv.TemporalTx) commitmentdb.StateReader {
+	return r
+}
+
+func (r *pbinConversionResumeStateReader) BindsWorkerTx() bool { return false }
 
 func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) error) (common.Hash, error) {
 	builder, err := eip8297.NewStreamRootBuilder(hash)
@@ -94,9 +144,20 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	defer domains.Close()
 	if opts.Resume != nil {
 		baseTxNum := opts.Resume.BaseTxNum
-		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentSplitStateReader(
-			commitmentdb.NewFilesOnlyStateReader(opts.TargetTx, baseTxNum),
-			commitmentdb.NewLatestStateReader(opts.TargetTx, domains, commitmentdb.LatestStateReaderOptions{}),
+		baseFiles := opts.TargetAggregator.BeginFilesRo()
+		defer baseFiles.Close()
+		limitTxNum := baseTxNum
+		if opts.Resume.BaseStateEnd > limitTxNum {
+			limitTxNum = opts.Resume.BaseStateEnd
+		}
+		commitmentReader := commitmentdb.StateReader(&pbinConversionResumeStateReader{at: baseFiles, baseTxNum: baseTxNum, limitTxNum: limitTxNum, stepSize: opts.TargetAggregator.StepSize()})
+		plainReader := commitmentdb.NewLatestStateReader(opts.TargetTx, domains, commitmentdb.LatestStateReaderOptions{})
+		if len(opts.Resume.BaseState) != 0 {
+			commitmentReader = &pbinConversionResumeStateReader{at: baseFiles, state: opts.Resume.BaseState, baseTxNum: baseTxNum, limitTxNum: limitTxNum, stepSize: opts.TargetAggregator.StepSize()}
+		}
+		domains.GetCommitmentCtxForDomain(opts.TargetDomain).SetStateReader(commitmentdb.NewCommitmentSplitStateReader(
+			commitmentReader,
+			plainReader,
 			opts.TargetDomain,
 			false,
 		))
@@ -171,7 +232,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		if resume.SourceTxNum == 0 {
 			resume.SourceTxNum = opts.EndTxNum
 		}
-		writer, err = NewPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum)
+		writer, err = newPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum, resume.BaseState, resume.BaseStateEnd)
 		if writer != nil {
 			writer.workers = workers
 		}

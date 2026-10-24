@@ -516,6 +516,10 @@ func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, end
 }
 
 func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64) (*PBinRangeWriter, error) {
+	return newPBinRangeWriterForResume(aggregator, domain, baseTxNum, endTxNum, nil, 0)
+}
+
+func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64, baseState []byte, baseStateEnd uint64) (*PBinRangeWriter, error) {
 	if aggregator == nil {
 		return nil, fmt.Errorf("pbin resume range writer: nil aggregator")
 	}
@@ -531,23 +535,95 @@ func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 	}
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
-	files := pbinAccountFiles(at.Files(domain))
-	if len(files) == 0 {
+	baseFiles := pbinAccountFiles(at.Files(domain))
+	if len(baseFiles) == 0 {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no files", domain)
 	}
-	_, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
-	if err != nil {
-		return nil, fmt.Errorf("pbin resume range writer: read base state: %w", err)
+	if len(baseState) == 0 {
+		_, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
+		if err != nil {
+			return nil, fmt.Errorf("pbin resume range writer: read base state: %w", err)
+		}
+		if !found || stateEnd < baseTxNum {
+			return nil, fmt.Errorf("pbin resume range writer: base domain %s has no state at txNum %d", domain, baseTxNum)
+		}
+		start := max(stateEnd, baseTxNum)
+		end := max(endTxNum+1, start+stepSize)
+		end = ((end + stepSize - 1) / stepSize) * stepSize
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end))
+		if err != nil {
+			return nil, err
+		}
+		return &PBinRangeWriter{
+			aggregator:   aggregator,
+			domain:       domain,
+			endTxNum:     endTxNum,
+			baseTxNum:    baseTxNum,
+			leafStamp:    endTxNum,
+			maxOps:       pbinRangeWriterMaxOps,
+			maxBytes:     pbinRangeWriterMaxBytes,
+			workers:      dbg.PBTWorkers,
+			stateInFiles: true,
+			resume:       true,
+			ranges:       []pbinRange{{start: start, end: end, rows: rows}},
+		}, nil
 	}
-	if !found || stateEnd < baseTxNum {
+	files := baseFiles
+	accountFiles := pbinAccountFiles(at.Files(kv.AccountsDomain))
+	if len(accountFiles) != 0 {
+		files = accountFiles
+	}
+	stateEnd := baseStateEnd
+	if stateEnd == 0 {
+		stateEnd = files.EndRootNum() * stepSize
+	}
+	if stateEnd <= baseTxNum {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no state at txNum %d", domain, baseTxNum)
 	}
 	start := max(stateEnd, baseTxNum)
-	end := max(endTxNum+1, start+stepSize)
-	end = ((end + stepSize - 1) / stepSize) * stepSize
-	rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end))
-	if err != nil {
-		return nil, err
+	ranges := make([]pbinRange, 0, len(files))
+	for _, file := range files {
+		fileStart, fileEnd := file.StartRootNum(), file.EndRootNum()
+		if fileEnd <= start {
+			continue
+		}
+		fileStart = max(fileStart, start)
+		fileEnd = max(fileEnd, fileStart+stepSize)
+		if fileEnd > endTxNum {
+			fileEnd = (endTxNum + stepSize) / stepSize * stepSize
+		}
+		if fileEnd <= fileStart {
+			continue
+		}
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", fileStart, fileEnd))
+		if err != nil {
+			for i := range ranges {
+				ranges[i].rows.close()
+			}
+			return nil, err
+		}
+		ranges = append(ranges, pbinRange{start: fileStart, end: fileEnd, rows: rows})
+	}
+	if len(ranges) == 0 {
+		end := max(endTxNum+1, start+stepSize)
+		end = ((end + stepSize - 1) / stepSize) * stepSize
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end))
+		if err != nil {
+			return nil, err
+		}
+		ranges = append(ranges, pbinRange{start: start, end: end, rows: rows})
+	}
+	last := &ranges[len(ranges)-1]
+	if last.end < endTxNum+1 {
+		end := ((endTxNum + 1 + stepSize - 1) / stepSize) * stepSize
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", last.end, end))
+		if err != nil {
+			for i := range ranges {
+				ranges[i].rows.close()
+			}
+			return nil, err
+		}
+		ranges = append(ranges, pbinRange{start: last.end, end: end, rows: rows})
 	}
 	return &PBinRangeWriter{
 		aggregator:   aggregator,
@@ -560,11 +636,7 @@ func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 		workers:      dbg.PBTWorkers,
 		stateInFiles: true,
 		resume:       true,
-		ranges: []pbinRange{{
-			start: start,
-			end:   end,
-			rows:  rows,
-		}},
+		ranges:       ranges,
 	}, nil
 }
 

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -34,11 +35,17 @@ import (
 
 type PBinResumeOptions struct {
 	BaseTxNum       uint64
+	BaseState       []byte
+	BaseStateEnd    uint64
 	SourceTxNum     uint64
 	Workers         int
 	PostCancun      bool
 	BytecodeRewrite bool
+	Progress        PBinResumeProgressFunc
+	GapKeys         *atomic.Uint64
 }
+
+type PBinResumeProgressFunc func(uint64)
 
 func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOptions, emit func(PBinLeaf) error) error {
 	if at == nil {
@@ -104,7 +111,28 @@ func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOp
 		return ctx.Err()
 	default:
 	}
-	return pbinLoadSortedLeafCollectors(collectors, emit, nil)
+	var reported uint64
+	var done uint64
+	err := pbinLoadSortedLeafCollectors(collectors, func(leaf PBinLeaf) error {
+		done++
+		if opts.GapKeys != nil {
+			opts.GapKeys.Store(done)
+		}
+		if done-reported >= 4096 {
+			if opts.Progress != nil {
+				opts.Progress(done - reported)
+			}
+			reported = done
+		}
+		if err := emit(leaf); err != nil {
+			return err
+		}
+		return nil
+	}, nil)
+	if done != reported && opts.Progress != nil {
+		opts.Progress(done - reported)
+	}
+	return err
 }
 
 func pbinResumeValidateSource(at *AggregatorRoTx, opts PBinResumeOptions) error {
