@@ -1939,7 +1939,6 @@ func TestCalcFees_SameTxDestroyedBurntContract_StaysRemoved(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	worker := state.NewWithVersionMap(state.NewNoopReader(), vm)
 	worker.SetTxContext(1, 1)
-	worker.SetNoMaterialize(true)
 	require.NoError(t, worker.CreateAccount(burnt, true))
 	require.NoError(t, worker.AddBalance(burnt, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
 	_, err := worker.Selfdestruct(burnt, rules.IsAmsterdam)
