@@ -144,3 +144,16 @@ func TestGetLogsFailsOnAMissingBody(t *testing.T) {
 	require.ErrorContains(t, err, "transaction not found")
 	require.Nil(t, logs)
 }
+
+// TestGetLatestLogsFailsOnAMissingBody pins the same for erigon_getLatestLogs.
+func TestGetLatestLogsFailsOnAMissingBody(t *testing.T) {
+	t.Parallel()
+
+	m := setupLogsChain(t)
+	dropBodies(t, m.DB, missingHeaderBlock, missingHeaderBlock+1)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLatestLogs(m.Ctx, fullRangeCriteria(), filters.LogFilterOptions{BlockCount: missingHeaderChainLen})
+	require.ErrorContains(t, err, "transaction not found")
+	require.Nil(t, logs)
+}
