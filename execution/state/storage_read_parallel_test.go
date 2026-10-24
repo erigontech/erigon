@@ -104,7 +104,6 @@ func TestStorageReadParallel_CommittedReadAfterWriteUsesReadSet(t *testing.T) {
 		storage: map[accounts.StorageKey]uint256.Int{key: *uint256.NewInt(42)},
 	}
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
 

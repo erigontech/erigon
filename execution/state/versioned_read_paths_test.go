@@ -116,16 +116,16 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
 
-	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	so, err := ibs.getStateObject(addr, true)
-	require.NoError(t, err)
-	require.Nil(t, so, "destructed account resolves to no object")
-	parked, ok := ibs.stateObjects[addr]
-	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+	// Snapshot this tx's reads for OCC validation.
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
 
-	v, err = ibs.GetState(addr, key)
-	require.NoError(t, err)
-	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
+	// A prior tx destroys the account after this tx's warm read. The cache-free
+	// path keeps no deleted stateObject to shadow the recorded read; the staleness
+	// is caught by OCC validation, which fails and forces re-execution rather than
+	// letting the pre-destruct value stand.
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	require.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
 func TestVersionedRead_B_DeletedStateObjectBeatsWarmCodeSizeRead(t *testing.T) {
@@ -138,16 +138,12 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmCodeSizeRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 7, size, "first read resolves from the version map")
 
-	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	so, err := ibs.getStateObject(addr, true)
-	require.NoError(t, err)
-	require.Nil(t, so)
-	parked, ok := ibs.stateObjects[addr]
-	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
 
-	size, err = ibs.GetCodeSize(addr)
-	require.NoError(t, err)
-	assert.Zero(t, size, "code size of a destructed account reads as zero, not as the recorded value")
+	// A prior tx destroys the account after the warm read: OCC validation catches it.
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	require.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
 // The read-once fast path must return exactly what the read-set-hit branch it
@@ -173,49 +169,54 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.True(t, clean, "a read-set hit is clean: this tx has no write of the slot, so a revert deletes the write")
 }
 
-func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, noMaterialize bool) *IntraBlockState {
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, versioned bool) *IntraBlockState {
 	_, tx, domains := NewTestRwTx(t)
 	addrValue := addr.Value()
 	domains.SetTxNum(10)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	var ibs *IntraBlockState
+	if versioned {
+		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
+	} else {
+		ibs = New(reader)
+	}
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(noMaterialize)
 	ibs.SetTxContext(1, 5)
 	return ibs
 }
 
 func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
 	t.Parallel()
-	for _, noMaterialize := range []bool{false, true} {
+	for _, versioned := range []bool{false, true} {
 		addr := accounts.InternAddress([20]byte{0xb6})
 		acc := accounts.NewAccount()
 		acc.Incarnation = 1
-		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+		ibs := newTouchTestIBS(t, addr, acc, versioned)
 
 		require.NoError(t, ibs.TouchAccount(addr))
 		n := ibs.journal.length()
 		require.Positive(t, n)
 		require.NoError(t, ibs.TouchAccount(addr))
-		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
+		assert.Equal(t, n, ibs.journal.length(), "versioned=%v", versioned)
 	}
 }
 
 // The touch result does not depend on the other fields once the tx wrote the balance.
 func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 	t.Parallel()
-	for _, noMaterialize := range []bool{false, true} {
+	for _, versioned := range []bool{false, true} {
 		addr := accounts.InternAddress([20]byte{0xb7})
 		acc := accounts.NewAccount()
 		acc.Incarnation = 1
 		acc.Nonce = 1
 		acc.Balance = *uint256.NewInt(5)
-		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+		ibs := newTouchTestIBS(t, addr, acc, versioned)
 
 		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
 		require.NoError(t, ibs.TouchAccount(addr))
 		_, ok := ibs.versionedReads.GetNonce(addr)
-		assert.False(t, ok, "nonce read, noMaterialize=%v", noMaterialize)
+		assert.False(t, ok, "nonce read, versioned=%v", versioned)
 	}
 }
 
@@ -872,7 +873,6 @@ func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
 	r := &refreshReader{}
 	ibs := NewWithVersionMap(r, NewVersionMap(nil))
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 5)
 	addr := accounts.InternAddress([20]byte{0xb9})
 
@@ -1083,30 +1083,27 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 // before the CREATE belongs to the old incarnation, so committed storage is zero.
 func TestVersionedRead_B_CommittedStorageAfterCreateIsZero(t *testing.T) {
 	t.Parallel()
-	for _, noMaterialize := range []bool{false, true} {
-		_, tx, domains := NewTestRwTx(t)
-		addr := accounts.InternAddress([20]byte{0xb7})
-		key := accounts.InternKey([32]byte{0x01})
-		acc := accounts.NewAccount()
-		acc.Balance = *uint256.NewInt(1)
-		acc.Incarnation = 1
-		addrValue, keyValue := addr.Value(), key.Value()
-		domains.SetTxNum(10)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
-		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(addrValue[:], keyValue[:]...), []byte{0x07}, 10, nil))
-		ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
-		t.Cleanup(ibs.Close)
-		ibs.SetNoMaterialize(noMaterialize)
-		ibs.SetTxContext(1, 5)
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb7})
+	key := accounts.InternKey([32]byte{0x01})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	acc.Incarnation = 1
+	addrValue, keyValue := addr.Value(), key.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(addrValue[:], keyValue[:]...), []byte{0x07}, 10, nil))
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 5)
 
-		v, err := ibs.GetState(addr, key)
-		require.NoError(t, err)
-		require.EqualValues(t, 7, v.Uint64(), "noMaterialize=%v", noMaterialize)
-		require.NoError(t, ibs.CreateAccount(addr, true))
-		committed, err := ibs.GetCommittedState(addr, key)
-		require.NoError(t, err)
-		assert.True(t, committed.IsZero(), "noMaterialize=%v", noMaterialize)
-	}
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 7, v.Uint64())
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	committed, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	assert.True(t, committed.IsZero())
 }
 
 // A dirty address serves the recorded read of a field it has not written, as a

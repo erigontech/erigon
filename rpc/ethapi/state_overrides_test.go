@@ -103,7 +103,6 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 			defer ibs.Close()
 			if tc.versioned {
 				ibs.SetVersionMap(state.NewVersionMap(nil))
-				ibs.SetNoMaterialize(true)
 				ibs.SetNoConflictDetection()
 				ibs.SetTxContext(0, 0)
 			}
@@ -131,7 +130,6 @@ func TestStateOverrideEmptyStateDiffKeepsAccountAbsent(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
 		if versioned {
 			ibs.SetVersionMap(state.NewVersionMap(nil))
-			ibs.SetNoMaterialize(true)
 			ibs.SetNoConflictDetection()
 			ibs.SetTxContext(0, 0)
 		}
@@ -162,7 +160,6 @@ func TestStateOverridesBalanceDecoding(t *testing.T) {
 func newVersionedCallState(reader state.StateReader) *state.IntraBlockState {
 	ibs := state.New(reader)
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	ibs.SetTxContext(0, 0)
 	return ibs
@@ -307,7 +304,6 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 			ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 			defer ibs.Close()
 			ibs.SetVersionMap(state.NewVersionMap(nil))
-			ibs.SetNoMaterialize(true)
 			ibs.SetNoConflictDetection()
 			ibs.SetTxContext(block, 0)
 			exists, err := ibs.Exist(addr)
@@ -333,7 +329,6 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 			ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 			defer ibs.Close()
 			ibs.SetVersionMap(state.NewVersionMap(nil))
-			ibs.SetNoMaterialize(true)
 			ibs.SetNoConflictDetection()
 			rules := &chain.Rules{IsSpuriousDragon: true}
 
