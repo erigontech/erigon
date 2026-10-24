@@ -1617,6 +1617,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 
+	pe.slotTxs = make(chan kv.TemporalTx, len(pe.execWorkers))
 	pe.execLoopGroup.Go(func() error {
 		pe.resetWorkers(pe.rs)
 		// Hand the reset worker contexts to the dispatcher as a semaphore. The buffer
@@ -1628,7 +1629,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		}
 		slots := len(pe.execWorkers)
 		pe.execSem = make(chan struct{}, slots)
-		pe.slotTxs = make(chan kv.TemporalTx, slots)
 		for range slots {
 			pe.execSem <- struct{}{}
 		}
