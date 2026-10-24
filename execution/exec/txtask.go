@@ -939,30 +939,47 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 }
 
 func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
-	q.lock.Lock()
-	has := q.retires.Len() > 0
-	if has { // means have conflicts to re-exec: it has higher priority than new tasks
-		task = heap.Pop(&q.retires).(Task)
+	// conflicts to re-exec have higher priority than new tasks
+	if task = q.popRetry(); task != nil {
+		return task, true
 	}
+	return q.popNew()
+}
+
+func (q *QueueWithRetry) popRetry() Task {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	if q.retires.Len() == 0 {
+		return nil
+	}
+	return heap.Pop(&q.retires).(Task)
+}
+
+// popNew gets a new task, non-blocking and without adding it to the queue.
+func (q *QueueWithRetry) popNew() (task Task, ok bool) {
+	q.lock.Lock()
 	newTasks := q.newTasks
 	q.lock.Unlock()
 
-	if has {
-		return task, task != nil
-	}
-
-	// otherwise get some new task. non-blocking way. without adding to queue.
-	for task == nil && len(newTasks) > 0 {
+	for len(newTasks) > 0 {
 		select {
 		case task, ok = <-newTasks:
 			if !ok {
 				return nil, false
 			}
+			// A nil is ReTry's wake-up: its task is on the heap, which
+			// popNoWait may have found empty just before ReTry pushed it.
+			if task == nil {
+				task = q.popRetry()
+			}
+			if task != nil {
+				return task, true
+			}
 		default:
 			return nil, false
 		}
 	}
-	return task, task != nil
+	return nil, false
 }
 
 // Close safe to call multiple times

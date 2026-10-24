@@ -285,3 +285,22 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 		})
 	}
 }
+
+// ReTry can land between popNoWait's heap check and its channel read. The
+// worker then receives ReTry's nil wake-up with the task already on the heap,
+// and must take it: nothing else wakes a worker parked in popWait, so a
+// retried task that is the last outstanding work would never run.
+func TestQueueWithRetryNilWakeTakesRetriedTask(t *testing.T) {
+	q := NewQueueWithRetry(8)
+	t.Cleanup(q.Release)
+	retried := &TxTask{TxNum: 1}
+
+	// popNoWait, with ReTry interleaved after its heap check.
+	require.Nil(t, q.popRetry())
+	q.ReTry(retried)
+	task, ok := q.popNew()
+
+	require.True(t, ok)
+	require.Same(t, retried, task)
+	require.Zero(t, q.RetriesLen())
+}
