@@ -295,6 +295,94 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 	}
 }
 
+func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	parent.GasLimit = 4 * 16_800
+	parentHash := parent.Hash()
+	for _, test := range []struct {
+		name                string
+		txCount             int
+		gasLimit            uint64
+		time                uint64
+		parentValidated     bool
+		wrongBlockHash      bool
+		blobHashes          []common.Hash
+		wantStatus          engine_types.EngineStatus
+		wantErr             string
+		wantLatestValidHash *common.Hash
+		wantBad             bool
+	}{
+		{name: "5 txs above the parent's gas limit", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "gas limit above the parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValidHash: &parentHash, wantBad: true},
+		{name: "time of the parent", txCount: 4, gasLimit: parent.GasLimit, time: 1000, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block: timestamp older than parent", wantLatestValidHash: &parentHash, wantBad: true},
+		{name: "gas limit above an unvalidated parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.AcceptedStatus},
+		{name: "gas limit above the parent's with a wrong block hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wrongBlockHash: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block hash"},
+		{name: "gas limit above the parent's with a wrong blob hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{{0x01}}, wantStatus: engine_types.InvalidStatus, wantErr: "mismatch blob hashes"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			to := common.Address{0x1}
+			txs := make(types.Transactions, test.txCount)
+			for i := range txs {
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
+			}
+			header := makeParentHeader(test.time)
+			header.ParentHash = parentHash
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = test.gasLimit
+			header.BaseFee.SetUint64(875_000_000) // the parent used no gas
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			cfg := preCancunChainConfig()
+			if test.blobHashes != nil {
+				cfg = prePragueChainConfig()
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+			if test.wrongBlockHash {
+				payload.BlockHash[0] ^= 0xff
+			}
+
+			stub := &stubExecutionModule{
+				getHeaderFunc:     getHeaderReturning(parentHash, parent),
+				currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
+				isValidatedFunc:   func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
+			}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			var status *engine_types.PayloadStatus
+			if test.blobHashes != nil {
+				status, err = srv.NewPayloadV3(t.Context(), payload, test.blobHashes, header.ParentBeaconBlockRoot)
+			} else {
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.wantStatus, status.Status)
+			if test.wantErr != "" {
+				require.EqualError(t, status.ValidationError.Error(), test.wantErr)
+			}
+			require.Equal(t, test.wantLatestValidHash, status.LatestValidHash)
+			bad, latestValidAncestor, _ := downloader.IsBadHeader(payload.BlockHash)
+			require.Equal(t, test.wantBad, bad)
+			if bad {
+				require.Equal(t, parentHash, latestValidAncestor)
+			}
+		})
+	}
+}
+
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
 	t.Parallel()
 
