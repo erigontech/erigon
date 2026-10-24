@@ -336,6 +336,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 	}
 
+	// A resumed dependency wait restarts here: the predecessor it waited on may have
+	// self-destructed the account, so the lifecycle check is redone too.
+reread:
 	var destructedVersion Version
 	if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
 		destructTxIndex := sdRes.DepIdx()
@@ -416,7 +419,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// heap alloc per non-storage read). On a miss it returns a pre-seeded (UnknownDep,
 	// -1) result, so res is always valid.
 	var res ReadResult
-reread:
 	switch path {
 	case AddressPath:
 		r.mapAddressVal, res, _ = s.versionMap.ReadAddress(addr, s.txIndex)
@@ -464,6 +466,7 @@ reread:
 						s.versionedReads.SetHeader(addr, path, key, hdr)
 						if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
 							s.wakeGen++
+							s.sdProbeEpoch++
 							goto reread
 						}
 						// Shutdown / no pause hook: fall through to the tx's own write.
@@ -572,6 +575,7 @@ reread:
 		// an Estimate and fall back to the in-flight value.
 		if s.waitCommit != nil && s.waitCommit(res.DepIdx()) {
 			s.wakeGen++
+			s.sdProbeEpoch++
 			goto reread
 		}
 		if res.DepIdx() > s.dep {
