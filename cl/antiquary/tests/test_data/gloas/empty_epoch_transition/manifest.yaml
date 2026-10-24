@@ -1,0 +1,6 @@
+preset: mainnet
+fork: gloas
+runner: sanity
+handler: blocks
+suite: pyspec_tests
+case: empty_epoch_transition
