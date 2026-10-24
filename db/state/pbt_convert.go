@@ -146,10 +146,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		baseTxNum := opts.Resume.BaseTxNum
 		baseFiles := opts.TargetAggregator.BeginFilesRo()
 		defer baseFiles.Close()
-		limitTxNum := baseTxNum
-		if opts.Resume.BaseStateEnd > limitTxNum {
-			limitTxNum = opts.Resume.BaseStateEnd
-		}
+		limitTxNum := max(baseTxNum, opts.Resume.BaseStateEnd)
 		commitmentReader := commitmentdb.StateReader(&pbinConversionResumeStateReader{at: baseFiles, baseTxNum: baseTxNum, limitTxNum: limitTxNum, stepSize: opts.TargetAggregator.StepSize()})
 		plainReader := commitmentdb.NewLatestStateReader(opts.TargetTx, domains, commitmentdb.LatestStateReaderOptions{})
 		if len(opts.Resume.BaseState) != 0 {
