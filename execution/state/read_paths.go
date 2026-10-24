@@ -513,6 +513,7 @@ reread:
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
 						Val:        true,
 					})
+					recordWipedCodeRead(s, addr, path, Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc})
 				}
 				r.outcome = outcomeReturnDefault
 				r.source = MapRead
@@ -651,6 +652,7 @@ reread:
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
+					recordWipedCodeRead(s, addr, path, sdVer)
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
@@ -1220,6 +1222,19 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 		return currentIncarnation, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshIncarnation: unexpected outcome %d for %x", r.outcome, addr))
+	}
+}
+
+// recordWipedCodeRead records an empty code / zero code-size read at the destruct that
+// wiped it. A re-create above the destruct writes code but no SelfDestruct cell, so only
+// this record lets that write invalidate the read.
+func recordWipedCodeRead(s *IntraBlockState, addr accounts.Address, path AccountPath, destructVer Version) {
+	hdr := ReadHeader{Source: MapRead, Version: destructVer}
+	switch path {
+	case CodePath:
+		s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
+	case CodeSizePath:
+		s.versionedReads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
 	}
 }
 
