@@ -21,7 +21,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -31,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -1864,4 +1867,35 @@ func TestParallelNextResultDropsUnmaterializedNetZeroWrite(t *testing.T) {
 		Coinbase: accounts.ZeroAddress,
 	}
 	require.NotPanics(t, func() { _, _ = be.nextResult(context.Background(), pe, rerun, roTx) })
+}
+
+// A newPayload block lives only in the block overlay until commit; the tracer
+// must still get its OnBlockStart.
+func TestOnBlockStartSeesOverlayBlock(t *testing.T) {
+	db := newResumeTestDB(t)
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+	logger := log.New()
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	doms, err := execctx.NewSharedDomains(t.Context(), roTx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+	require.NoError(t, doms.InitBlockOverlay(roTx))
+
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+	require.NoError(t, rawdb.WriteBlock(doms.BlockOverlay(), block))
+
+	var got *types.Block
+	te := &txExecutor{
+		cfg:     ExecuteBlockCfg{db: db, blockReader: br, chainConfig: chain.TestChainBerlinConfig},
+		doms:    doms,
+		applyTx: roTx,
+		logger:  logger,
+		hooks:   &tracing.Hooks{OnBlockStart: func(ev tracing.BlockEvent) { got = ev.Block }},
+	}
+	te.onBlockStart(t.Context(), 1, block.Hash())
+	require.NotNil(t, got)
+	require.Equal(t, block.Hash(), got.Hash())
 }
