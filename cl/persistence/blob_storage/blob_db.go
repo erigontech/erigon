@@ -61,6 +61,9 @@ func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
 }
 
 func (bs *BlobStore) deleteCountRows(roots []common.Hash) error {
+	if len(roots) == 0 {
+		return nil
+	}
 	return bs.db.Update(context.Background(), func(tx kv.RwTx) error {
 		for _, root := range roots {
 			if err := tx.Delete(kv.BlockRootToKzgCommitments, root[:]); err != nil {

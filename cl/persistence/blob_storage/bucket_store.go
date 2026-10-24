@@ -326,9 +326,6 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 }
 
 func (b *bucketStore) removeBucket(bucket uint64, name string) error {
-	l := b.forBucket(bucket)
-	l.Lock()
-	defer l.Unlock()
 	if b.dropRows != nil {
 		roots, err := b.bucketRoots(name)
 		if err != nil {
@@ -338,6 +335,9 @@ func (b *bucketStore) removeBucket(bucket uint64, name string) error {
 			return err
 		}
 	}
+	l := b.forBucket(bucket)
+	l.Lock()
+	defer l.Unlock()
 	return b.fs.RemoveAll(name)
 }
 
