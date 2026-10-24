@@ -59,7 +59,7 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 // once Amsterdam is active, cross-checks it against the header commitment. It
 // returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
 // path, where the header carries no BAL hash) can capture it.
-func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+func Process(tx kv.Getter, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
 		return nil, nil
 	}
