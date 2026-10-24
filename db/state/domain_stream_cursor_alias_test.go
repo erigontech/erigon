@@ -106,3 +106,36 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 		require.Equal(t, wantV[i], gotV[i], "val %d", i)
 	}
 }
+
+func TestDomainLatestIterFileKeepsEmptyFirstKey(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	rw := d.beginForTests()
+	w := rw.NewWriter(db)
+	require.NoError(t, w.PutWithPrev([]byte{}, []byte{0xaa}, 1, nil))
+	const n = 40
+	for i := uint64(2); i <= n; i++ {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], i)
+		require.NoError(t, w.PutWithPrev(k[:], k[:], i, nil))
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	rw.Close()
+	collateAndMerge(t, tx, d, n)
+
+	view := d.beginForTests()
+	defer view.Close()
+	it, err := view.DebugRangeLatestFromFiles(nil, nil, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	require.True(t, it.HasNext())
+	k, v, err := it.Next()
+	require.NoError(t, err)
+	require.Empty(t, k)
+	require.Equal(t, []byte{0xaa}, v)
+}
