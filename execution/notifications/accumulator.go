@@ -73,76 +73,21 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
 }
 
-// SetCanonicalChangeTxs makes the change for block `height` carry EXACTLY `txs` â the sealed body,
-// read from the same transaction the canonical hash comes from. Used by the FCU flush.
+// KeepOnlyCanonicalTxs clears the transaction list of every accumulated change whose block is not
+// the canonical one at its height. The change itself stays - pre-confirmation still publishes its
+// state deltas - but only Txs drives the txpool's removeMined, and a block that was not chosen
+// mined nothing.
 //
-// â  IT OVERWRITES, AND THE DIFFERENCE IS A DELETED TRANSACTION THAT NOTHING RE-SENDS.
-//
-// This used to be EnsureChangeTxs, which populated the change only when it was EMPTY and was
-// otherwise a no-op. But a change for that height is not usually empty: PRE-EXECUTION already
-// started it (exec3_serial/exec3_parallel call StartChange with the txs it executed), and what
-// execution ran is NOT what the block sealed with â a stopped round commits only
-// keptHashes[:stopped.Applied], and a cut transaction goes into the next round. So the change kept
-// the pre-executed set, the FORWARD state change published it, and the txpool's OnNewBlock took
-// every one of them as MINED.
-//
-// removeMined is then correct and fatal: on a canonical chain a mined nonce N implies every nonce
-// below it mined, so it deletes the sender's whole run at or below the highest nonce it was told
-// about. Measured on soak live433, with a per-nonce trace on the sponsor:
-//
-//	nonce 1700:  exec-filter-kept block=399 -> exec-committed block=399 -> pool-exit reason=3 (Mined)
-//	[sender-run] chainNext=1512 poolLowest=1733   <- pool deleted <=1732 with the chain at 1512
-//	[sender-run] chainNext=1640 poolLowest=1733   <- chain reaches 1639 and STOPS, for ever
-//
-// Nonce 1640 then existed nowhere, so the 6,434 transactions still held (1733..8166, contiguous)
-// could never be promoted: 3,684,920 execution offerings and 3,682,981 "future" rejections for
-// 8,400 admitted transactions, every round offering 128 and keeping 0.
-//
-// A transaction must leave the pool on IMPORT of the block that carries it, and ONLY for the
-// transactions that block actually carries. The canonical body is the authority; anything the
-// change already holds for this height is a pre-execution guess at it.
-func (a *Accumulator) SetCanonicalChangeTxs(height uint64, txs [][]byte) {
-	// ⚠ AN EMPTY BODY IS AN ANSWER, AND THIS USED TO RETURN EARLY ON IT. That early return is how the
-	// original defect survived its own fix: when the canonical body could not be read, or was
-	// genuinely empty, the change KEPT the pre-executed set and published it as canonical. Measured
-	// on soak live436, which drained 1200/2400/4800 in 60s each and then formed a fresh 87-wide hole
-	// at 9600: chainNext=12447 poolLowest=12534, 26,052 transactions stuck behind it.
-	//
-	// The two errors are not symmetric. Removing too LITTLE is self-correcting - the next block that
-	// names the sender cleans up, because removeMined deletes the whole run at or below it. Removing
-	// too MUCH is permanent: the nonce is gone from the pool, nothing re-sends it, and every later
-	// transaction from that sender is stranded behind the gap for ever. So when in doubt, remove
-	// nothing: clear the change rather than let a guess stand in for the body.
+// `canonical` reports the chosen hash at a height, and false when it cannot say. Cannot-say is
+// treated as not-canonical, because removing too little self-corrects on the next block while
+// removing too much strands a sender for ever.
+func (a *Accumulator) KeepOnlyCanonicalTxs(canonical func(height uint64) (common.Hash, bool)) {
 	for i := range a.changes {
-		if a.changes[i].BlockHeight != height {
+		if len(a.changes[i].Txs) == 0 {
 			continue
 		}
-		a.changes[i].Txs = make([][]byte, len(txs))
-		for j := range txs {
-			a.changes[i].Txs[j] = common.Copy(txs[j])
-		}
-	}
-}
-
-// ClearChangeTxsAbove drops the transaction list from every accumulated change ABOVE `height`,
-// leaving the changes themselves intact.
-//
-// ⚠ A CHANGE ABOVE THE CANONICAL HEAD IS A PREDICTION, AND SendAndReset PUBLISHES ALL OF THEM.
-// Pre-execution starts a change for every height it runs, and it runs AHEAD of what has been
-// forkchoice-updated. Reconciling only the FCU'd height therefore left every height above it
-// carrying the pre-executed set, which went out as a FORWARD state change and the txpool took as
-// MINED - removing each sender's whole run at or below it, permanently.
-//
-// Measured across three successive fixes on the same soak, the hole shrank and did not close:
-// frontGap 93 (no fix) -> 87 (canonical body authoritative) -> 34 (empty body clears the guess).
-// Each fix closed one path into the same defect; this closes the one that remained.
-//
-// Only the Txs list drives removeMined, so the state deltas are left alone: pre-confirmation still
-// publishes them, which is the whole point of running ahead. What a prediction may not do is
-// announce that something MINED.
-func (a *Accumulator) ClearChangeTxsAbove(height uint64) {
-	for i := range a.changes {
-		if a.changes[i].BlockHeight > height && len(a.changes[i].Txs) > 0 {
+		h, ok := canonical(a.changes[i].BlockHeight)
+		if !ok || h != a.changes[i].BlockHash {
 			a.changes[i].Txs = nil
 		}
 	}

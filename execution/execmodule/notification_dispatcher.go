@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -150,57 +149,30 @@ func (d *Dispatcher) Dispatch(
 		// executed, and what executed is not what sealed — a stopped round commits only the prefix it applied.
 		// The pre-executed set then went out as FORWARD and the txpool removed all of it as mined. See
 		// SetCanonicalChangeTxs for the measurement; it cost a soak the whole pool.
-		fcuHash, _ := rawdb.ReadCanonicalHash(tx, finishProgressAfter)
-		if fcuHash != (common.Hash{}) {
-			// ⚠ RECONCILE THE FCU'd HEIGHT WHETHER OR NOT A BODY CAME BACK. Guarding this on a non-empty
-			// body is how the pre-executed set survived: a body that cannot be read leaves the guess
-			// standing and it goes out as canonical. An unreadable body means we do not KNOW what mined,
-			// and the safe answer to that is to announce nothing mined - the next block that names the
-			// sender removes its run anyway. See SetCanonicalChangeTxs for why the errors are asymmetric.
-			var rawTxs [][]byte
-			if body, _ := rawdb.ReadBodyWithTransactions(tx, fcuHash, finishProgressAfter); body != nil && len(body.Transactions) > 0 {
-				if m, merr := types.MarshalTransactionsBinary(body.Transactions); merr == nil {
-					rawTxs = m
-				}
+		// ⚠ THE SET IS FIXED AT THE SEAL; ONLY THE CHOICE IS MADE HERE. A block's transactions are a
+		// property of that block and never change once it seals.
+		// What this moment decides is which block at each height was CHOSEN, which is a property of the
+		// chain. Everything else is a consequence of having conflated the two:
+		//
+		//   - pre-execution's guess was the default, and a stopped round commits only the prefix it
+		//     applied, so the guess routinely held transactions the block did not seal with;
+		//   - the content was then re-derived here by reading the body back out of the database, which
+		//     is a re-derivation of something already known and can come back EMPTY while the body is
+		//     still flushing - and when it did, the guess stood and the txpool deleted all of it;
+		//   - and only ONE height was reconciled, which is what you write having never seen an FCU
+		//     advance more than one block. Under load it advances several, and every other height in
+		//     the batch kept announcing a guess as mined.
+		//
+		// Now: no body is read, no height is special, and a block that was not chosen says nothing
+		// mined. A height whose canonical hash cannot be read is treated as not chosen, because
+		// removing too little self-corrects on the next block and removing too much strands a sender.
+		accumulator.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
+			h, err := rawdb.ReadCanonicalHash(tx, height)
+			if err != nil || h == (common.Hash{}) {
+				return common.Hash{}, false
 			}
-			has := false
-			for _, ch := range accumulator.Changes() {
-				if ch.BlockHeight == finishProgressAfter {
-					has = true
-					break
-				}
-			}
-			if has {
-				accumulator.SetCanonicalChangeTxs(finishProgressAfter, rawTxs)
-			} else if len(rawTxs) > 0 {
-				if fcuHeader := rawdb.ReadHeader(tx, fcuHash, finishProgressAfter); fcuHeader != nil {
-					accumulator.StartChange(fcuHeader, rawTxs, false)
-				}
-			}
-
-			// ⚠ AND EVERY OTHER CANONICAL HEIGHT IN THE BATCH, NOT JUST THE TOP ONE. An FCU can advance
-			// several blocks at once, and the accumulator then holds a change per height - each started by
-			// PRE-EXECUTION with the transactions it ran, which is not what those blocks sealed with.
-			// Reconciling only finishProgressAfter left the rest announcing a guess as mined, and the
-			// deeper the backlog the more heights an FCU covers: 1200/2400/4800 drain clean and 9600 still
-			// formed a 117-wide hole, which is exactly the shape of a per-FCU leak that grows with load.
-			for _, ch := range accumulator.Changes() {
-				h := ch.BlockHeight
-				if h >= finishProgressAfter || len(ch.Txs) == 0 {
-					continue
-				}
-				var body [][]byte
-				if hash, _ := rawdb.ReadCanonicalHash(tx, h); hash != (common.Hash{}) {
-					if b, _ := rawdb.ReadBodyWithTransactions(tx, hash, h); b != nil && len(b.Transactions) > 0 {
-						if m, merr := types.MarshalTransactionsBinary(b.Transactions); merr == nil {
-							body = m
-						}
-					}
-				}
-				// Same rule as above: an unreadable body announces nothing mined rather than a guess.
-				accumulator.SetCanonicalChangeTxs(h, body)
-			}
-		}
+			return h, true
+		})
 		// Genuinely empty flush (no change for the current head) — keep the empty backfill so consumers still
 		// see the head advance. Standard flow: exec already populated the change, so this is a no-op.
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
@@ -221,10 +193,6 @@ func (d *Dispatcher) Dispatch(
 
 		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
 
-		// ⚠ NOTHING ABOVE THE FCU'd HEIGHT MAY CLAIM TO HAVE MINED. SendAndReset publishes EVERY
-		// accumulated change, and pre-execution creates one per height it runs - ahead of this FCU. See
-		// ClearChangeTxsAbove: the state deltas still go out, only the mined-transaction claim does not.
-		accumulator.ClearChangeTxsAbove(finishProgressAfter)
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
