@@ -1826,6 +1826,9 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// releases this worker's slot, waits for that writer's task to commit,
 		// reacquires a slot, and retries the read against the final value.
 		tv.waitCommit = func(dep int) bool {
+			if !waitsOnDependency(tv.Task, int(tv.version.Incarnation)) {
+				return false
+			}
 			releaseSlot()
 			// dep is a versionMap TxIndex; translate to task-index frontier space.
 			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
@@ -2576,6 +2579,13 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 }
 
 // touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
+// waitsOnDependency reports whether a run parks on an in-flight read. A run before the
+// sender charge is redone after its predecessor commits, so it does not park.
+func waitsOnDependency(task exec.Task, incarnation int) bool {
+	txTask, ok := task.(*exec.TxTask)
+	return !ok || !txTask.ChargesSenderAtValidation(incarnation)
+}
+
 func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	sender, err := txTask.TxSender()
 	if err != nil {
