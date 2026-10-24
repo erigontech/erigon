@@ -432,6 +432,80 @@ func TestHistoryDownloadKeepsBackfillingBelowUnindexedLeadingSegment(t *testing.
 	require.False(t, finished, "slots below an unindexed leading segment must still be backfilled")
 }
 
+func historyDownloadFirstBlock(t *testing.T, sn *freezeblocks.CaplinSnapshots, slot uint64) (finished bool, beaconBlockRows uint64) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	t.Cleanup(db.Close)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = slot
+	var blockErr error
+	stop := errors.New("stop after the first block")
+	downloader := &firstBlockHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: stop}}
+	downloader.deliver = func(onNewBlock network.OnNewBlock) {
+		finished, blockErr = onNewBlock(block, nil)
+	}
+
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:          &cfg,
+		downloader:         downloader,
+		sn:                 sn,
+		waitForAllRoutines: true,
+		startingSlot:       2 * snaptype.CaplinMergeLimit,
+		indiciesDB:         db,
+		caplinConfig:       clparams.CaplinConfig{ArchiveBlocks: true},
+		logger:             log.New(),
+	}, t.Context(), log.New())
+	require.ErrorIs(t, err, stop)
+	require.NoError(t, blockErr)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		beaconBlockRows, err = tx.Count(kv.BeaconBlocks)
+		return err
+	}))
+	return finished, beaconBlockRows
+}
+
+func TestHistoryDownloadServesIndexedPrefixWhenIndexBuildFails(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	dirs := datadir.New(t.TempDir())
+	writeUnindexedBeaconBlocks(t, dirs, 0, limit)
+	writeUnindexedBeaconBlocks(t, dirs, limit, 2*limit)
+	indexed, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, limit))
+	require.True(t, ok)
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), indexed, 0, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, failingIndexBuilder)
+
+	finished, rows := historyDownloadFirstBlock(t, sn, limit/2)
+	require.Zero(t, rows, "a slot an indexed segment serves must not be written to the DB")
+	require.True(t, finished, "the archive backfill must stop at the indexed snapshot tip")
+}
+
+func TestHistoryDownloadBackfillsBelowAbsentLeadingRange(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	for _, tc := range []struct {
+		name     string
+		slot     uint64
+		wantRows uint64
+	}{
+		{"slot the indexed segment serves", limit, 0},
+		{"slot below the indexed segment", limit / 2, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			writeUnindexedBeaconBlocks(t, dirs, limit, 2*limit)
+			sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+
+			finished, rows := historyDownloadFirstBlock(t, sn, tc.slot)
+			require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
+			require.Equal(t, tc.wantRows, rows)
+			require.False(t, finished, "slots below a beaconblocks range absent from disk must still be backfilled")
+		})
+	}
+}
+
 func TestHistoryDownloadSkipsEngineWaitWithoutBlocksArchive(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
