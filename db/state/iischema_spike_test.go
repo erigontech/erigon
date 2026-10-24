@@ -1064,6 +1064,55 @@ func (prodSchema) unwind(tx kv.RwTx, keys [][]byte, txFrom uint64) error {
 	return nil
 }
 
+// ---- arm: production writer with the prefetcher, as loadIndex runs it ----
+
+var spikeDB kv.RoDB
+
+type prodPfSchema struct{ prodSchema }
+
+func (prodPfSchema) name() string { return "prodpf" }
+func (prodPfSchema) flush(tx kv.RwTx, keys [][]byte, vals [][]uint64) error {
+	c, err := tx.RwCursorDupSort(spikeTbl)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	ctx := context.Background()
+	p := newInvertedIndexPrefetcher(spikeDB, spikeTbl, 6)
+	if err := p.open(ctx); err != nil {
+		return err
+	}
+	defer p.close()
+	w := &iiChunkWriter{c: c}
+	pairs := make([][2][]byte, 0, 65536)
+	write := func() error {
+		if err := p.prefetch(ctx, pairs); err != nil {
+			return err
+		}
+		for _, pair := range pairs {
+			if err := w.add(pair[0], pair[1]); err != nil {
+				return err
+			}
+		}
+		pairs = pairs[:0]
+		return nil
+	}
+	for i, k := range keys {
+		for _, v := range vals[i] {
+			pairs = append(pairs, [2][]byte{k, binary.BigEndian.AppendUint64(nil, v)})
+			if len(pairs) == 65536 {
+				if err := write(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := write(); err != nil {
+		return err
+	}
+	return w.flush()
+}
+
 // ---- driver ----
 
 func spikeBatches(sd *spikeData, pairs []spikePair) ([][]byte, [][]uint64) {
@@ -1127,6 +1176,7 @@ func TestIISchemaSpike(t *testing.T) {
 		func() spikeSchema { return &dupChunkSchema{limit: 512} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512} },
 		func() spikeSchema { return prodSchema{} },
+		func() spikeSchema { return prodPfSchema{} },
 		func() spikeSchema { return &chunkSchema{codec: varintCodec{}, limit: 1024} },
 	}
 	if f := os.Getenv("II_SPIKE_ARMS"); f != "" {
@@ -1147,6 +1197,7 @@ func TestIISchemaSpike(t *testing.T) {
 		dir := t.TempDir()
 		db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dir).MapSize(64 * datasize.GB).DirtySpace(uint64(256 * datasize.MB)).
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: s.flags()}} }).MustOpen()
+		spikeDB = db
 		ctx := t.Context()
 
 		// bulk: [first, tipFrom) in 200k-txNum flushes
