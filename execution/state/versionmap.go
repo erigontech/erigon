@@ -1659,6 +1659,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			return VersionValid
 		}
 	}
+	if !recursive && source == MapRead && (path == CodePath || path == CodeSizePath) {
+		// A wiped code read is recorded at an in-block destruct, which a later revival
+		// may hide from the latest SelfDestruct cell; only a code write above it ends it.
+		if sdVer, ok := vm.selfDestructInRange(addr, version.TxIndex, version.TxIndex+1, true); ok && sdVer == version {
+			if hi, ok := vm.LatestTxIndex(addr, path, key, txIndex-1); ok && hi > version.TxIndex {
+				return VersionInvalid
+			}
+			return VersionValid
+		}
+	}
 	valid := VersionValid
 	switch rr.Status() {
 	case MVReadResultDone, MVReadResultValidated:
