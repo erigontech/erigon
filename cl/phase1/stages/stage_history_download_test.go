@@ -605,9 +605,22 @@ func TestHistoryDownloadServesRangeIndexedAfterEngineReady(t *testing.T) {
 }
 
 func TestHistoryDownloadSkipsEngineWaitWithoutBlocksArchive(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeUnindexedBeaconBlocks(t, dirs, 0, snaptype.CaplinMergeLimit)
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	var builds atomic.Int32
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(context.Context, snaptype.FileInfo, uint32, *chain.Config, string, *background.Progress, log.Lvl, log.Logger) error {
+		builds.Add(1)
+		return errors.New("no space left in tmpdir")
+	}))
+	var readyCalls atomic.Int32
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
-	engine.EXPECT().Ready(gomock.Any()).Return(false, nil).AnyTimes()
+	engine.EXPECT().Ready(gomock.Any()).DoAndReturn(func(context.Context) (bool, error) {
+		readyCalls.Add(1)
+		return true, nil
+	}).AnyTimes()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
@@ -615,6 +628,7 @@ func TestHistoryDownloadSkipsEngineWaitWithoutBlocksArchive(t *testing.T) {
 	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
 		beaconCfg:          &clparams.MainnetBeaconConfig,
 		downloader:         downloader,
+		sn:                 sn,
 		engine:             engine,
 		waitForAllRoutines: true,
 		startingSlot:       1,
@@ -622,6 +636,7 @@ func TestHistoryDownloadSkipsEngineWaitWithoutBlocksArchive(t *testing.T) {
 	}, ctx, log.New())
 	require.Equal(t, 1, downloader.requests, "a node that archives no blocks must not wait for the engine")
 	require.NoError(t, err)
+	require.Never(t, func() bool { return readyCalls.Load() > 0 || builds.Load() > 0 }, time.Second, 10*time.Millisecond, "a node that archives no blocks must neither poll the engine nor build caplin indexes")
 }
 
 func TestWaitForHistoryCompletion(t *testing.T) {
