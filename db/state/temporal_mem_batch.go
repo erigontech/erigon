@@ -66,7 +66,10 @@ type TemporalMemBatch struct {
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
-	domainWriters   [kv.DomainLen]*DomainBufferedWriter
+	domainWriters [kv.DomainLen]*DomainBufferedWriter
+	// mergedAway is set on the SOURCE of a Merge. Merge hands this batch's writers to the
+	// destination and nils every one of its own slots, so a write afterwards is a use-after-free.
+	mergedAway      atomic.Bool
 	iiWriters       []*InvertedIndexBufferedWriter
 	forkableWriters map[kv.ForkableId]kv.BufferedWriter
 
@@ -133,20 +136,65 @@ func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads 
 func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
+	// CHECKED BEFORE ANYTHING IS MUTATED. putLatest would otherwise write the in-memory latest value
+	// of a batch that is already dead, and only then fail.
+	if err := sd.writableFor(domain); err != nil {
+		return err
+	}
 	sd.putLatest(domain, k, v, txNum)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
+	if err := sd.writableFor(domain); err != nil {
+		return err
+	}
 	sd.putLatest(domain, k, nil, txNum)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval)
 }
 
-func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte) error {
-	if len(v) == 0 {
-		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval)
+// writableFor refuses a write to a domain this batch has no writer for.
+//
+// ⚠ IT USED TO DEREFERENCE NOTHING AND KILL THE NODE, on every 9,600-order soak pass:
+//
+//	DomainBufferedWriter.PutWithPrev -> putHistory -> DomainPut -> SharedDomains.domainPut
+//	-> flushPendingUpdates -> preExecuteLocked -> PreExecuteFlashblock -> driver.execRound
+//
+// Merge nils ALL SIX of the source batch's writers at once — measured: accounts, storage, code,
+// commitment, receipt and rcache all warned in the same millisecond — so this is a pre-exec round
+// still writing to a batch whose writers were handed to another batch.
+//
+// Skipping the write would silently drop real STATE, which is worse than crashing. Failing it
+// stops the round, which the driver already handles, and says why.
+func (sd *TemporalMemBatch) writableFor(domain kv.Domain) error {
+	if sd.domainWriters[domain] != nil {
+		return nil
 	}
-	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval)
+	return fmt.Errorf("temporal mem batch: no writer for domain %s (mergedAway=%v): a write reached a batch whose writers were handed to another batch by Merge",
+		domain, sd.mergedAway.Load())
+}
+
+func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte) error {
+	// ⚠ FAIL THE WRITE, DO NOT DEREFERENCE NOTHING, AND DO NOT SKIP IT EITHER. A nil writer here
+	// killed the node outright on every 9,600-order soak pass:
+	//
+	//	DomainBufferedWriter.PutWithPrev -> putHistory -> DomainPut -> SharedDomains.domainPut
+	//	-> flushPendingUpdates -> preExecuteLocked -> PreExecuteFlashblock -> driver.execRound
+	//
+	// Merge nils ALL SIX of the source batch's writers at once (measured: accounts, storage, code,
+	// commitment, receipt and rcache all warned in the same millisecond), so this is a pre-exec
+	// round still writing to a batch whose writers have been handed away.
+	//
+	// Skipping would silently drop real STATE, which is worse than crashing. Returning an error
+	// fails the round, which the driver already handles, and names why.
+	w := sd.domainWriters[domain]
+	if w == nil {
+		return sd.writableFor(domain)
+	}
+	if len(v) == 0 {
+		return w.DeleteWithPrev(k, txNum, preval)
+	}
+	return w.PutWithPrev(k, v, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
@@ -752,6 +800,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 		other.domainWriters[domain] = nil
 		other.pastDomainWriters[domain] = nil
 	}
+	// Anything that writes to `other` from here on is writing to a batch with no writers.
+	other.mergedAway.Store(true)
 
 	sd.pastIIWriters = append(sd.pastIIWriters, other.iiWriters...)
 	other.iiWriters = nil

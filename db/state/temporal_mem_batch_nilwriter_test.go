@@ -1,6 +1,11 @@
 package state
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/erigontech/erigon/db/kv"
+)
 
 // A MISSING DOMAIN WRITER MUST NOT KILL THE NODE, AND MUST NOT BE SILENT.
 //
@@ -26,5 +31,30 @@ func TestSetChangesetAccumulatorSurvivesAMissingWriterAndCountsIt(t *testing.T) 
 	if moved == 0 {
 		t.Fatal("a missing writer was skipped WITHOUT being counted — the stopgap is silent, " +
 			"which is the thing it exists not to be")
+	}
+}
+
+// A write that lands on a batch Merge has already emptied must FAIL, not crash and not vanish.
+//
+// Merge hands the source batch's writers to the destination and nils every one of its own slots.
+// A pre-exec round still running against that batch then dereferenced nothing and killed the node
+// on every 9,600-order soak pass. Skipping the write instead would silently drop real state, so
+// the only safe answer is an error the round can fail on.
+func TestAWriteAfterMergeFailsInsteadOfCrashing(t *testing.T) {
+	sd := &TemporalMemBatch{}
+	// Exactly the state Merge leaves behind: every domain writer nil.
+	sd.mergedAway.Store(true)
+
+	err := sd.DomainPut(kv.AccountsDomain, "k", []byte("v"), 1, nil)
+	if err == nil {
+		t.Fatal("a write to a merged-away batch returned no error — it used to panic instead")
+	}
+	if !strings.Contains(err.Error(), "mergedAway=true") {
+		t.Errorf("the error does not say the batch was merged away: %v", err)
+	}
+
+	// A delete takes the same path and must behave the same way.
+	if err := sd.DomainDel(kv.AccountsDomain, "k", 1, nil); err == nil {
+		t.Fatal("a delete to a merged-away batch returned no error")
 	}
 }
