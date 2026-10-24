@@ -1912,6 +1912,47 @@ func TestCalcFees_SameTxDestroyedCoinbase_EmitsRemoval(t *testing.T) {
 	}
 }
 
+// The tx creates and destroys the burnt-fee recipient. Serial credits the base fee to
+// the destroyed account and removes it with it, so the fee must not revive it.
+func TestCalcFees_SameTxDestroyedBurntContract_StaysRemoved(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true, IsLondon: true}
+	coinbase, burnt := fAddr("coinbase"), fAddr("burnt")
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+	version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+	txTask := &exec.TxTask{
+		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+		Config:          chain.TestChainBerlinConfig,
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task: task,
+		ExecutionResult: evmtypes.ExecutionResult{
+			FeeBurnt:             *uint256.NewInt(1_000),
+			BurntContractAddress: burnt,
+		},
+		Coinbase: coinbase,
+	}}
+
+	vm := state.NewVersionMap(nil)
+	worker := state.NewWithVersionMap(state.NewNoopReader(), vm)
+	worker.SetTxContext(1, 1)
+	require.NoError(t, worker.CreateAccount(burnt, true))
+	require.NoError(t, worker.AddBalance(burnt, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
+	_, err := worker.Selfdestruct(burnt, rules.IsAmsterdam)
+	require.NoError(t, err)
+	result.TxOut = finalizedWrites(t, worker, rules)
+
+	writes, err := result.calcFees(task, vm, newMapStateReader(), rules)
+	require.NoError(t, err)
+	require.Nil(t, findAddress(writes, burnt), "the base fee revives the destroyed burnt contract")
+	if bw := findBalance(writes, burnt); bw != nil {
+		require.True(t, bw.Val.IsZero(), "the base fee is credited to the destroyed burnt contract")
+	}
+}
+
 // The worker's EIP-161 removal of an empty codeless coinbase stands only without a tip:
 // serial credits the tip before the tx's empty-account sweep, so a tip keeps the account.
 func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {

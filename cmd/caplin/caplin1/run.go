@@ -512,7 +512,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters, gossipManager)
 	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters, batchSignatureVerifier)
 	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
@@ -663,6 +663,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			proposerPreferencesService,
 		)
 		apiHandler.StartPayloadPreparation(ctx)
+		apiHandler.StartPayloadAttributes(ctx)
 		go func() {
 			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
 				ArchiveApi: apiHandler,

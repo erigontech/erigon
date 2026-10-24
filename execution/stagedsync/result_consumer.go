@@ -17,10 +17,8 @@ type resultSink struct {
 // calculator's channel closes before the apply loop's, or the trailing
 // commitment write lands on a closed channel.
 //
-// publish, sendControl and close all run on the single exec-loop goroutine (close
-// is its deferred closeApplyChannels; the sends come from the exec loop and
-// processSingleResult), so a send after close or a double close cannot happen and
-// needs no recover — if one ever did it would be a bug worth the panic.
+// publish, sendControl and close all run on the exec-loop goroutine, so a send
+// after close or a double close cannot happen and needs no recover.
 type resultStream struct {
 	sinks []*resultSink
 }

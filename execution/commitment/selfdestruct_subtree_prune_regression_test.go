@@ -630,6 +630,61 @@ func TestSelfDestructTrieReset_SameBlockRecreate_NextBlock_Parallel(t *testing.T
 	require.Equal(t, want, got)
 }
 
+// The default trie defers branch writes, so the SD reset's tombstone and the rebuilt
+// branch at the same prefix are both queued in one Process; the next block must read
+// the rebuilt one.
+func TestSelfDestructTrieReset_SameBlockRecreate_NextBlock_Seq(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const nOld = 1500
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 7777).Nonce(a, 9)
+		for s := 5000; s < 6600; s++ {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+		}
+	}
+	next := func(ub *UpdateBuilder) {
+		for s := 5000; s < 6600; s += 7 {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "dd")
+		}
+	}
+
+	ms := NewMockState(t)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for s := range nOld {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := seqUpdateBatch(t, ms, k1, u1, nil, "")
+	clean := NewUpdateBuilder()
+	for s := range nOld {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	_, blob = seqUpdateBatch(t, ms, k2, u2, blob, a)
+	b3 := NewUpdateBuilder()
+	next(b3)
+	k3, u3 := b3.Build()
+	got, _ := seqUpdateBatch(t, ms, k3, u3, blob, "")
+
+	oms := NewMockState(t)
+	ob := NewUpdateBuilder().Balance(sib, 500)
+	recreate(ob)
+	ok, ou := ob.Build()
+	_, oblob := seqUpdateBatch(t, oms, ok, ou, nil, "")
+	o3 := NewUpdateBuilder()
+	next(o3)
+	ok3, ou3 := o3.Build()
+	want, _ := seqUpdateBatch(t, oms, ok3, ou3, oblob, "")
+
+	require.Equal(t, want, got)
+}
+
 // When every slot hash shares a leading nibble the storage root is an extension and
 // the first branch sits at hashedKey+extension. The SD reset must still tombstone it
 // with its real prev, and a recreate that rebuilds a branch there must keep that

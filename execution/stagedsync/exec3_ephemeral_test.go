@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -124,6 +123,8 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	cfg := StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB,
 		chainspec.Mainnet.Config, engine, &vm.Config{}, nil, false, false,
 		dirs, br, chainspec.Mainnet.Genesis, syncCfg, false, nil)
+	// The witness carries a flat post-state, no commitment trie: run exec-only.
+	cfg.discardCommitment = true
 
 	num := block.NumberU64()
 	inputTxNum := ephemeralSeedTxNum + 1
@@ -189,7 +190,6 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 func BenchmarkEphemeralParallelReplay(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-	defer dbg.OverrideDiscardCommitment(true)() // the witness carries no commitment trie
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
@@ -219,7 +219,6 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-	defer dbg.OverrideDiscardCommitment(true)() // the witness carries no commitment trie
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 

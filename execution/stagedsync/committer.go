@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 )
 
@@ -86,6 +87,9 @@ type commitmentCalculator struct {
 	// updates to the compute for it to drain, and rotates this one in; the compute
 	// drains synchronously, so by the next rotation the handed-off buffer is idle.
 	spare *commitment.Updates
+
+	prefetch *commitment.Warmuper
+	balBlock bool
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// to avoid reallocating a fresh prefix-trie arena each block.
@@ -224,7 +228,7 @@ func newCommitmentCalculator(
 	// Single asOfStateReader shared by calcState (lazy-load) and compute methods.
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0, dr: drTemplate.CloneWithTx(roTx)}
 
-	return &commitmentCalculator{
+	cc := &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,
 		chainConfig:          chainConfig,
@@ -246,7 +250,15 @@ func newCommitmentCalculator(
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
-	}, nil
+	}
+	if dbg.BALCommitmentWarmupReaders() > 0 {
+		cc.state.prefetch = func(plainKey []byte) {
+			if !cc.balBlock {
+				cc.prefetchKey(workCtx, plainKey)
+			}
+		}
+	}
+	return cc, nil
 }
 
 func (cc *commitmentCalculator) Start(ctx context.Context) {
@@ -258,6 +270,9 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	if cc.prefetch != nil {
+		cc.prefetch.CloseAndWait()
+	}
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
@@ -354,6 +369,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// it only affects the lazy-load path, never the trie fold.
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
+			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.state.ApplyWrites(r.writes)
 		}
 
@@ -632,6 +648,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // compute(). Used by BAL compute-ahead, which supplies its own balState-derived
 // updates rather than cc.state.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
+	cc.finishPrefetch()
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
@@ -657,6 +674,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	// recompute keeps a spurious leaf the BAL-driven root dropped.
 	emptyRemoval := r.BlockNum != 0 && cc.chainConfig.IsEIP161Enabled(r.BlockNum)
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	cc.finishPrefetch()
 	cc.state.flushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 	incUpdates := cc.handOffUpdates()
@@ -727,6 +745,22 @@ type computeMode struct {
 // handOffUpdates returns the filled buffer for the caller to compute against and
 // rotates the spare into cc.updates. The compute drains the returned buffer
 // synchronously, so it is idle again by the next rotation.
+func (cc *commitmentCalculator) prefetchKey(ctx context.Context, plainKey []byte) {
+	if cc.prefetch == nil {
+		cc.prefetch = exec.StartBranchPrefetch(ctx, cc.db, dbg.TrieBALWarmupers)
+	}
+	cc.prefetch.WarmKey(commitment.KeyToHexNibbleHash(plainKey), 0, 0)
+}
+
+func (cc *commitmentCalculator) finishPrefetch() {
+	if cc.prefetch == nil {
+		return
+	}
+	_ = cc.prefetch.WaitBufferFree(0)
+	cc.prefetch.CloseAndWait()
+	cc.prefetch = nil
+}
+
 func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 	filled := cc.updates
 	cc.updates, cc.spare = cc.spare, filled
@@ -749,6 +783,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// empty→removal here.
 	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	cc.finishPrefetch()
 	cc.state.flushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()

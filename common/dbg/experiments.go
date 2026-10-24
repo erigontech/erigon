@@ -208,16 +208,7 @@ func MemUsage() (alloc, sys uint64) {
 	return s[0].Value.Uint64(), s[1].Value.Uint64()
 }
 
-func DiscardCommitment() bool { return discardCommitment }
-
-// OverrideDiscardCommitment sets DiscardCommitment for a test and returns a restore
-// func; discardCommitment is otherwise read once from the env at init. Test-only.
-func OverrideDiscardCommitment(v bool) (restore func()) {
-	prev := discardCommitment
-	discardCommitment = v
-	return func() { discardCommitment = prev }
-}
-
+func DiscardCommitment() bool       { return discardCommitment }
 func NoPrune() bool                 { return noPrune }
 func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }
