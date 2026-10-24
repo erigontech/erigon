@@ -177,6 +177,29 @@ func (d *Dispatcher) Dispatch(
 					accumulator.StartChange(fcuHeader, rawTxs, false)
 				}
 			}
+
+			// ⚠ AND EVERY OTHER CANONICAL HEIGHT IN THE BATCH, NOT JUST THE TOP ONE. An FCU can advance
+			// several blocks at once, and the accumulator then holds a change per height - each started by
+			// PRE-EXECUTION with the transactions it ran, which is not what those blocks sealed with.
+			// Reconciling only finishProgressAfter left the rest announcing a guess as mined, and the
+			// deeper the backlog the more heights an FCU covers: 1200/2400/4800 drain clean and 9600 still
+			// formed a 117-wide hole, which is exactly the shape of a per-FCU leak that grows with load.
+			for _, ch := range accumulator.Changes() {
+				h := ch.BlockHeight
+				if h >= finishProgressAfter || len(ch.Txs) == 0 {
+					continue
+				}
+				var body [][]byte
+				if hash, _ := rawdb.ReadCanonicalHash(tx, h); hash != (common.Hash{}) {
+					if b, _ := rawdb.ReadBodyWithTransactions(tx, hash, h); b != nil && len(b.Transactions) > 0 {
+						if m, merr := types.MarshalTransactionsBinary(b.Transactions); merr == nil {
+							body = m
+						}
+					}
+				}
+				// Same rule as above: an unreadable body announces nothing mined rather than a guess.
+				accumulator.SetCanonicalChangeTxs(h, body)
+			}
 		}
 		// Genuinely empty flush (no change for the current head) — keep the empty backfill so consumers still
 		// see the head advance. Standard flow: exec already populated the change, so this is a no-op.
