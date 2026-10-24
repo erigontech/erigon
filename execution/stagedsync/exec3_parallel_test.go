@@ -1824,3 +1824,44 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	assert.ErrorContains(err, "missing finalized receipt for tx 1")
 	assert.Nil(res)
 }
+
+// On a BAL block a net-zero storage write is never materialized in the
+// versionMap, so a re-execution that drops it must not panic in nextResult.
+func TestParallelNextResultDropsUnmaterializedNetZeroWrite(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+
+	other := accounts.InternAddress([20]byte{0xaa})
+	guard := accounts.InternAddress([20]byte{0xbb})
+	slot := accounts.InternKey(common.Hash{0x01})
+	bal := types.BlockAccessList{{
+		Address:        other.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}},
+	}}
+
+	txs := []types.Transaction{signedTx, signedTx}
+	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
+	pending := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
+	pe, roTx := newResumeTestExec(t, db, config)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil)
+	be.tasks = []*execTask{eTask, pending}
+	be.results = []*execResult{nil, nil}
+	be.execTasks.setInProgress(0)
+	be.execTasks.setInProgress(1)
+
+	netZero := &state.WriteSet{}
+	netZero.SetStorage(guard, slot, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: guard, Path: state.StoragePath, Key: slot, Version: state.Version{BlockNum: 1, TxIndex: 0}},
+		Val:         *uint256.NewInt(1),
+	})
+	be.blockIO.RecordWrites(state.Version{BlockNum: 1, TxIndex: 0}, netZero)
+
+	rerun := &exec.TxResult{
+		Task:     &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}},
+		TxOut:    &state.WriteSet{},
+		Coinbase: accounts.ZeroAddress,
+	}
+	require.NotPanics(t, func() { _, _ = be.nextResult(context.Background(), pe, rerun, roTx) })
+}
