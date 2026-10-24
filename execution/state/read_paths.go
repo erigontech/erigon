@@ -340,7 +340,14 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// self-destructed the account, so the lifecycle check is redone too.
 reread:
 	var destructedVersion Version
-	if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
+	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
+	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
+	if ok && sdRes.Status() == MVReadResultDependency && s.waitCommit != nil && s.waitCommit(sdRes.DepIdx()) {
+		s.wakeGen++
+		s.sdProbeEpoch++
+		goto reread
+	}
+	if ok && sdRes.resolved() && destructed {
 		destructTxIndex := sdRes.DepIdx()
 		// A tx always observes its own same-tx write, even after a prior tx's self-destruct.
 		if !commited {
