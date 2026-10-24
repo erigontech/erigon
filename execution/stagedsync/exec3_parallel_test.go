@@ -2419,3 +2419,33 @@ func TestProcessRequestSetsEIP8246FromBlockTime(t *testing.T) {
 		require.Equal(t, tc.want, vm.ValidateVersion(1, io, equalVersion, true, false, false, ""), "block time %d", tc.time)
 	}
 }
+
+// Each block is counted once, when its duration is recorded; counting it again
+// at scheduling time halved the average block duration (bdur, exec_block_dur).
+func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
+	t.Run("processRequest", func(t *testing.T) {
+		config := chain.AllProtocolChanges
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.in = exec.NewQueueWithRetry(16)
+		pe.blockExecMetrics = newBlockExecMetrics()
+		header := &types.Header{Number: *uint256.NewInt(1)}
+		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		be := pe.blockExecutors[1]
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+	t.Run("scheduleNextPending", func(t *testing.T) {
+		be := newBlockExec(newParallelTestBlock(1), nil, nil, nil, nil, false, nil)
+		pe := &parallelExecutor{
+			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
+			blockExecutors: map[uint64]*blockExecutor{1: be},
+			in:             exec.NewQueueWithRetry(16),
+		}
+		pe.scheduleNextPending(t.Context())
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+}
