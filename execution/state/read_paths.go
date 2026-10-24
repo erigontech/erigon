@@ -756,7 +756,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// revival) is keccak(''), not the nil hash of a nonexistent account.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if s.versionMap.fieldMissHook != nil {
+				s.versionMap.fieldMissHook()
+			}
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, 0, s.txIndex, true); ok {
+				// The destruct may have been flushed after the field probe
+				// above, together with a field cell it keeps.
+				if s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+					versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+					return
+				}
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
@@ -830,6 +839,12 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.outcome = outcomeReturnDefault
 				r.source = accSource
 				r.version = UnknownVersion
+				return
+			}
+			// The record may have been flushed after the field probe above,
+			// together with a field cell that supersedes the record's field.
+			if accSource == MapRead && s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+				versionedReadCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
 			if readAccount != nil {

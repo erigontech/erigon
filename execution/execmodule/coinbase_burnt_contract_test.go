@@ -33,21 +33,25 @@ import (
 )
 
 func TestImportCoinbaseIsBurntContractWithSelfdestruct(t *testing.T) {
-	testImportCoinbaseIsBurntContract(t, true)
+	t.Run("pre_amsterdam", func(t *testing.T) { testImportCoinbaseIsBurntContract(t, false, true) })
+	t.Run("amsterdam", func(t *testing.T) { testImportCoinbaseIsBurntContract(t, true, true) })
 }
 
 func TestImportCoinbaseIsBurntContract(t *testing.T) {
-	testImportCoinbaseIsBurntContract(t, false)
+	t.Run("pre_amsterdam", func(t *testing.T) { testImportCoinbaseIsBurntContract(t, false, false) })
+	t.Run("amsterdam", func(t *testing.T) { testImportCoinbaseIsBurntContract(t, true, false) })
 }
 
-func testImportCoinbaseIsBurntContract(t *testing.T, selfdestruct bool) {
+func testImportCoinbaseIsBurntContract(t *testing.T, amsterdam, selfdestruct bool) {
 	t.Helper()
 
 	config := chain.AllProtocolChanges.Copy()
-	config.CancunTime = nil
-	config.PragueTime = nil
-	config.OsakaTime = nil
-	config.AmsterdamTime = nil
+	if !amsterdam {
+		config.CancunTime = nil
+		config.PragueTime = nil
+		config.OsakaTime = nil
+		config.AmsterdamTime = nil
+	}
 
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
