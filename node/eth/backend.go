@@ -1112,6 +1112,11 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
 		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
 		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
+		modules, err := mcpClient.SupportedModules()
+		if err != nil {
+			return err
+		}
+		s.mcpRPC.KeepNamespaces(modules)
 		s.bgComponentsEg.Go(func() error {
 			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
 			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
