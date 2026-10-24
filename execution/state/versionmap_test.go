@@ -474,7 +474,13 @@ func TestReadTimeSameLocation(t *testing.T) {
 // TestValidateRead_StoragePath_ValueTiebreaker verifies that when a StoragePath
 // read was from storage (source=StorageRead) but the versionMap now has a Done
 // entry with the SAME value, validation considers it valid (value tiebreaker).
-func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
+// TestValidateRead_StoragePath_NoOpCellDoesNotInvalidate pins that a cold storage read
+// shadowed by a later Done cell stays valid iff that cell is a net-zero (ValueUnchanged)
+// write — the live value still equals the committed origin the read saw. Validation is
+// version+valStatus with no live-value comparison: the write side stamps ValueUnchanged
+// for a same-value re-publication, so a correctly-written map needs no read-side tiebreak.
+// A real (ValueChanged) write under the same version invalidates the stale read.
+func TestValidateRead_StoragePath_NoOpCellDoesNotInvalidate(t *testing.T) {
 	t.Parallel()
 
 	addr := getAddress(42)
@@ -488,13 +494,7 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 		return VersionInvalid
 	}
 
-	vm := NewVersionMap(nil)
-
-	// TX 5 wrote storage value 100 to the versionMap.
-	writeFor(vm, addr, StoragePath, storageKey, Version{TxIndex: 5, Incarnation: 1}, storageVal, true)
-
-	// TX 10 originally read from storage (no versionMap entry at execution
-	// time) and got value 100 — the same value TX 5 later wrote.
+	// TX 10 cold-read storage value 100 (the committed origin) with no versionMap entry.
 	io := NewVersionedIO(10)
 	rs := ReadSet{}
 	rs.SetStorage(addr, storageKey, VersionedRead[uint256.Int]{
@@ -503,17 +503,29 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 	})
 	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
 
-	valid := vm.ValidateVersion(10, io, checkVersionEqual, false, "")
-	require.Equal(t, VersionValid, valid,
-		"StoragePath read with matching value should be valid via tiebreaker")
+	// TX 5 re-published the same value 100 — net-zero vs origin, stamped ValueUnchanged.
+	// The cold read still matches the live value, so it stays valid.
+	vmUnchanged := NewVersionMap(nil)
+	wsUnchanged := &WriteSet{}
+	wsUnchanged.SetStorage(addr, storageKey, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: storageKey, Version: Version{TxIndex: 5, Incarnation: 1}, valStatus: ValueUnchanged},
+		Val:         storageVal,
+	})
+	vmUnchanged.FlushVersionedWrites(wsUnchanged, true, "")
+	require.Equal(t, VersionValid, vmUnchanged.ValidateVersion(10, io, checkVersionEqual, false, ""),
+		"a ValueUnchanged shadowing cell leaves the cold read's origin value live")
 
-	// Now test with a DIFFERENT value — should be invalid.
-	vm2 := NewVersionMap(nil)
-	writeFor(vm2, addr, StoragePath, storageKey, Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(999), true)
-
-	valid2 := vm2.ValidateVersion(10, io, checkVersionEqual, false, "")
-	require.Equal(t, VersionInvalid, valid2,
-		"StoragePath read with different value should be invalid")
+	// TX 5 wrote a different value 999 — a real change (ValueChanged). The cold read of
+	// 100 is now stale and must invalidate.
+	vmChanged := NewVersionMap(nil)
+	wsChanged := &WriteSet{}
+	wsChanged.SetStorage(addr, storageKey, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: storageKey, Version: Version{TxIndex: 5, Incarnation: 1}, valStatus: ValueChanged},
+		Val:         *uint256.NewInt(999),
+	})
+	vmChanged.FlushVersionedWrites(wsChanged, true, "")
+	require.Equal(t, VersionInvalid, vmChanged.ValidateVersion(10, io, checkVersionEqual, false, ""),
+		"a ValueChanged shadowing cell invalidates the stale cold read")
 }
 
 // TestOneValuePerVersion_WriteSideForbidsValueChange proves the invariant that lets
