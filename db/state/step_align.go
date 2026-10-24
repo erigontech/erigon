@@ -26,6 +26,9 @@ import (
 )
 
 func (a *Aggregator) StepAlignedEnd(stepSize uint64) (end, stoppedEnd uint64, err error) {
+	if a.CommitmentDomainStopped(kv.CommitmentDomain) {
+		return 0, 0, fmt.Errorf("%s domain is stopped, its files cannot be merged apart from accounts and storage", kv.CommitmentDomain)
+	}
 	at := a.BeginFilesRo()
 	defer at.Close()
 	return at.stepAlignedEnd(stepSize, a.stoppedCommitmentDomains())
@@ -114,7 +117,7 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64, stopped []kv.Domain) (
 	if end, err = stepAlignedListsEnd(at.stepAlignedFileLists(stopped, false), stepSize, math.MaxUint64); err != nil {
 		return 0, 0, err
 	}
-	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled && !slices.Contains(stopped, kv.CommitmentDomain) {
+	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
 				return 0, 0, fmt.Errorf("%s and commitment files differ below txNum %d", d, end)

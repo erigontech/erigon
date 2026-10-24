@@ -112,6 +112,21 @@ func TestAlignFilesToStepSizeMergesStoppedShadowToItsOwnEnd(t *testing.T) {
 	require.Equal(t, [][2]uint64{{0, 20}, {20, 30}}, fileRangesUpTo(at.d[kv.CommitmentBinDomain].files, end))
 }
 
+func TestStepAlignedEndRefusesStoppedHexCommitment(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	live := []testFileRange{{0, 1}, {1, 2}}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		writeStepAlignTestFiles(t, agg, d, live)
+	}
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	agg.StopCommitmentDomain(kv.CommitmentDomain)
+	_, _, err := agg.StepAlignedEnd(2 * alignStepSize)
+	require.ErrorContains(t, err, "commitment domain is stopped")
+	_, _, err = agg.AlignFilesToStepSize(t.Context(), 2*alignStepSize)
+	require.ErrorContains(t, err, "commitment domain is stopped")
+}
+
 func writeStepAlignTestFiles(t *testing.T, agg *Aggregator, domain kv.Domain, ranges []testFileRange) {
 	t.Helper()
 	agg.d[domain].Compression = seg.CompressNone
