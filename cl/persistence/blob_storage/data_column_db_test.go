@@ -816,6 +816,25 @@ func TestRemoveColumnSidecarsNonExistent(t *testing.T) {
 	require.NoError(t, err) // Should not error when removing non-existent files
 }
 
+type updateCountingDB struct {
+	kv.RwDB
+	updates atomic.Int32
+}
+
+func (db *updateCountingDB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	db.updates.Add(1)
+	return db.RwDB.Update(ctx, f)
+}
+
+func TestRemoveColumnSidecarsWithNoIndicesOpensNoWriteTx(t *testing.T) {
+	db := &updateCountingDB{RwDB: setupTestDB(t)}
+	fs := afero.NewBasePathFs(afero.NewOsFs(), t.TempDir())
+	storage := NewDataColumnStore(db, fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+
+	require.NoError(t, storage.RemoveColumnSidecars(context.Background(), 1000, common.HexToHash("0x1234567890abcdef")))
+	require.Zero(t, db.updates.Load())
+}
+
 func TestWriteStreamErrorHandling(t *testing.T) {
 	storage, _, _ := setupTestDataColumnStorage(t)
 

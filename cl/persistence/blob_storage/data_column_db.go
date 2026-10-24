@@ -170,6 +170,9 @@ func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot ui
 }
 
 func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
+	if len(columnIndices) == 0 {
+		return nil
+	}
 	lock := s.forSlot(slot)
 	lock.Lock()
 	defer lock.Unlock()
