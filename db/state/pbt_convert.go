@@ -131,6 +131,10 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		workers = dbg.PBTWorkers
 	}
 	workers = max(workers, 1)
+	limits := PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes}
+	if opts.RangeWriterLimits != nil {
+		limits = *opts.RangeWriterLimits
+	}
 	cfg := pbinConversionTrieConfig()
 	cfg.WarmupNumWorkers = workers
 	options := []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek()}
@@ -142,6 +146,9 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, err
 	}
 	defer domains.Close()
+	if limits.DetachMDBXReads != nil {
+		domains.SetCommitmentPrevValueReadCounter(limits.DetachMDBXReads)
+	}
 	if opts.Resume != nil {
 		baseTxNum := opts.Resume.BaseTxNum
 		baseFiles := opts.TargetAggregator.BeginFilesRo()
@@ -207,10 +214,6 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return streamErr
 	}
 	var writer *PBinRangeWriter
-	limits := PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes}
-	if opts.RangeWriterLimits != nil {
-		limits = *opts.RangeWriterLimits
-	}
 	limits.Workers = workers
 	if opts.Resume != nil {
 		resume := *opts.Resume
@@ -227,7 +230,6 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if err != nil {
 		return common.Hash{}, err
 	}
-	writer.detachMDBXReads = limits.DetachMDBXReads
 	writer.absentProbe = limits.AbsentProbe
 	root, err := writer.WriteAtBlock(ctx, opts.TargetTx, domains, leaves, opts.BlockNum)
 	if opts.WorkerViews != nil {
@@ -262,6 +264,14 @@ func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	if len(at.Files(domain)) == 0 {
 		return eip8297.EmptyTreeHash, nil
 	}
+	verifyStats := stats
+	if verifyStats == nil {
+		verifyStats = new(pbt.VerifyStats)
+	}
+	verifyStats.SetLiveProgress(func(rows, bytes uint64) {
+		progress.SetFields("rows_live", rows, "bytes_live", bytes)
+	})
+	defer verifyStats.SetLiveProgress(nil)
 	log.Root().Info("PBT verification started", "phase", "pbt verify", "domain", domain.String())
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain), execctx.WithoutCommitmentSeek())
 	if err != nil {
@@ -285,7 +295,7 @@ func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 		defer progressTrie.SetVerifyProgress(nil)
 	}
 	if statsTrie, ok := trie.(interface{ SetVerifyStats(*pbt.VerifyStats) }); ok {
-		statsTrie.SetVerifyStats(stats)
+		statsTrie.SetVerifyStats(verifyStats)
 		defer statsTrie.SetVerifyStats(nil)
 	}
 	factory, release := commitmentCtx.VerificationContextFactory(tx)

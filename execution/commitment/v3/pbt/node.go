@@ -179,7 +179,7 @@ func rowKeyForPath(path *eip8297.Bitpath) ([]byte, error) {
 }
 
 func rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNode {
-	n := newRow(path, key, raw)
+	n := &rowNode{path: path, key: key, name: string(key), raw: raw, prev: raw}
 	for slot := range n.cells {
 		if record.Cells[slot].Kind != EmptyCell {
 			cell := record.Cells[slot]

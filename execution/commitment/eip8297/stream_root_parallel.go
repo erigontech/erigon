@@ -17,6 +17,7 @@
 package eip8297
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -59,10 +60,13 @@ type ParallelStreamRoot struct {
 	closed      bool
 	lastShard   int
 	hasShard    bool
+	prevKey     []byte
+	prevBits    []byte
 	err         error
 	root        common.Hash
 	rootReady   bool
 	current     *parallelStreamRootBatch
+	primed      bool
 	buildActive *atomic.Int32
 	buildMax    *atomic.Int32
 	buildStart  func()
@@ -105,6 +109,18 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 		b.err = err
 		return err
 	}
+	bits := bytesToBits(key)
+	if b.hasShard && bytes.Compare(key, b.prevKey) <= 0 {
+		b.err = errors.New("eip8297: stream keys are not strictly ascending")
+		return b.err
+	}
+	if b.hasShard {
+		commonBits := streamRootCommonPrefix(b.prevBits, bits)
+		if commonBits == len(b.prevBits) || commonBits == len(bits) {
+			b.err = errors.New("eip8297: stream keys are not prefix-free")
+			return nil
+		}
+	}
 	shard := streamRootShard(key)
 	if b.hasShard && shard < b.lastShard {
 		b.err = errors.New("eip8297: stream keys are not strictly ascending")
@@ -121,8 +137,20 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 	valueStart := len(b.current.arena)
 	b.current.arena = append(b.current.arena, value...)
 	b.current.leaves = append(b.current.leaves, parallelStreamRootLeaf{keyStart: keyStart, keyLength: len(key), valueStart: valueStart, valueLength: len(value)})
+	b.prevKey = append(b.prevKey[:0], key...)
+	b.prevBits = append(b.prevBits[:0], bits...)
 	b.lastShard = shard
 	b.hasShard = true
+	if b.workers == 1 && !b.primed {
+		probe := &parallelStreamRootBatch{shard: b.current.shard, arena: slices.Clone(b.current.arena), leaves: slices.Clone(b.current.leaves)}
+		select {
+		case b.inputs <- probe:
+			b.primed = true
+		case <-ctx.Done():
+			b.err = ctx.Err()
+			return b.err
+		}
+	}
 	return nil
 }
 

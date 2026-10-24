@@ -48,23 +48,22 @@ import (
 )
 
 type PBinRangeWriter struct {
-	aggregator      *Aggregator
-	domain          kv.Domain
-	endTxNum        uint64
-	baseTxNum       uint64
-	leafStamp       uint64
-	ranges          []pbinRange
-	maxOps          int
-	maxBytes        int
-	workers         int
-	state           []byte
-	stateInFiles    bool
-	resume          bool
-	workerViews     atomic.Int32
-	stampTracker    func() pbinStampTracker
-	pipelineHook    func(string, int) error
-	detachMDBXReads *atomic.Uint64
-	absentProbe     PBinAbsentProbeFunc
+	aggregator   *Aggregator
+	domain       kv.Domain
+	endTxNum     uint64
+	baseTxNum    uint64
+	leafStamp    uint64
+	ranges       []pbinRange
+	maxOps       int
+	maxBytes     int
+	workers      int
+	state        []byte
+	stateInFiles bool
+	resume       bool
+	workerViews  atomic.Int32
+	stampTracker func() pbinStampTracker
+	pipelineHook func(string, int) error
+	absentProbe  PBinAbsentProbeFunc
 }
 
 type PBinRangeWriterLimits struct {
@@ -154,13 +153,12 @@ type pbinRangeWriterDetached struct {
 
 type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
-	writes          map[string]pbinRangeWriterWrite
-	views           *atomic.Int32
-	base            bool
-	release         func([]byte)
-	write           func([]byte, []byte, []byte) error
-	finished        func() error
-	detachMDBXReads *atomic.Uint64
+	writes   map[string]pbinRangeWriterWrite
+	views    *atomic.Int32
+	base     bool
+	release  func([]byte)
+	write    func([]byte, []byte, []byte) error
+	finished func() error
 }
 
 type pbinDirectBranchWriter interface {
@@ -514,9 +512,6 @@ func (o *pbinRangeWriterOverlay) detach(skip func([]byte) (bool, error)) ([]pbin
 		if direct {
 			err = putter.PutBranchDirect([]byte(key), write.data, write.prev)
 		} else {
-			if o.detachMDBXReads != nil {
-				o.detachMDBXReads.Add(1)
-			}
 			err = o.PatriciaContext.PutBranch([]byte(key), write.data, write.prev)
 		}
 		if err != nil {
@@ -940,7 +935,6 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			}
 			return nil
 		},
-		detachMDBXReads: w.detachMDBXReads,
 		release: func(key []byte) {
 			domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
 		},

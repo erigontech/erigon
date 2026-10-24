@@ -47,8 +47,13 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.root.raw = bytes.Clone(data)
-	t.root.prev = bytes.Clone(data)
+	if t.verifyOnly {
+		t.root.raw = data
+		t.root.prev = data
+	} else {
+		t.root.raw = bytes.Clone(data)
+		t.root.prev = bytes.Clone(data)
+	}
 	switch record.Form {
 	case RowRoot:
 		path := t.rootRecordPath()

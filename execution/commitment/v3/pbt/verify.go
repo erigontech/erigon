@@ -79,14 +79,54 @@ type VerifyRangeReader interface {
 }
 
 type VerifyStats struct {
-	PointLookups atomic.Uint64
-	RangeTasks   atomic.Uint64
-	RangeReads   atomic.Uint64
-	RangeRows    atomic.Uint64
+	PointLookups     atomic.Uint64
+	RangeTasks       atomic.Uint64
+	RangeReads       atomic.Uint64
+	RangeRows        atomic.Uint64
+	TaskWorkers      atomic.Uint64
+	TaskRowsLoaded   atomic.Uint64
+	TaskRowsReleased atomic.Uint64
+	LiveRows         atomic.Uint64
+	LiveBytes        atomic.Uint64
+	PeakRows         atomic.Uint64
+	PeakBytes        atomic.Uint64
+	MaxTaskRows      atomic.Uint64
+	UpperRowsAtStart atomic.Uint64
+	liveProgress     func(uint64, uint64)
 }
 
 func (t *Trie) SetVerifyStats(stats *VerifyStats) {
 	t.verifyStats = stats
+}
+
+func (s *VerifyStats) SetLiveProgress(progress func(uint64, uint64)) {
+	s.liveProgress = progress
+}
+
+func (s *VerifyStats) holdRows(rows, bytes uint64) {
+	liveRows := s.LiveRows.Add(rows)
+	liveBytes := s.LiveBytes.Add(bytes)
+	for peak := s.PeakRows.Load(); liveRows > peak && !s.PeakRows.CompareAndSwap(peak, liveRows); peak = s.PeakRows.Load() {
+	}
+	for peak := s.PeakBytes.Load(); liveBytes > peak && !s.PeakBytes.CompareAndSwap(peak, liveBytes); peak = s.PeakBytes.Load() {
+	}
+	for maximum := s.MaxTaskRows.Load(); rows > maximum && !s.MaxTaskRows.CompareAndSwap(maximum, rows); maximum = s.MaxTaskRows.Load() {
+	}
+	if s.liveProgress != nil {
+		s.liveProgress(liveRows, liveBytes)
+	}
+}
+
+func (s *VerifyStats) releaseRows(rows, bytes uint64) {
+	if rows != 0 {
+		s.LiveRows.Add(0 - rows)
+	}
+	if bytes != 0 {
+		s.LiveBytes.Add(0 - bytes)
+	}
+	if s.liveProgress != nil {
+		s.liveProgress(s.LiveRows.Load(), s.LiveBytes.Load())
+	}
 }
 
 type verifiedChain struct {
@@ -118,6 +158,9 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 	}
 	if len(paths) < 2 {
 		return nil
+	}
+	if t.verifyStats != nil {
+		t.verifyStats.TaskWorkers.Store(uint64(min(workers, len(paths))))
 	}
 	t.trackBucketKeys()
 	progress := t.verifyProgress
@@ -180,6 +223,7 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 				if chain.err == nil {
 					chain.err = worker.verifyRowsComplete()
 				}
+				worker.releaseVerifyRows()
 				if chain.err != nil {
 					for failed := firstFailed.Load(); int64(i) < failed && !firstFailed.CompareAndSwap(failed, int64(i)); failed = firstFailed.Load() {
 					}
@@ -233,7 +277,32 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 	t.verifyRows = rows
 	t.verifyRowsUsed = make(map[string]struct{}, len(rows))
 	t.verifyRowsExact = false
+	t.verifyTaskRows = uint64(len(rows))
+	for key, value := range rows {
+		t.verifyTaskBytes += uint64(len(key) + len(value))
+	}
+	t.verifyTaskLoaded = true
+	if t.verifyStats != nil {
+		t.verifyStats.TaskRowsLoaded.Add(1)
+		t.verifyStats.holdRows(t.verifyTaskRows, t.verifyTaskBytes)
+	}
 	return nil
+}
+
+func (t *Trie) releaseVerifyRows() {
+	if !t.verifyTaskLoaded {
+		return
+	}
+	if t.verifyStats != nil {
+		t.verifyStats.TaskRowsReleased.Add(1)
+		t.verifyStats.releaseRows(t.verifyTaskRows, t.verifyTaskBytes)
+	}
+	t.verifyRows = nil
+	t.verifyRowsUsed = nil
+	t.verifyRowsExact = false
+	t.verifyTaskRows = 0
+	t.verifyTaskBytes = 0
+	t.verifyTaskLoaded = false
 }
 
 func (t *Trie) loadVerifyExact(key []byte) error {
@@ -359,6 +428,9 @@ func (t *Trie) verifyBranchChild(row *rowNode, slot int) (*rowNode, FoldResult, 
 }
 
 func (t *Trie) verify() error {
+	if t.verifyStats != nil {
+		t.verifyStats.UpperRowsAtStart.Store(t.verifyStats.LiveRows.Load())
+	}
 	root, err := t.loadRoot()
 	if err != nil {
 		return err

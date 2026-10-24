@@ -64,6 +64,10 @@ func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
 	require.Zero(t, stats.PointLookups.Load(), "C-d must not use point lookups")
 	require.Positive(t, stats.RangeReads.Load())
 	require.Equal(t, stats.RangeTasks.Load(), stats.RangeReads.Load(), "each verification task must use one range read")
+	require.Positive(t, stats.TaskRowsLoaded.Load())
+	require.Equal(t, stats.TaskRowsLoaded.Load(), stats.TaskRowsReleased.Load(), "every verification task must release its rows")
+	require.Zero(t, stats.UpperRowsAtStart.Load(), "upper rows must be verified after task rows are released")
+	require.LessOrEqual(t, stats.PeakRows.Load(), stats.TaskWorkers.Load()*stats.MaxTaskRows.Load(), "verification row memory exceeded the worker bound")
 }
 
 func TestPBinVerifyRejectsUnreferencedRowInsideChainRange(t *testing.T) {
