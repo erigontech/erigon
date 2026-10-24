@@ -30,6 +30,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -482,7 +483,14 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 			// Skipping the diff for one domain risks losing its changeset; crashing loses the node and the
 			// run. The count is what makes this a stopgap rather than a paper-over: NilDomainWriters() names
 			// the domain, which is the fact the panic did not carry, and all-zeros says it stopped happening.
-			nilDomainWriterSeen[idx].Add(1)
+			// SAY IT THE FIRST TIME, ONCE PER DOMAIN. A counter nothing reads is the same as no
+			// counter: this was added so all-zeros could mean "it stopped happening", and nothing
+			// ever called NilDomainWriters(). The 0->1 transition is the only one that logs, so a
+			// recurring window costs one line per domain, not one per block.
+			if nilDomainWriterSeen[idx].Add(1) == 1 {
+				log.Warn("[state] no domain writer for a changeset diff — the diff is SKIPPED for this domain",
+					"domain", kv.Domain(idx).String())
+			}
 			continue
 		}
 		if sd.currentChangesAccumulator == nil {
