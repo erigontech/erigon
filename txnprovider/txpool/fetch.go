@@ -351,10 +351,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		batchLock sync.Mutex
 	)
 
-	// LRU cache for deduplication - filters duplicates before they enter the batch
-	// Uses maphash to avoid string allocations
-	seenLRU, _ := maphash.NewLRU[struct{}](1024)
-
 	flushBatch := func() {
 		batchLock.Lock()
 		if len(batch) == 0 {
@@ -428,20 +424,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		if req == nil {
 			flushBatch()
 			return nil
-		}
-
-		// Deduplicate transaction bodies to avoid repeated blob verification.
-		// Keep announcements for peer fallback. Replies with cached bodies are still
-		// dropped before the pool can revalidate their transactions.
-		switch req.Id {
-		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
-			if _, seen := seenLRU.Get(req.Data); seen {
-				if f.wg != nil {
-					f.wg.Done()
-				}
-				continue
-			}
-			seenLRU.Set(req.Data, struct{}{})
 		}
 
 		batchLock.Lock()

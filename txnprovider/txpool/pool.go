@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -125,6 +126,7 @@ type TxPool struct {
 	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
+	blobProofsLRU           *simplelru.LRU[[32]byte, bool]
 	pending                 *PendingPool
 	baseFee                 *SubPool
 	queued                  *SubPool
@@ -212,6 +214,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	blobProofs, err := simplelru.NewLRU[[32]byte, bool](1024, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	byNonce := &BySenderAndNonce{
 		tree:              btree.NewG[*metaTxn](32, SortByNonceLess),
@@ -234,6 +240,7 @@ func New(
 		byHash:                  map[string]*metaTxn{},
 		isLocalLRU:              localsHistory,
 		discardReasonsLRU:       discardHistory,
+		blobProofsLRU:           blobProofs,
 		all:                     byNonce,
 		recentlyConnectedPeers:  &recentlyConnectedPeers{},
 		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
@@ -1196,18 +1203,30 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	if p.isOsaka() {
-		err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
-		if err != nil {
-			return txpoolcfg.UnmatchedBlobTxExt
+	// Cache only the proof verdict: transaction hashes do not cover sidecars.
+	digest := sha256.New()
+	for i, blob := range blobs {
+		_, _ = digest.Write(blob)
+		_, _ = digest.Write(commitments[i][:])
+	}
+	for i := range proofs {
+		_, _ = digest.Write(proofs[i][:])
+	}
+	var proofHash [32]byte
+	digest.Sum(proofHash[:0])
+	validProofs, known := p.blobProofsLRU.Get(proofHash)
+	if !known {
+		var err error
+		if p.isOsaka() {
+			err = libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
+		} else {
+			err = libkzg.Ctx().VerifyBlobKZGProofBatch(toBlobs(blobs), commitments, proofs)
 		}
-	} else {
-		// https://github.com/ethereum/consensus-specs/blob/017a8495f7671f5fff2075a9bfc9238c1a0982f8/specs/deneb/polynomial-commitments.md#verify_blob_kzg_proof_batch
-		kzgCtx := libkzg.Ctx()
-		err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(blobs), commitments, proofs)
-		if err != nil {
-			return txpoolcfg.UnmatchedBlobTxExt
-		}
+		validProofs = err == nil
+		p.blobProofsLRU.Add(proofHash, validProofs)
+	}
+	if !validProofs {
+		return txpoolcfg.UnmatchedBlobTxExt
 	}
 
 	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
