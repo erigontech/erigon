@@ -209,7 +209,7 @@ func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	return nil, false, nil
 }
 
-func (r *memBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+func (r *memBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, _ uint64, i int) (common.Hash, bool, error) {
 	txn, ok, err := r.TxnByIdxInBlock(ctx, tx, blockNum, i)
 	if err != nil || !ok {
 		return common.Hash{}, false, err
