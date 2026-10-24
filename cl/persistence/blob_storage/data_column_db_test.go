@@ -574,6 +574,39 @@ func TestGetSavedColumnIndexFallsBackToFilesWithoutARow(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, []uint64{1}, saved, "a column stored before the index existed must stay visible")
+	exists, err := storage.ColumnSidecarExists(t.Context(), 1000, root, 1)
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
+func TestColumnWriteSetsTheBitAfterTheCallerGaveUp(t *testing.T) {
+	storage, _, _ := setupTestDataColumnStorage(t)
+	root := common.Hash{1}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, storage.WriteColumnSidecars(ctx, root, 2, createTestDataColumnSidecar(1000, 2)))
+
+	saved, err := storage.GetSavedColumnIndex(t.Context(), 1000, root)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{2}, saved, "a sidecar that landed on disk must be indexed")
+}
+
+func TestColumnFileWithoutItsBitCountsAsMissingUntilRewritten(t *testing.T) {
+	storage, _, _ := setupTestDataColumnStorage(t)
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1000, 0)))
+	_, err := storage.(*dataColumnStorageImpl).write(1000, root, 1, createTestDataColumnSidecar(1000, 1))
+	require.NoError(t, err)
+
+	exists, err := storage.ColumnSidecarExists(t.Context(), 1000, root, 1)
+	require.NoError(t, err)
+	require.False(t, exists, "the downloader skips existing columns, so an unindexed file must read as missing")
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1)))
+	saved, err := storage.GetSavedColumnIndex(t.Context(), 1000, root)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 1}, saved)
 }
 
 func TestRemoveColumnSidecarsClearsTheRow(t *testing.T) {

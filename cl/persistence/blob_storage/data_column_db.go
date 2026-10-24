@@ -1,6 +1,7 @@
 package blob_storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -58,8 +59,18 @@ func NewDataColumnStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.Bea
 	return impl
 }
 
-func (s *dataColumnStorageImpl) markColumns(ctx context.Context, blockRoot common.Hash, stored bool, columns ...uint64) error {
-	return s.db.Update(ctx, func(tx kv.RwTx) error {
+func (s *dataColumnStorageImpl) columnRow(ctx context.Context, blockRoot common.Hash) ([]byte, error) {
+	var row []byte
+	err := s.db.View(ctx, func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
+		row = bytes.Clone(v)
+		return err
+	})
+	return row, err
+}
+
+func (s *dataColumnStorageImpl) markColumns(blockRoot common.Hash, stored bool, columns ...uint64) error {
+	return s.db.Update(context.Background(), func(tx kv.RwTx) error {
 		row, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
 		if err != nil {
 			return err
@@ -109,15 +120,15 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	}
 	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
 	if err == nil {
-		err = s.markColumns(ctx, blockRoot, true, uint64(columnIndex))
+		err = s.markColumns(blockRoot, true, uint64(columnIndex))
 	}
 	s.finishWrite()
-	if err != nil {
-		return err
-	}
 	if created {
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 		log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -139,7 +150,15 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 }
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
-	return s.exists(slot, blockRoot, uint64(columnIndex))
+	column := uint64(columnIndex)
+	row, err := s.columnRow(ctx, blockRoot)
+	if err != nil {
+		return false, err
+	}
+	if row == nil || column >= s.beaconChainConfig.NumberOfColumns {
+		return s.exists(slot, blockRoot, column)
+	}
+	return row[column/8]&(1<<(column%8)) != 0, nil
 }
 
 func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
@@ -150,7 +169,7 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	for i, index := range columnIndices {
 		columns[i] = uint64(index)
 	}
-	if err := s.markColumns(ctx, blockRoot, false, columns...); err != nil {
+	if err := s.markColumns(blockRoot, false, columns...); err != nil {
 		return err
 	}
 	var firstErr error
@@ -201,22 +220,18 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 	lock := s.forSlot(slot)
 	lock.RLock()
 	defer lock.RUnlock()
+	row, err := s.columnRow(ctx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
 	var savedColumns []uint64
-	indexed := false
-	if err := s.db.View(ctx, func(tx kv.Tx) error {
-		row, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
-		if err != nil || row == nil {
-			return err
-		}
-		indexed = true
+	if row != nil {
 		for i, b := range row {
 			for ; b != 0; b &= b - 1 {
 				savedColumns = append(savedColumns, uint64(i*8+bits.TrailingZeros8(b)))
 			}
 		}
-		return nil
-	}); err != nil || indexed {
-		return savedColumns, err
+		return savedColumns, nil
 	}
 	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
 		exists, err := s.exists(slot, blockRoot, i)
