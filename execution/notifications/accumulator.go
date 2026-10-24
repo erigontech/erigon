@@ -102,9 +102,17 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 // transactions that block actually carries. The canonical body is the authority; anything the
 // change already holds for this height is a pre-execution guess at it.
 func (a *Accumulator) SetCanonicalChangeTxs(height uint64, txs [][]byte) {
-	if len(txs) == 0 {
-		return
-	}
+	// ⚠ AN EMPTY BODY IS AN ANSWER, AND THIS USED TO RETURN EARLY ON IT. That early return is how the
+	// original defect survived its own fix: when the canonical body could not be read, or was
+	// genuinely empty, the change KEPT the pre-executed set and published it as canonical. Measured
+	// on soak live436, which drained 1200/2400/4800 in 60s each and then formed a fresh 87-wide hole
+	// at 9600: chainNext=12447 poolLowest=12534, 26,052 transactions stuck behind it.
+	//
+	// The two errors are not symmetric. Removing too LITTLE is self-correcting - the next block that
+	// names the sender cleans up, because removeMined deletes the whole run at or below it. Removing
+	// too MUCH is permanent: the nonce is gone from the pool, nothing re-sends it, and every later
+	// transaction from that sender is stranded behind the gap for ever. So when in doubt, remove
+	// nothing: clear the change rather than let a guess stand in for the body.
 	for i := range a.changes {
 		if a.changes[i].BlockHeight != height {
 			continue

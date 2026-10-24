@@ -45,12 +45,26 @@ func TestFCUBodyOverwritesWhatPreExecutionRan(t *testing.T) {
 	}
 }
 
-// An empty canonical body must not erase what is there: a flush with nothing to say says nothing.
-func TestAnEmptyCanonicalBodyLeavesTheChangeAlone(t *testing.T) {
+// AN EMPTY CANONICAL BODY IS AN ANSWER, AND IT MUST WIN.
+//
+// I first wrote this test the other way round - "a flush with nothing to say says nothing" - and
+// that instinct is what let the original defect survive its own fix. If the body cannot be read, or
+// is genuinely empty, leaving the pre-executed set in place publishes a GUESS as canonical and the
+// pool deletes every transaction in it. Measured on soak live436: 1200/2400/4800 drained in 60s
+// each, then a fresh 87-wide hole at 9600 - chainNext=12447, poolLowest=12534, 26,052 transactions
+// stranded behind it.
+//
+// The two errors are not symmetric. Removing too little self-corrects: the next block naming that
+// sender removes its whole run at or below it. Removing too much is permanent - the nonce is gone,
+// nothing re-sends it, and everything after it is stuck for ever. So announce nothing mined rather
+// than guess.
+func TestAnEmptyCanonicalBodyClearsThePreExecutedGuess(t *testing.T) {
 	a := NewAccumulator()
 	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{{7}}, false)
 	a.SetCanonicalChangeTxs(1, nil)
-	if got := len(a.Changes()[0].Txs); got != 1 {
-		t.Fatalf("an empty body wiped the change: %d txs left", got)
+	if got := len(a.Changes()[0].Txs); got != 0 {
+		t.Fatalf("the pre-executed guess survived an empty canonical body: %d txs left. Every one of "+
+			"them would be announced as MINED and deleted from the pool with the sender's whole run "+
+			"below it", got)
 	}
 }
