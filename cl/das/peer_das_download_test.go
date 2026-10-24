@@ -45,6 +45,8 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -196,7 +198,7 @@ func TestRunDownloadRejectsResponseForkDigestMismatchBeforeStorage(t *testing.T)
 	)
 
 	storage := &writeObservingColumnStorage{
-		DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		DataColumnStorage: blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 		lookups:           make(chan struct{}, 1),
 		writes:            make(chan *cltypes.DataColumnSidecar, 1),
 	}
@@ -266,7 +268,7 @@ func TestRunDownloadRejectsStaleBPOForkDigestBeforeStorage(t *testing.T) {
 	)
 
 	storage := &writeObservingColumnStorage{
-		DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		DataColumnStorage: blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 		lookups:           make(chan struct{}, 1),
 		writes:            make(chan *cltypes.DataColumnSidecar, 1),
 	}
@@ -345,7 +347,7 @@ func TestRunDownloadAcceptsExactBPOForkDigest(t *testing.T) {
 			)
 
 			storage := &writeObservingColumnStorage{
-				DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+				DataColumnStorage: blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 				lookups:           make(chan struct{}, 1),
 				writes:            make(chan *cltypes.DataColumnSidecar, 1),
 			}
@@ -407,7 +409,7 @@ func TestRunDownloadRejectsFuluSignatureMismatchBeforeStorage(t *testing.T) {
 	require.True(t, VerifyDataColumnSidecarKZGProofs(columns[1]))
 
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0], columns[1]})
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 1),
@@ -489,7 +491,7 @@ func TestRunDownloadAcceptsGloasSidecarWithRecoveryMetadata(t *testing.T) {
 	)
 
 	storage := &writeObservingColumnStorage{
-		DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		DataColumnStorage: blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 		lookups:           make(chan struct{}, 1),
 		writes:            make(chan *cltypes.DataColumnSidecar, 1),
 	}
@@ -561,7 +563,7 @@ func TestRunDownloadRejectsColumnFilteredOutOfWireRequest(t *testing.T) {
 	require.True(t, foundPeer)
 	rpcClient, sentinel := newColumnResponseRPCWithPeer(t, &cfg, block.GetSlot(), nodeID.String(), 1, []*cltypes.DataColumnSidecar{columns[1]})
 
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 1),
@@ -613,7 +615,7 @@ func TestRunDownloadRejectsValidUnrequestedFuluIdentityBeforeStorage(t *testing.
 	_, rootB, _, columnsB := recoverableFuluDataAtSlot(t, &cfg, 101)
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, blockA.GetSlot(), []*cltypes.DataColumnSidecar{columnsB[1]})
 
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 1),
@@ -664,7 +666,7 @@ func TestRunDownloadRejectsOverCardinalityBeforeStorage(t *testing.T) {
 	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0], columns[0]})
 
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 1),
@@ -715,7 +717,7 @@ func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
 	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0], columns[0]})
 
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 1),
@@ -769,7 +771,7 @@ func TestRunDownloadDoesNotRepeatRequestsToPeerThatAnsweredNothing(t *testing.T)
 			rpc:           rpcClient,
 			beaconConfig:  &cfg,
 			state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-			columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+			columnStorage: blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 		}
 		req := &downloadRequest{
 			beaconConfig: &cfg,
@@ -809,7 +811,7 @@ func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 	require.NoError(t, err)
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[2], columns[0]}, nil)
 
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 8),
@@ -871,7 +873,7 @@ func TestRunDownloadAcceptsLateSnapshotMemberAfterConcurrentCompletion(t *testin
 	sentinel.columnRequested = make(chan struct{})
 	sentinel.releaseColumn = make(chan struct{})
 
-	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	storage := &writeObservingColumnStorage{
 		DataColumnStorage: baseStorage,
 		lookups:           make(chan struct{}, 1),
@@ -1227,7 +1229,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		rpc:            rpcClient,
 		beaconConfig:   &cfg,
 		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		columnStorage:  blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 		gloasDataCache: gloasDataCache,
 	}
 	req := &downloadRequest{

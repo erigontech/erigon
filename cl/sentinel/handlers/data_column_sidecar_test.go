@@ -44,6 +44,8 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 var initDataColumnSidecarTestConfig sync.Once
@@ -505,7 +507,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 	})
 	beaconCfg := *mainnetCfg
 	beaconCfg.FuluForkEpoch = fuluForkEpoch
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &beaconCfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &beaconCfg, beaconevents.NewEventEmitter())
 
 	c := NewConsensusHandlers(
 		ctx,

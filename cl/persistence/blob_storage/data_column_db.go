@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/bits"
 	"os"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -12,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/spf13/afero"
 )
 
@@ -38,18 +41,46 @@ type DataColumnStorage interface {
 type dataColumnStorageImpl struct {
 	bucketStore
 	slotLocks
+	db                kv.RwDB
 	beaconChainConfig *clparams.BeaconChainConfig
 	emitters          *beaconevents.EventEmitter
 }
 
-func NewDataColumnStore(fs afero.Fs, beaconChainConfig *clparams.BeaconChainConfig, emitters *beaconevents.EventEmitter) DataColumnStorage {
+func NewDataColumnStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.BeaconChainConfig, emitters *beaconevents.EventEmitter) DataColumnStorage {
 	impl := &dataColumnStorageImpl{
+		db:                db,
 		beaconChainConfig: beaconChainConfig,
 		emitters:          emitters,
 	}
 	impl.bucketStore.init(fs)
+	impl.dropRows = deleteRootRows(db, kv.BlockRootToDataColumnCount)
 	impl.slotLocks.initLocks()
 	return impl
+}
+
+func (s *dataColumnStorageImpl) markColumns(ctx context.Context, blockRoot common.Hash, stored bool, columns ...uint64) error {
+	return s.db.Update(ctx, func(tx kv.RwTx) error {
+		row, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		bitmap := make([]byte, (s.beaconChainConfig.NumberOfColumns+7)/8)
+		copy(bitmap, row)
+		for _, column := range columns {
+			if column >= s.beaconChainConfig.NumberOfColumns {
+				continue
+			}
+			if stored {
+				bitmap[column/8] |= 1 << (column % 8)
+			} else {
+				bitmap[column/8] &^= 1 << (column % 8)
+			}
+		}
+		if !slices.ContainsFunc(bitmap, func(b byte) bool { return b != 0 }) {
+			return tx.Delete(kv.BlockRootToDataColumnCount, blockRoot[:])
+		}
+		return tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], bitmap)
+	})
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
@@ -77,6 +108,9 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		return nil
 	}
 	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
+	if err == nil {
+		err = s.markColumns(ctx, blockRoot, true, uint64(columnIndex))
+	}
 	s.finishWrite()
 	if err != nil {
 		return err
@@ -112,6 +146,13 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	lock := s.forSlot(slot)
 	lock.Lock()
 	defer lock.Unlock()
+	columns := make([]uint64, len(columnIndices))
+	for i, index := range columnIndices {
+		columns[i] = uint64(index)
+	}
+	if err := s.markColumns(ctx, blockRoot, false, columns...); err != nil {
+		return err
+	}
 	var firstErr error
 	for _, index := range columnIndices {
 		if err := s.remove(slot, blockRoot, uint64(index)); err != nil {
@@ -161,6 +202,22 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 	lock.RLock()
 	defer lock.RUnlock()
 	var savedColumns []uint64
+	indexed := false
+	if err := s.db.View(ctx, func(tx kv.Tx) error {
+		row, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
+		if err != nil || row == nil {
+			return err
+		}
+		indexed = true
+		for i, b := range row {
+			for ; b != 0; b &= b - 1 {
+				savedColumns = append(savedColumns, uint64(i*8+bits.TrailingZeros8(b)))
+			}
+		}
+		return nil
+	}); err != nil || indexed {
+		return savedColumns, err
+	}
 	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
 		exists, err := s.exists(slot, blockRoot, i)
 		if err != nil {

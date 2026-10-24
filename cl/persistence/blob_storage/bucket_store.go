@@ -17,6 +17,7 @@
 package blob_storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -347,20 +349,42 @@ func (b *bucketStore) bucketRoots(dir string) ([]common.Hash, error) {
 		return nil, err
 	}
 	defer f.Close()
-	names, err := f.Readdirnames(-1)
-	if err != nil {
-		return nil, err
-	}
-	roots := make([]common.Hash, 0, len(names))
-	for _, name := range names {
-		hex, _, _ := strings.Cut(name, "_")
-		root := common.HexToHash(hex)
-		if root.String() != hex {
-			continue
+	seen := map[common.Hash]struct{}{}
+	var roots []common.Hash
+	for {
+		names, err := f.Readdirnames(listBatch)
+		for _, name := range names {
+			hex, _, _ := strings.Cut(name, "_")
+			root := common.HexToHash(hex)
+			if _, ok := seen[root]; ok || root.String() != hex {
+				continue
+			}
+			seen[root] = struct{}{}
+			roots = append(roots, root)
 		}
-		roots = append(roots, root)
+		if errors.Is(err, io.EOF) {
+			return roots, nil
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	return roots, nil
+}
+
+func deleteRootRows(db kv.RwDB, table string) func(roots []common.Hash) error {
+	return func(roots []common.Hash) error {
+		if len(roots) == 0 {
+			return nil
+		}
+		return db.Update(context.Background(), func(tx kv.RwTx) error {
+			for _, root := range roots {
+				if err := tx.Delete(table, root[:]); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
 }
 
 type slotLocks struct {
