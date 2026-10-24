@@ -232,7 +232,8 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 
-	// Origin layer: the pre-block committed base (state before any tx in the block). Immutable and
+	// Origin layer: the committed base before the first unpublished tx (published txs are already
+	// folded into it); every reader of it has a higher tx index. Immutable and
 	// write-once, so it lives in lock-free sync.Maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
@@ -249,12 +250,12 @@ type originStorageKey struct {
 	key  accounts.StorageKey
 }
 
-// StoreOriginAccount records the pre-block committed account write-once (idempotent across txs).
+// StoreOriginAccount records the committed base account write-once (idempotent across txs).
 func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Account) {
 	vm.originAccounts.LoadOrStore(addr, acc)
 }
 
-// LoadOriginAccount returns the pre-block committed account and whether it was seeded.
+// LoadOriginAccount returns the committed base account and whether it was seeded.
 func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Account, bool) {
 	if v, ok := vm.originAccounts.Load(addr); ok {
 		acc, _ := v.(*accounts.Account)
@@ -263,12 +264,12 @@ func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Accoun
 	return nil, false
 }
 
-// StoreOriginStorage records the pre-block committed slot value write-once.
+// StoreOriginStorage records the committed base slot value write-once.
 func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
 	vm.originStorage.LoadOrStore(originStorageKey{addr, key}, val)
 }
 
-// LoadOriginStorage returns the pre-block committed slot value and whether it was seeded.
+// LoadOriginStorage returns the committed base slot value and whether it was seeded.
 func (vm *VersionMap) LoadOriginStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
 	if v, ok := vm.originStorage.Load(originStorageKey{addr, key}); ok {
 		return v.(uint256.Int), true
@@ -2039,6 +2040,24 @@ func (res ReadResult) Status() int {
 	}
 
 	return MVReadResultNone
+}
+
+// accountLiveAt reports whether any field cell below txIdx makes the account
+// EIP-161-non-empty. Unresolved cells cannot prove death and count as live.
+func (vm *VersionMap) accountLiveAt(addr accounts.Address, txIdx int) bool {
+	if bal, rr, ok := vm.ReadBalance(addr, txIdx); ok && (!rr.resolved() || !bal.IsZero()) {
+		return true
+	}
+	if nonce, rr, ok := vm.ReadNonce(addr, txIdx); ok && (!rr.resolved() || nonce != 0) {
+		return true
+	}
+	if ch, rr, ok := vm.ReadCodeHash(addr, txIdx); ok && (!rr.resolved() || !(ch.IsEmpty() || ch.IsZero())) {
+		return true
+	}
+	if c, rr, ok := vm.ReadCode(addr, txIdx); ok && (!rr.resolved() || len(c.Bytes) > 0) {
+		return true
+	}
+	return false
 }
 
 // resolved reports whether the floor holds a value at a known version: Done (sealed) or
