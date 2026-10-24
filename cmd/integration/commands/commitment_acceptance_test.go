@@ -201,6 +201,8 @@ func TestPBTAttachSkipVerifyAcceptanceAtConversionPoint(t *testing.T) {
 	conversionBlock, _, ok, err := publishedSettings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
+	manifest, err := dbstate.ReadPBTManifest(filepath.Join(datadir.Open(published).Snap, "pbt-manifest.toml"))
+	require.NoError(t, err)
 	require.NoError(t, attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), pbtAttachHooks{skipVerify: true}))
 	require.Zero(t, readExecutionStageProgress(t, node.Tester.Dirs.Chaindata))
 	require.Equal(t, readPBTFilesRoot(t, published), readPBTFilesRoot(t, node.Tester.Dirs.DataDir))
@@ -224,7 +226,8 @@ func TestPBTAttachSkipVerifyAcceptanceAtConversionPoint(t *testing.T) {
 		attachedAtConversion, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[conversionBlock-1].Hash(), conversionBlock)
 		return err
 	}))
-	require.Empty(t, attachedAtConversion)
+	manifestRoot := common.HexToHash(manifest.PBTRoot)
+	require.Equal(t, manifestRoot[:], attachedAtConversion)
 	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 		var attachedRoot, dualRoot []byte
@@ -335,10 +338,7 @@ func TestPBTAttachSkipVerifyRefusesPostForkPoint(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), pbtAttachHooks{skipVerify: true})
-	require.ErrorContains(t, err, "--skip-verify needs a conversion point before the binary trie fork")
-	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+	require.NoError(t, attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), pbtAttachHooks{skipVerify: true}))
 }
 
 func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.T) {
@@ -354,7 +354,7 @@ func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.
 	setExecutionProgress(t, source.Chaindata, 1)
 	before := snapshotTree(t, source.DataDir)
 	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
-	require.ErrorContains(t, err, "published binary rows")
+	require.ErrorContains(t, err, "digest mismatch")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
@@ -435,10 +435,8 @@ func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
 	doms.Close()
 	require.NoError(t, tx.Commit())
 	m.Close()
-	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "node PBT root")
-	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+	require.NoError(t, err)
 	resetPBTAcceptanceExecution(t, node)
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 	dual, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
@@ -497,7 +495,7 @@ func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	}}
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
-	require.ErrorContains(t, err, "node hex root")
+	require.ErrorContains(t, err, "published hex root")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 

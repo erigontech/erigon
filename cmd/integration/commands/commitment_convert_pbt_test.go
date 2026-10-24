@@ -260,7 +260,8 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 			}
 		}
 		setExecutionProgress(t, source.Chaindata, 1)
-		require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, output, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
+		err = attachPBTWithHooks(t.Context(), source.DataDir, output, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
+		require.ErrorContains(t, err, "pbt manifest")
 	})
 }
 

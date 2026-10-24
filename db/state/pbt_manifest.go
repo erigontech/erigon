@@ -154,6 +154,36 @@ func ReadPBTManifest(path string, sources ...PBTManifestFileSource) (PBTManifest
 }
 
 func ValidatePBTManifestFiles(ctx context.Context, manifest PBTManifest, sources []PBTManifestFileSource, workers int, progress PBTManifestProgressFunc) error {
+	if err := ValidatePBTManifestFileSet(manifest, sources); err != nil {
+		return err
+	}
+
+	actual, err := digestPBTManifestFiles(ctx, sources, workers, progress)
+	if err != nil {
+		return err
+	}
+	actualByName := make(map[string]PBTManifestFile, len(actual))
+	for _, file := range actual {
+		actualByName[file.Name] = file
+	}
+	manifestByName := make(map[string]PBTManifestFile, len(manifest.Files))
+	for _, file := range manifest.Files {
+		manifestByName[file.Name] = file
+	}
+	for _, name := range sortedPBTManifestNames(sources) {
+		want := manifestByName[name]
+		got := actualByName[name]
+		if want.Size != got.Size {
+			return fmt.Errorf("pbt manifest: size mismatch for %q: manifest=%d actual=%d", name, want.Size, got.Size)
+		}
+		if want.Blake3 != got.Blake3 {
+			return fmt.Errorf("pbt manifest: digest mismatch for %q: manifest=%s actual=%s", name, want.Blake3, got.Blake3)
+		}
+	}
+	return nil
+}
+
+func ValidatePBTManifestFileSet(manifest PBTManifest, sources []PBTManifestFileSource) error {
 	expected := make(map[string]PBTManifestFileSource, len(sources))
 	for _, source := range sources {
 		if _, ok := expected[source.Name]; ok {
@@ -174,28 +204,6 @@ func ValidatePBTManifestFiles(ctx context.Context, manifest PBTManifest, sources
 	for name := range expected {
 		if _, ok := seen[name]; !ok {
 			return fmt.Errorf("pbt manifest: missing file %q", name)
-		}
-	}
-	actual, err := digestPBTManifestFiles(ctx, sources, workers, progress)
-	if err != nil {
-		return err
-	}
-	actualByName := make(map[string]PBTManifestFile, len(actual))
-	for _, file := range actual {
-		actualByName[file.Name] = file
-	}
-	manifestByName := make(map[string]PBTManifestFile, len(manifest.Files))
-	for _, file := range manifest.Files {
-		manifestByName[file.Name] = file
-	}
-	for _, name := range sortedPBTManifestNames(expected) {
-		want := manifestByName[name]
-		got := actualByName[name]
-		if want.Size != got.Size {
-			return fmt.Errorf("pbt manifest: size mismatch for %q: manifest=%d actual=%d", name, want.Size, got.Size)
-		}
-		if want.Blake3 != got.Blake3 {
-			return fmt.Errorf("pbt manifest: digest mismatch for %q: manifest=%s actual=%s", name, want.Blake3, got.Blake3)
 		}
 	}
 	return nil
@@ -358,9 +366,10 @@ func (r pbtManifestContextReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func sortedPBTManifestNames(sources map[string]PBTManifestFileSource) []string {
+func sortedPBTManifestNames(sources []PBTManifestFileSource) []string {
 	names := make([]string, 0, len(sources))
-	for name := range sources {
+	for _, source := range sources {
+		name := source.Name
 		names = append(names, name)
 	}
 	sort.Strings(names)

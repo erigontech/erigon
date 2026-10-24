@@ -19,6 +19,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io/fs"
 	"os"
@@ -259,6 +260,25 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	}))
 	require.NotEqual(t, [32]byte{}, genesisHash)
 	genesisDB.Close()
+	manifest, err := state.ReadPBTManifest(filepath.Join(datadir.Open(source.DataDir).Snap, "pbt-manifest.toml"))
+	require.NoError(t, err)
+	blockNum, txNum, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	blockHash, _, blockEnd, _, _, err := pbtAttachBlockEnd(t.Context(), datadir.Open(source.DataDir), blockNum, txNum)
+	require.NoError(t, err)
+	if blockEnd {
+		attachedDB := dbCfg(dbcfg.ChainDB, source.Chaindata).MustOpen()
+		var shadow []byte
+		require.NoError(t, attachedDB.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			shadow, err = rawdb.ReadShadowStateRoot(tx, blockHash, blockNum)
+			return err
+		}))
+		manifestRoot := common.HexToHash(manifest.PBTRoot)
+		require.Equal(t, manifestRoot[:], shadow)
+		attachedDB.Close()
+	}
 	root, _ := reopenBinSource(t, source.DataDir, source.Chaindata)
 	require.Equal(t, wantRoot[:], root)
 }
@@ -293,9 +313,7 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 		"range 0-1 .kvi",
 		"domain root verify",
 		"output identity verify",
-		"attach leaf stamps verify",
 		"attach published bin verify",
-		"attach node root verify",
 		"attach adopt",
 	} {
 		pattern := regexp.MustCompile(`phase="` + regexp.QuoteMeta(phase) + `(?:"|\s).*done=(\d+)(?:.*total=(\d+))?`)
@@ -346,6 +364,185 @@ func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {
 	require.Zero(t, readExecutionStageProgress(t, source.Chaindata))
 	root, _ := reopenBinSource(t, source.DataDir, source.Chaindata)
 	require.Equal(t, wantRoot[:], root)
+}
+
+func TestAttachPBTManifestRefusesTamperingBeforeAdoption(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, string)
+		want   string
+	}{
+		{name: "changed file", mutate: func(t *testing.T, published string) {
+			path := pbtAttachManifestStateFile(t, published)
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			data[0] ^= 1
+			require.NoError(t, os.WriteFile(path, data, 0o644))
+		}, want: "digest mismatch"},
+		{name: "missing file", mutate: func(t *testing.T, published string) {
+			require.NoError(t, dir.RemoveFile(pbtAttachManifestStateFile(t, published)))
+		}, want: "pbt manifest"},
+		{name: "extra file", mutate: func(t *testing.T, published string) {
+			dirs := datadir.Open(published)
+			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-2.kv"), []byte("extra"), 0o644))
+		}, want: "pbt manifest"},
+		{name: "wrong pbt root", mutate: func(t *testing.T, published string) {
+			rewritePBTAttachManifest(t, published, func(manifest *state.PBTManifest) { manifest.PBTRoot = common.HexToHash("0x09").Hex() })
+		}, want: "binary root record"},
+		{name: "wrong hex root", mutate: func(t *testing.T, published string) {
+			rewritePBTAttachManifest(t, published, func(manifest *state.PBTManifest) { manifest.HexRoot = common.HexToHash("0x09").Hex() })
+		}, want: "published hex root"},
+		{name: "missing manifest", mutate: func(t *testing.T, published string) {
+			dirs := datadir.Open(published)
+			require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "pbt-manifest.toml")))
+		}, want: "re-run convert-pbt with this binary"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commitmentflags.Restore(t)
+			statecfg.ExperimentalCommitmentV3 = true
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			statecfg.BinCommitmentHash = ""
+			require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+			source, _ := newPBTConversionSource(t)
+			published := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+			test.mutate(t, published)
+			before := snapshotTreeDigest(t, source.Snap)
+			setExecutionProgress(t, source.Chaindata, 1)
+			err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
+			require.ErrorContains(t, err, test.want)
+			require.Equal(t, before, snapshotTreeDigest(t, source.Snap))
+		})
+	}
+}
+
+func TestAttachPBTSkipVerifyChecksRootsButSkipsDigests(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, string)
+		want   string
+	}{
+		{name: "changed file", mutate: func(t *testing.T, published string) {
+			path := pbtAttachManifestStateFile(t, published)
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			data[len(data)-1] ^= 1
+			require.NoError(t, os.WriteFile(path, data, 0o644))
+		}, want: ""},
+		{name: "wrong pbt root", mutate: func(t *testing.T, published string) {
+			rewritePBTAttachManifest(t, published, func(manifest *state.PBTManifest) { manifest.PBTRoot = common.HexToHash("0x09").Hex() })
+		}, want: "binary root record"},
+		{name: "wrong hex root", mutate: func(t *testing.T, published string) {
+			rewritePBTAttachManifest(t, published, func(manifest *state.PBTManifest) { manifest.HexRoot = common.HexToHash("0x09").Hex() })
+		}, want: "published hex root"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commitmentflags.Restore(t)
+			statecfg.ExperimentalCommitmentV3 = true
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			statecfg.BinCommitmentHash = ""
+			require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+			source, _ := newPBTConversionSource(t)
+			published := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+			test.mutate(t, published)
+			setExecutionProgress(t, source.Chaindata, 1)
+			err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: true})
+			if test.want == "" {
+				require.NoError(t, err)
+				_, statErr := os.Stat(filepath.Join(datadir.Open(source.DataDir).Snap, "pbt-manifest.toml"))
+				require.NoError(t, statErr)
+			} else {
+				require.ErrorContains(t, err, test.want)
+			}
+		})
+	}
+}
+
+func TestAttachPBTRemovesCorruptedCopiedFile(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	setExecutionProgress(t, source.Chaindata, 1)
+	sourcePath := pbtAttachManifestStateFile(t, published)
+	publishedDirs := datadir.Open(published)
+	sourceDirs := datadir.Open(source.DataDir)
+	rel, err := filepath.Rel(publishedDirs.Snap, sourcePath)
+	require.NoError(t, err)
+	destinationPath := filepath.Join(sourceDirs.Snap, rel)
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, afterCopy: func() error {
+		data, err := os.ReadFile(destinationPath)
+		if err != nil {
+			return err
+		}
+		data[0] ^= 1
+		return os.WriteFile(destinationPath, data, 0o644)
+	}}
+	err = attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks)
+	require.ErrorContains(t, err, "digest mismatch")
+	_, statErr := os.Stat(destinationPath)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func pbtAttachManifestStateFile(t *testing.T, published string) string {
+	return pbtAttachManifestFile(t, published, true)
+}
+
+func pbtAttachManifestIndexFile(t *testing.T, published string) string {
+	return pbtAttachManifestFile(t, published, false)
+}
+
+func pbtAttachManifestFile(t *testing.T, published string, data bool) string {
+	t.Helper()
+	sources, err := pbtAttachManifestSources(datadir.Open(published))
+	require.NoError(t, err)
+	for _, source := range sources {
+		if strings.Contains(source.Name, "accounts") && (data == strings.HasSuffix(source.Name, ".kv")) {
+			info, statErr := os.Stat(source.Path)
+			require.NoError(t, statErr)
+			if info.Size() != 0 {
+				return source.Path
+			}
+		}
+	}
+	t.Fatal("no accounts state file")
+	return ""
+}
+
+func snapshotTreeDigest(t *testing.T, root string) map[string][32]byte {
+	t.Helper()
+	got := map[string][32]byte{}
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		got[rel] = sha256.Sum256(data)
+		return nil
+	}))
+	return got
+}
+
+func rewritePBTAttachManifest(t *testing.T, published string, mutate func(*state.PBTManifest)) {
+	t.Helper()
+	dirs := datadir.Open(published)
+	path := filepath.Join(dirs.Snap, "pbt-manifest.toml")
+	manifest, err := state.ReadPBTManifest(path)
+	require.NoError(t, err)
+	mutate(&manifest)
+	require.NoError(t, state.WritePBTManifest(path, manifest))
 }
 
 func TestAttachPBTRejectsDifferentStateSalt(t *testing.T) {

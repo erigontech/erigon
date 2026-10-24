@@ -363,23 +363,23 @@ flowchart LR
 - Modify: `cmd/integration/commands/commitment_attach_pbt.go`
 - Modify: `cmd/integration/commands/commitment_attach_pbt_test.go`
 
-- [ ] require the manifest (named error for old outputs), and check:
+- [x] require the manifest (named error for old outputs), and check:
   - the point, `trie_hash` and file set;
   - the digests in parallel;
   - the root record against `pbt_root`;
   - the published and node hex roots against `hex_root`;
   - past the fork, the header root against `pbt_root`.
   Re-digest a file adopted by copy at the destination.
-- [ ] A-a, A-b and A-c leave the default path. `--skip-verify` stays and skips only the digest passes; every other
+- [x] A-a, A-b and A-c leave the default path. `--skip-verify` stays and skips only the digest passes; every other
       check above always runs. Write the shadow root from `pbt_root` at a block end before the fork, with or without
       the flag. Copy the manifest into the node.
-- [ ] tests:
+- [x] tests:
   - refused before adopting: a changed byte; a missing or extra file; a wrong root; a wrong hex root;
   - with `--skip-verify`, a changed byte passes, but a wrong root is still refused;
   - a corrupted copy is refused after the copy;
   - a clean attach writes the shadow root and settings;
   - resume after a crash at each `hooks.step`.
-- [ ] run the gate — must pass before Task 11.
+- [x] run the gate — must pass before Task 11.
 
 ### Task 11: Resume, part 1 — the gap leaf stream
 **Files:**
