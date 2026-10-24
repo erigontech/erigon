@@ -1682,7 +1682,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry a
 			// storage read saw is a BAL no-op and stays valid; other paths mean a real
 			// concurrent change and must invalidate.
-			if !vm.HasBAL || !path.BALSeeded() {
+			balTrusted := vm.HasBAL && path.BALSeeded()
+			// A removal of an already-empty account wipes its pre-block storage but carries
+			// no balance/nonce/code delta, so it cannot appear in the BAL (EIP-7928 has no
+			// removal field). A cold storage read beneath such a removal is therefore not a
+			// BAL no-op — drop the exemption and let the value/version check catch it.
+			if balTrusted && path == StoragePath {
+				if _, removed := vm.selfDestructInRange(addr, version.TxIndex+1, txIndex, true); removed {
+					balTrusted = false
+				}
+			}
+			if !balTrusted {
 				switch {
 				case recursive && matchesLive == nil:
 					// Synthetic cross-validate probe with no recorded value of its own —
