@@ -19,6 +19,7 @@ package eip8297
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -215,8 +216,7 @@ func (s streamRootSubtree) hashAt(sum HashFn, parentDepth int) common.Hash {
 		return hashStreamRootBranch(sum, prefix, branch.left, branch.right)
 	}
 	root := s.lastLeaf
-	for i := len(s.branches) - 1; i >= 0; i-- {
-		branch := s.branches[i]
+	for i, branch := range slices.Backward(s.branches) {
 		prefix := branch.prefix
 		if i == 0 {
 			prefix = s.firstBits[parentDepth+1 : branch.split]

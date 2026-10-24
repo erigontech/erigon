@@ -185,9 +185,9 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 			}
 			return PBinResumeLeaves(ctx, sourceFiles, resume, emit)
 		}
-		rootBuilder, err := eip8297.NewParallelStreamRoot(opts.Hash, workers)
-		if err != nil {
-			return err
+		rootBuilder, rootErr := eip8297.NewParallelStreamRoot(opts.Hash, workers)
+		if rootErr != nil {
+			return rootErr
 		}
 		returnErr := ForEachPBinLeafWithWorkers(sourceFiles, opts.SourceTx, true, workers, opts.SourceWorkerRuns, func(leaf PBinLeaf) error {
 			select {
