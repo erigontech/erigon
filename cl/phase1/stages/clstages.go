@@ -87,7 +87,10 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
-	chainTipRejections           *chainTipRejections
+	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
+	// EL adoption. Tolerated FCU timeouts still update it.
+	executionHead      common.Hash
+	chainTipRejections *chainTipRejections
 }
 
 type Args struct {
@@ -437,7 +440,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
-						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake,
+						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,
 					)
 					cfg.sleepForSlotHeadChanged = headChanged
 					if headChanged {
