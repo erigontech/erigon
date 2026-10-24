@@ -36,13 +36,11 @@ import (
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -499,28 +497,45 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 	}))
 }
 
-func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
-	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
-	headSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	headState := state.New(config)
-	headState.SetVersion(clparams.FuluVersion)
-	require.NoError(t, headState.SetSlot(headSlot))
-	emitter := beaconevents.NewEventEmitter()
-	events := make(chan *beaconevents.EventStream, 1)
-	subscription := emitter.State().Subscribe(events)
-	defer subscription.Unsubscribe()
-	cfg := &Cfg{
-		beaconCfg: config,
-		ethClock:  eth_clock.NewEthereumClock(0, common.Hash{}, config),
-		emitter:   emitter,
+func TestPayloadAttributesStageOwnershipAtGloas(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	config.AltairForkEpoch = 0
+	config.BellatrixForkEpoch = 0
+	config.CapellaForkEpoch = 0
+	config.DenebForkEpoch = 0
+	config.ElectraForkEpoch = 0
+	config.FuluForkEpoch = 0
+	config.GloasForkEpoch = 1
+	config.InitializeForkSchedule()
+	firstGloasSlot := config.GloasForkEpoch * config.SlotsPerEpoch
+	for _, test := range []struct {
+		name        string
+		headSlot    uint64
+		headVersion clparams.StateVersion
+		wantEvents  int
+	}{
+		{name: "before boundary", headSlot: firstGloasSlot - 2, headVersion: clparams.FuluVersion, wantEvents: 1},
+		{name: "at boundary", headSlot: firstGloasSlot - 1, headVersion: clparams.FuluVersion},
+		{name: "after boundary", headSlot: firstGloasSlot, headVersion: clparams.GloasVersion},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			headState := state.New(&config)
+			headState.SetVersion(test.headVersion)
+			require.NoError(t, headState.SetSlot(test.headSlot))
+			emitter := beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 1)
+			subscription := emitter.State().Subscribe(events)
+			defer subscription.Unsubscribe()
+			cfg := &Cfg{
+				beaconCfg: &config,
+				ethClock:  eth_clock.NewEthereumClock(0, common.Hash{}, &config),
+				emitter:   emitter,
+			}
+
+			require.NoError(t, emitNextPaylodAttributesEvent(cfg, test.headSlot, common.Hash{}, headState))
+			require.Len(t, events, test.wantEvents)
+		})
 	}
-
-	require.NoError(t, emitNextPaylodAttributesEvent(cfg, headSlot, common.Hash{}, headState))
-
-	require.Len(t, events, 1)
-	attrs := (<-events).Data.(*beaconevents.PayloadAttributesData).Data.PayloadAttributes
-	require.NotNil(t, attrs.TargetGasLimit)
-	require.Equal(t, hexutil.Uint64(200_000_000), *attrs.TargetGasLimit)
 }
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
