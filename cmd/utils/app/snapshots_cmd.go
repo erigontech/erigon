@@ -84,6 +84,7 @@ import (
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
+	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethconfig/features"
@@ -201,6 +202,8 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ErigondbDomainStepsInFrozenFileFlag,
+				&erigoncli.TieringColdDirFlag,
+				&erigoncli.TieringCommitmentHotMergeStepsFlag,
 			}),
 		},
 		{
@@ -3068,7 +3071,7 @@ type OpenSnapsResult struct {
 	TemporalDB *temporal.DB
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (
 	res OpenSnapsResult,
 	clean func(),
 	err error,
@@ -3119,7 +3122,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
-	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
+	res.Aggregator = openAgg(ctx, dirs, chainDB, logger, aggOpts...)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	res.TemporalDB, err = temporal.New(chainDB, res.Aggregator, res.BlockSnaps)
@@ -3449,7 +3452,14 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	tiered := func(opts state.AggOpts) state.AggOpts {
+		opts = opts.CommitmentHotMaxMergeSteps(cliCtx.Uint64(erigoncli.TieringCommitmentHotMergeStepsFlag.Name))
+		if coldDir := cliCtx.String(erigoncli.TieringColdDirFlag.Name); coldDir != "" {
+			opts = opts.DemoteColdDir(coldDir)
+		}
+		return opts
+	}
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger, tiered)
 	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -3664,20 +3674,24 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) *state.Aggregator {
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger, aggOpts...)
 	if err != nil {
 		panic(err)
 	}
 	return agg
 }
 
-func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (*state.Aggregator, error) {
+func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (*state.Aggregator, error) {
 	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err
 	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
+	opts := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings)
+	for _, f := range aggOpts {
+		opts = f(opts)
+	}
+	agg, err := opts.Open(ctx)
 	if err != nil {
 		return nil, err
 	}
