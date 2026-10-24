@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -1043,10 +1044,21 @@ func (prodSchema) unwind(tx kv.RwTx, keys [][]byte, txFrom uint64) error {
 		return err
 	}
 	defer c.Close()
-	d := newIIChunkDeleter(c)
-	for _, k := range keys {
-		if err := d.deleteRange(k, txFrom, math.MaxUint64); err != nil {
+	pc := iiChunkPruneCursor{RwCursorDupSort: c, d: newIIChunkDeleter(c)}
+	for _, k := range keys { // per-txNum deletes, as prune.HashSeekingPrune does
+		s, err := newIIChunkStream(tx, spikeTbl, k, int(txFrom), -1, order.Asc, -1)
+		if err != nil {
 			return err
+		}
+		txNums, err := stream.ToArrayU64(s)
+		s.Close()
+		if err != nil {
+			return err
+		}
+		for _, n := range txNums {
+			if err := pc.DeleteExact(k, binary.BigEndian.AppendUint64(nil, n)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
