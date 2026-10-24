@@ -278,15 +278,13 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
-	// [GLOAS] payload_attributes event is obsolete in GLOAS: the builder gossips SignedExecutionPayloadBid
-	// instead, and LatestExecutionPayloadHeader is no longer updated in GLOAS states.
-	if cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+	nextSlot := headSlot + 1
+	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
+	version := cfg.beaconCfg.GetCurrentStateVersion(epoch)
+	if version.AfterOrEqual(clparams.GloasVersion) {
 		return nil
 	}
 	headPayloadHeader := s.LatestExecutionPayloadHeader().Copy()
-	nextSlot := headSlot + 1
-
-	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
 	randaoMix := s.GetRandaoMixes(epoch)
 
 	proposerIndex, err := s.GetBeaconProposerIndexForSlot(nextSlot)
@@ -306,24 +304,15 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}
-	if cfg.beaconCfg.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.GloasVersion) {
-		sn := hexutil.Uint64(nextSlot)
-		payloadAttributes.SlotNumber = &sn
-		tgl := hexutil.Uint64(cfg.beaconCfg.DefaultBuilderGasLimit)
-		if gasLimit, ok := cfg.beaconCfg.GetScheduledGasLimit(epoch); ok {
-			tgl = hexutil.Uint64(gasLimit)
-		}
-		payloadAttributes.TargetGasLimit = &tgl
-	}
 	e := &beaconevents.PayloadAttributesData{
-		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),
+		Version: version.String(),
 		Data: beaconevents.PayloadAttributesContent{
 			ProposerIndex:     proposerIndex,
 			ProposalSlot:      nextSlot,
-			ParentBlockNumber: headPayloadHeader.BlockNumber,
+			ParentBlockNumber: &headPayloadHeader.BlockNumber,
 			ParentBlockHash:   headPayloadHeader.BlockHash,
 			ParentBlockRoot:   headRoot,
-			PayloadAttributes: payloadAttributes,
+			PayloadAttributes: beaconevents.NewPayloadAttributes(version, &payloadAttributes),
 		},
 	}
 	cfg.emitter.State().SendPayloadAttributes(e)

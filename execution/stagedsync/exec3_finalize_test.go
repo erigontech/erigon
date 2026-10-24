@@ -2107,6 +2107,39 @@ func TestFeeEntry_WriteToStaysWithinFeeWritePaths(t *testing.T) {
 	}
 }
 
+// A zero tip that removes an existing empty coinbase (EIP-161) must invalidate a
+// later tx that read only the coinbase's existence, as the worker's removal of a
+// touched empty account does.
+func TestFeeEntry_DeleteInvalidatesExistenceRead(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+	reader := newMapStateReader()
+	empty := accounts.NewAccount()
+	reader.accounts[coinbase] = &empty
+	vm := state.NewVersionMap(nil)
+
+	later := state.NewWithVersionMap(reader, vm)
+	t.Cleanup(later.Close)
+	later.SetTxContext(1, 2)
+	exists, err := later.Exist(coinbase)
+	require.NoError(t, err)
+	require.True(t, exists)
+	io := state.NewVersionedIO(3)
+	io.RecordReads(state.Version{TxIndex: 2}, later.VersionedReads())
+
+	fees := &state.WriteSet{}
+	(&feeEntry{addr: coinbase, deleted: true}).writeTo(fees, state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1})
+	vm.FlushVersionedWrites(fees, true)
+
+	equalVersion := func(readV, writeV state.Version) state.VersionValidity {
+		if readV != writeV {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	require.Equal(t, state.VersionInvalid, vm.ValidateVersion(2, io, equalVersion, true, false, false, ""))
+}
+
 func TestFeeEntry_NilIsAbsent(t *testing.T) {
 	t.Parallel()
 	var absent *feeEntry
