@@ -19,6 +19,8 @@ package beaconevents
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestEmitterSet(t *testing.T) {
@@ -37,4 +39,19 @@ func TestEmitterSet(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	emitter.Operation().SendAttestation(&AttestationData{})
 	<-done
+}
+
+func TestPayloadAttributesSubscriberTracking(t *testing.T) {
+	emitter := NewEventEmitter()
+	require.False(t, emitter.HasPayloadAttributesSubscribers())
+
+	releaseFirst := emitter.TrackPayloadAttributesSubscriber()
+	releaseSecond := emitter.TrackPayloadAttributesSubscriber()
+	require.True(t, emitter.HasPayloadAttributesSubscribers())
+
+	releaseFirst()
+	require.True(t, emitter.HasPayloadAttributesSubscribers())
+
+	releaseSecond()
+	require.False(t, emitter.HasPayloadAttributesSubscribers())
 }

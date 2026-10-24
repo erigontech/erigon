@@ -1624,3 +1624,39 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 		})
 	}
 }
+
+// TestInvIndexHasTxNumsInDB pins the txNum-indexed existence lookup: it answers
+// from the keys table alone, so it must see exactly the txNums that hold records.
+func TestInvIndexHasTxNumsInDB(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ic := ii.beginForTests()
+	defer ic.Close()
+	writer := ic.NewWriter(db)
+	defer writer.close()
+	require.NoError(t, writer.Add([]byte("key1"), 2))
+	require.NoError(t, writer.Add([]byte("key2"), 3))
+	require.NoError(t, writer.Add([]byte("key1"), 17))
+	require.NoError(t, writer.Flush(ctx, tx))
+
+	for _, tc := range []struct {
+		from, to uint64
+		want     bool
+	}{
+		{0, 2, false},
+		{2, 3, true},
+		{3, 4, true},
+		{4, 17, false},
+		{17, 18, true},
+		{18, 100, false},
+	} {
+		got, err := ic.HasTxNumsInDB(tc.from, tc.to, tx)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, "txNums [%d, %d)", tc.from, tc.to)
+	}
+}

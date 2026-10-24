@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -997,4 +999,86 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 		})
 	}
 	require.NoError(t, eg.Wait())
+}
+
+// Without a count from the blocks, a slot whose count row is missing from the blob store
+// reads as blobless and freezes as an empty entry.
+func TestDumpBlobSidecarsRangeRequiresBlobCount(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+
+	err := DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, nil, log.LvlDebug, log.New())
+	require.ErrorContains(t, err, "blob count")
+
+	written, err := filepath.Glob(filepath.Join(dirs.Snap, "*blobsidecars*"))
+	require.NoError(t, err)
+	require.Empty(t, written)
+}
+
+// A slot outside every frozen block segment reads as no block, the same as an empty slot, so
+// counting it as blobless would freeze a hole wherever the blob store is pruned.
+func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &clparams.MainnetBeaconConfig))
+	n, err := blobCount(25_000)
+	require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
+	require.Zero(t, n)
+
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	err = DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+	require.ErrorContains(t, err, "no frozen beacon block segment")
+}
+
+func TestOpenBeaconBlocksIgnoresDamagedBlobSegments(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	blobSeg := snaptype.BlobSidecars.FileName(version.ZeroVersion, 20_000, 30_000)
+	blobIdx := snaptype.IdxFileName(version.V1_1, 20_000, 30_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	for _, name := range []string{blobSeg, blobIdx} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), bytes.Repeat([]byte{0xff}, 31), 0o644))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenBeaconBlocks())
+	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
+	require.Zero(t, sn.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum()))
+}
+
+func TestRemoveBlobIndexAndTorrents(t *testing.T) {
+	dirs := datadir.New(filepath.Join(t.TempDir(), "dd[1]"))
+	idx := func(v version.Version, from, to uint64) string {
+		return snaptype.IdxFileName(v, from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	}
+	seg := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	removed := []string{seg + ".torrent", idx(version.V1_1, 30_000, 40_000), idx(version.V1_1, 30_000, 40_000) + ".torrent", idx(version.V1_0, 30_000, 40_000)}
+	kept := []string{
+		seg,
+		snaptype.BlobSidecars.FileName(version.V1_1, 40_000, 50_000) + ".torrent",
+		idx(version.V1_1, 40_000, 50_000),
+		snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000) + ".torrent",
+	}
+	for _, name := range append(removed, kept...) {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1}, 0o644))
+	}
+
+	require.NoError(t, removeBlobIndexAndTorrents(dirs.Snap, 30_000, 40_000))
+
+	entries, err := os.ReadDir(dirs.Snap)
+	require.NoError(t, err)
+	var left []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			left = append(left, e.Name())
+		}
+	}
+	require.ElementsMatch(t, kept, left)
 }
