@@ -912,13 +912,15 @@ func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx
 	}
 	defer keysCursor.Close()
 	if valDelCursor == nil {
-		c, err := rwTx.RwCursorDupSort(iit.ii.ValuesTable)
-		if err != nil {
+		var chunksCursor kv.RwCursorDupSort
+		if chunksCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable); err != nil {
 			return nil, err
 		}
-		valDelCursor = iiChunkPruneCursor{RwCursorDupSort: c, d: newIIChunkDeleter(c)}
+		defer chunksCursor.Close()
+		valDelCursor = iiChunkPruneCursor{RwCursorDupSort: chunksCursor, d: newIIChunkDeleter(chunksCursor)}
+	} else {
+		defer valDelCursor.Close()
 	}
-	defer valDelCursor.Close()
 
 	if pruneSizeMetric == nil {
 		pruneSizeMetric = mxPruneSizeIndex
