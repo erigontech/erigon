@@ -350,7 +350,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		if err := verifyPBTOutputRows(ctx, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
 			return err
 		}
-		if err := verifyPBTOutputIdentity(sourceDirs, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
+		if err := verifyPBTOutputIdentity(sourceDirs, outputDirs, visibleRanges, finalSettings, targetDomain, point, logger); err != nil {
 			return err
 		}
 	}
@@ -513,7 +513,7 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	return err
 }
 
-func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
+func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, visibleRanges map[string]struct{}, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
 	sourceFiles, err := pbtAttachFiles(sourceDirs)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: C-e source files: %w", err)
@@ -531,6 +531,13 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbst
 			rel, relErr := filepath.Rel(sourceDirs.Snap, file.path)
 			if relErr != nil {
 				return relErr
+			}
+			parsed, _, parsedOK := snaptype.ParseFileName(filepath.Dir(file.path), filepath.Base(file.path))
+			if !parsedOK {
+				continue
+			}
+			if _, visible := visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)]; !visible {
+				continue
 			}
 			sourceByPath[filepath.Clean(rel)] = file
 		}
@@ -556,11 +563,15 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbst
 	sort.Strings(paths)
 	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output identity verify", Total: uint64(len(paths))})
 	defer progress.Done()
+	var missing error
 	for _, rel := range paths {
 		source := sourceByPath[rel]
 		file, ok := outputByPath[rel]
 		if !ok {
-			return fmt.Errorf("commitment convert-pbt: C-e output state file %s is missing", filepath.Join(outputDirs.Snap, rel))
+			if missing == nil {
+				missing = fmt.Errorf("commitment convert-pbt: C-e output state file %s is missing", filepath.Join(outputDirs.Snap, rel))
+			}
+			continue
 		}
 		sourceInfo, sourceErr := os.Stat(source.path)
 		if sourceErr != nil {
@@ -580,8 +591,15 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbst
 			return fmt.Errorf("commitment convert-pbt: C-e output state file %s has no source file", file.path)
 		}
 	}
-	if err := verifyPBTOutputStateRecords(outputDirs, settings, domain, point); err != nil {
-		return err
+	stateErr := verifyPBTOutputStateRecords(outputDirs, settings, domain, point)
+	if missing != nil {
+		if stateErr != nil {
+			return fmt.Errorf("%v; %w", missing, stateErr)
+		}
+		return missing
+	}
+	if stateErr != nil {
+		return stateErr
 	}
 	return nil
 }
