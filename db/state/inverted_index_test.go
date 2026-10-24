@@ -1879,3 +1879,36 @@ func TestInvertedIndexChunks(t *testing.T) {
 		requireIIChunks(t, tx, ii.ValuesTable, m)
 	})
 }
+
+func TestInvertedIndexPruneChunksResume(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	m := iiChunkModel{}
+	for _, key := range []string{"a", "b", "c"} {
+		iiChunkAdd(t, tx, ii.ValuesTable, m, key, 1, 5, 9, 13)
+	}
+	c, err := tx.RwCursorDupSort(ii.ValuesTable)
+	require.NoError(t, err)
+	defer c.Close()
+	iit := ii.beginForTests()
+	defer iit.Close()
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	stat := &prune.Stat{MinTxNum: math.MaxUint64, ValueProgress: prune.First}
+	require.NoError(t, iit.pruneChunks(canceled, c, 0, 10, logEvery, stat))
+	require.Equal(t, prune.InProgress, stat.ValueProgress)
+	require.Equal(t, []byte("a"), stat.LastPrunedValue)
+
+	require.NoError(t, iit.pruneChunks(t.Context(), c, 0, 10, logEvery, stat))
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 9, stat.PruneCountValues)
+	for _, key := range []string{"a", "b", "c"} {
+		m.delete(key, 0, 10)
+	}
+	requireIIChunks(t, tx, ii.ValuesTable, m)
+}
