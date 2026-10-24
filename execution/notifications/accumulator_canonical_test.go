@@ -5,105 +5,86 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// ONLY THE BLOCK THAT WAS CHOSEN MAY SAY ANYTHING MINED.
+// ONLY WHAT THE CANONICAL BLOCK SEALED WITH MAY BE ANNOUNCED AS MINED.
 //
-// ⚠ THIS IS THE DEFECT THAT COST A SOAK ITS WHOLE POOL, FIVE TIMES OVER.
+// The txpool's removeMined deletes a sender's whole run at or below the highest nonce it is told
+// about — correct for a block that is on the chain, destructive for anything else, because the
+// nonce is then gone and nothing re-sends it.
 //
-// A block's transaction set is settled when it SEALS - it is a property of that block and never
-// changes. Whether that block is the canonical one at its height is a property of the CHAIN, and is
-// settled later. The code conflated the two, and every variant of the same bug followed:
+// ⚠ AND THE CHANGE'S OWN HASH CANNOT BE USED TO DECIDE THAT. Pre-execution starts the change from
+// the header it is building, so BlockHash is a provisional hash and no block by it ever exists.
+// A rule of "announce only if the change's hash is canonical at this height" is false for EVERY
+// block: measured on live445 height 1, changeHash=0x86da26db (unknown to the chain) against
+// canonicalHash=0x9766df8e, dropping the 21 transactions that block really did seal with. The
+// txpool was then told nothing had ever been mined — removals with reason Mined fell from 4,627
+// to 0 — and it kept every transaction the chain had already taken.
 //
-//   - pre-execution's set was left as the default, and a stopped round commits only the prefix it
-//     applied, so the set routinely held transactions the block never sealed with;
-//   - the content was re-derived at FCU by reading the body back out of the database, which can
-//     come back EMPTY while the body is still flushing - and then the guess stood;
-//   - only ONE height was reconciled, which is what you write having never seen an FCU advance more
-//     than one block. Under load it advances several.
-//
-// The txpool then took all of it as mined, and removeMined deletes a sender's whole run at or below
-// the highest nonce it is told about - correct on a canonical chain, fatal on a guess. The nonce is
-// gone, nothing re-sends it, and every later transaction from that sender is stranded for ever.
-// Measured: chainNext 12447, poolLowest 12534, 26,052 transactions behind an 87-wide hole, every
-// round offering 128 and keeping 0.
-//
-// So the rule is one line: a change announces its transactions only if its block is the canonical
-// one at its height. A height that cannot be resolved counts as not chosen - removing too little
-// self-corrects on the next block, removing too much is permanent.
-func TestOnlyTheCanonicalBlockAnnouncesItsTransactions(t *testing.T) {
+// So the canonical body is read and INSTALLED, never compared against.
+func TestTheCanonicalBodyReplacesWhateverTheChangeWasCarrying(t *testing.T) {
 	txn := func(n byte) []byte { return []byte{n} }
-	chosen := common.HexToHash("0xc0")
-	orphan := common.HexToHash("0x0f")
 
 	a := NewAccumulator()
+	// Pre-execution's guess: a prefix of what the block went on to seal with.
 	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{txn(1)}, false)
-	// Same height, a block that lost - and a height above the head, which has no canonical hash.
-	a.StartChange(&types.Header{Number: *uint256.NewInt(2)}, [][]byte{txn(2)}, false)
-	a.StartChange(&types.Header{Number: *uint256.NewInt(3)}, [][]byte{txn(3)}, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(2)}, [][]byte{txn(9)}, false)
 
-	chs := a.Changes()
-	chs[0].BlockHash = chosen
-	chs[1].BlockHash = orphan
-	chs[2].BlockHash = orphan
-
-	a.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
+	replaced, cleared := a.SetCanonicalTxs(func(height uint64) ([][]byte, bool) {
 		switch height {
 		case 1:
-			return chosen, true
-		case 2:
-			return common.HexToHash("0xbb"), true // a DIFFERENT block won this height
+			return [][]byte{txn(1), txn(2), txn(3)}, true // the block sealed with three
 		default:
-			return common.Hash{}, false // above the head: nothing is canonical yet
+			return nil, false // body not readable here
 		}
 	})
 
-	out := a.Changes()
-	if len(out[0].Txs) != 1 {
-		t.Fatalf("the CHOSEN block lost its transactions: %d", len(out[0].Txs))
+	if replaced != 1 || cleared != 1 {
+		t.Fatalf("replaced=%d cleared=%d, want 1/1", replaced, cleared)
 	}
-	if len(out[1].Txs) != 0 {
-		t.Fatal("an ORPHANED block still claims its transactions mined - the pool will delete them " +
-			"and every nonce below them, permanently")
+	chs := a.Changes()
+	if got := len(chs[0].Txs); got != 3 {
+		t.Errorf("height 1 announced %d transactions, want the canonical 3", got)
 	}
-	if len(out[2].Txs) != 0 {
-		t.Fatal("a height ABOVE the canonical head still claims transactions mined - pre-execution " +
-			"runs ahead, and a prediction may not say something mined")
+	if chs[0].Txs[2][0] != 3 {
+		t.Errorf("height 1 did not take the canonical set: %v", chs[0].Txs)
+	}
+	if len(chs[1].Txs) != 0 {
+		t.Errorf("a height whose body could not be read must announce nothing, got %v", chs[1].Txs)
 	}
 }
 
-// The counts are the contract now, because clearing silently is what let a total failure of
-// mined-removal run unnoticed for four soaks: every height cleared, the txpool told nothing was
-// ever mined, and no line anywhere said so.
-func TestKeepOnlyCanonicalTxsReportsWhatItCleared(t *testing.T) {
-	txn := func(n byte) []byte { return []byte{n} }
-	chosen := common.HexToHash("0xc0")
-
+// A height the chain genuinely sealed empty announces nothing, and is not counted as a loss.
+func TestAnEmptyCanonicalBlockAnnouncesNothing(t *testing.T) {
 	a := NewAccumulator()
-	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{txn(1)}, false)
-	a.StartChange(&types.Header{Number: *uint256.NewInt(2)}, [][]byte{txn(2)}, false)
-	a.StartChange(&types.Header{Number: *uint256.NewInt(3)}, [][]byte{txn(3)}, false)
-	// A change with no transactions is not counted either way.
-	a.StartChange(&types.Header{Number: *uint256.NewInt(4)}, nil, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{{7}}, false)
 
-	chs := a.Changes()
-	chs[0].BlockHash = chosen
-	chs[1].BlockHash = chosen
-	chs[2].BlockHash = chosen
+	replaced, cleared := a.SetCanonicalTxs(func(uint64) ([][]byte, bool) { return nil, true })
+	if replaced != 0 || cleared != 1 {
+		t.Fatalf("replaced=%d cleared=%d, want 0/1", replaced, cleared)
+	}
+	if len(a.Changes()[0].Txs) != 0 {
+		t.Error("an empty canonical block left the pre-executed guess standing")
+	}
+}
 
-	kept, unresolved, mismatched := a.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
-		switch height {
-		case 1:
-			return chosen, true
-		case 2:
-			return common.HexToHash("0xbb"), true // another block won
-		default:
-			return common.Hash{}, false // cannot say
+// The counts are the contract: clearing silently is what let a total failure of mined-removal run
+// unnoticed across four soaks.
+func TestSetCanonicalTxsReportsWhatItDid(t *testing.T) {
+	a := NewAccumulator()
+	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{{1}}, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(2)}, nil, false) // nothing to lose
+	a.StartChange(&types.Header{Number: *uint256.NewInt(3)}, [][]byte{{3}}, false)
+
+	replaced, cleared := a.SetCanonicalTxs(func(height uint64) ([][]byte, bool) {
+		if height == 1 {
+			return [][]byte{{1}}, true
 		}
+		return nil, false
 	})
-	if kept != 1 || mismatched != 1 || unresolved != 1 {
-		t.Fatalf("kept=%d unresolved=%d mismatched=%d, want 1/1/1", kept, unresolved, mismatched)
+	// Height 2 carried nothing, so clearing it is not a loss and is not counted.
+	if replaced != 1 || cleared != 1 {
+		t.Fatalf("replaced=%d cleared=%d, want 1/1", replaced, cleared)
 	}
 }

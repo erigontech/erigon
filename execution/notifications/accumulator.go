@@ -73,37 +73,49 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
 }
 
-// KeepOnlyCanonicalTxs clears the transaction list of every accumulated change whose block is not
-// the canonical one at its height. The change itself stays - pre-confirmation still publishes its
-// state deltas - but only Txs drives the txpool's removeMined, and a block that was not chosen
-// mined nothing.
+// SetCanonicalTxs replaces each accumulated change's transaction list with the one the CANONICAL
+// block at that height actually sealed with, and clears it when the canonical body cannot be had.
 //
-// `canonical` reports the chosen hash at a height, and false when it cannot say.
+// ⚠ THE CHANGE'S OWN HASH IS A GUESS AND CANNOT BE COMPARED AGAINST. Pre-execution starts the
+// change from the header it is building, so BlockHash is that provisional header's hash; the block
+// that seals has a different one, and no block by the provisional hash ever exists. The previous
+// rule here was "announce only if the change's hash is the canonical hash at this height", which
+// is therefore false for EVERY block. Measured on live445, height 1:
 //
-// ⚠ IT RETURNS WHAT IT CLEARED, AND THE CALLER MUST SAY SO. Clearing silently is how this went
-// wrong: "cannot say" was treated as not-canonical on the reasoning that removing too little
-// self-corrects, and it does not — the txpool is told a height mined nothing and never hears about
-// that height again. Measured across soaks: removals with reason Mined went 4,627 (live439, before
-// this function existed) to exactly 0 (live440 onward), and every departure fell back to the lazy
-// nonce-too-low sweep that only runs for a sender the pool is told changed.
-func (a *Accumulator) KeepOnlyCanonicalTxs(canonical func(height uint64) (common.Hash, bool)) (kept, unresolved, mismatched int) {
+//	changeHash=0x86da26db... (UNKNOWN TO THE CHAIN)  canonicalHash=0x9766df8e...  txsDropped=21
+//
+// and the canonical block held exactly those 21. Every block's transactions were discarded, so the
+// txpool was told nothing had ever been mined: removals with reason Mined went 4,627 (live439) to
+// 0 (live440 onward) and the pool kept every transaction the chain had already taken.
+//
+// `canonicalTxs` returns the sealed transactions at a height, and false when it cannot say.
+// Cannot-say still clears, and that direction is deliberate: a stale transaction left in the pool
+// is swept later by the nonce-too-low rule, while announcing a set the chain did not seal makes
+// removeMined delete a sender's whole run at or below that nonce, which nothing re-sends.
+func (a *Accumulator) SetCanonicalTxs(canonicalTxs func(height uint64) ([][]byte, bool)) (replaced, cleared int) {
 	for i := range a.changes {
-		if len(a.changes[i].Txs) == 0 {
+		txs, ok := canonicalTxs(a.changes[i].BlockHeight)
+		if !ok {
+			if len(a.changes[i].Txs) > 0 {
+				a.changes[i].Txs = nil
+				cleared++
+			}
 			continue
 		}
-		h, ok := canonical(a.changes[i].BlockHeight)
-		switch {
-		case !ok:
-			a.changes[i].Txs = nil
-			unresolved++
-		case h != a.changes[i].BlockHash:
-			a.changes[i].Txs = nil
-			mismatched++
-		default:
-			kept++
+		if len(txs) == 0 {
+			if len(a.changes[i].Txs) > 0 {
+				a.changes[i].Txs = nil
+				cleared++
+			}
+			continue
 		}
+		a.changes[i].Txs = make([][]byte, len(txs))
+		for j := range txs {
+			a.changes[i].Txs[j] = common.Copy(txs[j])
+		}
+		replaced++
 	}
-	return kept, unresolved, mismatched
+	return replaced, cleared
 }
 
 // StartChange begins accumulation of changes for a new block.

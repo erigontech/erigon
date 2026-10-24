@@ -17,6 +17,7 @@
 package execmodule
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/erigontech/erigon/common"
@@ -166,20 +167,30 @@ func (d *Dispatcher) Dispatch(
 		// Now: no body is read, no height is special, and a block that was not chosen says nothing
 		// mined. A height whose canonical hash cannot be read is treated as not chosen, because
 		// removing too little self-corrects on the next block and removing too much strands a sender.
-		kept, unresolved, mismatched := accumulator.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
+		replaced, cleared := accumulator.SetCanonicalTxs(func(height uint64) ([][]byte, bool) {
 			h, err := rawdb.ReadCanonicalHash(tx, height)
 			if err != nil || h == (common.Hash{}) {
-				return common.Hash{}, false
+				return nil, false
 			}
-			return h, true
+			body, err := rawdb.ReadBodyWithTransactions(tx, h, height)
+			if err != nil || body == nil {
+				return nil, false
+			}
+			out := make([][]byte, 0, len(body.Transactions))
+			for _, txn := range body.Transactions {
+				var buf bytes.Buffer
+				if err := txn.MarshalBinary(&buf); err != nil {
+					return nil, false
+				}
+				out = append(out, buf.Bytes())
+			}
+			return out, true
 		})
-		// NEVER CLEAR SILENTLY. If every height is cleared, the txpool is told nothing was ever
-		// mined and keeps every transaction the chain has already taken — which is what happened,
-		// unnoticed, because this said nothing. unresolved is the one to watch: it means the
-		// canonical hash for a height we just executed could not be read here at all.
-		if unresolved > 0 || mismatched > 0 {
+		// NEVER CLEAR SILENTLY. A cleared height tells the txpool nothing was mined there, and it
+		// never hears about that height again — which is how mined-removal fell to zero unnoticed.
+		if cleared > 0 {
 			d.logger.Warn("[accumulator] heights announcing no mined transactions",
-				"kept", kept, "unresolved", unresolved, "mismatched", mismatched)
+				"replaced", replaced, "cleared", cleared)
 		}
 		// Genuinely empty flush (no change for the current head) — keep the empty backfill so consumers still
 		// see the head advance. Standard flow: exec already populated the change, so this is a no-op.
