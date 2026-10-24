@@ -5,4 +5,4 @@
 go.sum text eol=lf
 *.sol linguist-language=Solidity
 
-.github/workflows/*.lock.yml linguist-generated=true merge=ours
+.github/workflows/*.lock.yml linguist-generated=true merge=ours*.pgo binary
