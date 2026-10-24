@@ -172,6 +172,120 @@ func TestStepRebaseIncreaseKeepsDualCommitment(t *testing.T) {
 	}))
 }
 
+func TestStepRebaseIncreaseKeepsStoppedShadowBehind(t *testing.T) {
+	commitmentflags.Restore(t)
+	const stepSize, stepsInFrozenFile, factor = uint64(1), uint64(64), uint64(32)
+	const newStepSize = stepSize * factor
+	logger := log.New()
+	fixture, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, false, true, stepSize, stepsInFrozenFile, 54)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	dirs := fixture.Tester.Dirs
+	top := fixture.Chain.TopBlock.NumberU64()
+	var lastTxNum uint64
+	wantState := make(map[uint64]map[string][]byte)
+	require.NoError(t, fixture.Tester.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		var err error
+		if _, lastTxNum, err = rawdbv3.TxNums.Last(tx); err != nil {
+			return err
+		}
+		for txNum := uint64(0); txNum <= lastTxNum; txNum++ {
+			wantState[txNum] = collectStateAt(t, tx, txNum)
+		}
+		return nil
+	}))
+	buildMergedStateFiles(t, fixture)
+
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	require.NoError(t, chainDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	}))
+	chainDB.Close()
+	stepAligned := func() (end uint64, stoppedEnds map[kv.Domain]uint64) {
+		require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) error {
+			e, stoppedEnd, err := agg.StepAlignedEnd(newStepSize)
+			end, stoppedEnds = e, stoppedCommitmentEnds(agg, stoppedEnd)
+			return err
+		}))
+		return end, stoppedEnds
+	}
+	end, _ := stepAligned()
+	require.NotZero(t, end)
+	binCut := end/stepSize - factor
+	for _, root := range stateSnapDirs(dirs) {
+		entries, err := os.ReadDir(root)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			matches := stepFileRe.FindStringSubmatch(entry.Name())
+			if matches == nil || matches[2] != kv.CommitmentBinDomain.String() {
+				continue
+			}
+			to, err := strconv.ParseUint(matches[4], 10, 64)
+			require.NoError(t, err)
+			if to > binCut {
+				require.NoError(t, dir.RemoveFile(filepath.Join(root, entry.Name())))
+			}
+		}
+	}
+	liveEnd, stoppedEnds := stepAligned()
+	require.Equal(t, end, liveEnd, "a stopped shadow must not cap the live domains")
+	binEnd := stoppedEnds[kv.CommitmentBinDomain]
+	require.Equal(t, binCut*stepSize, binEnd)
+	require.Less(t, binEnd, end)
+
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, stoppedEnds, logger)
+	require.NoError(t, err)
+	require.NoError(t, applyStepRebasePlan(t.Context(), dirs, plan, logger))
+
+	ends := make(map[string]uint64)
+	for _, root := range stateSnapDirs(dirs) {
+		entries, err := os.ReadDir(root)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			matches := stepFileRe.FindStringSubmatch(entry.Name())
+			if matches == nil {
+				continue
+			}
+			to, err := strconv.ParseUint(matches[4], 10, 64)
+			require.NoError(t, err)
+			limit := end / newStepSize
+			if matches[2] == kv.CommitmentBinDomain.String() {
+				limit = binEnd / newStepSize
+			}
+			require.LessOrEqualf(t, to, limit, "%s past its aligned end", entry.Name())
+			ends[matches[2]] = max(ends[matches[2]], to)
+		}
+	}
+	require.Equal(t, end/newStepSize, ends[kv.CommitmentDomain.String()])
+	require.Equal(t, binEnd/newStepSize, ends[kv.CommitmentBinDomain.String()])
+	chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	require.NoError(t, chainDB.View(t.Context(), func(tx kv.Tx) error {
+		stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+		require.True(t, stopped)
+		return err
+	}))
+	chainDB.Close()
+
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(dirs),
+		execmoduletester.WithGenesisSpec(fixture.Genesis),
+		execmoduletester.WithKey(fixture.Key),
+		execmoduletester.WithStepSize(newStepSize),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	defer reopened.Close()
+	require.NoError(t, reopened.ReExecuteTo(t.Context(), top))
+	require.NoError(t, reopened.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		for txNum := uint64(0); txNum <= lastTxNum; txNum++ {
+			require.Equalf(t, wantState[txNum], collectStateAt(t, tx, txNum), "state as of txNum %d", txNum)
+		}
+		return nil
+	}))
+}
+
 func buildMergedStateFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
 	t.Helper()
 	fixture.Tester.Close()

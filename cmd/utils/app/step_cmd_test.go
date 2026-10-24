@@ -196,6 +196,21 @@ func TestStepRebaseIncreaseRefusesReferencedCommitmentReadAsPlain(t *testing.T) 
 	require.NoError(t, err)
 }
 
+func TestStepRebaseIncreaseRenamesStoppedShadowOnlyUpToItsOwnEnd(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	for _, name := range []string{"v1.0-accounts.0-20.kv", "v1.0-commitment-bin.0-10.kv", "v1.0-commitment-bin.10-11.kv", "v1.0-commitment-bin.11-12.kv"} {
+		writeTestFile(t, filepath.Join(dirs.SnapDomain, name))
+	}
+	_, err := collectRenameList(dirs.SnapDomain, false, 10, 20, nil)
+	require.ErrorContains(t, err, "does not start and end at a multiple of 10 steps")
+	list, err := collectRenameList(dirs.SnapDomain, false, 10, 20, map[string]uint64{kv.CommitmentBinDomain.String(): 10})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-20.kv"), filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-2.kv"),
+		filepath.Join(dirs.SnapDomain, "v1.0-commitment-bin.0-10.kv"), filepath.Join(dirs.SnapDomain, "v1.0-commitment-bin.0-1.kv"),
+	}, list)
+}
+
 func TestStepRebaseIncreaseDropsFilesPastAlignedEnd(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
