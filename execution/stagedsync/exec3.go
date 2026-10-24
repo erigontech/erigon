@@ -602,8 +602,8 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	if blockNum == 0 {
 		if te.hooks.OnGenesisBlock != nil {
 			var b *types.Block
-			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+			if err := te.viewBlockTx(ctx, func(tx kv.Tx) (err error) {
+				b, err = te.readHookBlock(ctx, tx, blockHash, blockNum)
 				return err
 			}); err != nil {
 				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
@@ -618,8 +618,8 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			var finalized *types.Header
 			var safe *types.Header
 
-			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+			if err := te.viewBlockTx(ctx, func(tx kv.Tx) (err error) {
+				b, err = te.readHookBlock(ctx, tx, blockHash, blockNum)
 				if err != nil {
 					return err
 				}
@@ -641,6 +641,24 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			})
 		}
 	}
+}
+
+// viewBlockTx runs f on a block-files-pinned tx that also sees blocks staged in the block overlay.
+func (te *txExecutor) viewBlockTx(ctx context.Context, f func(tx kv.Tx) error) error {
+	return te.cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		if overlay := te.doms.BlockOverlay(); overlay != nil {
+			return f(overlay.NewReadView(tx))
+		}
+		return f(tx)
+	})
+}
+
+func (te *txExecutor) readHookBlock(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64) (*types.Block, error) {
+	b, _, err := te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+	if err == nil && b == nil {
+		err = fmt.Errorf("block %d %x not found", blockNum, blockHash)
+	}
+	return b, err
 }
 
 func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {

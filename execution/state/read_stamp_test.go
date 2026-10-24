@@ -24,6 +24,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -80,4 +83,66 @@ func TestReadStamp_ResumeChangesStamp(t *testing.T) {
 	require.True(t, ok)
 	// GetState does not journal, so wakeGen is the only field that can have moved.
 	require.NotEqual(t, before, after, "a dep-wait resume must change the stamp (wakeGen) so the slot cache invalidates")
+}
+
+// A read that waits on an in-flight estimate and wakes after the writer commits
+// must return the committed value and must not leave a dependency verdict.
+func TestDepWait_ResumeReadsCommittedValue(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+	ibs.SetVersion(0)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 2}, uint256.Int{}, false)
+
+	ibs.SetWaitCommit(func(int) bool {
+		mvhm.WriteStorage(addr, key, Version{TxIndex: 2}, *uint256.NewInt(7), true)
+		return true
+	})
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), v)
+	require.False(t, ibs.HadInvalidRead(), "a successful wait must not force a re-execution")
+}
+
+// A SetCode whose code hash was read from a committed cell must load the previous
+// code through the versioned path too: a code cell still in flight from the same
+// writer must be waited on, not replaced by the pre-block storage code.
+func TestDepWait_SetCodeLoadsInFlightCode(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+	ibs.SetVersion(0)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	addrValue := addr.Value()
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 0, nil))
+	delegation := accounts.NewCode(types.AddressToDelegation(accounts.InternAddress(common.HexToAddress("0xbeef"))))
+	writer := Version{TxIndex: 0}
+	delegated := acc
+	delegated.Nonce = 1
+	delegated.CodeHash = delegation.Hash
+	mvhm.WriteAddress(addr, writer, &delegated, true)
+	mvhm.WriteNonce(addr, writer, 1, true)
+	mvhm.WriteCodeHash(addr, writer, delegation.Hash, true)
+	mvhm.WriteCodeSize(addr, writer, len(delegation.Bytes), true)
+	mvhm.WriteCode(addr, writer, delegation, false)
+
+	ibs.SetWaitCommit(func(int) bool {
+		mvhm.WriteCode(addr, writer, delegation, true)
+		return true
+	})
+
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
+	_, wrote := ibs.VersionedWrites().GetCode(addr)
+	require.True(t, wrote, "clearing an in-flight delegation must write the empty code")
 }

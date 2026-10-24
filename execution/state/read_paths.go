@@ -566,11 +566,6 @@ reread:
 				res.DepIdx(), res.Incarnation(),
 				addr, AccountKey{path, key})
 		}
-		if res.DepIdx() > s.dep {
-			s.dep = res.DepIdx()
-		}
-		hdr.Source = MapRead
-		s.versionedReads.SetHeader(addr, path, key, hdr)
 		// The predecessor write is in flight (Estimate): wait for it to commit, then
 		// re-read the now-committed cell rather than aborting. waitCommit returns false
 		// only on shutdown; callers with no pause hook (serial/historical) never observe
@@ -579,6 +574,11 @@ reread:
 			s.wakeGen++
 			goto reread
 		}
+		if res.DepIdx() > s.dep {
+			s.dep = res.DepIdx()
+		}
+		hdr.Source = MapRead
+		s.versionedReads.SetHeader(addr, path, key, hdr)
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
