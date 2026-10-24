@@ -130,23 +130,42 @@ func (w *iiChunkWriter) put(key []byte, txNums []uint64) error {
 	if err != nil {
 		return err
 	}
-	if v != nil { // txNums go into or before existing chunks: merge with all chunks from here on
-		w.old = w.old[:0]
-		for v != nil {
-			if w.old, err = decodeIIChunk(w.old, v); err != nil {
-				return err
-			}
-			if err := w.c.DeleteCurrent(); err != nil {
-				return err
-			}
-			if v, err = w.c.SeekBothRange(key, seek[:]); err != nil {
-				return err
-			}
-		}
-		w.old = append(w.old, txNums...)
-		slices.Sort(w.old)
-		return w.putChunks(key, slices.Compact(w.old))
+	if v != nil { // txNums go into or before existing chunks
+		return w.mergeFrom(key, seek[:], v, txNums)
 	}
+	return w.appendToLast(key, txNums)
+}
+
+// mergeFrom rewrites the chunks of key from v, the one at the cursor, on together with txNums.
+func (w *iiChunkWriter) mergeFrom(key, seek, v []byte, txNums []uint64) error {
+	w.old = w.old[:0]
+	for v != nil {
+		if err := w.takeChunk(v); err != nil {
+			return err
+		}
+		next, err := w.c.SeekBothRange(key, seek)
+		if err != nil {
+			return err
+		}
+		v = next
+	}
+	w.old = append(w.old, txNums...)
+	slices.Sort(w.old)
+	return w.putChunks(key, slices.Compact(w.old))
+}
+
+// takeChunk moves the txNums of chunk v, the one at the cursor, to w.old.
+func (w *iiChunkWriter) takeChunk(v []byte) error {
+	old, err := decodeIIChunk(w.old, v)
+	if err != nil {
+		return err
+	}
+	w.old = old
+	return w.c.DeleteCurrent()
+}
+
+// appendToLast adds txNums above every chunk of key to its last chunk and new chunks after it.
+func (w *iiChunkWriter) appendToLast(key []byte, txNums []uint64) error {
 	k, _, err := w.c.SeekExact(key)
 	if err != nil {
 		return err
@@ -188,6 +207,7 @@ func (w *iiChunkWriter) putChunks(key []byte, txNums []uint64) error {
 // iiChunkDeleter removes txNums from the values table and counts what it removed.
 type iiChunkDeleter struct {
 	c        kv.RwCursorDupSort
+	key      []byte
 	vals     []uint64
 	buf      []byte
 	count    uint64
@@ -218,21 +238,35 @@ func (d *iiChunkDeleter) deleteRange(key []byte, from, to uint64) error {
 		}
 		d.count += uint64(j - i)
 		d.min, d.max = min(d.min, chunk[i]), max(d.max, chunk[j-1])
-		rest := append(chunk[:i], chunk[j:]...)
-		if len(rest) == 0 {
+		reachedTo := j < len(chunk) // chunk[j] >= to: later chunks are out of range
+		chunk = slices.Delete(chunk, i, j)
+		if len(chunk) == 0 {
 			if err := d.c.DeleteCurrent(); err != nil {
 				return err
 			}
 			continue
 		}
-		d.buf = appendIIChunk(d.buf[:0], rest)
+		d.buf = appendIIChunk(d.buf[:0], chunk)
 		if err := d.c.PutCurrent(key, d.buf); err != nil {
 			return err
 		}
-		if j < len(chunk) { // chunk[j] >= to: later chunks are out of range
+		if reachedTo {
 			return nil
 		}
 	}
+}
+
+// pruneKey removes [from, to) of the key at k and returns the next key.
+func (d *iiChunkDeleter) pruneKey(k []byte, from, to uint64) ([]byte, error) {
+	d.key = append(d.key[:0], k...)
+	if err := d.deleteRange(d.key, from, to); err != nil {
+		return nil, err
+	}
+	next, _, err := d.c.Seek(d.key)
+	if err == nil && next != nil && bytes.Equal(next, d.key) {
+		next, _, err = d.c.NextNoDup()
+	}
+	return next, err
 }
 
 // hashSeekingPruneChunks removes [txFrom, txTo) of a standalone index, finding the keys via the keys table.
@@ -324,6 +358,9 @@ func (iit *InvertedIndexRoTx) pruneChunks(ctx context.Context, c kv.RwCursorDupS
 	default:
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s index values: %w", iit.ii.FilenameBase, err)
+	}
 	d := newIIChunkDeleter(c)
 	defer func() {
 		stat.PruneCountValues += d.count
@@ -331,22 +368,14 @@ func (iit *InvertedIndexRoTx) pruneChunks(ctx context.Context, c kv.RwCursorDupS
 			stat.MinTxNum, stat.MaxTxNum = min(stat.MinTxNum, d.min), max(stat.MaxTxNum, d.max)
 		}
 	}()
-	var key []byte
 	for k != nil {
-		if err != nil {
-			return fmt.Errorf("iterate over %s index values: %w", iit.ii.FilenameBase, err)
-		}
 		if ctx.Err() != nil {
 			stat.LastPrunedValue, stat.ValueProgress = bytes.Clone(k), prune.InProgress
 			return nil
 		}
-		key = append(key[:0], k...)
 		stat.ScanCountKeys++
-		if err := d.deleteRange(key, txFrom, txTo); err != nil {
-			return err
-		}
-		if k, _, err = c.Seek(key); err == nil && k != nil && bytes.Equal(k, key) {
-			k, _, err = c.NextNoDup()
+		if k, err = d.pruneKey(k, txFrom, txTo); err != nil {
+			return fmt.Errorf("prune %s index values: %w", iit.ii.FilenameBase, err)
 		}
 		if stat.ScanCountKeys%1024 == 0 {
 			select {
@@ -357,7 +386,7 @@ func (iit *InvertedIndexRoTx) pruneChunks(ctx context.Context, c kv.RwCursorDupS
 		}
 	}
 	stat.LastPrunedValue, stat.ValueProgress = nil, prune.Done
-	return err
+	return nil
 }
 
 // iiChunkStream iterates the txNums of one key: asc [from, to), desc (to, from]; -1 is unbounded.
