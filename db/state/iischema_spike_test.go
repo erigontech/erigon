@@ -1287,3 +1287,44 @@ func dbgEnvU(name string, def uint64) uint64 {
 	}
 	return def
 }
+
+func TestIISchemaSpikeKeysTable(t *testing.T) {
+	path := os.Getenv("II_SPIKE_EF")
+	if path == "" {
+		t.Log("set II_SPIKE_EF to a .ef file")
+		return
+	}
+	sd := spikeLoad(t, path, 1_562_500)
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).MapSize(64 * datasize.GB).DirtySpace(uint64(256 * datasize.MB)).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: kv.DupSort}} }).MustOpen()
+	defer db.Close()
+	var b [8]byte
+	for i := 0; i < len(sd.pairs); {
+		tx, err := db.BeginRw(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := tx.RwCursorDupSort(spikeTbl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j := 0; j < 200_000 && i < len(sd.pairs); i, j = i+1, j+1 {
+			binary.BigEndian.PutUint64(b[:], sd.pairs[i].tx)
+			if err := c.Put(b[:], sd.keys[sd.pairs[i].k]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c.Close()
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, _ := db.BeginRo(t.Context())
+	defer tx.Rollback()
+	size, _ := tx.BucketSize(spikeTbl)
+	txNums := map[uint64]struct{}{}
+	for _, p := range sd.pairs {
+		txNums[p.tx] = struct{}{}
+	}
+	fmt.Printf("%s keys table: %.1f MB, pairs=%d txNums=%d\n", filepath.Base(path), float64(size)/1e6, len(sd.pairs), len(txNums))
+}
