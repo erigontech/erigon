@@ -209,38 +209,6 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := validatePBTAttachSalts(nodeDirs, publishedDirs); err != nil {
 		return err
 	}
-	manifestPath := filepath.Join(publishedDirs.Snap, "pbt-manifest.toml")
-	manifest, manifestErr := dbstate.ReadPBTManifest(manifestPath)
-	manifestAvailable := true
-	if errors.Is(manifestErr, fs.ErrNotExist) {
-		manifestAvailable = false
-	} else if manifestErr != nil {
-		return fmt.Errorf("commitment attach-pbt: read pbt-manifest.toml: %w", manifestErr)
-	}
-	if manifestAvailable {
-		sources, sourceErr := pbtAttachManifestSources(publishedDirs)
-		if sourceErr != nil {
-			return fmt.Errorf("commitment attach-pbt: manifest files: %w", sourceErr)
-		}
-		if fileSetErr := dbstate.ValidatePBTManifestFileSet(manifest, sources); fileSetErr != nil {
-			return fileSetErr
-		}
-	}
-	if !manifestAvailable {
-		return errors.New("commitment attach-pbt: pbt-manifest.toml is missing; re-run convert-pbt with this binary")
-	}
-	manifestDigest, err := dbstate.PBTManifestDigest(manifestPath)
-	if err != nil {
-		return fmt.Errorf("commitment attach-pbt: manifest digest: %w", err)
-	}
-	if marker != nil {
-		if marker.ManifestBlake3 == "" {
-			return errors.New("commitment attach-pbt: marker has no manifest digest; rerun attach-pbt from the published datadir")
-		}
-		if marker.ManifestBlake3 != manifestDigest {
-			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
-		}
-	}
 	if marker == nil {
 		nodeFiles, fileErr := pbtAttachFiles(nodeDirs)
 		if fileErr != nil {
@@ -284,6 +252,38 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		}
 		if nodeBlock != blockNum || nodeTx != txNum {
 			return fmt.Errorf("commitment attach-pbt: resumed node state is (%d, %d), want (%d, %d)", nodeBlock, nodeTx, blockNum, txNum)
+		}
+	}
+	manifestPath := filepath.Join(publishedDirs.Snap, "pbt-manifest.toml")
+	manifest, manifestErr := dbstate.ReadPBTManifest(manifestPath)
+	manifestAvailable := true
+	if errors.Is(manifestErr, fs.ErrNotExist) {
+		manifestAvailable = false
+	} else if manifestErr != nil {
+		return fmt.Errorf("commitment attach-pbt: read pbt-manifest.toml: %w", manifestErr)
+	}
+	if manifestAvailable {
+		sources, sourceErr := pbtAttachManifestSources(publishedDirs)
+		if sourceErr != nil {
+			return fmt.Errorf("commitment attach-pbt: manifest files: %w", sourceErr)
+		}
+		if fileSetErr := dbstate.ValidatePBTManifestFileSet(manifest, sources); fileSetErr != nil {
+			return fileSetErr
+		}
+	}
+	if !manifestAvailable {
+		return errors.New("commitment attach-pbt: pbt-manifest.toml is missing; re-run convert-pbt with this binary")
+	}
+	manifestDigest, err := dbstate.PBTManifestDigest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("commitment attach-pbt: manifest digest: %w", err)
+	}
+	if marker != nil {
+		if marker.ManifestBlake3 == "" {
+			return errors.New("commitment attach-pbt: marker has no manifest digest; rerun attach-pbt from the published datadir")
+		}
+		if marker.ManifestBlake3 != manifestDigest {
+			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
 		}
 	}
 	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
