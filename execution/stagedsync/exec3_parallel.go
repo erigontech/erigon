@@ -1966,10 +1966,14 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// Valid: wait for its dependencies to commit, then re-validate — a
 			// dependency may have re-executed to a new value, forcing a re-exec;
 			// otherwise the verdict is authoritative and we commit out of order.
-			if !be.versionMap.HasBAL && !waitTo(target) {
-				return
+			// A BAL block does not wait, so nothing changed since the check above.
+			if !be.versionMap.HasBAL {
+				if !waitTo(target) {
+					return
+				}
+				valid, _, _ = be.selfLoopEvaluate(tv, result)
 			}
-			if v, _, _ := be.selfLoopEvaluate(tv, result); v {
+			if valid {
 				send(result)
 				// Stay alive rather than exit: the committed-dependent re-check signals
 				// slReexec (via a sticky flag, so a dropped wake is recovered on the next
