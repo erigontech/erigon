@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	balpkg "github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -387,15 +386,8 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	_ = fmt.Sprintf // suppress unused import
 }
 
-type storedBALGetter struct {
-	kv.Getter
-	data []byte
-}
-
-func (g storedBALGetter) GetOne(string, []byte) ([]byte, error) { return g.data, nil }
-
 func TestProcessChecksStoredBALBytesAndComputedBAL(t *testing.T) {
-	computed := balpkg.Create(1, state.NewVersionedIO(0), "", log.New())
+	computed := balpkg.Create(1, nil, state.NewVersionedIO(0), "", log.New())
 	computedBytes, err := types.EncodeBlockAccessListBytes(computed)
 	require.NoError(t, err)
 	other := types.BlockAccessList{{Address: common.HexToAddress("0x01")}}
@@ -404,7 +396,7 @@ func TestProcessChecksStoredBALBytesAndComputedBAL(t *testing.T) {
 
 	process := func(headerHash common.Hash, stored []byte) error {
 		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
-		_, err := balpkg.Process(storedBALGetter{data: stored}, h, state.NewVersionedIO(0), true, false, "", log.New())
+		_, err := balpkg.Process(stored, h, nil, state.NewVersionedIO(0), true, false, "", log.New())
 		return err
 	}
 	require.NoError(t, process(computed.Hash(), computedBytes))
