@@ -109,11 +109,13 @@ type DomainLatestIterFile struct {
 	roTx          kv.Tx
 	valsTable     string
 
-	limit       int
-	largeVals   bool
-	filesOnly   bool // when true, iterate only over .kv files, ignoring MDBX
-	from, to    []byte
-	orderAscend order.By
+	limit           int
+	largeVals       bool
+	filesOnly       bool // when true, iterate only over .kv files, ignoring MDBX
+	includeEmpty    bool
+	minFileEndTxNum uint64
+	from, to        []byte
+	orderAscend     order.By
 
 	h *CursorHeap
 
@@ -180,6 +182,9 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	}
 
 	for i, item := range domainRoTx.files {
+		if item.endTxNum <= hi.minFileEndTxNum {
+			continue
+		}
 		txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
 		if domainRoTx.d.Accessors.Has(statecfg.AccessorBTree) {
 			// Use BTree cursor for domains with BTree accessor
@@ -369,6 +374,10 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
 		nextStamp := (*hi.h)[0].endTxNum
+		if (*hi.h)[0].btCursor != nil {
+			lastKey = append(hi.k[:0], lastKey...)
+			lastVal = append(hi.v[:0], lastVal...)
+		}
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
@@ -378,8 +387,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				if ci1.btCursor != nil {
 					// BTree cursor iteration
 					if ci1.btCursor.Next() {
-						ci1.key = bytes.Clone(ci1.btCursor.Key())
-						ci1.val = bytes.Clone(ci1.btCursor.Value())
+						ci1.key = ci1.btCursor.Key()
+						ci1.val = ci1.btCursor.Value()
 						if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 							heap.Push(hi.h, ci1)
 						} else {
@@ -412,7 +421,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 			}
 		}
-		if len(lastVal) > 0 {
+		if len(lastVal) > 0 || hi.includeEmpty {
 			hi.nextKey, hi.nextVal, hi.nextStamp = lastKey, lastVal, nextStamp
 			return nil // founc
 		}

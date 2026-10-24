@@ -2007,13 +2007,23 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 // DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
 // ignoring keys in MDBX.
 func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	return dt.debugRangeLatestFromFiles(fromKey, toKey, limit, false, 0)
+}
+
+func (dt *DomainRoTx) debugRangeLatestFromFilesAfter(fromKey, toKey []byte, limit int, minFileEndTxNum uint64) (*DomainLatestIterFile, error) {
+	return dt.debugRangeLatestFromFiles(fromKey, toKey, limit, true, minFileEndTxNum)
+}
+
+func (dt *DomainRoTx) debugRangeLatestFromFiles(fromKey, toKey []byte, limit int, includeEmpty bool, minFileEndTxNum uint64) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
-		orderAscend: order.Asc,
-		aggStep:     dt.stepSize,
-		filesOnly:   true,
-		logger:      dt.d.logger,
-		h:           &CursorHeap{},
+		orderAscend:     order.Asc,
+		aggStep:         dt.stepSize,
+		filesOnly:       true,
+		includeEmpty:    includeEmpty,
+		minFileEndTxNum: minFileEndTxNum,
+		logger:          dt.d.logger,
+		h:               &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
 		s.Close() // it's responsibility of constructor (our) to close resource on error

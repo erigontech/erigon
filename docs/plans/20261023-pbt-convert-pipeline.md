@@ -386,10 +386,10 @@ flowchart LR
 - Create: `db/state/pbt_resume_leaves.go`, `db/state/pbt_resume_leaves_test.go`
 - Modify: `db/state/pbt_leaf_stream.go`
 
-- [ ] input: the base point X and the source point Y. Output: the accounts, storage and code keys of every source
+- [x] input: the base point X and the source point Y. Output: the accounts, storage and code keys of every source
       `.kv` file whose range ends after X, walked in parallel by address range as in D4. History files are not
       read.
-- [ ] per touched address, emit the leaves at Y the way execution's feed (`FeedOpEmitter.EmitAccount`) defines them, as
+- [x] per touched address, emit the leaves at Y the way execution's feed (`FeedOpEmitter.EmitAccount`) defines them, as
       plain ops with 32-byte values:
   - the header leaves always: basic data, plus code hash or delegation, with an all-zero deletion for the one that
     is absent;
@@ -397,18 +397,18 @@ flowchart LR
   - each touched storage slot, with a deletion for an empty value;
   - for an account absent at Y, a deletion for every header leaf and for each storage tombstone. No Drop ops.
   Stamps are the source file's `endTxNum − 1`. The ops go through the one leaf sort (ETL A).
-- [ ] refusals, each with a named error:
+- [x] refusals, each with a named error:
   - a source file that starts at step 0 and spans X;
   - a gap that is not entirely post-Cancun, or a chain with a bytecode rewrite (AuRa `rewriteBytecode`, Gnosis's
     Balancer `Merge.Initialize`).
-- [ ] tests: applying the gap ops to the leaf set at X gives the leaf set at Y, on corpora with:
+- [x] tests: applying the gap ops to the leaf set at X gives the leaf set at Y, on corpora with:
   - updates and deletions;
   - an EIP-161 deletion;
   - EIP-7702 delegation set and clear;
   - new code and shared code;
   - a source merge with a non-zero start that spans X.
   Each refusal has its own test.
-- [ ] run the gate — must pass before Task 12.
+- [x] run the gate — must pass before Task 12.
 
 ### Task 12: Resume, part 2 — fold on top of the existing PBT
 **Files:**
