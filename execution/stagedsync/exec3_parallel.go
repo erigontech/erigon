@@ -127,7 +127,10 @@ type parallelExecutor struct {
 	// keeps its object but releases its execSem slot, so resting does not reduce
 	// concurrency — another worker runs on a different object. runSem must hold enough
 	// objects for the peak of executing+resting workers; execSem sizes parallelism.
-	execSem    chan struct{}
+	execSem chan struct{}
+	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
+	// open and close one; like applyTx it lives for one exec loop.
+	slotTxs    chan kv.TemporalTx
 	runWG      sync.WaitGroup
 	workersCtx context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
@@ -1657,6 +1660,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		}
 		slots := len(pe.execWorkers)
 		pe.execSem = make(chan struct{}, slots)
+		pe.slotTxs = make(chan kv.TemporalTx, slots)
 		for range slots {
 			pe.execSem <- struct{}{}
 		}
@@ -1672,6 +1676,14 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// cancelWorkers unblocks any waiting on runSem, so no goroutine touches a
 		// worker after teardown.
 		pe.runWG.Wait()
+		for drained := false; !drained; {
+			select {
+			case tx := <-pe.slotTxs:
+				tx.Rollback()
+			default:
+				drained = true
+			}
+		}
 
 		pe.stopWorkers()
 
@@ -1805,7 +1817,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				return
 			}
 			if goRoTx != nil {
-				goRoTx.Rollback()
+				select {
+				case pe.slotTxs <- goRoTx:
+				default:
+					goRoTx.Rollback()
+				}
 				goRoTx = nil
 			}
 			pe.execSem <- struct{}{}
@@ -1822,6 +1838,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				slotHeld = true
 			case <-pe.workersCtx.Done():
 				return false
+			}
+			select {
+			case goRoTx = <-pe.slotTxs:
+				return true
+			default:
 			}
 			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx) //nolint:gocritic // slot-tied rotx: rolled back on slot release (releaseSlot), not a defer here — it outlives this function
 			if err != nil {
