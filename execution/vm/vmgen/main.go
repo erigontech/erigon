@@ -140,6 +140,9 @@ func coldOps() []fastOp {
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
 		op("GAS", "opGas"),
+		copyOp("CALLDATACOPY", "opCallDataCopy", "memoryCallDataCopy", "gasCallDataCopy"),
+		copyOp("CODECOPY", "opCodeCopy", "memoryCodeCopy", "gasCodeCopy"),
+		copyOp("RETURNDATACOPY", "opReturnDataCopy", "memoryReturnDataCopy", "gasReturnDataCopy"),
 		forked(alu("BLOBHASH", "opBlobHash", 1)),
 		forked(fastOp{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1}),
 		forked(fastOp{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep"}),
@@ -155,6 +158,16 @@ func coldOps() []fastOp {
 }
 
 const allocated32 = "callContext.Memory.allocated32(stack.peek())"
+
+// copyOp is a copy into memory from outside it, which writes length bytes at the stack top.
+func copyOp(name, execute, memorySize, dynamicGas string) fastOp {
+	allocated := "callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))"
+	if name == "RETURNDATACOPY" {
+		// RETURNDATACOPY is in the jump table only from Byzantium on.
+		allocated = "jt[RETURNDATACOPY].memorySize != nil && " + allocated
+	}
+	return fastOp{name: name, execute: execute, gas: "GasFastestStep", pop: 3, memorySize: memorySize, dynamicGas: dynamicGas, allocated: allocated, copyLen: "stack.back(2)"}
+}
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
 
@@ -244,7 +257,7 @@ func inlineBody(srcs map[string][]byte, o fastOp) string {
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh", "SetFromData"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
@@ -292,13 +305,19 @@ func returns(n ast.Node) (found bool) {
 func callsOutOfLine(s ast.Node) (found bool) {
 	ast.Inspect(s, func(n ast.Node) bool {
 		if c, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
+			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && (slices.Contains(outOfLine, sel.Sel.Name) || sel.Sel.Name == "Set" && isMemory(sel.X)) {
 				found = true
 			}
 		}
 		return !found
 	})
 	return found
+}
+
+// isMemory reports whether x is a Memory field: uint256's inlined Set has the same name as Memory.Set.
+func isMemory(x ast.Expr) bool {
+	sel, ok := x.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == "Memory"
 }
 
 // mustStmt parses src as a statement without positions, so the printer lays it
