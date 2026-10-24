@@ -53,8 +53,10 @@ func TestResultStream_MustDeliverBlocksUntilDrained(t *testing.T) {
 	s.register("applyResults", apply)
 	s.register("commitResults", commit)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	done := make(chan error, 1)
-	go func() { done <- s.publish(context.Background(), "r", true) }()
+	go func() { done <- s.publish(ctx, "r", true) }()
 
 	// Both consumers must receive even though the coordination ctx is cancelled:
 	// mustDeliver ignores ctx.Done. A cancelled ctx must not short-circuit.

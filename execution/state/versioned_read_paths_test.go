@@ -645,6 +645,118 @@ func TestVersionedRead_G7_BalanceViaResolvedAddressPath(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(555), bal, "balance resolved via AddressPath account")
 }
 
+// A lower tx creates the account and is flushed after the field probe missed
+// but before the fallbacks probe the version map again. The account record and
+// the self-destruct cell hold creation-time state at the same version as the
+// field cell flushed with them, so validation cannot catch a stale field: the
+// read must return and record the cell.
+func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
+	t.Parallel()
+	codeHash := accounts.InternCodeHash([32]byte{0xc9})
+	tests := []struct {
+		name     string
+		write    func(ws *WriteSet, addr accounts.Address, hdr WriteHeader)
+		read     func(ibs *IntraBlockState, addr accounts.Address) (any, error)
+		recorded func(rs *ReadSet, addr accounts.Address) (ReadHeader, any)
+		want     any
+	}{
+		{
+			name: "balance",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = BalancePath
+				ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: hdr, Val: *uint256.NewInt(1)})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetBalance(addr) },
+			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+				vr, _ := rs.GetBalance(addr)
+				return vr.ReadHeader, vr.Val
+			},
+			want: *uint256.NewInt(1),
+		},
+		{
+			name: "nonce",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = NoncePath
+				ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: hdr, Val: 1})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetNonce(addr) },
+			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+				vr, _ := rs.GetNonce(addr)
+				return vr.ReadHeader, vr.Val
+			},
+			want: uint64(1),
+		},
+		{
+			name: "code hash",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = CodeHashPath
+				ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: hdr, Val: codeHash})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetCodeHash(addr) },
+			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+				vr, _ := rs.GetCodeHash(addr)
+				return vr.ReadHeader, vr.Val
+			},
+			want: codeHash,
+		},
+		{
+			name: "incarnation",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = IncarnationPath
+				ws.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: hdr, Val: 1})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetIncarnation(addr) },
+			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+				vr, _ := rs.GetIncarnation(addr)
+				return vr.ReadHeader, vr.Val
+			},
+			want: uint64(1),
+		},
+		{
+			name: "balance kept by a self-destruct to itself",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = SelfDestructPath
+				ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: hdr, Val: true})
+				hdr.Path = BalancePath
+				ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: hdr, Val: *uint256.NewInt(1)})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetBalance(addr) },
+			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+				vr, _ := rs.GetBalance(addr)
+				return vr.ReadHeader, vr.Val
+			},
+			want: *uint256.NewInt(1),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0x99})
+			vm := NewVersionMap(nil)
+			ibs := NewWithVersionMap(&emptyReader{}, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 1)
+
+			hdr := WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}
+			ws := &WriteSet{}
+			ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: hdr, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
+			tt.write(ws, addr, hdr)
+			vm.fieldMissHook = func() {
+				vm.fieldMissHook = nil
+				vm.FlushVersionedWrites(ws, true, "")
+			}
+
+			got, err := tt.read(ibs, addr)
+			require.NoError(t, err)
+			require.Nil(t, vm.fieldMissHook, "the flush must land after the field probe")
+			assert.Equal(t, tt.want, got)
+			recHdr, recVal := tt.recorded(&ibs.versionedReads, addr)
+			assert.Equal(t, ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}}, recHdr)
+			assert.Equal(t, tt.want, recVal)
+		})
+	}
+}
+
 // storage fallback. Empty reader + no prior writes/reads → falls through
 // to the readStorage callback (returns zero from emptyReader) and records
 // defaultV in readSet.
@@ -965,4 +1077,138 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	var io VersionedIO
 	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
 	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, ""), "commit-time validation catches the stale read")
+}
+
+// CREATE over an account with storage but no code or nonce: the slot read
+// before the CREATE belongs to the old incarnation, so committed storage is zero.
+func TestVersionedRead_B_CommittedStorageAfterCreateIsZero(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		_, tx, domains := NewTestRwTx(t)
+		addr := accounts.InternAddress([20]byte{0xb7})
+		key := accounts.InternKey([32]byte{0x01})
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1)
+		acc.Incarnation = 1
+		addrValue, keyValue := addr.Value(), key.Value()
+		domains.SetTxNum(10)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(addrValue[:], keyValue[:]...), []byte{0x07}, 10, nil))
+		ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 5)
+
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		require.EqualValues(t, 7, v.Uint64(), "noMaterialize=%v", noMaterialize)
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		committed, err := ibs.GetCommittedState(addr, key)
+		require.NoError(t, err)
+		assert.True(t, committed.IsZero(), "noMaterialize=%v", noMaterialize)
+	}
+}
+
+// A dirty address serves the recorded read of a field it has not written, as a
+// clean one does: a later estimate in the version map is left to validation.
+func TestVersionedRead_B_DirtyAddressServesRecordedRead(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb4})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.Balance = *uint256.NewInt(1234)
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, nonce)
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
+	require.False(t, ibs.warmReadable(addr), "the balance write makes the address dirty")
+
+	mvhm.WriteNonce(addr, Version{TxIndex: 2}, 9, false)
+	nonce, err = ibs.GetNonce(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, nonce)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 77, balance.Uint64(), "an own write still wins")
+
+	_, err = ibs.GetCode(addr)
+	require.NoError(t, err)
+	mvhm.WriteCode(addr, Version{TxIndex: 2}, accounts.Code{Bytes: []byte{0x60}}, false)
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	assert.Empty(t, code, "code is served from the recorded read too")
+}
+
+// Touching an account whose own balance write is already zero changes nothing,
+// so it adds no journal entry.
+func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb6})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	n := ibs.journal.length()
+	require.Positive(t, n)
+	require.NoError(t, ibs.TouchAccount(addr))
+	assert.Equal(t, n, ibs.journal.length())
+	balance, ok := ibs.versionedWrites.GetBalance(addr)
+	require.True(t, ok)
+	assert.True(t, balance.Val.IsZero())
+}
+
+// A CREATE2 onto an account a prior tx destroyed carries the balance a later tx's
+// fee revived it with, even when this tx first read the account while it was
+// destroyed.
+func TestVersionedRead_CreateCarriesRevivedBalanceAfterEarlierDestroyedRead(t *testing.T) {
+	t.Parallel()
+	for _, firstRead := range []string{"nonce", "balance", "codehash"} {
+		t.Run(firstRead, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			addr := accounts.InternAddress([20]byte{0xc7})
+			vm := NewVersionMap(nil)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+			ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 2)
+
+			var err error
+			switch firstRead {
+			case "nonce":
+				_, err = ibs.GetNonce(addr)
+			case "balance":
+				_, err = ibs.GetBalance(addr)
+			case "codehash":
+				_, err = ibs.GetCodeHash(addr)
+			}
+			require.NoError(t, err)
+
+			revived := accounts.NewAccount()
+			revived.Balance = *uint256.NewInt(1000)
+			vm.WriteBalance(addr, Version{TxIndex: 1}, revived.Balance, true)
+			vm.WriteAddress(addr, Version{TxIndex: 1}, &revived, true)
+
+			require.NoError(t, ibs.CreateAccount(addr, true))
+			bal, err := ibs.GetBalance(addr)
+			require.NoError(t, err)
+			require.EqualValues(t, 1000, bal.Uint64())
+		})
+	}
 }

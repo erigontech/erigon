@@ -739,6 +739,93 @@ func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
 		"a revival write after the destruct re-creates the account — the read stays valid")
 }
 
+// A revival writes SelfDestruct=false above the destruct and no nonce, so a nonce read
+// from before the destruct is stale; one rewritten after the destruct stays valid.
+func TestValidateRead_NonceBeforeDestructStaleAfterRevival(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		rewrite bool
+		want    VersionValidity
+	}{
+		{"stale", false, VersionInvalid},
+		{"rewritten", true, VersionValid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(79)
+			vm := NewVersionMap(nil)
+			writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0}, uint64(1), true)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+			writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(1), true)
+			read := VersionedRead[uint64]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}}, Val: 1}
+			if tc.rewrite {
+				writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 2}, uint64(0), true)
+				read = VersionedRead[uint64]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 2}}}
+			}
+
+			io := NewVersionedIO(4)
+			rs := ReadSet{}
+			rs.SetNonce(addr, read)
+			io.RecordReads(Version{TxIndex: 3}, rs)
+			require.Equal(t, tc.want, vm.ValidateVersion(3, io, validateEqualVersion, false, ""))
+		})
+	}
+}
+
+// Tx 0 deploys code, tx 1 destroys the account and tx 2 revives it with a value
+// transfer or a fee credit, neither of which writes code. A code or code-size read
+// from before the destruct is stale, as the read path, which returns empty code
+// here, says.
+func TestValidateRead_CodeBeforeDestructStaleAfterRevival(t *testing.T) {
+	t.Parallel()
+	runtime := accounts.NewCode([]byte{0x33, 0xff})
+	revivals := []struct {
+		name     string
+		transfer bool
+	}{{"value transfer", true}, {"fee credit", false}}
+	reads := []struct {
+		name   string
+		record func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
+	}{
+		{"code", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: runtime})
+		}},
+		{"code size", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr, Val: runtime.Len()})
+		}},
+	}
+	for _, revival := range revivals {
+		for _, read := range reads {
+			t.Run(revival.name+"/"+read.name, func(t *testing.T) {
+				t.Parallel()
+				addr := getAddress(80)
+				vm := NewVersionMap(nil)
+				writeFor(vm, addr, CodePath, accounts.NilKey, Version{TxIndex: 0}, runtime, true)
+				writeFor(vm, addr, CodeSizePath, accounts.NilKey, Version{TxIndex: 0}, runtime.Len(), true)
+				writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 0}, runtime.Hash, true)
+				writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+				writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 1}, uint256.Int{}, true)
+				revived := &accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+				writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 2}, revived, true)
+				writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(1), true)
+				writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 2}, accounts.EmptyCodeHash, true)
+				if revival.transfer {
+					writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(0), true)
+					writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+				}
+
+				io := NewVersionedIO(4)
+				rs := ReadSet{}
+				read.record(&rs, addr, ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}})
+				io.RecordReads(Version{TxIndex: 3}, rs)
+				require.Equal(t, VersionInvalid, vm.ValidateVersion(3, io, validateEqualVersion, false, ""))
+			})
+		}
+	}
+}
+
 // TestVersionedWritePoolReuse_NoStaleFields guards the *VersionedWrite[T] pool
 // invariant: getVW* returns a recycled cell that may still hold a prior write's
 // contents, so the record path MUST wholesale-overwrite it. It drives the

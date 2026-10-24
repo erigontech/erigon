@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -124,6 +123,8 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	cfg := StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB,
 		chainspec.Mainnet.Config, engine, &vm.Config{}, nil, false, false,
 		dirs, br, chainspec.Mainnet.Genesis, syncCfg, false, nil)
+	// The witness carries a flat post-state, no commitment trie: run exec-only.
+	cfg.discardCommitment = true
 
 	num := block.NumberU64()
 	inputTxNum := ephemeralSeedTxNum + 1
@@ -189,7 +190,6 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 func BenchmarkEphemeralParallelReplay(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-	defer dbg.OverrideDiscardCommitment(true)() // the witness carries no commitment trie
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
@@ -219,7 +219,6 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-	defer dbg.OverrideDiscardCommitment(true)() // the witness carries no commitment trie
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
@@ -292,4 +291,32 @@ func TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock(t *testing.T) {
 	require.False(t, valid, "a stale read must revalidate as invalid")
 	require.Equal(t, writerTxIndex-startTxIndex, blocker,
 		"blocker must be in dense task-list space, not versionMap block-TxIndex space")
+}
+
+// TestSelfLoopEvaluateBlockerOnSelfDestructEstimate pins that a read invalidated
+// only by a lower tx's in-flight self-destruct estimate names that tx as the
+// blocker. The read itself is a Done origin cell, so a blocker search over the
+// read's own path finds nothing and the worker re-executes in a busy loop until
+// it hits the incarnation limit.
+func TestSelfLoopEvaluateBlockerOnSelfDestructEstimate(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000deadbeef"))
+	origin := state.Version{TxIndex: -2}
+	vm := state.NewVersionMap(nil)
+	vm.WriteAddress(addr, origin, &accounts.Account{}, true)
+	vm.WriteSelfDestruct(addr, state.Version{TxIndex: 0, Incarnation: -1}, true, false)
+
+	var rs state.ReadSet
+	rs.SetAddress(addr, state.VersionedRead[state.AccountView]{
+		ReadHeader: state.ReadHeader{Source: state.MapRead, Version: origin},
+		Val:        state.NewAccountView(&accounts.Account{}),
+	})
+	be := &blockExecutor{
+		versionMap: vm,
+		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: -1}, index: 0}},
+	}
+	tv := &taskVersion{execTask: &execTask{index: 2}, version: state.Version{TxIndex: 1}}
+
+	valid, _, blocker := be.selfLoopEvaluate(tv, &exec.TxResult{TxIn: rs})
+	require.False(t, valid)
+	require.Equal(t, 1, blocker, "the self-destruct estimate's writer must be the blocker")
 }

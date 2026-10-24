@@ -1386,6 +1386,10 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 	}
 	ibs.stateReader.SetTrace(false, "")
 	if err != nil {
+		// Route a committed-base read failure (e.g. a corrupt account record) operationally
+		// like the origin* readers, so the executor surfaces it instead of letting the
+		// EVM swallow it as a gas failure and condemn the block as invalid.
+		ibs.recordStateReadError(err)
 		return nil, err
 	}
 	if ibs.committedBase == nil {
@@ -1871,7 +1875,7 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 
 	// Deliberately no StoragePath=0 writes for the dirty slots: the account
 	// stays alive until end-of-tx, so a re-entry's GetState must still see the
-	// dirty values. The per-slot DELETE entries come from Normalize's SD cascade.
+	// dirty values.
 
 	return true, nil
 }
@@ -2037,6 +2041,10 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	accountVersion := ibs.Version()
 
 	if err != nil {
+		// Record so the executor surfaces it operationally rather than continuing
+		// with a wrong value; the serial (non-versioned) account read reaches the DB
+		// here, bypassing refreshAccount and the typed readers that already record.
+		ibs.recordStateReadError(err)
 		return nil, err
 	}
 
@@ -2352,12 +2360,19 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// prefund, and reading after createObject would see the just-written zero.
 	var carryBalance uint256.Int
 	carryBalanceValid := previous != nil && !previous.selfdestructed
-	if carryBalanceValid {
+	if previous != nil {
 		b, _, err := ibs.getBalance(addr)
 		if err != nil {
 			return err
 		}
-		carryBalance = b
+		// Carry the live balance over the create. Normally zero for a self-destructed
+		// previous, but a same-tx credit may have revived the account before this create
+		// (the EVM preserves funds sent to a not-yet-created address), so carry a non-zero
+		// revived balance too.
+		if carryBalanceValid || !b.IsZero() {
+			carryBalance = b
+			carryBalanceValid = true
+		}
 	}
 	newObj := ibs.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
@@ -2368,15 +2383,18 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
+	} else if previous == nil && balSource == MapRead {
+		// This tx already read the account destroyed, so there is no record, but a
+		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
+		newObj.data.Balance.Set(&preTxBalance)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
-		// Record contract creation in the versioned writes so that
-		// Normalize knows this address was created (prevents
-		// empty account deletion for newly deployed contracts).
+		// Record contract creation so FinalizedWrites does not remove a newly
+		// deployed contract as empty.
 		ibs.recordWriteCreateContract(addr, true)
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
@@ -2490,6 +2508,14 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		}
 	} else if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
+		// A recreate below the original incarnation makes the writer clear the old code
+		// and storage on the account write, so that write must land before the new ones.
+		downRev := stateObject.original.Incarnation > stateObject.data.Incarnation
+		if downRev {
+			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+				return err
+			}
+		}
 		// Write any contract code associated with the state object; dirtyCode is
 		// set only when code actually changed, so a clear-to-empty must still
 		// write through (empty CodeDomain, consistent with the empty codeHash).
@@ -2512,11 +2538,12 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 			}
 		}
-		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
-			return err
+		if !downRev {
+			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+				return err
+			}
 		}
-		// In parallel mode only modified fields land in the versionMap WriteSet;
-		// Normalize fills the rest from the stateReader.
+		// In parallel mode only modified fields land in the versionMap WriteSet.
 	}
 	return nil
 }
@@ -2738,7 +2765,7 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // emptiness. Created-empty accounts are already withheld by
 // withholdCreatedEmptyAccounts, so only pre-existing empties reach here.
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet) {
-	if ibs.blockNum == 0 || chainRules == nil || ibs.versionMap == nil {
+	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
@@ -2781,9 +2808,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 // absent and left empty (EIP-161): such an account is absent both before and
 // after the tx, so omitting its writes is exact and no deletion marker is
 // needed. An account that existed before is kept even when it ends empty —
-// clearing it needs an explicit delete, which commit-time normalization emits.
+// clearing it needs an explicit delete, which encodeExistingEmptyRemovals emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
-	if ibs.blockNum == 0 || chainRules == nil {
+	if chainRules == nil {
 		return
 	}
 	for addr := range writes.address {

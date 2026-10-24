@@ -260,7 +260,7 @@ type readPathResult struct {
 // reads as its empty value — EmptyCodeHash for the code hash), else outcomeReturnZero
 // when the account is absent (reads as the zero value).
 func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcome {
-	if state, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
+	if state, _, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
 		return outcomeReturnEmpty
 	}
 	return outcomeReturnZero
@@ -271,6 +271,13 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 // wrappers consume the result. skipStorage suppresses the storage-read fallback on a
 // miss, for callers that resolve the value themselves. Result is written into *r
 // (caller stack, passed pre-zeroed) to avoid a return-value copy per read.
+func (ibs *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
+	_, created := ibs.versionedWrites.GetCreateContract(addr)
+	_, destructed := ibs.versionedWrites.GetSelfDestruct(addr)
+	_, recorded := ibs.versionedWrites.GetAddress(addr)
+	return created || destructed || recorded
+}
+
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
@@ -315,15 +322,17 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// writer overwrite the recorded read, so seal-time re-validation would compare the
 	// re-resolved version against itself and miss the divergence. Per-cell, not per-address:
 	// only the tx's own write to this exact cell takes precedence (via versionedWriteHit below).
-	if !commited {
-		if !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) {
-			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
-				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
-				r.outcome = outcomeReadSetHit
-				r.source = prHeader.Source
-				r.version = prHeader.Version
-				return
-			}
+	// A committed read wants the pre-tx value, which is what the tx's first read of the cell
+	// recorded: a read after the tx's own write is served from the write set and not recorded.
+	// A tx that created or destroyed the account, or holds its state object, answers otherwise.
+	if !commited && !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) ||
+		commited && path == StoragePath && s.stateObjects[addr] == nil && !s.wroteAccountLifecycle(addr) {
+		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
+			(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
+			r.outcome = outcomeReadSetHit
+			r.source = prHeader.Source
+			r.version = prHeader.Version
+			return
 		}
 	}
 
@@ -414,7 +423,7 @@ reread:
 	case BalancePath:
 		r.mapBalanceVal, res, _ = s.versionMap.ReadBalance(addr, s.txIndex)
 	case NoncePath:
-		r.mapNonceVal, res, _ = s.versionMap.ReadNonce(addr, s.txIndex)
+		r.mapNonceVal, res, _, r.life = s.versionMap.ReadNonceLife(addr, s.txIndex)
 	case IncarnationPath:
 		r.mapIncarnationVal, res, _ = s.versionMap.ReadIncarnation(addr, s.txIndex)
 	case CodePath:
@@ -516,17 +525,25 @@ reread:
 		// must see zero. Anchor the dependency on canonicalVer (the latest SD cell the
 		// validator resolves), never the wipe — a revival sitting above the wipe would
 		// otherwise make validation disagree forever and livelock.
-		if path == StoragePath {
+		if path == StoragePath || path == NoncePath {
 			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
+				destructVer := Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
 						Val:        true,
 					})
-					// Not recorded as a storage read: for a revived account canonicalVer
-					// is the revival cell, whose incarnation shifts as that tx re-executes,
-					// so anchoring here never settles (self-loop). The genuinely-absent
-					// case anchors on the stable destruct and does record it.
+					// Record the wiped slot read anchored on the destruct version, matching
+					// liveStorage: a later store above the destruct resolves there and
+					// version-mismatches this read, so it invalidates by version alone. The
+					// destruct is stable, so this needs no value tiebreaker to survive the
+					// revival tx's incarnation churn.
+					if path == StoragePath {
+						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+							ReadHeader: ReadHeader{Source: MapRead, Version: destructVer},
+							Val:        uint256.Int{},
+						})
+					}
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
@@ -618,8 +635,17 @@ reread:
 		// UnknownVersion would be rejected by the validator cross-check and loop.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if s.versionMap.fieldMissHook != nil {
+				s.versionMap.fieldMissHook()
+			}
 			if destructed, sd, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sd.resolved() && destructed {
 				sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
+				// The destruct may have been flushed after the field probe
+				// above, together with a field cell it keeps.
+				if s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+					versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+					return
+				}
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
@@ -678,6 +704,12 @@ reread:
 				r.outcome = outcomeReturnDefault
 				r.source = accSource
 				r.version = UnknownVersion
+				return
+			}
+			// The record may have been flushed after the field probe above,
+			// together with a field cell that supersedes the record's field.
+			if accSource == MapRead && s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+				versionedReadCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
 			if readAccount != nil {
@@ -1549,6 +1581,14 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 
 // readSelfDestruct returns whether the account is selfdestructed.
 func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSource, Version, error) {
+	// A contract this tx recreated (own CreateContract cell) shadows a prior tx's
+	// SELFDESTRUCT in the version map, like the origin* readers above — unless this
+	// tx has since re-destroyed it, whose own SelfDestruct cell the path below returns.
+	if _, ownSD := s.versionedWrites.GetSelfDestruct(addr); !ownSD {
+		if cc, ok := s.versionedWriteCreateContract(addr); ok && cc {
+			return false, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+		}
+	}
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetSelfDestruct(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil

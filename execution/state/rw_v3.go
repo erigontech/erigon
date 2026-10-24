@@ -74,7 +74,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
 }
 
-// ApplyWrites writes an already-Normalized write-set directly to the shared
+// ApplyWrites writes a finalized write-set directly to the shared
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
@@ -1236,63 +1236,3 @@ func returnReadList(v ReadLists) {
 	}
 	readListPool.Put(v)
 }
-
-type LightCollector struct {
-	writes *WriteSet
-}
-
-func NewLightCollector() *LightCollector {
-	return &LightCollector{writes: &WriteSet{}}
-}
-
-// TakeWrites returns the accumulated writes and resets the collector.
-func (c *LightCollector) TakeWrites() *WriteSet {
-	writes := c.writes
-	c.writes = &WriteSet{}
-	return writes
-}
-
-func (c *LightCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	var accountCopy accounts.Account
-	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
-
-	if original.Incarnation > accountCopy.Incarnation {
-		c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
-	}
-
-	// Only emit fields that changed vs original. original is the worker's
-	// block-origin snapshot, so emitting an unchanged field would overwrite a
-	// later tx's update on apply with a stale pre-block value.
-	if !accountCopy.Balance.Eq(&original.Balance) {
-		c.writes.SetBalance(address, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
-	}
-	if accountCopy.Nonce != original.Nonce {
-		c.writes.SetNonce(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
-	}
-	// Emit on up-revs only — a down-rev would clobber a same-block SD-side cell.
-	if accountCopy.Incarnation > original.Incarnation {
-		c.writes.SetIncarnation(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
-	}
-	if accountCopy.CodeHash != original.CodeHash {
-		c.writes.SetCodeHash(address, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash})
-	}
-	return nil
-}
-
-func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, codeHash accounts.CodeHash, code []byte) error {
-	c.writes.SetCode(address, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: address, Path: CodePath}, Val: accounts.Code{Hash: codeHash, Bytes: code}})
-	return nil
-}
-
-func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
-	c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
-	return nil
-}
-
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	c.writes.SetStorage(address, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: StoragePath, Key: key}, Val: value})
-	return nil
-}
-
-func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }

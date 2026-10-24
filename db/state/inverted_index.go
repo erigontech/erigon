@@ -1312,6 +1312,24 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return from, to
 }
 
+// HasTxNumsInDB reports whether the DB holds index records for any txNum in
+// [fromTxNum, toTxNum). It seeks the txNum-ordered keys table, so the cost does
+// not grow with the number of keys the index holds.
+func (iit *InvertedIndexRoTx) HasTxNumsInDB(fromTxNum, toTxNum uint64, tx kv.Tx) (bool, error) {
+	c, err := tx.CursorDupSort(iit.ii.KeysTable)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	var from [8]byte
+	binary.BigEndian.PutUint64(from[:], fromTxNum)
+	k, _, err := c.Seek(from[:])
+	if err != nil || k == nil {
+		return false, err
+	}
+	return binary.BigEndian.Uint64(k) < toTxNum, nil
+}
+
 func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
 	fst, err := kv.FirstKey(tx, ii.KeysTable)
 	if err != nil {

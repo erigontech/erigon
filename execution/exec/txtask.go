@@ -115,11 +115,6 @@ type TxResult struct {
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
 
-	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced during worker execution, with fee-calc balance
-	// adjustments folded in during finalize.
-	CollectorWrites *state.WriteSet
-
 	// Dep is the highest predecessor TxIndex this tx read as an in-flight or
 	// mid-execution-changed value (state.IntraBlockState.dep). >= 0 means the
 	// tx's reads were not against a single settled snapshot — an intra-tx
