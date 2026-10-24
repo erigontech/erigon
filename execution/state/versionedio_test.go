@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -2113,4 +2114,60 @@ func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
 
 	require.Len(t, bal, 1)
 	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
+}
+
+// TestCreateAccount_RecordsSelfDestructReadForOrdering pins the parallel-executor contract:
+// CreateAccount resolves prior self-destruct state (refreshSelfDestruct), recording a
+// SelfDestructPath read. The dep-wait scheduler needs that dependency so a create orders
+// after a prior-tx SELFDESTRUCT (CREATE2 reincarnation). (Main's serial path recorded no
+// such read — a lean-footprint invariant that does not hold on this branch.)
+func TestCreateAccount_RecordsSelfDestructReadForOrdering(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7E01"))
+	reader := newAccountStateReader(addr)
+	vm := NewVersionMap(nil)
+	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
+	ibs.SetTxContext(0, 5)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	reads := ibs.VersionedReads()
+	_, tracked := reads.GetSelfDestruct(addr)
+	require.True(t, tracked, "CreateAccount must record the SelfDestructPath dependency for ordering")
+}
+
+// countingStateReader records how many account reads reached the domain.
+type countingStateReader struct {
+	minimalStateReader
+	acc            *accounts.Account
+	accountReads   int
+	failOnAccounts bool
+}
+
+func (r *countingStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	r.accountReads++
+	if r.failOnAccounts {
+		return nil, errors.New("domain must not be consulted")
+	}
+	return r.acc, nil
+}
+
+// TestVersionedStateReader_UnrecordedAddressReadsDomain pins the complement: with no
+// recorded AddressPath entry, the reader falls through to the domain exactly once and
+// returns its value.
+func TestVersionedStateReader_UnrecordedAddressReadsDomain(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc01d"))
+	domainAcc := accounts.NewAccount()
+	domainAcc.Nonce = 9
+	reader := &countingStateReader{acc: &domainAcc}
+	vr := NewVersionedStateReader(3, ReadSet{}, NewVersionMap(nil), reader)
+
+	got, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(9), got.Nonce)
+	require.Equal(t, 1, reader.accountReads)
 }
