@@ -69,24 +69,17 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		}
 		return b, sidecar.BlockAccessList(), nil
 	}
-	var dbBAL types.BlockAccessList
-	// Prefer the payload-carried BAL; fall back to the DB sidecar via blockTx
-	// (overlay or execRoTx) — do NOT open a separate db.View() as it can deadlock
-	// with the stageloop's RW transaction when BlockOverlay is active.
-	data, err := blockAccessListBytes(s.blockTx, b, blockNum)
+	blockBAL, err := blockAccessList(s.blockTx, b, blockNum)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(data) > 0 && !dbg.IgnoreBAL {
-		dbBAL, err = types.DecodeBlockAccessListBytes(data)
-		if err != nil {
-			return nil, nil, fmt.Errorf("decode block access list: %w", err)
-		}
-		if err := dbBAL.Validate(); err != nil {
-			return nil, nil, fmt.Errorf("invalid block access list: %w", err)
-		}
+	if b.BlockAccessList() == nil && blockBAL != nil {
+		b = b.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(blockBAL))
 	}
-	return b, dbBAL, nil
+	if dbg.IgnoreBAL {
+		return b, nil, nil
+	}
+	return b, blockBAL, nil
 }
 
 func (s *dbBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {

@@ -237,6 +237,10 @@ type VersionMap struct {
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
+
+	// fieldMissHook runs after an account-field probe missed, before the
+	// fallbacks probe the version map again. Tests set it to land a flush there.
+	fieldMissHook func()
 }
 
 type originStorageKey struct {
@@ -310,8 +314,7 @@ func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 	return nil
 }
 
-// StorageKeys returns every storage slot key recorded for addr. Used by Normalize to
-// emit synthetic delete entries for every slot of a selfdestructed contract.
+// StorageKeys returns every storage slot key recorded for addr.
 func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	e := vm.load(addr)
 	if e == nil {

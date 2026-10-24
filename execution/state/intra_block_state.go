@@ -263,14 +263,7 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
-// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject
-// cache on. Genesis is the sole caller that needs both representations at once:
-// its writes must reach the executor as versioned writes AND be read back and
-// persisted through the materialize path (ComputeGenesisCommitment's FinalizeTx,
-// the serial executor's MakeWriteSet). Every other versioned caller runs
-// cache-free via NewWithVersionMap; the version-map-implies-noMaterialize
-// invariant SetVersionMap enforces holds for all of them. Retire this with the
-// materialize path.
+// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
 func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
 	ibs := New(stateReader)
 	ibs.versionMap = NewVersionMap(nil)
@@ -1870,7 +1863,7 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 
 	// Deliberately no StoragePath=0 writes for the dirty slots: the account
 	// stays alive until end-of-tx, so a re-entry's GetState must still see the
-	// dirty values. The per-slot DELETE entries come from Normalize's SD cascade.
+	// dirty values.
 
 	return true, nil
 }
@@ -2371,15 +2364,18 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
+	} else if previous == nil && balSource == MapRead {
+		// This tx already read the account destroyed, so there is no record, but a
+		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
+		newObj.data.Balance.Set(&preTxBalance)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
-		// Record contract creation in the versioned writes so that
-		// Normalize knows this address was created (prevents
-		// empty account deletion for newly deployed contracts).
+		// Record contract creation so FinalizedWrites does not remove a newly
+		// deployed contract as empty.
 		ibs.recordWriteCreateContract(addr, true)
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
@@ -2527,8 +2523,7 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		// In parallel mode only modified fields land in the versionMap WriteSet;
-		// Normalize fills the rest from the stateReader.
+		// In parallel mode only modified fields land in the versionMap WriteSet.
 	}
 	return nil
 }
@@ -2793,7 +2788,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 // absent and left empty (EIP-161): such an account is absent both before and
 // after the tx, so omitting its writes is exact and no deletion marker is
 // needed. An account that existed before is kept even when it ends empty —
-// clearing it needs an explicit delete, which commit-time normalization emits.
+// clearing it needs an explicit delete, which encodeExistingEmptyRemovals emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
 	if chainRules == nil {
 		return

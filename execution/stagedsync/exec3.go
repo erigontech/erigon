@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -104,6 +104,10 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	inputTxNum = min
 
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
+}
+
+func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
+	return dbg.ReadAheadWait && isValidatingBlocks
 }
 
 // execRange is the resolved block/txNum window the executor runs over. The
@@ -192,10 +196,11 @@ func ExecV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
+	doms.SetDiscardCommitment(cfg.discardCommitment)
 	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup
 	// entirely: EnableParaTrieDB after the witness seed's DomainPut touches would
 	// panic on the dropped sequential-buffer keys.
-	if !dbg.DiscardCommitment() {
+	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
 		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
@@ -205,6 +210,9 @@ func ExecV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+	}
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
 	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -320,8 +328,9 @@ func execV3Serial(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
+	doms.SetDiscardCommitment(cfg.discardCommitment)
 	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup.
-	if !dbg.DiscardCommitment() {
+	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
 		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
@@ -329,6 +338,9 @@ func execV3Serial(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+	}
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
 	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
@@ -368,7 +380,7 @@ func execV3Serial(ctx context.Context,
 	if u != nil && !u.HasUnwindPoint() {
 		if lastHeader != nil {
 			switch {
-			case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
+			case execErr == nil || IsOnlyLoopExhausted(execErr):
 				_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, false, logger, u)
 				if err != nil {
 					return err
@@ -403,7 +415,7 @@ func execV3Serial(ctx context.Context,
 				switch {
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-				case errors.Is(execErr, &ErrLoopExhausted{}):
+				case IsOnlyLoopExhausted(execErr):
 					break
 				default:
 					return execErr
@@ -442,7 +454,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		stepCheckTx.Rollback()
 	}
 
-	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !dbg.DiscardCommitment() {
+	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !cfg.discardCommitment {
 		logger.Warn("["+logPrefix+"] can't persist commitment: txn step frozen",
 			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommittedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
@@ -488,7 +500,7 @@ type txExecutor struct {
 	lastCommittedTxNum    atomic.Uint64
 	committedGas          atomic.Int64
 
-	execLoopGroup *errgroup.Group
+	execLoopGroup *commonerrors.Group
 
 	execRequests chan *execRequest
 	execCount    atomic.Int64
@@ -611,7 +623,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				if err != nil {
 					return err
 				}
-				chainReader := exec.NewChainReader(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
+				chainReader := exec.NewChainReader(te.cfg.chainConfig, tx, te.cfg.blockReader, te.logger)
 				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
 				finalized = chainReader.CurrentFinalizedHeader()
 				safe = chainReader.CurrentSafeHeader()
@@ -631,20 +643,12 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
-	if sidecar := block.BlockAccessListSidecar(); sidecar != nil {
-		data, err := sidecar.Bytes()
-		if err != nil {
-			return nil, err
-		}
-		if len(data) > 0 {
-			return data, nil
-		}
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
+	bal := block.BlockAccessList()
+	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
 	}
-	if block.HeaderNoCopy().HasNonEmptyBAL() {
-		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
-	}
-	return nil, nil
+	return bal, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, consumers *resultStream, blockRequests chan *blockRequest) error {
@@ -780,7 +784,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose commitment which is writable to the db, otherwise the update will get lost
 			var exhausted *ErrLoopExhausted
-			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, te.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
 			// Heads-up to the commitment calculator, ahead of the block's
@@ -883,7 +887,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		// both executors; a second bump here double-counted it on the serial path.
 	}
 
-	if dbg.DiscardCommitment() {
+	if cfg.discardCommitment {
 		return true, times, nil
 	}
 

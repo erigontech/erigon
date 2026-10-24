@@ -22,9 +22,9 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -242,7 +242,7 @@ func TestBlockValidatorWaitNil(t *testing.T) {
 // leaving the robustness sweeps green.
 func TestParallelExecutorWaitHarvestsExecLoopError(t *testing.T) {
 	pe := &parallelExecutor{}
-	g, _ := errgroup.WithContext(context.Background())
+	g, _ := commonerrors.NewGroup(context.Background())
 	release := make(chan struct{})
 	sentinel := errors.New("exec loop failure")
 	g.Go(func() error {
@@ -258,6 +258,20 @@ func TestParallelExecutorWaitHarvestsExecLoopError(t *testing.T) {
 
 	require.ErrorIs(t, pe.wait(), sentinel,
 		"wait must block for the exec-loop group and surface its verdict, not drop it")
+}
+
+// A sibling's cancellation recorded first must not hide another member's real error.
+func TestParallelExecutorWaitKeepsRealErrorBehindCancel(t *testing.T) {
+	pe := &parallelExecutor{}
+	g, ctx := commonerrors.NewGroup(context.Background())
+	sentinel := errors.New("apply loop failure")
+	g.Go(func() error { return context.Canceled })
+	g.Go(func() error {
+		<-ctx.Done()
+		return sentinel
+	})
+	pe.execLoopGroup = g
+	require.ErrorIs(t, pe.wait(), sentinel)
 }
 
 // TestBlockValidatorWaitMultipleTimes verifies Wait can be called
