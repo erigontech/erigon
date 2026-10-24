@@ -120,12 +120,10 @@ func (w *iiChunkWriter) put(key []byte, txNums []uint64) error {
 	if err != nil {
 		return err
 	}
-	if v == nil { // txNums go above every chunk: extend the last one
-		if v, err = w.lastChunk(key); err != nil {
-			return err
-		}
+	if v != nil { // txNums go into or before existing chunks
+		return w.mergeFrom(key, seek[:], v, txNums)
 	}
-	return w.mergeFrom(key, seek[:], v, txNums)
+	return w.appendToLast(key, txNums)
 }
 
 // mergeFrom rewrites the chunks of key from v, the one at the cursor, on together with txNums.
@@ -156,12 +154,32 @@ func (w *iiChunkWriter) takeChunk(v []byte) error {
 	return w.c.DeleteCurrent()
 }
 
-func (w *iiChunkWriter) lastChunk(key []byte) ([]byte, error) {
+// appendToLast adds txNums above every chunk of key to its last chunk and new chunks after it.
+func (w *iiChunkWriter) appendToLast(key []byte, txNums []uint64) error {
 	k, _, err := w.c.SeekExact(key)
-	if err != nil || k == nil {
-		return nil, err
+	if err != nil {
+		return err
 	}
-	return w.c.LastDup()
+	if k == nil {
+		return w.putChunks(key, txNums)
+	}
+	last, err := w.c.LastDup()
+	if err != nil {
+		return err
+	}
+	if w.old, err = decodeIIChunk(w.old[:0], last); err != nil {
+		return err
+	}
+	lastLen := len(w.old)
+	w.old = append(w.old, txNums...)
+	n := iiChunkFit(w.old)
+	if n > lastLen {
+		w.buf = appendIIChunk(w.buf[:0], w.old[:n])
+		if err := w.c.PutCurrent(key, w.buf); err != nil {
+			return err
+		}
+	}
+	return w.putChunks(key, w.old[n:])
 }
 
 func (w *iiChunkWriter) putChunks(key []byte, txNums []uint64) error {
