@@ -78,12 +78,6 @@ type treeRoot struct {
 	topRow *rowNode
 }
 
-func newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
-	row := new(rowNode)
-	initRowOwned(row, path, key, raw)
-	return row
-}
-
 func initRowOwned(row *rowNode, path eip8297.Bitpath, key, raw []byte) {
 	rawCopy := bytes.Clone(raw)
 	*row = rowNode{path: path, key: key, name: string(key), raw: rawCopy, prev: rawCopy}
