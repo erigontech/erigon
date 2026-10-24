@@ -841,9 +841,15 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 	//
 	// The pending-commitment transfer a few lines below already skips itself when not closing, for
 	// exactly this reason. This is the same rule.
-	if closeOther {
-		sd.takeWritersFrom(other)
-	}
+	// ⚠ UNCONDITIONAL FOR NOW, AND THAT IS A KNOWN HAZARD. Guarding this with closeOther stopped the
+	// destination ever receiving the source's buffered writes, and nothing committed: measured on
+	// live448, every block executed with "offered=23 kept=0 dropped=0 deferred=23" and the CLOB never
+	// deployed. The source's writes evidently DO have to move even when the source stays alive as a
+	// read-through parent, so the fix for the 9,600 crash is not here.
+	//
+	// What protects the node meanwhile is writableFor: a pre-exec round that reaches the emptied
+	// batch now fails its round with a named error instead of dereferencing nothing.
+	sd.takeWritersFrom(other)
 
 	if sd.currentChangesAccumulator != nil {
 		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
