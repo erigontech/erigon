@@ -3069,8 +3069,15 @@ func (p *TxPool) logStats() {
 	// nothing about WHICH two. The census names them with the chain's nonce beside them, but it only
 	// fires on admission — in the idle window after a burst nothing admits, so nothing reports. This
 	// names them while the pool is idle, which is the only time the question is being asked.
-	if n := len(p.byHash); n > 0 && n <= 16 {
-		p.logger.Warn("[pool-residue] what the pool is still holding, named", "held", p.residueNames())
+	if n := len(p.byHash); n > 0 {
+		if n <= 16 {
+			p.logger.Warn("[pool-residue] what the pool is still holding, named", "held", p.residueNames())
+		} else {
+			// Too many to name one at a time, and the per-sender shape is the one that answers it
+			// anyway. NEVER silent: see residueBySender.
+			p.logger.Warn("[pool-residue] what the pool is still holding, by sender",
+				"heldTotal", n, "senders", p.residueBySender(5))
+		}
 	}
 	pendingSubCounter.SetInt(p.pending.Len())
 	basefeeSubCounter.SetInt(p.baseFee.Len())
@@ -3435,5 +3442,60 @@ func (p *TxPool) residueNames() string {
 		out = append(out, fmt.Sprintf("%s nonce=%d subPool=%b", name, mt.TxnSlot.Nonce, mt.subPool))
 	}
 	sort.Strings(out)
+	return strings.Join(out, " | ")
+}
+
+// residueBySender summarises what the pool is holding, grouped by sender, for a residue too large
+// to name one transaction at a time.
+//
+// ⚠ THE PROBE USED TO GO SILENT EXACTLY WHEN THE WEDGE WAS BIGGEST. Both residue readers refused
+// above 16 held, because they were written for the pending=2 tail. Measured on soak live442: the
+// chain was producing blocks and they were EMPTY while the pool held 1,247 for twenty minutes, and
+// nothing named one of them. A diagnostic that only fires for small problems is not a diagnostic.
+//
+// Per sender: how many are held, the nonce span they occupy, and how many numbers in that span the
+// pool does NOT hold. That last figure is the whole question — a contiguous run is a pool waiting
+// its turn, and a span wider than the count is a HOLE, which is what stops a chain taking any of it.
+// No state read, so it is safe from the idle path where no cacheView exists.
+func (p *TxPool) residueBySender(topN int) string {
+	type agg struct {
+		n         int
+		low, high uint64
+	}
+	by := map[uint64]*agg{}
+	for _, mt := range p.byHash {
+		id := mt.TxnSlot.SenderID
+		a := by[id]
+		if a == nil {
+			a = &agg{low: mt.TxnSlot.Nonce, high: mt.TxnSlot.Nonce}
+			by[id] = a
+		}
+		a.n++
+		if mt.TxnSlot.Nonce < a.low {
+			a.low = mt.TxnSlot.Nonce
+		}
+		if mt.TxnSlot.Nonce > a.high {
+			a.high = mt.TxnSlot.Nonce
+		}
+	}
+	ids := make([]uint64, 0, len(by))
+	for id := range by {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return by[ids[i]].n > by[ids[j]].n })
+	if len(ids) > topN {
+		ids = ids[:topN]
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		a := by[id]
+		name := fmt.Sprintf("id%d", id)
+		if addr, ok := p.senders.senderID2Addr[id]; ok {
+			name = addr.String()
+		}
+		span := a.high - a.low + 1
+		out = append(out, fmt.Sprintf("%s held=%d nonces=%d..%d span=%d missingInSpan=%d",
+			name, a.n, a.low, a.high, span, int64(span)-int64(a.n)))
+	}
 	return strings.Join(out, " | ")
 }
