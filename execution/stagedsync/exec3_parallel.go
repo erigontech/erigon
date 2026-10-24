@@ -1131,10 +1131,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
-				if !blockExecutor.execStarted.IsZero() {
-					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
-					pe.blockExecMetrics.BlockCount.Add(1)
-				}
+				pe.recordBlockExecMetrics(blockExecutor)
 				if logNpPhases {
 					busy := time.Duration(blockExecutor.execCpuNanos.Load())
 					wall := npWait + npProc
@@ -1519,6 +1516,13 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 // by processRequest while the slot was busy gets scheduled — processRequest itself
 // only schedules when the map was empty at insert time, so without this a block
 // enqueued mid-flight would orphan in the map and never be validated.
+func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
+	if !be.execStarted.IsZero() {
+		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+		pe.blockExecMetrics.BlockCount.Add(1)
+	}
+}
+
 func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {

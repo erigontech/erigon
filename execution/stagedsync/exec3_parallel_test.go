@@ -1906,22 +1906,20 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 	t.Run("processRequest", func(t *testing.T) {
 		config := chain.AllProtocolChanges
 		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
-		pe.in = exec.NewQueueWithRetry(16)
 		pe.blockExecMetrics = newBlockExecMetrics()
+		pe.workersCtx = t.Context()
 		header := &types.Header{Number: *uint256.NewInt(1)}
-		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
-		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
 		be := pe.blockExecutors[1]
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
 	t.Run("scheduleNextPending", func(t *testing.T) {
-		be := newBlockExec(newParallelTestBlock(1), nil, nil, nil, nil, false, nil)
+		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil)
 		pe := &parallelExecutor{
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},
-			in:             exec.NewQueueWithRetry(16),
 		}
 		pe.scheduleNextPending(t.Context())
 		require.False(t, be.execStarted.IsZero())
