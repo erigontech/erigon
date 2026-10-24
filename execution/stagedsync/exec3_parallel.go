@@ -1294,7 +1294,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execFailed = append(executor.execFailed, 0)
 
 		executor.execTasks.pushPending(i)
-		executor.validateTasks.pushPending(i)
 
 		switch {
 		case len(t.Dependencies()) > 0:
@@ -1827,6 +1826,10 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// releases this worker's slot, waits for that writer's task to commit,
 		// reacquires a slot, and retries the read against the final value.
 		tv.waitCommit = func(dep int) bool {
+			// A run before the sender charge is redone after its predecessor commits, so it does not park here.
+			if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) {
+				return false
+			}
 			releaseSlot()
 			// dep is a versionMap TxIndex; translate to task-index frontier space.
 			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
