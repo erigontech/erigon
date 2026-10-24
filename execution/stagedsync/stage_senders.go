@@ -425,7 +425,9 @@ func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlo
 	if dbg.IgnoreBAL || cfg.chainConfig.AmsterdamTime == nil {
 		return nil
 	}
-	for blockNum := from; blockNum <= to; blockNum++ {
+	// Newest first: the walk stops at the first block before Amsterdam, which no older block can follow.
+	for n := to + 1; n > from; n-- {
+		blockNum := n - 1
 		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return err
@@ -433,6 +435,9 @@ func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlo
 		header, err := cfg.blockReader.Header(ctx, tx, hash, blockNum)
 		if err != nil {
 			return err
+		}
+		if header != nil && header.Time < *cfg.chainConfig.AmsterdamTime {
+			break
 		}
 		if header == nil || !exec.RecoversSenders(header) {
 			continue
