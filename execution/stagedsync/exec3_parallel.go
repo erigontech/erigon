@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -20,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -687,8 +689,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above.
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(block.Time())
-					// A partial block records only suffix I/O, so it cannot be checked
-					// against a full-block BAL.
+					// A partial block records only suffix I/O; for an Amsterdam block
+					// nextResult checks its BAL against a re-derived one instead.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
 						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)
@@ -1313,6 +1315,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	executor, ok := pe.blockExecutors[blockNum]
 	if !ok {
 		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+		executor.versionMap.SetEIP8246(pe.cfg.chainConfig.IsAmsterdam(execRequest.block.Time()))
 	}
 
 	for i, txTask := range execRequest.tasks {
@@ -1352,6 +1355,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				return err
 			}
 			addresses := make([]common.Address, 0, 2)
+			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
+				sender = accounts.NilAddress
+			}
 			if !sender.IsNil() {
 				addresses = append(addresses, sender.Value())
 			}
@@ -2408,6 +2414,56 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	return nil
 }
 
+// touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
+func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
+	sender, err := txTask.TxSender()
+	if err != nil {
+		return true
+	}
+	_, readBalance := result.TxIn.GetBalance(sender)
+	_, readNonce := result.TxIn.GetNonce(sender)
+	_, wroteBalance := result.TxOut.GetBalance(sender)
+	_, wroteNonce := result.TxOut.GetNonce(sender)
+	return readBalance || readNonce || wroteBalance || wroteNonce
+}
+
+// chargeSenderAtValidation returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		return nil, err
+	}
+	sender := msg.From()
+	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
+		return nil, nil
+	}
+	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
+	if !overflow {
+		limit, overflow = u256.AddOverflow(limit, *msg.Value())
+	}
+	if overflow || acc.Balance.Lt(&limit) {
+		return nil, nil
+	}
+	charge := u256.Mul(u256.U64(result.ExecutionResult.ReceiptGasUsed), *msg.GasPrice())
+	if result.ExecutionResult.Err == nil {
+		charge = u256.Add(charge, *msg.Value())
+	}
+	ws := &state.WriteSet{}
+	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
+		Val:         u256.Sub(acc.Balance, charge),
+	})
+	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
+		Val:         acc.Nonce + 1,
+	})
+	return ws, nil
+}
+
 type taskVersion struct {
 	*execTask
 	version    state.Version
@@ -2449,6 +2505,11 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	}
 
 	if result.Err != nil {
+		return result
+	}
+
+	if txTask, ok := ev.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(ev.version.Incarnation) && touchedSenderAccount(txTask, result) {
+		result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ev.version.TxIndex - 1}
 		return result
 	}
 
@@ -2887,7 +2948,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// after a genuine error can never be settledInput, since its
 				// erroring predecessor never validates — so out of a cascade of
 				// speculative errors only the genuinely-first one is returned.
-				if be.settledInput[tx] {
+				// A run without the sender checks re-runs with them: serial execution reports a sender error first.
+				txTask, isTxTask := be.tasks[tx].Task.(*exec.TxTask)
+				skippedSenderChecks := isTxTask && txTask.ChargesSenderAtValidation(res.Version().Incarnation)
+				if be.settledInput[tx] && !skippedSenderChecks {
 					txVersion := res.Version()
 					taskRules := be.tasks[tx].Task.Rules()
 					validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
@@ -3042,16 +3106,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.number(), txVersion.TxIndex, txVersion.Incarnation)
 		}
 
-		// Credit tip pre-validate for regular TXs so the validator sees the
-		// post-tip coinbase write. Caveat: the tip write is stamped at the
-		// same (TxIndex, Incarnation) as the worker's coinbase write, so a
-		// downstream tx that read coinbase via versionMap between the worker
-		// write and the tip write records the same Version the validator
-		// observes — the version-only validator will NOT catch that case.
-		// In practice this is unusual: only sender==coinbase produces a
-		// worker coinbase write, and downstream BALANCE(coinbase) reads
-		// across this window are rare. Value-aware validation would close
-		// the gap if it surfaces.
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
@@ -3089,6 +3143,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// The validator verdict is the single source of truth (issue #21319):
 		// a result is committed only if validation explicitly passed it.
 		valid := validity == state.VersionValid
+
+		var senderWrites *state.WriteSet
+		if valid {
+			if txTask, ok := txTask.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(txVersion.Incarnation) {
+				if senderWrites, err = chargeSenderAtValidation(txTask, txResult, txVersion, be.versionMap, stateReader); err != nil {
+					return nil, err
+				}
+				valid = senderWrites != nil
+			}
+		}
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -3169,6 +3233,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 			addWrites := finalizeWrites
+			if senderWrites != nil {
+				addWrites = senderWrites.MergeInto(addWrites)
+			}
 
 			// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 			if addReads.Len() > 0 {
@@ -3357,10 +3424,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		receiptsComplete := !isPartial
 		if isPartial && be.number() > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
+			blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum+1)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.number(), "startTxIndex", startTxIndex, "err", err)
@@ -3373,6 +3440,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// blocks, skips partial ones — do it here, even when prior receipts
 			// couldn't be reconstructed (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.hash())
+
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
+				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, be.tasks[0].Version().TxNum)
+				var vio *state.VersionedIO
+				if err == nil {
+					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)
+				}
+				if err == nil {
+					err = bal.Process(header, be.block.BlockAccessList(), vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+					vio.ReleaseOutputMaps()
+				}
+				if errors.Is(err, rules.ErrInvalidBlock) {
+					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.number(), err)), nil
+				}
+				if err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot validate its block access list: %w", be.number(), err)), nil
+				}
+			}
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer

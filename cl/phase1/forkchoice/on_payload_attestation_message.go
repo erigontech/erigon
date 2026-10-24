@@ -30,13 +30,16 @@ import (
 // choice does not count because its slot is before the store's current slot.
 var ErrPayloadAttestationNotCurrentSlot = errors.New("payload attestation is not for the current slot")
 
+// PayloadAttestationSignatureVerifier being nil means signatures are verified immediately with bls.VerifyAggregate.
+type PayloadAttestationSignatureVerifier func(ctx context.Context, signature, signingRoot, publicKey []byte) error
+
 // OnPayloadAttestationMessage implements on_payload_attestation_message for a wire message.
 // Returns ErrIgnore for IGNORE conditions, other errors for REJECT conditions.
 func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
 ) error {
-	return f.onPayloadAttestationMessage(ctx, msg, false)
+	return f.onPayloadAttestationMessage(ctx, msg, false, nil)
 }
 
 // OnGossipPayloadAttestationMessage is OnPayloadAttestationMessage for a gossip message,
@@ -44,14 +47,16 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 func (f *ForkChoiceStore) OnGossipPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
+	verifySignature PayloadAttestationSignatureVerifier,
 ) error {
-	return f.onPayloadAttestationMessage(ctx, msg, true)
+	return f.onPayloadAttestationMessage(ctx, msg, true, verifySignature)
 }
 
 func (f *ForkChoiceStore) onPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
 	firstValidOnly bool,
+	verifySignature PayloadAttestationSignatureVerifier,
 ) error {
 	if msg == nil || msg.Data == nil {
 		return errors.New("nil payload attestation data")
@@ -72,7 +77,7 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 		return err
 	}
 
-	if err := validationContext.validateSignature(msg); err != nil {
+	if err := validationContext.validateSignature(ctx, msg, verifySignature); err != nil {
 		return err
 	}
 	return f.applyWirePayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, firstValidOnly)

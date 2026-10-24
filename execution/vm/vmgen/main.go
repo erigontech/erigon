@@ -140,6 +140,10 @@ func coldOps() []fastOp {
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
 		op("GAS", "opGas"),
+		forked(alu("BLOBHASH", "opBlobHash", 1)),
+		forked(fastOp{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1}),
+		forked(fastOp{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep"}),
+		forked(fastOp{name: "EXCHANGE", execute: "opExchange", gas: "GasFastestStep"}),
 	}
 	for n := 9; n <= 16; n++ {
 		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)", minStack: "int(op-DUP1)+1"})
@@ -153,11 +157,7 @@ func coldOps() []fastOp {
 func rareOps() []fastOp {
 	return []fastOp{
 		{name: "CLZ", execute: "opCLZ", gas: "GasFastStep", pop: 1, push: 1, fork: true},
-		{name: "BLOBHASH", execute: "opBlobHash", gas: "GasFastestStep", pop: 1, push: 1, fork: true},
 		{name: "SLOTNUM", execute: "opSlotNum", gas: "GasQuickStep", push: 1, fork: true},
-		{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1, fork: true},
-		{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep", fork: true},
-		{name: "EXCHANGE", execute: "opExchange", gas: "GasFastestStep", fork: true},
 	}
 }
 

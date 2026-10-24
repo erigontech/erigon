@@ -308,10 +308,17 @@ run:
 			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
 				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
-						callContext.gas, callContext.savedPC = gasLeft, pc
-						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
-						gasLeft, pc = callContext.gas, callContext.savedPC
+					code := callContext.Contract.Code
+					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(code)) {
+						if end < 32 {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							callContext.Stack.pushRef().SetBytes(code[pc+1 : end])
+							gasLeft, pc = callContext.gas, callContext.savedPC
+							pc = pc + uint64(op-PUSH0)
+							pc++
+							continue run
+						}
+						setBytes32Masked(callContext.Stack.pushRef(), (*[32]byte)(code[end-32:end]), &pushMasks[uint64(op-PUSH0)])
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
@@ -687,52 +694,16 @@ run:
 						pc++
 						continue run
 					}
-				case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
-					if sLen >= int(op-DUP1)+1 && sLen < stackLimit && gasLeft >= GasFastestStep {
-						gasLeft -= GasFastestStep
-						callContext.Stack.dup(int(op - DUP1))
-						pc++
-						continue run
-					}
-				case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
-					if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
-						gasLeft -= GasFastestStep
-						callContext.Stack.swap(int(op-SWAP1) + 1)
-						pc++
-						continue run
-					}
-				}
-			}
-			if isRareOp[op] {
-				switch op {
-				case CLZ:
-					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
-						gasLeft -= GasFastStep
-						x := callContext.Stack.peek()
-
-						x.SetUint64(256 - uint64(x.BitLen()))
-						pc++
-						continue run
-					}
 				case BLOBHASH:
 					if jt[BLOBHASH].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						idx := callContext.Stack.peek()
 						if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 							hash := evm.BlobHashes[idx.Uint64()]
-							callContext.gas, callContext.savedPC = gasLeft, pc
-							idx.SetBytes(hash[:])
-							gasLeft, pc = callContext.gas, callContext.savedPC
+							idx.SetBytes32(hash[:])
 						} else {
 							idx.Clear()
 						}
-						pc++
-						continue run
-					}
-				case SLOTNUM:
-					if jt[SLOTNUM].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
-						gasLeft -= GasQuickStep
-						callContext.Stack.pushRef().SetUint64(evm.Context.SlotNumber)
 						pc++
 						continue run
 					}
@@ -812,6 +783,40 @@ run:
 						}
 
 						callContext.Stack.exchange(n, m)
+						pc++
+						continue run
+					}
+				case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
+					if sLen >= int(op-DUP1)+1 && sLen < stackLimit && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						callContext.Stack.dup(int(op - DUP1))
+						pc++
+						continue run
+					}
+				case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+					if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						callContext.Stack.swap(int(op-SWAP1) + 1)
+						pc++
+						continue run
+					}
+				}
+			}
+			if isRareOp[op] {
+				switch op {
+				case CLZ:
+					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
+						gasLeft -= GasFastStep
+						x := callContext.Stack.peek()
+
+						x.SetUint64(256 - uint64(x.BitLen()))
+						pc++
+						continue run
+					}
+				case SLOTNUM:
+					if jt[SLOTNUM].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(evm.Context.SlotNumber)
 						pc++
 						continue run
 					}
@@ -932,6 +937,10 @@ var isColdOp = [256]bool{
 	PC:             true,
 	MSIZE:          true,
 	GAS:            true,
+	BLOBHASH:       true,
+	DUPN:           true,
+	SWAPN:          true,
+	EXCHANGE:       true,
 	DUP9:           true,
 	DUP10:          true,
 	DUP11:          true,
@@ -956,10 +965,6 @@ var isColdOp = [256]bool{
 
 // isRareOp marks the ops of run's third fast-path switch.
 var isRareOp = [256]bool{
-	CLZ:      true,
-	BLOBHASH: true,
-	SLOTNUM:  true,
-	DUPN:     true,
-	SWAPN:    true,
-	EXCHANGE: true,
+	CLZ:     true,
+	SLOTNUM: true,
 }

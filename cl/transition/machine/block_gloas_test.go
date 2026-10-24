@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	corestate "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -64,6 +65,8 @@ func TestProcessBlockPassesParentHeaderSlotToAttestations(t *testing.T) {
 	s.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{Slot: 0})
 	block := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
 	block.Slot = 65
+	block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	block.Body.SignedExecutionPayloadBid.Signature = common.Bytes96(bls.InfiniteSignature)
 	p := &parentSlotProcessor{}
 
 	require.NoError(t, ProcessBlock(p, s, block))

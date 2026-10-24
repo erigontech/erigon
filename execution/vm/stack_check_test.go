@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"math/rand/v2"
@@ -266,8 +267,11 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		block.GasLimit, block.BlockNumber, block.Time = 21, 22, 23
 		block.Difficulty, block.BaseFee, block.BlobBaseFee = *uint256.NewInt(24), *uint256.NewInt(25), *uint256.NewInt(26)
 		block.SlotNumber = 28
-		txCtx := evmtypes.TxContext{Origin: accounts.InternAddress(common.HexToAddress("0x0a")), GasPrice: *uint256.NewInt(27)}
-		txCtx.BlobHashes = []common.Hash{common.HexToHash("0x5a5a01"), common.HexToHash("0xa5a502")}
+		txCtx := evmtypes.TxContext{
+			Origin:     accounts.InternAddress(common.HexToAddress("0x0a")),
+			GasPrice:   *uint256.NewInt(27),
+			BlobHashes: []common.Hash{common.HexToHash("0x28"), common.HexToHash("0x29")},
+		}
 		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
 		c.Code = code
@@ -328,6 +332,53 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"exchange":        prog(dirty(20), EXCHANGE, 142, EXCHANGE, 128),
 		"exchangebad":     prog(dirty(20), EXCHANGE, 82),
 	}
+	// MCOPY dst src len over 64 distinct bytes, returning all of memory.
+	mcopy := func(dst, src, length []byte) []byte {
+		lo, hi := make([]byte, 32), make([]byte, 32)
+		for i := range 32 {
+			lo[i], hi[i] = byte(i+1), byte(i+33)
+		}
+		var b []byte
+		b = append(b, byte(PUSH32))
+		b = append(b, lo...)
+		b = append(b, byte(PUSH1), 0, byte(MSTORE), byte(PUSH32))
+		b = append(b, hi...)
+		b = append(b, byte(PUSH1), 32, byte(MSTORE))
+		for _, w := range [][]byte{length, src, dst} {
+			b = append(b, byte(PUSH1)+byte(len(w)-1))
+			b = append(b, w...)
+		}
+		return append(b, byte(MCOPY), byte(MSIZE), byte(PUSH1), 0, byte(RETURN))
+	}
+	n := func(v int) []byte { return []byte{byte(v)} }
+	// 2^bits + low, as a big-endian push operand.
+	pow2 := func(bits int, low byte) []byte {
+		b := make([]byte, bits/8+1)
+		b[0], b[len(b)-1] = 1, low
+		return b
+	}
+	for name, args := range map[string][3][]byte{
+		"mcopydstend":      {n(32), n(0), n(32)},
+		"mcopydstpastend":  {n(33), n(0), n(32)},
+		"mcopysrcend":      {n(0), n(32), n(32)},
+		"mcopysrcpastend":  {n(0), n(33), n(32)},
+		"mcopyall":         {n(0), n(0), n(64)},
+		"mcopyzeroatend":   {n(64), n(64), n(0)},
+		"mcopyzeropastend": {n(65), n(65), n(0)},
+		"mcopyoverlapup":   {n(1), n(0), n(40)},
+		"mcopyoverlapdown": {n(0), n(1), n(40)},
+		"mcopydsthuge":     {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(1)},
+		"mcopysrchuge":     {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(1)},
+		"mcopylenhuge":     {n(0), n(0), {1, 0, 0, 0, 0, 0, 0, 0, 32}},
+		"mcopydst2pow128":  {pow2(128, 0), n(0), n(1)},
+		"mcopydst2pow192":  {pow2(192, 0), n(0), n(1)},
+		"mcopysrc2pow128":  {n(0), pow2(128, 0), n(1)},
+		"mcopysrc2pow192":  {n(0), pow2(192, 0), n(1)},
+		"mcopylen2pow128":  {n(0), n(0), pow2(128, 32)},
+		"mcopylen2pow192":  {n(0), n(0), pow2(192, 32)},
+	} {
+		programs[name] = mcopy(args[0], args[1], args[2])
+	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
 			programs["under"+op.String()] = prog(pushes(w.numPop-1), op)
@@ -382,6 +433,35 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			got, _ := runOnce(code, gas, false)
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
 		}
+	}
+}
+
+// TestRunTakesMcopyFastPath fails when an allocated MCOPY falls back to the
+// jump table, which the result comparison above cannot see.
+func TestRunTakesMcopyFastPath(t *testing.T) {
+	t.Parallel()
+	errJumpTable := errors.New("jump table MCOPY")
+	for _, traced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			jt := *evm.jt
+			jt[MCOPY].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
+			evm.jt = &jt
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 8, byte(PUSH1), 0, byte(PUSH1), 1, byte(MCOPY)}
+			f := evm.run
+			if traced {
+				f = evm.runTraced
+			}
+			_, _, _, err := f(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+			if traced {
+				require.ErrorIs(t, err, errJumpTable)
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }
 

@@ -435,12 +435,12 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	// Fail if we're trying to transfer more than the available balance.
 	// Skip the check for zero-value calls, matching geth's short-circuit.
-	if !value.IsZero() {
+	if !value.IsZero() && !bailout {
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
 		}
-		if !canTransfer && !bailout {
+		if !canTransfer {
 			return nil, gasRemaining, mdgas.MdGasUsage{}, ErrInsufficientBalance
 		}
 	}

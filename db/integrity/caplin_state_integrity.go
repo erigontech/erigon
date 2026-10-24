@@ -22,9 +22,11 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
@@ -67,6 +69,44 @@ func CheckCaplinStateRoots(ctx context.Context, dirs datadir.Dirs, failFast bool
 		}
 	}
 	return firstErr
+}
+
+// CheckPtcWindowEpoch verifies that required epoch rows are present in snapshots.
+func CheckPtcWindowEpoch(ctx context.Context, dirs datadir.Dirs, cfg *clparams.BeaconChainConfig) error {
+	files, err := filepath.Glob(filepath.Join(dirs.SnapCaplin, "*-"+kv.PtcWindowEpochTable+".seg"))
+	if err != nil {
+		return err
+	}
+	for _, path := range files {
+		info, _, ok := snaptype.ParseFileName(filepath.Dir(path), filepath.Base(path))
+		if !ok {
+			return fmt.Errorf("invalid %s snapshot filename %s", kv.PtcWindowEpochTable, filepath.Base(path))
+		}
+		d, err := seg.NewDecompressor(path)
+		if err != nil {
+			return err
+		}
+		getter := d.MakeGetter()
+		offset := uint64(0)
+		for ; getter.HasNext(); offset++ {
+			if offset%8192 == 0 && ctx.Err() != nil {
+				d.Close()
+				return ctx.Err()
+			}
+			word, _ := getter.Next(nil)
+			slot := info.From + offset
+			if slot%cfg.SlotsPerEpoch == 0 && slot/cfg.SlotsPerEpoch >= cfg.GloasForkEpoch && len(word) == 0 {
+				d.Close()
+				return fmt.Errorf("caplin %s snapshot %s: missing row at slot %d", kv.PtcWindowEpochTable, filepath.Base(path), slot)
+			}
+		}
+		if expected := info.To - info.From; offset != expected {
+			d.Close()
+			return fmt.Errorf("caplin %s snapshot %s: word count %d, expected %d", kv.PtcWindowEpochTable, filepath.Base(path), offset, expected)
+		}
+		d.Close()
+	}
+	return nil
 }
 
 func scanBlankRoots(ctx context.Context, path string) (blank, total, firstBlankSlot uint64, err error) {
