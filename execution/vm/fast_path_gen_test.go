@@ -118,4 +118,6 @@ var fastPathOps = map[OpCode]fastPathWant{
 	SWAP14:         {opSwap14, GasFastestStep, 15, 15, nil, nil},
 	SWAP15:         {opSwap15, GasFastestStep, 16, 16, nil, nil},
 	SWAP16:         {opSwap16, GasFastestStep, 17, 17, nil, nil},
+	CLZ:            {opCLZ, GasFastStep, 1, 1, nil, nil},
+	SLOTNUM:        {opSlotNum, GasQuickStep, 0, 1, nil, nil},
 }

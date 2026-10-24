@@ -725,7 +725,7 @@ run:
 						n := decodeSingle(x)
 
 						if callContext.Stack.len() < n {
-							res, err = nil, &ErrStackUnderflow{stackLen: callContext.Stack.len(), required: n}
+							res, err = nil, stackUnderflow(callContext.Stack.len(), n)
 							break run
 						}
 
@@ -751,7 +751,7 @@ run:
 						n := decodeSingle(x)
 
 						if callContext.Stack.len() < n+1 {
-							res, err = nil, &ErrStackUnderflow{stackLen: callContext.Stack.len(), required: n + 1}
+							res, err = nil, stackUnderflow(callContext.Stack.len(), n+1)
 							break run
 						}
 
@@ -778,7 +778,7 @@ run:
 						need := max(n, m) + 1
 
 						if callContext.Stack.len() < need {
-							res, err = nil, &ErrStackUnderflow{stackLen: callContext.Stack.len(), required: need}
+							res, err = nil, stackUnderflow(callContext.Stack.len(), need)
 							break run
 						}
 
@@ -797,6 +797,26 @@ run:
 					if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						callContext.Stack.swap(int(op-SWAP1) + 1)
+						pc++
+						continue run
+					}
+				}
+			}
+			if isRareOp[op] {
+				switch op {
+				case CLZ:
+					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
+						gasLeft -= GasFastStep
+						x := callContext.Stack.peek()
+
+						x.SetUint64(256 - uint64(x.BitLen()))
+						pc++
+						continue run
+					}
+				case SLOTNUM:
+					if jt[SLOTNUM].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(evm.Context.SlotNumber)
 						pc++
 						continue run
 					}
@@ -941,4 +961,10 @@ var isColdOp = [256]bool{
 	SWAP14:         true,
 	SWAP15:         true,
 	SWAP16:         true,
+}
+
+// isRareOp marks the ops of run's third fast-path switch.
+var isRareOp = [256]bool{
+	CLZ:     true,
+	SLOTNUM: true,
 }
