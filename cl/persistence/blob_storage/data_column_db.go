@@ -59,9 +59,9 @@ func NewDataColumnStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.Bea
 	return impl
 }
 
-func (s *dataColumnStorageImpl) columnRow(ctx context.Context, blockRoot common.Hash) ([]byte, error) {
+func (s *dataColumnStorageImpl) columnRow(blockRoot common.Hash) ([]byte, error) {
 	var row []byte
-	err := s.db.View(ctx, func(tx kv.Tx) error {
+	err := s.db.View(context.Background(), func(tx kv.Tx) error {
 		v, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
 		row = bytes.Clone(v)
 		return err
@@ -151,7 +151,7 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
 	column := uint64(columnIndex)
-	row, err := s.columnRow(ctx, blockRoot)
+	row, err := s.columnRow(blockRoot)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +220,7 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 	lock := s.forSlot(slot)
 	lock.RLock()
 	defer lock.RUnlock()
-	row, err := s.columnRow(ctx, blockRoot)
+	row, err := s.columnRow(blockRoot)
 	if err != nil {
 		return nil, err
 	}

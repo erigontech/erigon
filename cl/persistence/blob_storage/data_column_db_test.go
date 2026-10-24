@@ -586,10 +586,14 @@ func TestColumnWriteSetsTheBitAfterTheCallerGaveUp(t *testing.T) {
 	cancel()
 
 	require.NoError(t, storage.WriteColumnSidecars(ctx, root, 2, createTestDataColumnSidecar(1000, 2)))
+	require.Equal(t, []byte{1 << 2}, columnRow(t, storage, root), "a sidecar that landed on disk must be indexed")
 
-	saved, err := storage.GetSavedColumnIndex(t.Context(), 1000, root)
-	require.NoError(t, err)
-	require.Equal(t, []uint64{2}, saved, "a sidecar that landed on disk must be indexed")
+	exists, err := storage.ColumnSidecarExists(ctx, 1000, root, 2)
+	require.NoError(t, err, "the downloader bans the serving peer when this check fails")
+	require.True(t, exists)
+
+	require.NoError(t, storage.RemoveColumnSidecars(ctx, 1000, root, 2))
+	require.Nil(t, columnRow(t, storage, root))
 }
 
 func TestColumnFileWithoutItsBitCountsAsMissingUntilRewritten(t *testing.T) {
