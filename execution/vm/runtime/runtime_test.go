@@ -1196,7 +1196,6 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 	}
 	versioned := func() *state.IntraBlockState {
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		return ibs
 	}
 	was := dbg.TraceTransactionIO

@@ -70,7 +70,6 @@ func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
 
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
 
 	exists, err := ibs.Exist(addr)
@@ -206,7 +205,6 @@ func TestEIP8246_VersionedStateReader_BurnReadsAbsent(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(newAccountStateReader(), vm)
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 5)
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))

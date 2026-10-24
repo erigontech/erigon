@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -33,10 +32,9 @@ import (
 
 var amsterdamRules = &chain.Rules{IsAmsterdam: true, IsSpuriousDragon: true}
 
-func newAmsterdamIBS(reader *accountStateReader, vm *VersionMap, txIdx int, noMaterialize bool) *IntraBlockState {
+func newAmsterdamIBS(reader *accountStateReader, vm *VersionMap, txIdx int) *IntraBlockState {
 	ibs := NewWithVersionMap(reader, vm)
 	ibs.SetTxContext(1, txIdx)
-	ibs.SetNoMaterialize(noMaterialize)
 	ibs.SetVersion(0)
 	return ibs
 }
@@ -50,7 +48,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	dead := accounts.InternAddress(common.HexToAddress("0xdead"))
 	vm := NewVersionMap(nil)
 
-	destroyer := newAmsterdamIBS(reader, vm, 0, true)
+	destroyer := newAmsterdamIBS(reader, vm, 0)
 	t.Cleanup(destroyer.Close)
 	_, err := destroyer.GetCodeHash(addr)
 	require.NoError(t, err)
@@ -70,7 +68,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	t.Cleanup(destroyWrites.ReleaseAndReset)
 	vm.FlushVersionedWrites(destroyWrites, true, "")
 
-	recreator := newAmsterdamIBS(reader, vm, 1, true)
+	recreator := newAmsterdamIBS(reader, vm, 1)
 	t.Cleanup(recreator.Close)
 	_, err = recreator.GetCodeHash(addr)
 	require.NoError(t, err)
@@ -117,7 +115,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 
 	vm := NewVersionMap(changes)
 	vm.FlushVersionedWrites(destroyWrites, true, "")
-	ibs := newAmsterdamIBS(reader, vm, 2, true)
+	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
 	exists, err := ibs.Exist(addr)
@@ -139,7 +137,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 
 	vm.FlushVersionedWrites(recreateWrites, true, "")
-	rerun := newAmsterdamIBS(reader, vm, 2, true)
+	rerun := newAmsterdamIBS(reader, vm, 2)
 	defer rerun.Close()
 	exists, err = rerun.Exist(addr)
 	require.NoError(t, err)
@@ -156,32 +154,27 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 // tx re-executes with a consistent view.
 func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	t.Parallel()
-	for _, noMaterialize := range []bool{true, false} {
-		t.Run(fmt.Sprintf("noMaterialize=%v", noMaterialize), func(t *testing.T) {
-			t.Parallel()
-			addr := accounts.InternAddress(common.HexToAddress("0x8246AB"))
-			reader := newAccountStateReader(addr)
-			reader.accounts[addr].Balance = *uint256.NewInt(1)
-			destroyWrites, recreateWrites, _ := destroyThenRecreate(t, reader, addr, []byte{0x60, 0x01})
+	addr := accounts.InternAddress(common.HexToAddress("0x8246AB"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(1)
+	destroyWrites, recreateWrites, _ := destroyThenRecreate(t, reader, addr, []byte{0x60, 0x01})
 
-			vm := NewVersionMap(nil)
-			vm.FlushVersionedWrites(destroyWrites, true, "")
-			ibs := newAmsterdamIBS(reader, vm, 2, noMaterialize)
-			defer ibs.Close()
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(destroyWrites, true, "")
+	ibs := newAmsterdamIBS(reader, vm, 2)
+	defer ibs.Close()
 
-			empty, err := ibs.Empty(addr)
-			require.NoError(t, err)
-			require.True(t, empty)
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
 
-			vm.FlushVersionedWrites(recreateWrites, true, "")
+	vm.FlushVersionedWrites(recreateWrites, true, "")
 
-			exists, err := ibs.Exist(addr)
-			require.NoError(t, err)
-			require.False(t, exists, "the record fallback must not revive an address this tx already read as absent")
-			so, err := ibs.getStateObject(addr, true)
-			require.NoError(t, err)
-			require.Nil(t, so)
-			require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
-		})
-	}
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists, "the record fallback must not revive an address this tx already read as absent")
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, so)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }

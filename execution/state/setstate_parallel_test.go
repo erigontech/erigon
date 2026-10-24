@@ -94,7 +94,6 @@ func TestGetCommittedStateParallel_ValidatedFloor(t *testing.T) {
 
 	// tx0: SSTORE the slot, flushed Validated (pre-seal early-break state).
 	ibs0 := NewWithVersionMap(reader, vm)
-	ibs0.SetNoMaterialize(true)
 	ibs0.SetTxContext(100, 0)
 	ibs0.SetVersion(0)
 	require.NoError(t, ibs0.SetState(addr, key, *predVal))
@@ -108,7 +107,6 @@ func TestGetCommittedStateParallel_ValidatedFloor(t *testing.T) {
 
 	// tx1: committed read must see tx0's Validated write (42), not domain (5).
 	ibs1 := NewWithVersionMap(reader, vm)
-	ibs1.SetNoMaterialize(true)
 	ibs1.SetTxContext(100, 5)
 	ibs1.SetVersion(0)
 
@@ -146,7 +144,6 @@ func TestBaseStateReadConsistency_NoReResolve(t *testing.T) {
 	vm.WriteStorage(addr, key, Version{TxIndex: 0, Incarnation: 0}, *v1, true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 

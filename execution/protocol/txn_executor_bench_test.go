@@ -55,7 +55,6 @@ func BenchmarkSysCallContract(b *testing.B) {
 	newIBS := func(b *testing.B) *state.IntraBlockState {
 		b.Helper()
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		ibs.SetNoConflictDetection()
 		require.NoError(b, ibs.CreateAccount(contract, false))
 		require.NoError(b, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))

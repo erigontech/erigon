@@ -32,7 +32,6 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 		ibs := NewWithVersionMap(reader, vm)
 		ibs.SetTxContext(100, txIdx)
 		ibs.SetVersion(0)
-		ibs.SetNoMaterialize(true)
 		f(ibs)
 		vm.FlushVersionedWrites(finalizedWrites(t, ibs, &chain.Rules{}), true, "")
 	}
@@ -52,7 +51,6 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 	ibs3 := NewWithVersionMap(reader, vm)
 	ibs3.SetTxContext(100, 3)
 	ibs3.SetVersion(0)
-	ibs3.SetNoMaterialize(true)
 	v, err := ibs3.GetState(addr, key)
 	require.NoError(t, err)
 	require.True(t, v.IsZero(), "recreated contract's unwritten slot must read 0, got %s", v.String())
@@ -64,7 +62,6 @@ func runRevivalTx(t *testing.T, vm *VersionMap, txIdx int, f func(ibs *IntraBloc
 	t.Helper()
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	ibs.SetTxContext(100, txIdx)
-	ibs.SetNoMaterialize(true)
 	f(ibs)
 	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	vm.FlushVersionedWrites(writes, true, "")

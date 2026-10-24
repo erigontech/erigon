@@ -149,10 +149,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	if ba.HasBAL() {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
-		// Versioned assembly commits from the write-set (BalIO) below, not from a
-		// materialized stateObject, and reads cross-tx state from the versionMap
-		// (flushed per tx), so it does not need the stateObject cache.
-		ibs.SetNoMaterialize(true)
 	}
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))

@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -34,7 +33,6 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
@@ -50,7 +48,6 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	vm.FlushVersionedWrites(writes, true, "")
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
-	next.SetNoMaterialize(true)
 	next.SetTxContext(1, 1)
 	exists, err := next.Exist(addr)
 	require.NoError(t, err)
@@ -75,7 +72,6 @@ func TestFinalizedWritesEmptyRemovalClearsWholeAccountCell(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.CreateAccount(addr, false))
@@ -100,7 +96,6 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
 
 	empty, err := ibs.Empty(addr)
@@ -129,7 +124,6 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
 
 	exists, err := ibs.Exist(addr)
@@ -153,7 +147,6 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	newTx := func(txIndex int) *IntraBlockState {
 		ibs := NewWithVersionMap(reader, vm)
 		t.Cleanup(ibs.Close)
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, txIndex)
 		return ibs
 	}
@@ -209,24 +202,21 @@ func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
 			return ibs.AddBalance(addr, *uint256.NewInt(1), 0)
 		}, false},
 	} {
-		for _, materialize := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/materialize=%v", tc.name, materialize), func(t *testing.T) {
-				t.Parallel()
-				addr := accounts.InternAddress([20]byte{0xe6})
-				empty := accounts.NewAccount()
-				ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
-				t.Cleanup(ibs.Close)
-				ibs.SetNoMaterialize(!materialize)
-				ibs.SetTxContext(1, 0)
-				rules := &chain.Rules{IsSpuriousDragon: true}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xe6})
+			empty := accounts.NewAccount()
+			ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 0)
+			rules := &chain.Rules{IsSpuriousDragon: true}
 
-				require.NoError(t, tc.apply(ibs, addr))
-				require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+			require.NoError(t, tc.apply(ibs, addr))
+			require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
 
-				sd, ok := finalizedWrites(t, ibs, rules).GetSelfDestruct(addr)
-				require.Equal(t, tc.removed, ok && sd.Val)
-			})
-		}
+			sd, ok := finalizedWrites(t, ibs, rules).GetSelfDestruct(addr)
+			require.Equal(t, tc.removed, ok && sd.Val)
+		})
 	}
 }
 
@@ -250,7 +240,6 @@ func TestFinalizedWritesRemovalFollowsEIP161(t *testing.T) {
 			empty := accounts.NewAccount()
 			ibs := NewWithVersionMap(&emptyAccountReader{addr: tc.addr, acc: &empty}, NewVersionMap(nil))
 			t.Cleanup(ibs.Close)
-			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(1, 0)
 			_, err := ibs.Exist(tc.addr)
 			require.NoError(t, err)
@@ -267,7 +256,6 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
@@ -363,7 +351,6 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress([20]byte{0xe1})
@@ -377,7 +364,6 @@ func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 
 	addr := accounts.InternAddress([20]byte{0xe1})
@@ -391,7 +377,6 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(params.SystemAddress))
