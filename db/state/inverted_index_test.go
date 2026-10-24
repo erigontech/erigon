@@ -25,6 +25,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1316,19 +1317,25 @@ type prefetchIndexCursor struct {
 	kv.RwCursorDupSort
 	t             *testing.T
 	prefetchErr   error
-	prefetched    atomic.Int32
+	prefetched    sync.Map // keys whose pages a prefetch reader touched
+	prefetchSeeks atomic.Int32
 	prefetchCalls atomic.Int32
 	rollbacks     atomic.Int32
 }
 
 func (c *prefetchIndexCursor) Put(k, v []byte) error {
-	require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
+	c.requirePrefetched(k)
 	return c.RwCursorDupSort.Put(k, v)
 }
 
 func (c *prefetchIndexCursor) PutCurrent(k, v []byte) error {
-	require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
+	c.requirePrefetched(k)
 	return c.RwCursorDupSort.PutCurrent(k, v)
+}
+
+func (c *prefetchIndexCursor) requirePrefetched(k []byte) {
+	_, ok := c.prefetched.Load(string(k))
+	require.True(c.t, ok, "prefetch must precede every write of key %x", k)
 }
 
 func (c *prefetchIndexCursor) Close() {}
@@ -1390,7 +1397,8 @@ type prefetchIndexReadCursor struct {
 func (c *prefetchIndexReadCursor) SeekBothRange(k, v []byte) ([]byte, error) {
 	value, err := c.CursorDupSort.SeekBothRange(k, v)
 	if err == nil {
-		c.cursor.prefetched.Add(1)
+		c.cursor.prefetched.Store(string(k), struct{}{})
+		c.cursor.prefetchSeeks.Add(1)
 	}
 	return value, err
 }
@@ -1899,4 +1907,26 @@ func TestInvertedIndexPruneChunksResume(t *testing.T) {
 		m.delete(key, 0, 10)
 	}
 	requireIIChunks(t, tx, ii.ValuesTable, m)
+}
+
+func TestInvertedIndexPrefetchOncePerKey(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	iit := ii.beginForTests()
+	defer iit.Close()
+	cursor := &prefetchIndexCursor{t: t}
+	prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+	w := iit.NewWriter(prefetchDB)
+	defer w.close()
+	w.prefetcher = newInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, 1)
+	w.prefetchBatchSize = 1024
+	for txNum := uint64(1); txNum <= 100; txNum++ {
+		require.NoError(t, w.Add([]byte("hot"), txNum))
+	}
+	require.NoError(t, w.Add([]byte("cold"), 7))
+	require.NoError(t, w.Flush(t.Context(), tx))
+	require.EqualValues(t, 2, cursor.prefetchSeeks.Load(), "the writer seeks each key once per batch")
+	require.Len(t, iiValuePairs(t, tx, ii.ValuesTable), 101)
 }
