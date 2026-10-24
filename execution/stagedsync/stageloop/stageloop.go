@@ -329,7 +329,13 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 			if cause := context.Cause(ctx); cause != nil {
 				return fmt.Errorf("state step stopped with work left: %w", cause)
 			}
-			return errors.New("unexpected state step has more work")
+			// NOT cancelled, so a stage genuinely reported more work. Say WHICH and WHY: the stage
+			// returned an ErrLoopExhausted carrying from/to/reason, and runStage used to swallow it,
+			// which left this error with nothing in it but its own name.
+			if ex := stateSync.LastExhausted(); ex != nil {
+				return fmt.Errorf("unexpected state step has more work: %w", ex)
+			}
+			return errors.New("unexpected state step has more work (no stage said why)")
 		}
 	}
 	return nil

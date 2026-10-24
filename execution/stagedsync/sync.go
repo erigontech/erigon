@@ -39,6 +39,9 @@ type Sync struct {
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
+	// lastExhausted is why a stage most recently reported "more work": set from the ErrLoopExhausted
+	// a stage returned, which runStage otherwise swallows. See LastExhausted.
+	lastExhausted *ErrLoopExhausted
 
 	stages        []*Stage
 	unwindOrder   []*Stage
@@ -297,6 +300,7 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 		s.currentStage = 0
 	}()
 
+	s.lastExhausted = nil
 	var errBadBlock error
 	for !s.IsDone() {
 		var badBlockUnwind bool
@@ -355,6 +359,10 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 
 	return hasMore, errBadBlock
 }
+
+// LastExhausted is the ErrLoopExhausted that most recently made a stage report "more work", or nil.
+// It is what lets a caller say WHY work was left over instead of only that it was.
+func (s *Sync) LastExhausted() *ErrLoopExhausted { return s.lastExhausted }
 
 // ErrLoopExhausted is used to allow the sync loop to continue when one of the stages has thrown it due to reaching
 // some loop iteration limit.
@@ -525,6 +533,13 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
 		var errExhausted *ErrLoopExhausted
 		if errors.As(err, &errExhausted) {
+			// ⚠ KEEP THE REASON. This used to log it at Debug — invisible in any normal run — and
+			// return a bare "there is more work", so by the time the stage loop turned that into
+			// "unexpected state step has more work" there was nothing left to say WHY. That error
+			// was chased twice from the wrong end: it is not the pre-exec valve stopping a round
+			// (the context is not cancelled) and not the blks=0 path (a block is executed). The
+			// reason was always right here and was dropped.
+			s.lastExhausted = errExhausted
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
 			return true, nil
