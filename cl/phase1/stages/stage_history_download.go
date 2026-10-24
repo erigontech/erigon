@@ -142,13 +142,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}
 
 	if cfg.caplinConfig.ArchiveBlocks {
-		if err := waitForEngineReady(ctx, cfg.engine, logger); err != nil {
-			return err
-		}
-		logger.Info("[Caplin] Building missing snapshot indices")
-		if err := cfg.sn.BuildMissingIndices(ctx, logger); err != nil {
-			logger.Warn("[Caplin] Could not build missing snapshot indices", "err", err)
-		}
+		go func() {
+			err := waitForEngineReady(ctx, cfg.engine, logger)
+			if err == nil {
+				logger.Info("[Caplin] Building missing snapshot indices")
+				err = cfg.sn.BuildMissingIndices(ctx, logger)
+			}
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("[Caplin] Could not build missing snapshot indices", "err", err)
+			}
+		}()
 	}
 
 	var hasFinishedDownloadingElBlocks atomic.Bool
