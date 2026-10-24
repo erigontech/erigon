@@ -135,8 +135,7 @@ func TestRederiveBlockAccessListReportsRecoveredPanic(t *testing.T) {
 	t.Parallel()
 	getHeader := func(common.Hash, uint64) (*types.Header, error) { panic("header read panicked") }
 	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, getHeader)
-	_, isPanic := errors.AsType[*protocol.ErrExecPanic](err)
-	require.True(t, isPanic, "%v", err)
+	require.ErrorIs(t, err, protocol.ErrExecPanic)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
 
