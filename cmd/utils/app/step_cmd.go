@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
 )
 
 type stepRebasePlan struct {
@@ -348,6 +350,9 @@ func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, 
 		return err
 	}
 	defer chainDB.Close()
+	if _, err := features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
+		return err
+	}
 	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
