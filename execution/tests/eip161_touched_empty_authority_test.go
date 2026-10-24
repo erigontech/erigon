@@ -50,6 +50,7 @@ var eip161TouchForks = func() []struct {
 }()
 
 // generateEIP161TouchBlock builds one block with serial or versioned execution.
+// From Amsterdam on GenerateChain always runs versioned execution.
 func generateEIP161TouchBlock(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, versioned bool, fill func(*blockgen.BlockGen)) *blockgen.ChainPack {
 	t.Helper()
 	dbg.Exec3Parallel = versioned
@@ -93,13 +94,14 @@ func callCode(addr common.Address, value byte) []byte {
 	return append(code, byte(vm.GAS), byte(vm.CALL), byte(vm.STOP))
 }
 
-// A transaction touches an empty account, by a zero-value call or by paying it
-// a zero tip as the coinbase, so EIP-161 removes it at the end of that
-// transaction. A later transaction in the block, from another sender, uses the
-// account as an EIP-7702 authority, whose gas depends on whether the authority
-// exists: it must cost the same as for an authority that never existed. The
-// touch comes after a long loop, so the parallel executor usually runs the
-// authorization first and must invalidate it.
+// A transaction touches an empty account, by a zero-value call (also when the
+// account is the burnt-fee recipient and the burn is zero) or by paying it a
+// zero tip as the coinbase, so EIP-161 removes it at the end of that
+// transaction. A later transaction in the
+// block, from another sender, uses the account as an EIP-7702 authority, whose
+// gas depends on whether the authority exists: it must cost the same as for an
+// authority that never existed. The touch comes after a long loop, so the
+// parallel executor usually runs the authorization first and must invalidate it.
 func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 	// This test changes dbg.Exec3Parallel and cannot run in parallel.
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
@@ -126,13 +128,19 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 		coinbase common.Address
 		tip      uint64
 		code     []byte
+		burnt    bool
 	}{
-		{"zero-value call", common.Address{1}, 1, append(loop, callCode(authority, 0)...)},
-		{"zero tip", authority, 0, append(loop, byte(vm.STOP))},
+		{"zero-value call", common.Address{1}, 1, append(loop, callCode(authority, 0)...), false},
+		{"zero tip", authority, 0, append(loop, byte(vm.STOP)), false},
+		{"zero burn", common.Address{1}, 1, append(loop, callCode(authority, 0)...), true},
 	} {
 		for _, fork := range eip161TouchForks {
 			t.Run(tc.name+"/"+fork.name, func(t *testing.T) {
 				config := fork.config
+				if tc.burnt {
+					config = config.Copy()
+					config.BurntContract = map[string]common.Address{"0": authority}
+				}
 				signer := types.LatestSignerForChainID(config.ChainID)
 				auth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.HexToAddress("0xcafe"), 0)
 				require.NoError(t, err)
@@ -146,7 +154,11 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 					if withEmptyAuthority {
 						alloc[authority] = types.GenesisAccount{Balance: big.NewInt(0)}
 					}
-					return &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+					gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+					if tc.burnt {
+						gspec.BaseFee = new(uint256.Int)
+					}
+					return gspec
 				}
 				fill := func(b *blockgen.BlockGen) {
 					b.SetCoinbase(tc.coinbase)
@@ -200,22 +212,23 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 	gasPrice := uint256.NewInt(10_000_000_000)
 
 	for _, tc := range []struct {
-		name string
-		fill func(b *blockgen.BlockGen, config *chain.Config)
+		name  string
+		burnt bool
+		fill  func(b *blockgen.BlockGen, config *chain.Config)
 	}{
-		{"tipped coinbase", func(b *blockgen.BlockGen, config *chain.Config) {
+		{"tipped coinbase", false, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(empty)
 			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), empty, uint256.NewInt(0), 100_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
 			require.NoError(t, err)
 			b.AddTx(txn)
 		}},
-		{"value call", func(b *blockgen.BlockGen, config *chain.Config) {
+		{"value call", false, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(common.Address{1})
 			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), payer, uint256.NewInt(0), 200_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
 			require.NoError(t, err)
 			b.AddTx(txn)
 		}},
-		{"delegated authority", func(b *blockgen.BlockGen, config *chain.Config) {
+		{"delegated authority", false, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(common.Address{1})
 			auth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.HexToAddress("0xcafe"), 0)
 			require.NoError(t, err)
@@ -231,11 +244,22 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 			require.NoError(t, err)
 			b.AddTx(txn)
 		}},
+		{"burnt-fee recipient with a non-zero burn", true, func(b *blockgen.BlockGen, config *chain.Config) {
+			b.SetCoinbase(common.Address{1})
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), empty, uint256.NewInt(0), 100_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}},
 	} {
 		for _, fork := range eip161TouchForks {
 			t.Run(tc.name+"/"+fork.name, func(t *testing.T) {
+				config := fork.config
+				if tc.burnt {
+					config = config.Copy()
+					config.BurntContract = map[string]common.Address{"0": empty}
+				}
 				gspec := &types.Genesis{
-					Config:   fork.config,
+					Config:   config,
 					GasLimit: 30_000_000,
 					Alloc: types.GenesisAlloc{
 						senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
@@ -243,12 +267,53 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 						empty:      {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x01")}},
 					},
 				}
-				fill := func(b *blockgen.BlockGen) { tc.fill(b, fork.config) }
+				fill := func(b *blockgen.BlockGen) { tc.fill(b, config) }
 				serial := generateEIP161TouchBlock(t, gspec, keys[0], false, fill)
 				versioned := generateEIP161TouchBlock(t, gspec, keys[0], true, fill)
 				require.Equal(t, serial.TopBlock.Root(), versioned.TopBlock.Root())
 				importEIP161TouchBlock(t, gspec, keys[0], versioned)
 			})
 		}
+	}
+}
+
+// A contract with nonce 0, as deployed before Spurious Dragon, receives value
+// through a CALL, which reads whether it is empty, and forwards its whole
+// balance. It ends with a zero balance and a zero nonce but keeps its code, so
+// it is not removed.
+func TestEmptiedContractIsKept(t *testing.T) {
+	// This test changes dbg.Exec3Parallel and cannot run in parallel.
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	keys, senders := eip161TouchKeys(t, 1)
+	wallet := common.HexToAddress("0x3a11e7")
+	payer := common.HexToAddress("0xc0de")
+	sink := common.HexToAddress("0x5151")
+	forward := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.SELFBALANCE), byte(vm.PUSH20)}
+	forward = append(forward, sink[:]...)
+	forward = append(forward, byte(vm.GAS), byte(vm.CALL), byte(vm.STOP))
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{
+				Config:   fork.config,
+				GasLimit: 30_000_000,
+				Alloc: types.GenesisAlloc{
+					senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					payer:      {Code: callCode(wallet, 1), Balance: big.NewInt(1)},
+					wallet:     {Code: forward},
+				},
+			}
+			fill := func(b *blockgen.BlockGen) {
+				b.SetCoinbase(common.Address{1})
+				txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), payer, uint256.NewInt(0), 300_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+				require.NoError(t, err)
+				b.AddTx(txn)
+			}
+			serial := generateEIP161TouchBlock(t, gspec, keys[0], false, fill)
+			versioned := generateEIP161TouchBlock(t, gspec, keys[0], true, fill)
+			require.Equal(t, serial.TopBlock.Root(), versioned.TopBlock.Root())
+			importEIP161TouchBlock(t, gspec, keys[0], versioned)
+		})
 	}
 }
