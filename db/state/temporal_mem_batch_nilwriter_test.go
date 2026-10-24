@@ -58,3 +58,46 @@ func TestAWriteAfterMergeFailsInsteadOfCrashing(t *testing.T) {
 		t.Fatal("a delete to a merged-away batch returned no error")
 	}
 }
+
+// Taking the writers EMPTIES the source, so it must only happen when the source is being closed.
+//
+// Merge's closeOther=false means "keep the source alive as the successor's read-through parent".
+// The confiscation used to be inline and unconditional, so the source came out alive for READING
+// and dead for WRITING, and the pre-exec round that still owned it killed the node on every
+// 9,600-order soak pass.
+func TestTakingTheWritersEmptiesTheSource(t *testing.T) {
+	src := &TemporalMemBatch{}
+	for i := range src.domainWriters {
+		src.domainWriters[i] = &DomainBufferedWriter{discard: true}
+	}
+	src.forkableWriters = map[kv.ForkableId]kv.BufferedWriter{}
+	dst := &TemporalMemBatch{pastForkableWriters: map[kv.ForkableId][]kv.BufferedWriter{}}
+
+	// Untouched: a source kept alive keeps every writer and is not marked merged away.
+	if src.mergedAway.Load() {
+		t.Fatal("a fresh batch is already marked merged away")
+	}
+	for d := range src.domainWriters {
+		if src.domainWriters[d] == nil {
+			t.Fatalf("domain %s started with no writer", kv.Domain(d))
+		}
+	}
+
+	dst.takeWritersFrom(src)
+
+	if !src.mergedAway.Load() {
+		t.Error("the source was emptied but not marked merged away, so the error cannot say why")
+	}
+	for d := range src.domainWriters {
+		if src.domainWriters[d] != nil {
+			t.Errorf("domain %s kept its writer; the destination never received it", kv.Domain(d))
+		}
+	}
+	if got := len(dst.pastDomainWriters[kv.AccountsDomain]); got != 1 {
+		t.Errorf("destination holds %d past writers for accounts, want 1", got)
+	}
+	// And the source is now refused rather than crashed.
+	if err := src.DomainPut(kv.AccountsDomain, "k", []byte("v"), 1, nil); err == nil {
+		t.Error("a write to the emptied source was accepted")
+	}
+}

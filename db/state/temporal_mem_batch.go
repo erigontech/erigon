@@ -738,6 +738,51 @@ func (sd *TemporalMemBatch) Close() {
 	sd.ClearRam()
 }
 
+// takeWritersFrom moves every buffered writer out of `other` and into sd's past-writer lists,
+// leaving `other` with none.
+//
+// ⚠ IT EMPTIES `other`, SO IT RUNS ONLY WHEN `other` IS BEING CLOSED. This used to be inline in
+// Merge and unconditional, while Merge's closeOther=false means "keep the source alive as the
+// successor's read-through parent" and the comment at the foot of Merge calls the copy
+// "non-destructive". It was not: the source came out alive for READING and dead for WRITING, and
+// the pre-exec round that still owned it dereferenced nothing and killed the node on every
+// 9,600-order soak pass — all six domains warning in the same millisecond. The pending-commitment
+// transfer in Merge already skips itself when not closing; this is the same rule.
+func (sd *TemporalMemBatch) takeWritersFrom(other *TemporalMemBatch) {
+	for domain, writer := range other.domainWriters {
+		// Skip a nil writer: an EMPTY block (heartbeat) touches no state, so its untouched domains have no
+		// writer (domainWriters are created lazily on first write). Putting nil in here poisons
+		// pastDomainWriters, which flushWriters/DiscardWrites deref WITHOUT the nil guard the domainWriters
+		// loop has — a nil-deref crash when an empty block's SD is merged/promoted (frontier run-ahead).
+		newer := other.pastDomainWriters[domain]
+		if writer != nil {
+			newer = append([]*DomainBufferedWriter{writer}, newer...)
+		}
+		if len(newer) > 0 {
+			sd.pastDomainWriters[domain] = append(newer, sd.pastDomainWriters[domain]...)
+		}
+		other.domainWriters[domain] = nil
+		other.pastDomainWriters[domain] = nil
+	}
+	// Anything that writes to `other` from here on is writing to a batch with no writers.
+	other.mergedAway.Store(true)
+
+	sd.pastIIWriters = append(sd.pastIIWriters, other.iiWriters...)
+	other.iiWriters = nil
+	sd.pastIIWriters = append(sd.pastIIWriters, other.pastIIWriters...)
+	other.pastIIWriters = nil
+
+	for id, writer := range other.forkableWriters {
+		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writer)
+	}
+	other.forkableWriters = nil
+
+	for id, writers := range other.pastForkableWriters {
+		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writers...)
+	}
+	other.pastForkableWriters = nil
+}
+
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error {
 	other, ok := o.(*TemporalMemBatch)
 	if !ok {
@@ -785,38 +830,20 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 	// oldest writer last, which makes the FIRST round of a multi-round block the one that wins: the block
 	// commits as if only its first round had run, while its root — advanced cumulatively through the shared
 	// commitment context — says otherwise, so nothing catches it.
-	for domain, writer := range other.domainWriters {
-		// Skip a nil writer: an EMPTY block (heartbeat) touches no state, so its untouched domains have no
-		// writer (domainWriters are created lazily on first write). Putting nil in here poisons
-		// pastDomainWriters, which flushWriters/DiscardWrites deref WITHOUT the nil guard the domainWriters
-		// loop has — a nil-deref crash when an empty block's SD is merged/promoted (frontier run-ahead).
-		newer := other.pastDomainWriters[domain]
-		if writer != nil {
-			newer = append([]*DomainBufferedWriter{writer}, newer...)
-		}
-		if len(newer) > 0 {
-			sd.pastDomainWriters[domain] = append(newer, sd.pastDomainWriters[domain]...)
-		}
-		other.domainWriters[domain] = nil
-		other.pastDomainWriters[domain] = nil
+	//
+	// ⚠ TAKING THE WRITERS IS DESTRUCTIVE, SO IT OBEYS closeOther LIKE EVERY OTHER DESTRUCTIVE STEP
+	// HERE. closeOther=false means the source is a frontier block kept alive as its successor's
+	// read-through parent, and the comment at the foot of this function says its data is "copied
+	// above, non-destructively" — which was not true of the writers: they were confiscated and
+	// nilled whatever the caller asked for. The batch was then alive for READING and dead for
+	// WRITING, and the pre-exec round that still owned it dereferenced nothing and killed the node
+	// on every 9,600-order soak pass (all six domains warned in the same millisecond).
+	//
+	// The pending-commitment transfer a few lines below already skips itself when not closing, for
+	// exactly this reason. This is the same rule.
+	if closeOther {
+		sd.takeWritersFrom(other)
 	}
-	// Anything that writes to `other` from here on is writing to a batch with no writers.
-	other.mergedAway.Store(true)
-
-	sd.pastIIWriters = append(sd.pastIIWriters, other.iiWriters...)
-	other.iiWriters = nil
-	sd.pastIIWriters = append(sd.pastIIWriters, other.pastIIWriters...)
-	other.pastIIWriters = nil
-
-	for id, writer := range other.forkableWriters {
-		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writer)
-	}
-	other.forkableWriters = nil
-
-	for id, writers := range other.pastForkableWriters {
-		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writers...)
-	}
-	other.pastForkableWriters = nil
 
 	if sd.currentChangesAccumulator != nil {
 		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
