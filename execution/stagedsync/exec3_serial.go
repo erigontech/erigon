@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -72,7 +71,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	var b *types.Block
 
-	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
+	lastFrozenStep := se.applyTx.StepsInFiles(canonicalCommitmentDomain(se.applyTx))
 
 	var lastFrozenTxNum uint64
 	if lastFrozenStep > 0 {
@@ -193,7 +192,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				fmt.Println(blockNum, "Commitment")
 				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
-			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, se.onCommitProgress)
 			if traceBlk {
 				se.doms.GetCommitmentCtx().SetTraceWriter(nil)
@@ -208,7 +206,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !bytes.Equal(rh, header.Root[:]) {
+			if headerRootMismatch(rh, header.Root[:]) {
 				se.logWrongTrieRoot(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root[:], header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}

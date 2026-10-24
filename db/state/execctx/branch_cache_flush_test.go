@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 type commitmentWrite struct {
@@ -135,7 +136,7 @@ func TestLegalStagedUnwindReadsMergedCommitmentFile(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -159,7 +160,7 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -181,7 +182,7 @@ func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -246,7 +247,7 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithLocalCacheUnwind())
 	require.NoError(t, err)
@@ -256,6 +257,32 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	require.NoError(t, err)
 	_, _, ok := branchCache.Get(key)
 	require.False(t, ok, "a speculative session must not seed the shared branch cache")
+}
+
+func TestV3SharedDomainsLeaveBranchCacheEmpty(t *testing.T) {
+	db, key, value := commitmentFileFixture(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
+	branchCache.Clear()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithTrieConfig(cfg))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	written := []byte{0x0b, 0x0c}
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, written, []byte{0, 0, 0, 0, 2}, 30, nil))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "read-through filled the cache")
+	_, _, ok = branchCache.Get(written)
+	require.False(t, ok, "commit wrote through to the cache")
 }
 
 // unwindDeadFork commits an unwind of the step-2 branch written at txNum 40. during runs after the unwind is
@@ -330,7 +357,7 @@ func TestBranchCacheRejectsFillFromViewOpenedBeforeUnwind(t *testing.T) {
 	defer newTx.Rollback()
 	_, _, err = newTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
 	require.NoError(t, err)
-	got, _, ok := newTx.AggTx().(commitment.BranchCacheProvider).BranchCache().Get(key)
+	got, _, ok := newTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain).Get(key)
 	require.True(t, ok, "a view opened after the unwind commit must still fill")
 	require.Equal(t, stepOneValue, got)
 }

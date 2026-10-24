@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -151,6 +153,24 @@ func TestRecordingState_accountExists(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordingStateDeleteAccountClearsModifiedCode(t *testing.T) {
+	address := common.HexToAddress("0x5600000000000000000000000000000000000000")
+	code := []byte{0x60, 0x01, 0x00}
+	rs := NewRecordingState(&fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}})
+	require.NoError(t, rs.UpdateAccountCode(accounts.InternAddress(address), 0, accounts.InternCodeHash(crypto.Keccak256Hash(code)), code))
+	require.NoError(t, rs.DeleteAccount(accounts.InternAddress(address), nil))
+	funded := &accounts.Account{Balance: *uint256.NewInt(1)}
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(address), nil, funded))
+
+	input, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Len(t, input.Accounts, 1)
+	require.Nil(t, input.Accounts[0].Code)
+	basic, err := eip8297.EncodeBasicData(0, &funded.Balance, 0)
+	require.NoError(t, err)
+	require.Equal(t, basic[:], input.Accounts[0].Values[eip8297.BasicDataLeafKey])
 }
 
 // hasEmptyCode reports whether the legacy code set carries the single empty `0x`
@@ -430,7 +450,7 @@ func TestWitnessReaderComposition(t *testing.T) {
 	)
 	hc := &headCaptureSource{}
 
-	collapse := collapseReaderFor(hc, nil, firstTxNumInBlock, endTxNum)
+	collapse := collapseReaderFor(hc, nil, kv.CommitmentDomain, firstTxNumInBlock, endTxNum)
 	hcCollapse, ok := collapse.(*commitmentdb.CommitmentReplayStateReader)
 	require.True(t, ok, "head-capture collapse phase must install the dual-tx reader")
 	asOf, ok := hcCollapse.PlainStateAsOf()
@@ -438,7 +458,7 @@ func TestWitnessReaderComposition(t *testing.T) {
 	require.Equal(t, endTxNum, asOf, "collapse detection reads plain state at block end")
 	require.False(t, collapse.WithHistory())
 
-	trie := trieReaderFor(hc, nil, firstTxNumInBlock)
+	trie := trieReaderFor(hc, nil, kv.CommitmentDomain, firstTxNumInBlock)
 	hcTrie, ok := trie.(*commitmentdb.CommitmentReplayStateReader)
 	require.True(t, ok, "head-capture trie phase must install the dual-tx reader")
 	asOf, ok = hcTrie.PlainStateAsOf()
@@ -446,14 +466,14 @@ func TestWitnessReaderComposition(t *testing.T) {
 	require.Equal(t, firstTxNumInBlock, asOf, "trie phase reads plain state at the parent")
 	require.True(t, trie.WithHistory(), "trie phase is read-only: PutBranch must no-op during witness capture")
 
-	durableCollapse := collapseReaderFor(nil, nil, firstTxNumInBlock, endTxNum)
+	durableCollapse := collapseReaderFor(nil, nil, kv.CommitmentDomain, firstTxNumInBlock, endTxNum)
 	splitReader, ok := durableCollapse.(*commitmentdb.SplitStateReader)
 	require.True(t, ok, "durable collapse phase installs the split-history reader")
 	asOf, ok = splitReader.PlainStateAsOf()
 	require.True(t, ok)
 	require.Equal(t, endTxNum, asOf, "durable collapse reads plain state at block end")
 
-	durableTrie := trieReaderFor(nil, nil, firstTxNumInBlock)
+	durableTrie := trieReaderFor(nil, nil, kv.CommitmentDomain, firstTxNumInBlock)
 	historyReader, ok := durableTrie.(*commitmentdb.HistoryStateReader)
 	require.True(t, ok, "durable trie phase installs a plain history reader")
 	require.Equal(t, firstTxNumInBlock, historyReader.AsOf())
@@ -488,7 +508,7 @@ func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
 	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.NoError(t, err)
 
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, &rollingPin{tx: tx}, nil, info, witnessModeLegacy, witnessTrieMPT)
 	require.Error(t, err, "a mispinned parent must fail a validation gate")
 	require.Nil(t, result, "no witness is produced on gate failure")
 }
@@ -522,12 +542,12 @@ func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
 	require.NoError(t, err)
 
 	// The tip-pinned tx carries block 13's commitment, not parent(3): a validation gate fails.
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, &rollingPin{tx: tx}, nil, info, witnessModeLegacy, witnessTrieMPT)
 	require.Error(t, err, "a stale parent view must fail a validation gate")
 	require.Nil(t, result, "no wrong witness is produced on gate failure")
 	require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
 
-	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 	require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
 	require.Nil(t, served)
 }
@@ -556,7 +576,7 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
 		t.Cleanup(func() { api.witnessCache = nil })
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.ErrorIs(t, err, errWitnessOutOfWindow)
 		require.Nil(t, result, "a cache-only miss must not build a witness")
 	})
@@ -566,7 +586,7 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		canonical := "canonical"
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical, nil)
 		require.ErrorIs(t, err, errWitnessCanonicalUnavailable)
 		require.Nil(t, result, "a cache-only node never builds a canonical witness")
 	})
@@ -577,7 +597,7 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
 	})
@@ -589,7 +609,7 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		hitBefore, awaitBefore := witnessCacheHitCounter.GetValueUint64(), witnessCacheAwaitCounter.GetValueUint64()
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
 		require.Equal(t, hitBefore, witnessCacheHitCounter.GetValueUint64(), "a joined build is not a resident hit")
@@ -624,23 +644,23 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		tx, err := api.db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		result, hit, reorgedAway := api.serveFromWitnessCache(ctx, tx, byHash, witnessModeLegacy)
+		result, hit, reorgedAway := api.serveFromWitnessCache(ctx, tx, byHash, witnessModeLegacy, witnessTrieMPT, witnessTrieMPT)
 		require.False(t, hit, "a non-canonical by-hash request must not serve its resident entry")
 		require.True(t, reorgedAway, "an orphan hash must be flagged reorged-away")
 		require.Nil(t, result)
 
-		_, err = api.ExecutionWitness(ctx, byHash, nil)
+		_, err = api.ExecutionWitness(ctx, byHash, nil, nil)
 		require.ErrorIs(t, err, errWitnessReorgedAway)
 
 		// requireCanonical: true must still land in the reorged-away bucket, not the generic
 		// out-of-window one: the serve path owns the canonical check for the orphan signal.
 		byHashRequireCanonical := rpc.BlockNumberOrHash{BlockHash: &forkHash, RequireCanonical: true}
-		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy)
+		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy, witnessTrieMPT, witnessTrieMPT)
 		require.False(t, hit)
 		require.True(t, reorgedAway, "requireCanonical must not collapse an orphan into a plain miss")
 		require.Nil(t, result)
 
-		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil)
+		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil, nil)
 		require.ErrorIs(t, err, errWitnessReorgedAway)
 	})
 }
@@ -819,12 +839,91 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	bad := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	dbg.AssertEnabled = false
-	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, block.Root()),
 		"without the gate a witness is never replayed, so a wrong one passes")
 
 	dbg.AssertEnabled = true
-	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, block.Root()),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+type fixedParentState struct {
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey]uint256.Int
+}
+
+func (p fixedParentState) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
+	a, ok := p.acc[addr]
+	return a, ok
+}
+
+func (p fixedParentState) GetCommittedStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	v, ok := p.slot[key]
+	return v, ok
+}
+
+type fixedHistory struct {
+	state.StateReader
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey]uint256.Int
+}
+
+func (h fixedHistory) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return h.acc[addr], nil
+}
+
+func (h fixedHistory) ReadAccountStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	v, ok := h.slot[key]
+	return v, ok, nil
+}
+
+func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
+	previous := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previous })
+	cached, absent, unseen := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{2}), accounts.InternAddress(common.Address{3})
+	full, empty, other := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2}), accounts.InternKey(common.Hash{3})
+	history := fixedHistory{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, unseen: {Nonce: 9}},
+		slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(5), other: *uint256.NewInt(6)},
+	}
+	parent := fixedParentState{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, absent: nil},
+		slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(5), empty: {}},
+	}
+	for _, asserts := range []bool{false, true} {
+		dbg.AssertEnabled = asserts
+		r := &parentStateReader{StateReader: history, parent: parent}
+		acc, err := r.ReadAccountData(cached)
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), acc.Nonce)
+		acc.Nonce = 8
+		require.Equal(t, uint64(7), parent.acc[cached].Nonce, "callers get a copy")
+		acc, err = r.ReadAccountData(absent)
+		require.NoError(t, err)
+		require.Nil(t, acc)
+		acc, err = r.ReadAccountData(unseen)
+		require.NoError(t, err)
+		require.Equal(t, uint64(9), acc.Nonce, "a key the validation never read comes from history")
+		v, ok, err := r.ReadAccountStorage(cached, full)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, uint64(5), v.Uint64())
+		v, ok, err = r.ReadAccountStorage(cached, empty)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.True(t, v.IsZero())
+		v, _, err = r.ReadAccountStorage(cached, other)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), v.Uint64())
+	}
+
+	dbg.AssertEnabled = true
+	wrong := fixedParentState{acc: map[accounts.Address]*accounts.Account{cached: {Nonce: 1}}, slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(4)}}
+	r := &parentStateReader{StateReader: history, parent: wrong}
+	_, err := r.ReadAccountData(cached)
+	require.Error(t, err, "asserts reject a cached account that differs from history")
+	_, _, err = r.ReadAccountStorage(cached, full)
+	require.Error(t, err, "asserts reject a cached slot that differs from history")
 }
 
 func TestBuildAccessedStateStopsOnCancelledContext(t *testing.T) {
@@ -843,6 +942,6 @@ func TestBuildAccessedStateStopsOnCancelledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(m.Ctx)
 	cancel()
-	_, _, err = api.buildAccessedState(ctx, tx, info.Block, chainConfig, api.engine(), info.FirstTxNumInBlock, witnessModeLegacy)
+	_, _, err = api.buildAccessedState(ctx, tx, info.Block, chainConfig, api.engine(), info.FirstTxNumInBlock, witnessModeLegacy, nil)
 	require.ErrorIs(t, err, context.Canceled)
 }

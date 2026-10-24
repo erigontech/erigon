@@ -17,7 +17,9 @@
 package dir
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -60,4 +62,25 @@ func Test_CreateTempWithExt(t *testing.T) {
 	base1 := filepath.Base(tmpfile.Name())
 	base2 := filepath.Base(ogfile)
 	require.True(t, strings.HasPrefix(base1, base2))
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	dirPath := t.TempDir()
+	path := filepath.Join(dirPath, "settings.json")
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+
+	require.NoError(t, WriteFileAtomic(path, []byte("new"), 0o644))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, []byte("new"), data)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
+	entries, err := os.ReadDir(dirPath)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, filepath.Base(path), entries[0].Name())
 }

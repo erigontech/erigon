@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"runtime"
 	"slices"
 	"strings"
@@ -47,9 +48,11 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
@@ -94,16 +97,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime, keepStoredChainConfig, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -127,7 +130,7 @@ func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash
 	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -154,6 +157,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		if overrideAmsterdamTime != nil {
 			config.AmsterdamTime = overrideAmsterdamTime
 		}
+		if overrideBinaryTrieTime != nil {
+			config.BinaryTrieTime = overrideBinaryTrieTime
+		}
 	}
 
 	if (storedHash == common.Hash{}) {
@@ -168,7 +174,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		g := *genesis
 		g.Config = g.Config.Copy()
 		genesis = &g
+		genesisBinaryTrieTime := genesis.Config.BinaryTrieTime
 		applyOverrides(genesis.Config)
+		if overrideBinaryTrieTime != nil {
+			if err := checkBinaryTrieOverrideTime(genesisBinaryTrieTime, *overrideBinaryTrieTime, genesis.Timestamp); err != nil {
+				return genesis.Config, nil, err
+			}
+		}
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -203,6 +215,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
 	// overrides go onto a copy or they rewrite the schedule for every later reader.
 	newCfg := configOrDefault(genesis, chainName, storedHash).Copy()
+	configuredBinaryTrieTime := newCfg.BinaryTrieTime
 	applyOverrides(newCfg)
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil {
@@ -211,6 +224,18 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if storedCfg == nil {
 		if err := newCfg.CheckConfigForkOrder(); err != nil {
 			return newCfg, nil, err
+		}
+		if overrideBinaryTrieTime != nil {
+			storedGenesis, err := rawdb.ReadGenesis(tx)
+			if err != nil {
+				return newCfg, nil, err
+			}
+			if storedGenesis != nil && storedGenesis.Config != nil {
+				configuredBinaryTrieTime = storedGenesis.Config.BinaryTrieTime
+			}
+			if err := checkBinaryTrieOverride(newCfg, configuredBinaryTrieTime, storedBlock, dirs); err != nil {
+				return newCfg, nil, err
+			}
 		}
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
@@ -246,6 +271,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// the node never adopts and passes the one it does.
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
+	}
+	if overrideBinaryTrieTime != nil {
+		if err := checkBinaryTrieOverride(newCfg, storedCfg.BinaryTrieTime, storedBlock, dirs); err != nil {
+			return newCfg, nil, err
+		}
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -420,8 +450,25 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
-	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if g.Config != nil && g.Config.BinaryTrieTime != nil && *g.Config.BinaryTrieTime > g.Timestamp && !statecfg.ExperimentalHexBinCommitment {
+		if _, err := dbstate.ReadErigonDBSettings(dirs); errors.Is(err, fs.ErrNotExist) {
+			if err := checkBinaryTrieSchedule(g, &dbstate.ErigonDBSettings{}); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettingsForGenesis(dirs, logger, false,
+		g.Config != nil && g.Config.BinaryTrieTime != nil)
 	if err != nil {
+		return nil, nil, err
+	}
+	// After the resolve, not before: a bin datadir adopts the variant from erigondb.toml
+	// here, so an earlier read would refuse `erigon init` on a datadir that is already bin
+	// whenever COMMITMENT_BIN is unset.
+	if err := checkBinaryTrieSchedule(g, erigonDBSettings); err != nil {
+		return nil, nil, err
+	}
+	if err := checkBinaryTrieCommitment(g, erigonDBSettings); err != nil {
 		return nil, nil, err
 	}
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx)
@@ -443,7 +490,8 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	defer tx.Rollback()
 
 	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
-	// context factory wired here, so use the sequential trie (identical root).
+	// context factory wired here, so demote it to the sequential trie (identical
+	// root). The bin variant is kept — block 0 must be the root the executor computes.
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, err
@@ -460,11 +508,104 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	return types.NewBlock(head, nil, nil, nil, withdrawals, nil), ibs, nil
 }
 
+func checkBinaryTrieSchedule(g *types.Genesis, settings *dbstate.ErigonDBSettings) error {
+	if g.Config == nil || g.Config.BinaryTrieTime == nil {
+		return nil
+	}
+	if g.Config.AmsterdamTime == nil || *g.Config.BinaryTrieTime < *g.Config.AmsterdamTime {
+		return fmt.Errorf("binaryTrieTime %d needs amsterdamTime scheduled no later: EIP-8297 is defined from Amsterdam onwards",
+			*g.Config.BinaryTrieTime)
+	}
+	if *g.Config.BinaryTrieTime > g.Timestamp && settings.TrieVariantName() != dbstate.TrieVariantHexBin {
+		return fmt.Errorf("binaryTrieTime %d is after the genesis timestamp %d: a post-genesis binary trie needs a hex+bin datadir, initialized fresh with COMMITMENT_HEX_BIN=true",
+			*g.Config.BinaryTrieTime, g.Timestamp)
+	}
+	return nil
+}
+
+func checkBinaryTrieOverride(cfg *chain.Config, previous *uint64, genesisBlock *types.Block, dirs datadir.Dirs) error {
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	if errors.Is(err, fs.ErrNotExist) {
+		settings, err = &dbstate.ErigonDBSettings{}, nil
+	}
+	if err != nil {
+		return err
+	}
+	g := &types.Genesis{Config: cfg}
+	if genesisBlock != nil {
+		g.Timestamp = genesisBlock.Time()
+	}
+	if err := checkBinaryTrieOverrideTime(previous, *cfg.BinaryTrieTime, g.Timestamp); err != nil {
+		return err
+	}
+	return checkBinaryTrieSchedule(g, settings)
+}
+
+func checkBinaryTrieOverrideTime(previous *uint64, binaryTrieTime, genesisTime uint64) error {
+	if binaryTrieTime <= genesisTime {
+		return fmt.Errorf("--override.binary-trie %d is not after the genesis timestamp %d: a binary trie from genesis is scheduled by the genesis file",
+			binaryTrieTime, genesisTime)
+	}
+	if previous != nil && *previous <= genesisTime {
+		return fmt.Errorf("--override.binary-trie %d cannot reschedule a binary trie that starts at genesis (binaryTrieTime %d, genesis timestamp %d)",
+			binaryTrieTime, *previous, genesisTime)
+	}
+	return nil
+}
+
+func checkBinaryTrieCommitment(g *types.Genesis, settings *dbstate.ErigonDBSettings) error {
+	if g.Config == nil || g.Config.BinaryTrieTime == nil || settings.TrieVariantName() != dbstate.TrieVariantHex {
+		return nil
+	}
+	return errors.New("genesis schedules EIP-8297 (binaryTrieTime) but this merkle-patricia datadir does not carry a binary commitment domain")
+}
+
+type genesisCommitmentPutDel struct {
+	putter   kv.TemporalPutDel
+	contexts []*commitmentdb.SharedDomainsCommitmentContext
+}
+
+func (p *genesisCommitmentPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	if err := p.putter.DomainPut(domain, k, v, txNum, prevVal); err != nil {
+		return err
+	}
+	for _, ctx := range p.contexts {
+		ctx.TouchKey(domain, string(k), v)
+		if domain == kv.AccountsDomain && len(k) == 20 && ctx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
+			ctx.TouchKey(kv.CodeDomain, string(k), v)
+		}
+	}
+	return nil
+}
+
+func (p *genesisCommitmentPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	if err := p.putter.DomainDel(domain, k, txNum, prevVal); err != nil {
+		return err
+	}
+	for _, ctx := range p.contexts {
+		ctx.TouchKey(domain, string(k), nil)
+	}
+	return nil
+}
+
+func (p *genesisCommitmentPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	return p.putter.DomainDelPrefix(domain, prefix, txNum)
+}
+
 func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
 	blockNum := uint64(0)
 	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	putter := sd.AsPutDel(tx)
+	commitmentDomains := sd.CommitmentDomains()
+	if len(commitmentDomains) > 1 || sd.GetCommitmentCtx().Trie().Variant() == commitment.VariantBinPatriciaTrie {
+		contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(commitmentDomains))
+		for _, domain := range commitmentDomains {
+			contexts = append(contexts, sd.GetCommitmentCtxForDomain(domain))
+		}
+		putter = &genesisCommitmentPutDel{putter: putter, contexts: contexts}
+	}
+	r, w := state.NewNoopReader(), state.NewWriter(putter, nil, txNum)
 
 	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
 	statedb.SetTrace(false)
@@ -534,12 +675,32 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		return nil, nil, err
 	}
 
-	rh, err := sd.ComputeCommitment(ctx, tx, true, blockNum, txNum, "genesis", nil)
-	if err != nil {
+	roots := make(map[kv.Domain][]byte, len(commitmentDomains))
+	for _, domain := range commitmentDomains {
+		root, err := sd.GetCommitmentCtxForDomain(domain).ComputeCommitment(ctx, tx, true, blockNum, txNum, "genesis", nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		roots[domain] = root
+	}
+	if len(commitmentDomains) == 1 {
+		head.Root = common.BytesToHash(roots[commitmentDomains[0]])
+		return roots[commitmentDomains[0]], statedb, nil
+	}
+	canonicalDomain, shadowDomain := kv.CommitmentDomain, kv.CommitmentBinDomain
+	if g.Config != nil && g.Config.IsBinaryTrie(head.Time) {
+		canonicalDomain, shadowDomain = shadowDomain, canonicalDomain
+	}
+	canonicalRoot := roots[canonicalDomain]
+	head.Root = common.BytesToHash(canonicalRoot)
+	dbPutter, ok := any(tx).(kv.Putter)
+	if !ok {
+		return nil, nil, errors.New("genesis shadow root requires a writable transaction")
+	}
+	if err := rawdb.WriteShadowStateRoot(dbPutter, head.Hash(), blockNum, roots[shadowDomain]); err != nil {
 		return nil, nil, err
 	}
-
-	return rh, statedb, nil
+	return canonicalRoot, statedb, nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.

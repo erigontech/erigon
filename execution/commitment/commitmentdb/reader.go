@@ -1,13 +1,21 @@
 package commitmentdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type StateReader interface {
@@ -145,6 +153,13 @@ func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateRe
 
 func (r *syncStateReader) BindsWorkerTx() bool { return false }
 
+func (r *syncStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if refs, ok := r.src.(leafRefReader); ok {
+		return refs.LeafRefs(key, data)
+	}
+	return nil
+}
+
 // HistoryStateReader reads *full* historical state at specified txNum.
 // `limitReadAsOfTxNum` here is used as timestamp for usual GetAsOf.
 type HistoryStateReader struct {
@@ -240,6 +255,7 @@ func (r *FilesOnlyStateReader) BindsWorkerTx() bool { return true }
 type SplitStateReader struct {
 	commitmentReader StateReader
 	plainStateReader StateReader
+	commitmentDomain kv.Domain
 	withHistory      bool
 }
 
@@ -249,9 +265,14 @@ var _ StateReader = (*SplitStateReader)(nil) // compile-time type assertion
 //   - commitment data as-of txnum commitmentAsOf
 //   - account/storage/code data as-of txnum dataAsOf
 func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, dataAsOf uint64, withHistory bool) *SplitStateReader {
+	return NewSplitHistoryReaderForDomain(tx, kv.CommitmentDomain, commitmentAsOf, dataAsOf, withHistory)
+}
+
+func NewSplitHistoryReaderForDomain(tx kv.TemporalTx, commitmentDomain kv.Domain, commitmentAsOf uint64, dataAsOf uint64, withHistory bool) *SplitStateReader {
 	return &SplitStateReader{
 		commitmentReader: NewHistoryStateReader(tx, commitmentAsOf),
 		plainStateReader: NewHistoryStateReader(tx, dataAsOf),
+		commitmentDomain: commitmentDomain,
 		withHistory:      withHistory,
 	}
 }
@@ -274,31 +295,32 @@ func (r *SplitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
 }
 
 func (r *SplitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	if d == kv.CommitmentDomain {
+	if d == r.commitmentDomain {
 		return r.commitmentReader.Read(d, plainKey, stepSize)
 	}
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
 func (r *SplitStateReader) Clone(tx kv.TemporalTx) StateReader {
-	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.withHistory)
+	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.commitmentDomain, r.withHistory)
 }
 
 // CloneForWorker propagates the worker clone to sub-readers so an embedded
 // LatestStateReader (the commitment reader) meters into the per-worker
 // accumulator instead of the shared one.
 func (r *SplitStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
-	return NewCommitmentSplitStateReader(r.commitmentReader.CloneForWorker(workerCtx, tx), r.plainStateReader.CloneForWorker(workerCtx, tx), r.withHistory)
+	return NewCommitmentSplitStateReader(r.commitmentReader.CloneForWorker(workerCtx, tx), r.plainStateReader.CloneForWorker(workerCtx, tx), r.commitmentDomain, r.withHistory)
 }
 
 func (r *SplitStateReader) BindsWorkerTx() bool {
 	return r.commitmentReader.BindsWorkerTx() && r.plainStateReader.BindsWorkerTx()
 }
 
-func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) *SplitStateReader {
+func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, commitmentDomain kv.Domain, withHistory bool) *SplitStateReader {
 	return &SplitStateReader{
 		commitmentReader: commitmentReader,
 		plainStateReader: plainStateReader,
+		commitmentDomain: commitmentDomain,
 		withHistory:      withHistory,
 	}
 }
@@ -308,21 +330,68 @@ type CommitmentReplayStateReader struct {
 }
 
 func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return NewCommitmentReplayStateReaderForDomain(ttx, tx, tsd, kv.CommitmentDomain, plainStateAsOf)
+}
+
+func NewCommitmentReplayStateReaderForDomain(ttx, tx kv.TemporalTx, tsd sd, commitmentDomain kv.Domain, plainStateAsOf uint64) *CommitmentReplayStateReader {
 	return &CommitmentReplayStateReader{
-		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd, LatestStateReaderOptions{}), NewHistoryStateReader(tx, plainStateAsOf), false),
+		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd, LatestStateReaderOptions{}), NewHistoryStateReader(tx, plainStateAsOf), commitmentDomain, false),
 	}
+}
+
+type ParentRecords struct {
+	BlockNum   uint64
+	BlockHash  common.Hash
+	ParentHash common.Hash
+	Deleted    [][]byte
+	Get        func(key []byte) ([]byte, kv.Step, bool)
+	State      ParentState
+}
+
+type ParentState interface {
+	GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool)
+	GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool)
+}
+
+var (
+	parentRecords      atomic.Pointer[ParentRecords]
+	parentReadsWanted  atomic.Bool
+	mxParentRecordHit  = metrics.GetOrCreateCounter("witness_parent_record_hits_total")
+	mxParentRecordMiss = metrics.GetOrCreateCounter("witness_parent_record_misses_total")
+)
+
+func WantParentReads(want bool) { parentReadsWanted.Store(want) }
+
+func ParentReadsWanted() bool { return parentReadsWanted.Load() }
+
+func PublishParentRecords(r *ParentRecords) { parentRecords.Store(r) }
+
+func ParentRecordsFor(blockNum uint64, blockHash, parentHash common.Hash) *ParentRecords {
+	r := parentRecords.Load()
+	if r == nil || r.BlockNum != blockNum || r.BlockHash != blockHash || r.ParentHash != parentHash {
+		return nil
+	}
+	return r
 }
 
 // txLatestReader reads directly from a pinned RO transaction, bypassing
 // SharedDomains memory so commitment reads remain on the pinned parent view.
 type txLatestReader struct {
-	tx kv.TemporalTx
+	tx   kv.TemporalTx
+	recs *ParentRecords
 }
 
 func (r *txLatestReader) WithHistory() bool                           { return false }
 func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if d == kv.CommitmentDomain && r.recs != nil {
+		if enc, step, ok := r.recs.Get(plainKey); ok {
+			mxParentRecordHit.Inc()
+			return bytes.Clone(enc), step, nil
+		}
+		mxParentRecordMiss.Inc()
+	}
 	enc, step, err := r.tx.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("txLatestReader(GetLatest) %q: %w", d, err)
@@ -334,10 +403,12 @@ func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]
 // warmup callers targets a different (compute) database and would read empty
 // parent commitment. The witness build runs sequential commitment, so these
 // are not exercised on the hot path, but preserving the pinned tx is correct.
-func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestReader{tx: r.tx} }
+func (r *txLatestReader) Clone(kv.TemporalTx) StateReader {
+	return &txLatestReader{tx: r.tx, recs: r.recs}
+}
 
 func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
-	return &txLatestReader{tx: r.tx}
+	return &txLatestReader{tx: r.tx, recs: r.recs}
 }
 
 func (r *txLatestReader) BindsWorkerTx() bool { return false }
@@ -350,7 +421,11 @@ func (r *txLatestReader) BindsWorkerTx() bool { return false }
 // withHistory=false so the collapse-detection fold's PutBranch calls accumulate
 // branches in the build's own in-memory batch (discarded on Close, never flushed).
 func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
-	return newHeadCaptureStateReader(pinnedParentTx, committedTx, plainStateAsOf, false)
+	return NewHeadCaptureStateReaderForDomain(pinnedParentTx, committedTx, kv.CommitmentDomain, plainStateAsOf)
+}
+
+func NewHeadCaptureStateReaderForDomain(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, commitmentDomain kv.Domain, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return newHeadCaptureStateReader(pinnedParentTx, committedTx, commitmentDomain, plainStateAsOf, false)
 }
 
 // NewHeadCaptureTrieStateReader is the head-capture reader for the witness-trie phase:
@@ -359,17 +434,29 @@ func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.Temp
 // (whose trie phase uses a history reader). Writing branches during capture would corrupt
 // the captured node set.
 func NewHeadCaptureTrieStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
-	return newHeadCaptureStateReader(pinnedParentTx, committedTx, plainStateAsOf, true)
+	return NewHeadCaptureTrieStateReaderForDomain(pinnedParentTx, committedTx, kv.CommitmentDomain, plainStateAsOf)
 }
 
-func newHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64, withHistory bool) *CommitmentReplayStateReader {
+func NewHeadCaptureTrieStateReaderForDomain(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, commitmentDomain kv.Domain, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return newHeadCaptureStateReader(pinnedParentTx, committedTx, commitmentDomain, plainStateAsOf, true)
+}
+
+func newHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, commitmentDomain kv.Domain, plainStateAsOf uint64, withHistory bool) *CommitmentReplayStateReader {
 	return &CommitmentReplayStateReader{
 		NewCommitmentSplitStateReader(
 			&txLatestReader{tx: pinnedParentTx},
 			NewHistoryStateReader(committedTx, plainStateAsOf),
+			commitmentDomain,
 			withHistory,
 		),
 	}
+}
+
+func (crsr *CommitmentReplayStateReader) WithParentRecords(recs *ParentRecords) *CommitmentReplayStateReader {
+	if l, ok := crsr.commitmentReader.(*txLatestReader); ok {
+		l.recs = recs
+	}
+	return crsr
 }
 
 func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -383,6 +470,7 @@ func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
 		SplitStateReader: NewCommitmentSplitStateReader(
 			crsr.commitmentReader.Clone(tx),
 			crsr.plainStateReader,
+			crsr.commitmentDomain,
 			crsr.withHistory,
 		),
 	}
@@ -395,6 +483,7 @@ func (crsr *CommitmentReplayStateReader) CloneForWorker(workerCtx context.Contex
 		SplitStateReader: NewCommitmentSplitStateReader(
 			crsr.commitmentReader.CloneForWorker(workerCtx, tx),
 			crsr.plainStateReader,
+			crsr.commitmentDomain,
 			crsr.withHistory,
 		),
 	}

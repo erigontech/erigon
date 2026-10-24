@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"math/bits"
 
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -74,4 +75,34 @@ func (a *Aggregator) mergeCommitmentStep(ctx context.Context, toTxNum uint64) (s
 	}
 	a.integrateMergedDirtyFiles(in)
 	return true, nil
+}
+
+// rebuildShardSteps sizes a shard from the memory on the machine and the key
+// density of the range it covers. The range itself is the only upper bound: a
+// constant one puts a wide enough range back into the many-shard regime however
+// large the box, which is the cost sharding exists to avoid in the first place.
+//
+// The budget charges a shard for every key it walks, well above the marginal
+// cost measured on mainnet, so it errs towards more and smaller shards. Ranges
+// come from the accounts file step ranges and are already power-of-two spans;
+// only the memory-derived count needs flooring to keep shard boundaries aligned
+// with the merge ranges they feed.
+func rebuildShardSteps(totalMemory, stepsInRange, keysPerStep uint64) uint64 {
+	const bytesPerKey = 1400
+
+	if stepsInRange == 0 {
+		return 1
+	}
+	if keysPerStep == 0 {
+		return stepsInRange
+	}
+	steps := prevPowerOfTwo(totalMemory / 2 / (bytesPerKey * keysPerStep))
+	return min(max(steps, 1), stepsInRange)
+}
+
+func prevPowerOfTwo(n uint64) uint64 {
+	if n == 0 {
+		return 0
+	}
+	return uint64(1) << (bits.Len64(n) - 1)
 }

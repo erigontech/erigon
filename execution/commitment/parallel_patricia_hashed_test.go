@@ -134,6 +134,25 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 	require.NotNil(t, p.template, "Reset preserves the template")
 }
 
+// A restore moves the root, so RootHash must report the restored template
+// rather than a root an earlier Process published.
+func TestParallelPatriciaHashedSetStateDropsPublishedRoot(t *testing.T) {
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+	stashed := []byte{0xde, 0xad}
+	p.rootHash.Store(&stashed)
+
+	require.NoError(t, p.SetState(nil))
+	assert.Nil(t, p.rootHash.Load(), "SetState clears the published rootHash")
+
+	restored, err := p.RootHash()
+	require.NoError(t, err)
+	templateRoot, err := p.template.RootHash()
+	require.NoError(t, err)
+	assert.Equal(t, templateRoot, restored)
+}
+
+// Every checkout must be config-correct whether it hit the shared pool or
+// constructed fresh — that fungibility is what lets workers cross instances.
 func TestWorkerCheckoutAppliesConfig(t *testing.T) {
 	cfg := DefaultTrieConfig()
 	cfg.MemoizationOff = true
@@ -891,7 +910,8 @@ func reusedInstanceIncrementalRoot(t *testing.T, variant TrieVariant, workers in
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = variant
-	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	trie, ut, err := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer ut.Close()
 	defer trie.Release()
 	pt := trie.(*ParallelPatriciaHashed)

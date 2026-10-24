@@ -141,6 +141,39 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 Don't sign commits, pr's, issues, comments.
 
+`package commitment` holds two engines in one namespace. Every package-level identifier belonging to the EIP-8297 binary trie carries a `pbin` prefix (`PBin` for exported ones) — the hex engine already owns the generic names (`cell`, `fold`, `unfold`, `computeCellHash`), so an unprefixed addition is a collision waiting to happen. Test helpers included.
+
+Selecting the binary trie is process-global, not a per-tester option: set `statecfg.ExperimentalBinCommitment` and `statecfg.BinCommitmentHash`, then `commitment.SetPBinHashSuite`. Calling `SetPBinHashSuite` alone is undone by the settings resolver's keccak default. A test that flips these must restore them in `t.Cleanup` and must not call `t.Parallel` — a concurrent hex test reads the same globals.
+
+The EIP-8297 engine lives in `execution/commitment/v3/pbt`; shared rules and the independent reference live in `execution/commitment/eip8297`. Binary state uses the `0xB1` marker and row format `0x20`, checked by `PBinValidateRowStateFormat`; legacy binary formats are refused at datadir open. `BinFeedFromState` in `execution/commitment/commitmentdb/pbin_feed.go` is the input adapter for SharedDomains, calcState and BAL sources. `erigondb.toml` records `trie_variant` and `trie_hash`, but the embedding itself is not versioned, so rebuild bin datadirs from genesis whenever key derivation or leaf layout changes.
+
+A PBT round splits its ops into chain tasks (12-bit prefixes) and storage-bucket tasks; small buckets are batched
+into one task and large ones split into subtasks. A task reads and writes only
+records under its own prefix, every task reads one round-start view that nobody writes during the round, and
+writes come back as delta parts that the round applies after the join; a join refuses records owned by a task.
+Worker contexts come from the trie context factory, and a factory that returns a nil context fails the round. With
+deferral on (fork validation and parallel block apply, the same rule as hex), the bin trie keeps its parts until
+the caller takes them with `TakeDeferredDeltas` and flushes them to its own commitment domain; a round started with
+untaken parts fails. Convert (`PBinRangeWriter.WriteAtBlock`) runs the same round on workers that read its overlay,
+and refuses a target domain whose visible files hold a live key or whose MDBX table holds any row, tombstones
+included. `VerifyPBinDomainRoot` verifies each chain
+subtree on a worker view opened from the caller's file pin, then the rows above bit 12; a write-tx caller verifies
+sequentially.
+
+Dual commitment keeps trie ownership and canonical role separate. `kv.CommitmentDomain` is the hex
+domain and `kv.CommitmentBinDomain` is the binary domain in `hex+bin` mode; a binary-only datadir
+uses the existing commitment domain with the binary algorithm. Block-correct code must derive the
+role from `Config.IsBinaryTrie(blockTime)` or `Aggregator.CanonicalCommitmentDomain()`, not from the
+process-global `PickTrieVariant`. The shadow root is keyed by block number and hash, and a shadow
+fold error stops that domain without invalidating the block.
+
+When adding a commitment-domain consumer, use `Aggregator.CommitmentDomains()` and
+`kv.StateDomains(canonicalDomain)` instead of assuming the hex domain. Binary commitment branches
+do not use the hex branch cache or inter-domain references. A frozen domain remains on disk but must
+reject writes, folds, merges, and unwinds below its recorded `frozen_at_txnum`.
+
+Cite by name, never by line number. An EIP reference is `eip:"<section name>"`, not `eip:NNN-NNN`; a reference to erigon source from `docs/` names the identifier and its file, not `file.go:NNN`. Line anchors rot on the next edit in either repo, and a stale one is worse than none — it points a reader at unrelated code with full confidence.
+
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.

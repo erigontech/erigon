@@ -23,6 +23,7 @@ import (
 
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/stretchr/testify/require"
 )
 
@@ -916,4 +917,12 @@ func Test_CheckIfBlockSnapshotsPublishable_IgnoresStateSubdirs(t *testing.T) {
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv")
 	require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+}
+
+func Test_CheckStateSnapshotFiles_BinOnlyNeedsNoCommitmentBin(t *testing.T) {
+	bin, hexBin := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
+	t.Cleanup(func() { statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = bin, hexBin })
+	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, false
+	dirs := setupWorkingStateMockDatadir(t)
+	require.NoError(t, checkStateSnapshotFiles(dirs, false, false))
 }

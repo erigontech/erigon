@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -154,6 +155,29 @@ func TestHeadCaptureStateReader_Routing(t *testing.T) {
 	require.Len(t, pinnedTx.getCalls, 1)
 }
 
+func TestCommitmentSplitStateReaderUsesBoundDomain(t *testing.T) {
+	t.Parallel()
+
+	commitmentReader := &testStateReader{commitmentDomain: kv.CommitmentBinDomain, branchData: []byte{1}, step: 1}
+	plainReader := &testStateReader{branchData: []byte{2}, step: 2}
+	reader := NewCommitmentSplitStateReader(commitmentReader, plainReader, kv.CommitmentBinDomain, false)
+
+	value, step, err := reader.Read(kv.CommitmentBinDomain, []byte{1}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, value)
+	require.Equal(t, kv.Step(1), step)
+	require.Equal(t, kv.CommitmentBinDomain, commitmentReader.readDomain)
+	require.Equal(t, 1, commitmentReader.readCalls)
+	require.Zero(t, plainReader.readCalls)
+
+	value, step, err = reader.Read(kv.CommitmentDomain, []byte{2}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{2}, value)
+	require.Equal(t, kv.Step(2), step)
+	require.Equal(t, kv.CommitmentDomain, plainReader.readDomain)
+	require.Equal(t, 1, plainReader.readCalls)
+}
+
 func TestHeadCaptureStateReader_PlainStateAsOfRouting(t *testing.T) {
 	t.Parallel()
 
@@ -272,4 +296,47 @@ func TestHeadCaptureStateReader_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, source)
+}
+
+func TestHeadCaptureStateReader_ServesParentRecords(t *testing.T) {
+	t.Parallel()
+
+	held, missing, acc := []byte{0xaa}, []byte{0xbb}, []byte{0xa0}
+	recs := map[string][]byte{string(held): {1, 2, 3}}
+	pinnedTx := &fakeTemporalTx{latest: map[string]getVal{
+		key(kv.CommitmentDomain, held):    {v: []byte{9}, step: 7},
+		key(kv.CommitmentDomain, missing): {v: []byte{4}, step: 7},
+	}}
+	committedTx := &fakeTemporalTx{values: map[string][]byte{key(kv.AccountsDomain, acc): {5}}}
+	records := &ParentRecords{Get: func(k []byte) ([]byte, kv.Step, bool) {
+		v, ok := recs[string(k)]
+		return v, 3, ok
+	}}
+	reader := NewHeadCaptureStateReader(pinnedTx, committedTx, 1).WithParentRecords(records)
+
+	v, step, err := reader.Read(kv.CommitmentDomain, held, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1, 2, 3}, v)
+	require.Equal(t, kv.Step(3), step)
+	require.Empty(t, pinnedTx.getCalls, "a held record is not read from the pinned tx")
+	v[0] = 8
+	require.Equal(t, []byte{1, 2, 3}, recs[string(held)], "the caller gets a copy of the record")
+
+	v, _, err = reader.Clone(nil).Read(kv.CommitmentDomain, missing, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{4}, v, "a key without a record falls back to the pinned tx, clones included")
+
+	v, _, err = reader.Read(kv.AccountsDomain, acc, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{5}, v)
+}
+
+func TestParentRecordsForMatchesBlockAndParent(t *testing.T) {
+	r := &ParentRecords{BlockNum: 7, BlockHash: common.Hash{7}, ParentHash: common.Hash{6}}
+	PublishParentRecords(r)
+	t.Cleanup(func() { PublishParentRecords(nil) })
+	require.Same(t, r, ParentRecordsFor(7, common.Hash{7}, common.Hash{6}))
+	require.Nil(t, ParentRecordsFor(7, common.Hash{7}, common.Hash{5}), "another parent")
+	require.Nil(t, ParentRecordsFor(7, common.Hash{8}, common.Hash{6}), "another block at the same height")
+	require.Nil(t, ParentRecordsFor(8, common.Hash{7}, common.Hash{6}))
 }

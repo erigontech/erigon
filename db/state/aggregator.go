@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -51,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -78,7 +80,14 @@ type Aggregator struct {
 	dirtyFilesLock sync.Mutex
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
-	commitmentRefsMu sync.RWMutex
+	commitmentRefsMu            sync.RWMutex
+	canonicalCommitment         atomic.Uint32
+	stoppedCommitment           [kv.DomainLen]atomic.Bool
+	commitmentLifecycleRestored atomic.Bool
+	trieVariant                 string
+	frozenMu                    sync.RWMutex
+	frozenAtTxNum               [kv.DomainLen]uint64
+	frozen                      [kv.DomainLen]bool
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
@@ -95,9 +104,10 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	branchCacheDisabled bool
-	skipFilesDBGapCheck bool
-	workers             workersCfg
+	branchCacheDisabled  bool
+	skipFilesDBGapCheck  bool
+	skipPBinStateDBCheck bool
+	workers              workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -150,6 +160,18 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 
 		produce: true,
 	}
+	a.trieVariant = TrieVariantHex
+	if statecfg.ExperimentalBinCommitment {
+		a.trieVariant = TrieVariantBin
+	}
+	if statecfg.ExperimentalHexBinCommitment {
+		a.trieVariant = TrieVariantHexBin
+	}
+	if settings, settingsErr := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)); settingsErr == nil {
+		a.trieVariant = settings.TrieVariantName()
+		a.setFrozenAtTxNums(settings.FrozenAtTxNum)
+	}
+	a.canonicalCommitment.Store(uint32(kv.CommitmentDomain))
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
 	a.oldestVisible = empty
@@ -271,6 +293,100 @@ func (a *Aggregator) StepSize() uint64          { return a.stepSize.Load() }
 func (a *Aggregator) Dirs() datadir.Dirs        { return a.dirs }
 func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile.Load() }
 func (a *Aggregator) Logger() log.Logger        { return a.logger }
+func (a *Aggregator) CanonicalCommitmentDomain() kv.Domain {
+	commitmentDomain := kv.Domain(a.canonicalCommitment.Load())
+	if commitmentDomain == kv.AccountsDomain {
+		return kv.CommitmentDomain
+	}
+	return commitmentDomain
+}
+
+func (a *Aggregator) SetCanonicalCommitmentDomain(domain kv.Domain) {
+	if a.trieVariant != TrieVariantHexBin && domain == kv.CommitmentBinDomain {
+		domain = kv.CommitmentDomain
+	}
+	a.canonicalCommitment.Store(uint32(domain))
+}
+
+func (a *Aggregator) StopCommitmentDomain(domain kv.Domain) {
+	if domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain {
+		a.stoppedCommitment[domain].Store(true)
+	}
+}
+
+func (a *Aggregator) CommitmentDomainStopped(domain kv.Domain) bool {
+	return domain < kv.DomainLen && a.stoppedCommitment[domain].Load()
+}
+
+func (a *Aggregator) ClearStoppedCommitmentDomains() {
+	for i := range a.stoppedCommitment {
+		a.stoppedCommitment[i].Store(false)
+	}
+}
+
+func (a *Aggregator) setFrozenAtTxNums(values map[string]uint64) {
+	a.frozenMu.Lock()
+	defer a.frozenMu.Unlock()
+	a.frozenAtTxNum = [kv.DomainLen]uint64{}
+	a.frozen = [kv.DomainLen]bool{}
+	for name, txNum := range values {
+		domain, err := kv.String2Domain(name)
+		if err != nil || (domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain) {
+			continue
+		}
+		a.frozenAtTxNum[domain] = txNum
+		a.frozen[domain] = true
+	}
+}
+
+func (a *Aggregator) IsDomainFrozen(domain kv.Domain) (uint64, bool) {
+	if domain >= kv.DomainLen {
+		return 0, false
+	}
+	a.frozenMu.RLock()
+	defer a.frozenMu.RUnlock()
+	return a.frozenAtTxNum[domain], a.frozen[domain]
+}
+
+func (a *Aggregator) isDomainFrozen(domain kv.Domain) bool {
+	_, frozen := a.IsDomainFrozen(domain)
+	return frozen
+}
+
+func (a *Aggregator) FreezeDomain(domain kv.Domain, txNum uint64) error {
+	if domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain {
+		return fmt.Errorf("cannot freeze non-commitment domain %s", domain)
+	}
+	if a.d[domain] == nil {
+		return fmt.Errorf("commitment domain %s is not registered", domain)
+	}
+	settings, err := readErigonDBSettings(filepath.Join(a.dirs.Snap, ERIGONDB_SETTINGS_FILE))
+	if err != nil {
+		return err
+	}
+	if previous, ok := settings.FrozenAt(domain); ok {
+		if previous != txNum {
+			return fmt.Errorf("commitment domain %s is already frozen at txnum %d", domain, previous)
+		}
+		return nil
+	}
+	if settings.FrozenAtTxNum == nil {
+		settings.FrozenAtTxNum = make(map[string]uint64)
+	}
+	settings.FrozenAtTxNum[domain.String()] = txNum
+	if err := writeErigonDBSettings(filepath.Join(a.dirs.Snap, ERIGONDB_SETTINGS_FILE), settings); err != nil {
+		return err
+	}
+	a.setFrozenAtTxNums(settings.FrozenAtTxNum)
+	return nil
+}
+
+func (a *Aggregator) CommitmentDomains() []kv.Domain {
+	if a.trieVariant == TrieVariantHexBin {
+		return []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}
+	}
+	return []kv.Domain{kv.CommitmentDomain}
+}
 
 // SetErigondbDomainStepsInFrozenFile applies a domain-only merge cap override at runtime.
 // Intended for one-shot tools (e.g. `erigon seg retire`) that construct the aggregator
@@ -291,12 +407,14 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d != nil && d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
 // consumes it via a local Schema copy) and updates the live commitment domain post-configure.
 func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
+	refs = refs && a.trieVariant != TrieVariantBin
 	if !a.configured {
 		a.commitmentRefsOverride = &refs
 		return
@@ -369,6 +487,7 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
 	a.applyReferencesInCommitmentBranches(settings.RefsInCommitmentBranches())
+	a.setFrozenAtTxNums(settings.FrozenAtTxNum)
 
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
@@ -409,6 +528,9 @@ func (a *Aggregator) ConfigureDomains() error {
 	if a.commitmentRefsOverride != nil {
 		schema.CommitmentDomain.ReferencesInCommitmentBranches = *a.commitmentRefsOverride
 	}
+	if a.trieVariant == TrieVariantBin {
+		schema.CommitmentDomain.ReferencesInCommitmentBranches = false
+	}
 	if err := statecfg.Configure(schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
@@ -417,7 +539,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated
 	// by USE_STATE_CACHE, nil = disabled. Skipped for ephemeral aggregators that
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
-	if dbg.UseStateCache && !a.branchCacheDisabled {
+	if dbg.UseStateCache && !a.branchCacheDisabled && a.trieVariant != TrieVariantBin {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
 			if !dbg.DisableAdaptivePin {
@@ -463,7 +585,13 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	}
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
-		entity:      FromDomain(dependent),
+		entity: FromDomain(dependent),
+		requiredForVisibility: func() bool {
+			return dependent != kv.CommitmentDomain || a.CanonicalCommitmentDomain() == kv.CommitmentDomain
+		},
+		requiredForRetention: func(file *FilesItem) bool {
+			return dependent != kv.CommitmentDomain || (a.trieVariant != TrieVariantBin && CommitmentBranchReferenced(file.version, a.StepSize(), file.startTxNum, file.endTxNum))
+		},
 		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
@@ -575,6 +703,9 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 }
 
 func (a *Aggregator) OpenFolder(db kv.RoDB) error {
+	if err := a.restoreCommitmentLifecycle(db); err != nil {
+		return err
+	}
 	if err := func() error {
 		a.dirtyFilesLock.Lock()
 		defer a.dirtyFilesLock.Unlock()
@@ -588,7 +719,108 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if err := a.checkPBinStateFormat(db); err != nil {
+		return err
+	}
 	return a.checkFilesDBGap(db)
+}
+
+func (a *Aggregator) checkPBinStateFormat(db kv.RoDB) error {
+	if a.trieVariant != TrieVariantBin && a.trieVariant != TrieVariantHexBin {
+		return nil
+	}
+	domain := kv.CommitmentDomain
+	if a.trieVariant == TrieVariantHexBin {
+		domain = kv.CommitmentBinDomain
+	}
+	if a.d[domain] == nil || !a.d[domain].Enabled {
+		return nil
+	}
+	files := a.BeginFilesRo()
+	defer files.Close()
+
+	var state []byte
+	var found bool
+	if db != nil && !a.skipPBinStateDBCheck {
+		err := db.View(a.ctx, func(tx kv.Tx) error {
+			var err error
+			state, _, found, err = files.GetLatest(domain, commitment.KeyCommitmentState, tx, kv.GetLatestOptions{})
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("OpenFolder: read bin commitment state: %w", err)
+		}
+	}
+	if !found {
+		var err error
+		state, found, _, _, err = files.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, math.MaxUint64)
+		if err != nil {
+			return fmt.Errorf("OpenFolder: read bin commitment state files: %w", err)
+		}
+	}
+	if !found || len(state) == 0 {
+		return nil
+	}
+	if err := validatePBinOpenState(state); err != nil {
+		return fmt.Errorf("OpenFolder: run commitment convert-pbt for the bin commitment domain: %w", err)
+	}
+	return nil
+}
+
+func validatePBinOpenState(value []byte) error {
+	state := value
+	if !commitment.IsPBinState(state) {
+		if len(value) < 18 {
+			return fmt.Errorf("state blob is %d bytes, want a pbin blob or commitment-state envelope", len(value))
+		}
+		stateLen := int(binary.BigEndian.Uint16(value[16:18]))
+		if len(value) != 18+stateLen {
+			return fmt.Errorf("state envelope claims %d bytes, %d present", stateLen, len(value)-18)
+		}
+		state = value[18:]
+	}
+	if len(state) == 0 {
+		return nil
+	}
+	if err := commitment.PBinValidateRowStateFormat(state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *Aggregator) restoreCommitmentLifecycle(db kv.RoDB) error {
+	if a.trieVariant != TrieVariantHexBin || db == nil || a.commitmentLifecycleRestored.Load() {
+		return nil
+	}
+	if err := db.View(a.ctx, func(tx kv.Tx) error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			stopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
+			if err != nil {
+				return err
+			}
+			if stopped {
+				a.StopCommitmentDomain(domain)
+			}
+		}
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		config, err := rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		if config != nil {
+			if head := rawdb.ReadCurrentHeaderHavingBody(tx); head != nil && config.IsBinaryTrie(head.Time) {
+				a.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("read canonical commitment domain: %w", err)
+	}
+	a.commitmentLifecycleRestored.Store(true)
+	return nil
 }
 
 // checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
@@ -652,7 +884,7 @@ func (a *Aggregator) openFolder() error {
 
 	eg, ctx := errgroup.WithContext(a.ctx)
 	for id, d := range a.d {
-		if !d.Enabled {
+		if d == nil || !d.Enabled {
 			continue
 		}
 
@@ -705,6 +937,8 @@ func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.closeDirtyFiles()
 	a.recalcVisibleFiles(nil)
 }
+
+func (a *Aggregator) CloseFilesNoReopen() { a.closeDirtyFilesNoReopen() }
 
 func (a *Aggregator) WaitForFiles() {
 	for range a.WaitForBuildAndMerge(a.ctx) {
@@ -883,6 +1117,9 @@ func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 		return res
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		res = append(res, d.Files()...)
 	}
 	for _, ii := range at.standaloneIIs() {
@@ -917,6 +1154,9 @@ func (a *Aggregator) LS() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		doLS(d.dirtyFiles)
 		doLS(d.History.dirtyFiles)
 		doLS(d.History.InvertedIndex.dirtyFiles)
@@ -981,6 +1221,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 	}()
 
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name])
 	}
 
@@ -1018,7 +1261,87 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) error {
+const maxCollationBatchSteps = 32
+
+type collationBatch struct {
+	from, to kv.Step
+	values   [kv.DomainLen][]*seg.Compressor
+}
+
+func (b *collationBatch) take(domain kv.Domain, step kv.Step) *seg.Compressor {
+	if b == nil || step < b.from || step >= b.to || b.values[domain] == nil {
+		return nil
+	}
+	comp := b.values[domain][step-b.from]
+	b.values[domain][step-b.from] = nil
+	return comp
+}
+
+func (b *collationBatch) covers(step kv.Step) bool {
+	return b != nil && step >= b.from && step < b.to
+}
+
+func (b *collationBatch) Close() {
+	if b == nil {
+		return
+	}
+	for _, comps := range b.values {
+		for _, comp := range comps {
+			if comp != nil {
+				comp.Close()
+			}
+		}
+	}
+}
+
+func (a *Aggregator) collateBatch(ctx context.Context, db kv.TemporalRoDB, from, limit kv.Step, finalityCtx kv.FinalityContext, onlyCommitment bool) (*collationBatch, error) {
+	to := from
+	for to < limit && to < from+maxCollationBatchSteps {
+		_, _, _, _, ok, err := a.readyForCollation(ctx, db, to, finalityCtx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			break
+		}
+		to++
+	}
+	if to-from < 2 {
+		return nil, nil
+	}
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
+	batch := &collationBatch{from: from, to: to}
+	ac := a.BeginFilesRo()
+	defer ac.Close()
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(a.workers.getCollateAndBuild())
+	for id, d := range a.d {
+		if d == nil || !d.Enabled || d.LargeValues || a.isDomainFrozen(kv.Domain(id)) || a.CommitmentDomainStopped(kv.Domain(id)) {
+			continue
+		}
+		if onlyCommitment && kv.Domain(id) != kv.CommitmentDomain && kv.Domain(id) != kv.CommitmentBinDomain {
+			continue
+		}
+		if from < ac.d[id].FirstStepNotInFiles() {
+			continue
+		}
+		g.Go(func() error {
+			return db.View(gctx, func(tx kv.Tx) (err error) {
+				batch.values[id], err = d.collateValuesBatch(gctx, from, to, tx)
+				return err
+			})
+		})
+	}
+	if err := g.Wait(); err != nil {
+		batch.Close()
+		return nil, fmt.Errorf("domain batch collation [%d, %d): %w", from, to, err)
+	}
+	a.logger.Debug("[snapshots] batch collated", "fromStep", from, "toStep", to)
+	return batch, nil
+}
+
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, batch *collationBatch, onlyCommitment bool) error {
 	// Pin worker counts for the duration of buildFiles. The collate/build phases
 	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
 	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
@@ -1073,7 +1396,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	for id, d := range a.d {
-		if !d.Enabled {
+		if d == nil || !d.Enabled || a.isDomainFrozen(kv.Domain(id)) || a.CommitmentDomainStopped(kv.Domain(id)) {
+			continue
+		}
+		if onlyCommitment && kv.Domain(id) != kv.CommitmentDomain && kv.Domain(id) != kv.CommitmentBinDomain {
 			continue
 		}
 
@@ -1085,7 +1411,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		g.Go(func() error {
 			var collation Collation
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
+				collation, err = d.collateWithValues(ctx, step, txFrom, txTo, tx, batch.take(kv.Domain(id), step))
 				return err
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
@@ -1113,7 +1439,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled {
+		if !ii.Enabled || onlyCommitment {
 			continue
 		}
 
@@ -1223,8 +1549,17 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
+		var batch *collationBatch
+		defer func() { batch.Close() }()
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, finalityCtx); err != nil {
+			if !batch.covers(step) {
+				batch.Close()
+				var err error
+				if batch, err = a.collateBatch(ctx, db, step, toStep, finalityCtx, false); err != nil {
+					panic(err)
+				}
+			}
+			if err := a.buildFiles(ctx, db, step, finalityCtx, batch, false); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -1346,6 +1681,9 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
 	}
 	for id, ii := range a.standaloneIIs() {
@@ -1357,7 +1695,9 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
 	for _, name := range names {
-		tables = append(tables, a.d[name].Tables()...)
+		if d := a.d[name]; d != nil {
+			tables = append(tables, d.Tables()...)
+		}
 	}
 	return tables
 }
@@ -1423,6 +1763,9 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 		return false
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		if d.CanPruneUntil(tx, untilTx) {
 			return true
 		}
@@ -1531,6 +1874,9 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	steps := make([]string, 0, len(at.d)+at.iisCount)
 	for _, dt := range at.d {
+		if dt == nil {
+			continue
+		}
 		a1, a2 := dt.stepsRangeInDB(tx)
 		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.FilenameBase, a2-a1))
 	}
@@ -1649,6 +1995,9 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	}
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
+		if d == nil {
+			continue
+		}
 		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
 		//	if true { //d.d.Name != kv.CommitmentDomain {
 		//		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
@@ -1718,6 +2067,37 @@ func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 
 func (at *AggregatorRoTx) Agg() *Aggregator { return at.a }
 
+func (at *AggregatorRoTx) CanonicalCommitmentDomain() kv.Domain {
+	return at.a.CanonicalCommitmentDomain()
+}
+
+func (at *AggregatorRoTx) SetCanonicalCommitmentDomain(domain kv.Domain) {
+	at.a.SetCanonicalCommitmentDomain(domain)
+}
+
+func (at *AggregatorRoTx) StopCommitmentDomain(domain kv.Domain) {
+	at.a.StopCommitmentDomain(domain)
+}
+
+func (at *AggregatorRoTx) CommitmentStopper() func(kv.Domain) {
+	a := at.a
+	return func(domain kv.Domain) {
+		a.StopCommitmentDomain(domain)
+	}
+}
+
+func (at *AggregatorRoTx) CommitmentDomainStopped(domain kv.Domain) bool {
+	return at.a.CommitmentDomainStopped(domain)
+}
+
+func (at *AggregatorRoTx) IsDomainFrozen(domain kv.Domain) (uint64, bool) {
+	return at.a.IsDomainFrozen(domain)
+}
+
+func (at *AggregatorRoTx) CommitmentDomains() []kv.Domain {
+	return at.a.CommitmentDomains()
+}
+
 func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint64) {
 	return at.d[domain].d.minStepInDB(tx)
 }
@@ -1754,6 +2134,7 @@ func (a *Aggregator) MaxPrunableStepsBacklog() uint64 {
 		mxPrunableDSto.GetValueUint64(),
 		mxPrunableDCode.GetValueUint64(),
 		mxPrunableDComm.GetValueUint64(),
+		mxPrunableDCommBin.GetValueUint64(),
 	)
 }
 
@@ -1776,6 +2157,9 @@ func (a *Aggregator) FilesAmount() (res []int) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		res = append(res, d.dirtyFiles.Len())
 	}
 	for _, ii := range a.standaloneIIs() {
@@ -1809,7 +2193,8 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 
 	ceiling := uint64(math.MaxUint64)
 	for id, d := range a.d {
-		if d == nil || !d.Enabled || a.unalignedDomain[id] {
+		if d == nil || !d.Enabled || a.unalignedDomain[id] || a.isDomainFrozen(kv.Domain(id)) ||
+			((kv.Domain(id) == kv.CommitmentDomain || kv.Domain(id) == kv.CommitmentBinDomain) && kv.Domain(id) != a.CanonicalCommitmentDomain()) {
 			continue
 		}
 		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
@@ -1834,12 +2219,13 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
 // See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
-	generation   uint64
-	d            [kv.DomainLen]*domainVisible
-	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
-	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
-	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	generation             uint64
+	d                      [kv.DomainLen]*domainVisible
+	dh                     [kv.DomainLen]visibleFiles      // per-domain History visible files
+	dhii                   [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
+	iis                    [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
+	minimaxTxNum           uint64                          // min of domain file EndTxNum across kv.StateDomains
+	commitmentDependencies map[[2]uint64]commitmentFileDependencies
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1867,7 +2253,10 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		}
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
-	next.minimaxTxNum = next.stateMinimaxTxNum()
+	if a.trieVariant != TrieVariantBin && next.d[kv.CommitmentDomain] != nil {
+		next.commitmentDependencies = a.commitmentDependencies(next.d[kv.CommitmentDomain].files)
+	}
+	next.minimaxTxNum = next.stateMinimaxTxNum(a.CanonicalCommitmentDomain())
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -1902,12 +2291,9 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	reclaimFiles(a.reclaimRetiredLocked())
 }
 
-// stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
-// AggregatorRoTx.TxNumsInFiles but operates directly on the bundle so the
-// writer can compute it without spinning up a throwaway RoTx.
-func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
+func (v *aggregatorVisible) stateMinimaxTxNum(commitmentDomain kv.Domain) uint64 {
 	minTxNum := uint64(math.MaxUint64)
-	for _, d := range kv.StateDomains {
+	for _, d := range kv.StateDomains(commitmentDomain) {
 		dv := v.d[d]
 		if dv == nil {
 			continue
@@ -1938,7 +2324,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 
 	r := &Ranges{}
 	// Account/storage must stay range-aligned with commitment whenever referencing is active.
-	commitmentMergeReferencing := at.a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced()
+	commitmentMergeReferencing := !at.a.isDomainFrozen(kv.CommitmentDomain) && !at.a.CommitmentDomainStopped(kv.CommitmentDomain) &&
+		(at.a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced())
 	if commitmentMergeReferencing {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
@@ -1952,7 +2339,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if d == nil || !d.d.Enabled || at.a.isDomainFrozen(kv.Domain(id)) || at.a.CommitmentDomainStopped(kv.Domain(id)) {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
@@ -2038,13 +2425,13 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	// With referenced commitment files present, concurrent dereference does random reads; read through
 	// the shared mmap instead of a separate sequential view that would evict those pages.
 	seqReadahead := !at.commitmentVisibleFilesReferenced()
-	needCommitmentTransform := comVals.needMerge &&
+	needCommitmentTransform := at.a.trieVariant != TrieVariantBin && comVals.needMerge &&
 		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)
 
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if !at.d[id].d.Enabled {
+		if at.d[id] == nil || !at.d[id].d.Enabled || at.a.isDomainFrozen(kv.Domain(id)) || at.a.CommitmentDomainStopped(kv.Domain(id)) {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -2117,7 +2504,7 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		if !d.Enabled {
+		if d == nil || !d.Enabled {
 			continue
 		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
@@ -2150,7 +2537,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	var deleted []string
 	var retired []*FilesItem
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if d == nil || !d.d.Enabled {
 			continue
 		}
 		var names []string
@@ -2256,9 +2643,12 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		lastInDB := max(
 			lastIdInDB(db, a.d[kv.AccountsDomain]),
 			lastIdInDB(db, a.d[kv.CodeDomain]),
-			lastIdInDB(db, a.d[kv.StorageDomain]),
-			lastIdInDB(db, a.d[kv.CommitmentDomain]),
-		)
+			lastIdInDB(db, a.d[kv.StorageDomain]))
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			if a.d[domain] != nil && !a.isDomainFrozen(domain) && !a.CommitmentDomainStopped(domain) {
+				lastInDB = max(lastInDB, lastIdInDB(db, a.d[domain]))
+			}
+		}
 		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx, db, finalityCtx.MaxReorgDepth())
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
 			"reorgSafeBlock", reorgSafeBlock, "reorgSafeStep", fmt.Sprintf("%.2f", reorgSafeStep), "reorgSafeOK", reorgSafeOK)
@@ -2330,12 +2720,39 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}
 		}
 
+		canonicalStep := step
+		vis := a.visible.Load()
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			d := a.d[domain]
+			if d == nil || !d.Enabled || vis.d[domain] == nil || a.isDomainFrozen(domain) || a.CommitmentDomainStopped(domain) {
+				continue
+			}
+			if end := vis.d[domain].files.EndTxNum(); end > 0 {
+				step = min(step, kv.Step(end/a.StepSize()))
+			}
+		}
+
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
+		var batch *collationBatch
+		defer func() { batch.Close() }()
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx); err != nil {
+			onlyCommitment := step < canonicalStep
+			if !batch.covers(step) {
+				batch.Close()
+				limit := lastInDB
+				if onlyCommitment {
+					limit = canonicalStep
+				}
+				var err error
+				if batch, err = a.collateBatch(a.ctx, db, step, limit, finalityCtx, onlyCommitment); err != nil {
+					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+					break
+				}
+			}
+			if err := a.buildFiles(a.ctx, db, step, finalityCtx, batch, onlyCommitment); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2405,6 +2822,9 @@ func (at *AggregatorRoTx) IIStartFrom(name kv.InvertedIdx, tx kv.Tx) uint64 {
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		if d.d.HistoryIdx == name {
 			return d.ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 		}
@@ -2634,20 +3054,20 @@ func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
 }
 
 // BranchCache attached to the commitment domain (implements commitment.BranchCacheProvider).
-func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
-	if at.d[kv.CommitmentDomain] == nil {
+func (at *AggregatorRoTx) BranchCache(domain kv.Domain) *commitment.BranchCache {
+	if at.d[domain] == nil {
 		return nil
 	}
-	return at.d[kv.CommitmentDomain].d.branchCache
+	return at.d[domain].d.BranchCache()
 }
 
 // AdaptivePinController attached to the commitment domain (implements
 // commitment.AdaptivePinControllerProvider).
-func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinController {
-	if at.d[kv.CommitmentDomain] == nil {
+func (at *AggregatorRoTx) AdaptivePinController(domain kv.Domain) *commitment.AdaptivePinController {
+	if at.d[domain] == nil {
 		return nil
 	}
-	return at.d[kv.CommitmentDomain].d.adaptivePinController
+	return at.d[domain].d.AdaptivePinController()
 }
 
 // MetricsCollector exposes the aggregator-scope KV-read metrics collector,
@@ -2663,6 +3083,9 @@ func (at *AggregatorRoTx) standaloneIIs() []*InvertedIndexRoTx { return at.iis[:
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
+	if d == nil {
+		return 0
+	}
 	if d.d.HistoryDisabled {
 		// this is not accurate, okay for reporting...
 		// if historyDisabled, there's no way to get progress in
@@ -2674,6 +3097,9 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 
 func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
 	d := at.d[name]
+	if d == nil {
+		return 0, false
+	}
 	if d.d.HistoryDisabled {
 		return 0, false
 	}
@@ -2709,18 +3135,36 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
-	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+	if name != kv.CommitmentDomain {
+		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if !at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+		v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+		if err != nil || ok {
+			return v, ok, err
+		}
+		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+		return v, ok, err
+	}
+	v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		if len(v) == 0 {
+			return nil, false, nil
+		}
+		return v, true, nil
+	}
+	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
+func (at *AggregatorRoTx) cacheLatestBranch(domain kv.Domain, enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
 	if !enabled || len(v) == 0 {
 		return
 	}
-	if branchCache := at.BranchCache(); branchCache != nil {
+	if branchCache := at.BranchCache(domain); branchCache != nil {
 		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
 	}
 }
@@ -2740,7 +3184,10 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
+		if opts.Owned() {
+			v = bytes.Clone(v)
+		}
+		at.cacheLatestBranch(domain, cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
 		return v, step, true, nil
 	}
 	var found bool
@@ -2752,10 +3199,14 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
+	stored := v
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	if opts.Owned() && len(v) != 0 && len(stored) != 0 && &v[0] == &stored[0] {
+		v = bytes.Clone(v)
+	}
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)
+		at.cacheLatestBranch(domain, cacheBranch, k, v, step, fileEndTxNum, tx)
 	}
 	return v, step, found, err
 }
@@ -2789,6 +3240,12 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
+		if d == nil {
+			continue
+		}
+		if frozenAt, frozen := at.a.IsDomainFrozen(kv.Domain(idx)); frozen && txNumUnwindTo < frozenAt {
+			return fmt.Errorf("unwind to txnum %d would cross frozen domain %s at txnum %d", txNumUnwindTo, kv.Domain(idx), frozenAt)
+		}
 		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
 			return err
 		}
@@ -2808,6 +3265,9 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 		return at
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		d.files.MadvNormal()
 		d.ht.files.MadvNormal()
 		d.ht.iit.files.MadvNormal()
@@ -2823,6 +3283,9 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 		return
 	}
 	for _, d := range at.d {
+		if d == nil {
+			continue
+		}
 		d.files.DisableReadAhead()
 		d.ht.files.DisableReadAhead()
 		d.ht.iit.files.DisableReadAhead()
@@ -2836,6 +3299,9 @@ func (a *Aggregator) MadvNormal() *Aggregator {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.dirtyFiles.MadvNormal()
 		d.History.dirtyFiles.MadvNormal()
 		d.History.InvertedIndex.dirtyFiles.MadvNormal()
@@ -2850,6 +3316,9 @@ func (a *Aggregator) DisableReadAhead() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.dirtyFiles.DisableReadAhead()
 		d.History.dirtyFiles.DisableReadAhead()
 		d.History.InvertedIndex.dirtyFiles.DisableReadAhead()

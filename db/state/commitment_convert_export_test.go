@@ -33,3 +33,8 @@ var (
 func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 	convertPhase1AfterFileHook = fn
 }
+
+// CloseMappedFilesForTest drops the aggregator's file mmaps so a test can remove
+// or rename the files underneath it; Windows refuses either while a mapping is
+// open. ReloadFiles re-opens them.
+func (a *Aggregator) CloseMappedFilesForTest() { a.closeDirtyFilesNoReopen() }

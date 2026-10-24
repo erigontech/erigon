@@ -7,6 +7,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
 )
 
 func TestRemoveContents(t *testing.T) {
@@ -49,4 +56,45 @@ func TestRemoveContents(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Empty(t, list)
+}
+
+func TestPBinCommitmentWarningNamesRefusedMethods(t *testing.T) {
+	for _, method := range []string{"eth_getProof", "eth_getWitness", "debug_executionWitness"} {
+		require.Contains(t, pbinCommitmentUnsupportedMethods, method)
+	}
+	require.NotContains(t, pbinCommitmentUnsupportedMethods, "debug_executionWitness is supported")
+}
+
+func TestRefusePBTStartupMarkersChecksBothMarkers(t *testing.T) {
+	for _, name := range []string{"attach", "import"} {
+		t.Run(name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			if name == "attach" {
+				variant := state.TrieVariantHexBin
+				require.NoError(t, state.WritePBTAttachMarker(dirs, &state.PBTAttachMarker{PublishedPath: "/tmp/published", Settings: &state.ErigonDBSettings{TrieVariant: &variant}}))
+			} else {
+				variant := state.TrieVariantHexBin
+				hash := "blake3"
+				require.NoError(t, state.WritePBTImportMarker(dirs, &state.PBTImportMarker{SnapshotPath: "/tmp/snapshot", SnapshotHash: "digest", Files: []string{"domain/v3.0-commitment-bin.0-1.kv"}, Settings: &state.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}))
+			}
+			require.Error(t, refusePBTStartupMarkers(dirs, "mainnet"))
+		})
+	}
+}
+
+func TestEthereumNewRefusesPBTImportMarker(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := state.TrieVariantHexBin
+	hash := "blake3"
+	require.NoError(t, state.WritePBTImportMarker(dirs, &state.PBTImportMarker{
+		SnapshotPath: "/tmp/snapshot",
+		SnapshotHash: "digest",
+		Files:        []string{"domain/v3.0-commitment-bin.0-1.kv"},
+		Settings:     &state.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash},
+	}))
+	stack, err := node.New(t.Context(), &nodecfg.Config{Dirs: dirs}, log.New())
+	require.NoError(t, err)
+	defer stack.Close()
+	_, err = New(t.Context(), stack, &ethconfig.Config{}, log.New(), nil)
+	require.ErrorContains(t, err, "commitment import-pbt")
 }

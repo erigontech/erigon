@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -43,6 +44,9 @@ func newTestCalcState() *calcState {
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		codeValues:   make(map[accounts.Address][]byte),
+		wiped:        make(map[accounts.Address]struct{}),
+		binFeed:      true,
 	}
 }
 
@@ -644,33 +648,9 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
-// mockStorageEnum returns a fixed persisted-slot set per address.
-type mockStorageEnum struct {
-	slots map[accounts.Address][]accounts.StorageKey
-}
-
-func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
-	for _, k := range m.slots[addr] {
-		if err := fn(k); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete pins that a
-// self-destruct emits no per-slot deletes for untouched on-disk storage: the
-// account DeleteUpdate collapses the subtree, so the injected enumerator must
-// not be consulted.
 func TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
-	untouched1 := accounts.InternKey(common.Hash{0x11})
-	untouched2 := accounts.InternKey(common.Hash{0x22})
-
 	cs := newTestCalcState()
-	cs.storageEnum = &mockStorageEnum{slots: map[accounts.Address][]accounts.StorageKey{
-		addr: {untouched1, untouched2},
-	}}
 
 	cs.ApplyWrites(newWS().
 		inc(addr, state.Version{}, uint64(3)).
@@ -830,25 +810,7 @@ func sdEIP8246Original() *accounts.Account {
 // calcState so callers can inspect the account and flush to updates.
 func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *calcState {
 	t.Helper()
-	original := sdEIP8246Original()
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-
-	// IBS.Selfdestruct emits IncarnationPath, SelfDestructPath=true and
-	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
-	// moved-in/retained balance). A non-zero incarnation checks that it is zeroed.
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
+	normalized := sdWrites(addr, postSDBalance, eip8246)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(normalized, eip8246)
@@ -958,18 +920,7 @@ func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache boo
 	original := sdEIP8246Original()
 	addrVal := addr.Value()
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(original), 0, nil))
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, true)
+	normalized := sdWrites(addr, postSDBalance, true)
 	rs := state.NewStateV3(domains, false, log.New())
 	var blockCache *state.BlockStateCache
 	if useBlockCache {
@@ -1104,4 +1055,98 @@ func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
 	require.Contains(t, got, plainKeyOf(a))
 	require.Contains(t, got, plainKeyOf(b))
 	require.Len(t, cs.dirtyAccounts, 2, "a mid-block flush must not list an account twice")
+}
+
+func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
+	cs := newTestCalcState()
+	cs.hashes = newCalcHashes()
+	a := accounts.InternAddress(common.Address{0xa1})
+	b := accounts.InternAddress(common.Address{0xb2})
+	c := accounts.InternAddress(common.Address{0xc3})
+	d := accounts.InternAddress(common.Address{0xd4})
+	s1, s2, s3 := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2}), accounts.InternKey(common.Hash{3})
+	cs.ApplyWrites(newWS().
+		stor(d, s1, state.Version{}, *uint256.NewInt(9)).
+		bal(d, state.Version{}, *uint256.NewInt(4)).
+		build(), false)
+	cs.ResetBlockFlags()
+	cs.ApplyWrites(newWS().
+		bal(a, state.Version{}, *uint256.NewInt(1)).
+		stor(a, s1, state.Version{}, *uint256.NewInt(0x1234)).
+		stor(a, s2, state.Version{}, uint256.Int{}).
+		nonce(b, state.Version{}, 3).
+		stor(c, s3, state.Version{}, *uint256.NewInt(7)).
+		selfDestruct(d, state.Version{}, true).
+		build(), false)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	require.Nil(t, cs.deleted, "a flush to updates leaves the deletions unknown")
+	want := map[string]commitment.Update{}
+	wantDeleted := map[string]struct{}{}
+	for plainKey, u := range emittedUpdates(t, updates) {
+		if u.Deleted() {
+			wantDeleted[plainKey] = struct{}{}
+		}
+		hash := crypto.Keccak256([]byte(plainKey)[:20])
+		if len(plainKey) > 20 {
+			hash = append(hash, crypto.Keccak256([]byte(plainKey)[20:])...)
+		}
+		want[string(hash)] = u
+	}
+
+	var feed commitment.Feed
+	cs.FlushToFeed(&feed)
+	got := map[string]commitment.Update{}
+	for _, account := range feed.Accounts {
+		if account.Update != nil {
+			got[string(account.Hash[:])] = *account.Update
+		}
+		for _, slot := range account.Slots {
+			u := commitment.Update{Flags: commitment.DeleteUpdate}
+			if len(slot.Value) != 0 {
+				u = commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(slot.Value))}
+				copy(u.Storage[:], slot.Value)
+			}
+			got[string(append(account.Hash[:], slot.Hash[:]...))] = u
+		}
+	}
+	distinct := map[[32]byte]struct{}{}
+	for _, account := range feed.Accounts {
+		distinct[account.Hash] = struct{}{}
+	}
+	require.Len(t, want, 7)
+	require.Len(t, distinct, len(feed.Accounts))
+	require.Equal(t, len(want), feed.Keys)
+	require.Equal(t, want, got)
+
+	gotDeleted := map[string]struct{}{}
+	for _, key := range cs.deleted {
+		gotDeleted[string(key)] = struct{}{}
+	}
+	require.NotEmpty(t, wantDeleted)
+	require.Len(t, cs.deleted, len(wantDeleted))
+	require.Equal(t, wantDeleted, gotDeleted, "the feed's deleted keys are the deletions FlushToUpdates emits")
+}
+
+func sdWrites(addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *state.WriteSet {
+	original := sdEIP8246Original()
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	// IBS.Selfdestruct emits IncarnationPath=preInc, SelfDestructPath=true and
+	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
+	// moved-in/retained balance).
+	rawWrites := newWS().
+		inc(addr, ver, original.Incarnation).
+		selfDestruct(addr, ver, true).
+		bal(addr, ver, postSDBalance).
+		build()
+
+	vm := state.NewVersionMap(nil)
+	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
+	vm.WriteSelfDestruct(addr, ver, true, true)
+	vm.WriteBalance(addr, ver, postSDBalance, true)
+
+	stateReader := &preBlockReader{addr: addr, acc: original}
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
+	return normalized
 }

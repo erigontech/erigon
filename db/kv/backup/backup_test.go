@@ -54,6 +54,25 @@ func newWriteMapDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestOpenExistingMissingTableReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chaindata")
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(path).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{kv.Headers: {}}
+	}).MustOpen()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.Headers, []byte{1}, []byte{1})
+	}))
+	db.Close()
+
+	opened, err := OpenExisting(t.Context(), mdbx.New(dbcfg.ChainDB, log.New()).Path(path), true)
+	require.NoError(t, err)
+	defer opened.Close()
+	require.Error(t, opened.View(t.Context(), func(tx kv.Tx) error {
+		_, err := tx.GetOne(kv.TblCommitmentBinVals, []byte{1})
+		return err
+	}))
+}
+
 func tableSize(t *testing.T, db kv.RwDB) uint64 {
 	t.Helper()
 	var sz uint64

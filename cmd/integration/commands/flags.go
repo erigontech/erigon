@@ -46,6 +46,7 @@ var (
 	batchSizeStr                 string
 	domain                       string
 	reset, squeeze, yes          bool
+	skipFilesDBGapCheck          bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
@@ -63,6 +64,8 @@ var (
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
+	rebuildOutputDatadir            string
+	rebuildMaxShardSteps            uint64
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 
@@ -70,6 +73,7 @@ var (
 	convertNibblesV2 bool
 	convertRestore   bool
 	convertContinue  bool
+	convertV3        bool
 )
 
 func must(err error) {
@@ -138,6 +142,7 @@ func withConvertFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&convertSqueeze, "squeeze", false, "target state for the value squeeze axis: true = squeezed (offsets), false = unsqueezed (plain keys inline)")
 	cmd.Flags().BoolVar(&convertNibblesV2, "nibbles.v2", false, "target state for the key encoding axis: true = V2 (prefix-sort trie locality), false = V1 (compact bytes)")
 	cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")
+	cmd.Flags().BoolVar(&convertV3, "v3", false, "convert legacy hex-patricia commitment files into commitment v3 records (v3.0 .kv with .bt and .kvei); files must be unsqueezed; verifies every reachable record against the state root after the swap")
 	cmd.Flags().BoolVar(&convertContinue, "continue", false, "Resume a prior interrupted conversion. Skips files whose converted shard already exists in <datadir>/snap/rebuild/domain/. Flags --squeeze and --nibbles.v2 MUST match the original interrupted run; mismatch produces mixed-encoding output. Mutually exclusive with --restore.")
 }
 
@@ -147,6 +152,11 @@ func withClearCommitment(cmd *cobra.Command) {
 
 func withResume(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
+}
+
+func withRebuildOutputDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input")
+	must(cmd.MarkFlagDirname("output.datadir"))
 }
 
 func withNoHistory(cmd *cobra.Command) {
@@ -177,6 +187,25 @@ func withDataDir(cmd *cobra.Command) {
 func withExperimentalCommitment(cmd *cobra.Command) {
 	def := statecfg.ExperimentalParallelCommitment
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Name, statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Usage)
+	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Name, statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Usage)
+	cmd.PreRun = func(*cobra.Command, []string) {
+		if statecfg.ExperimentalCommitmentV3 {
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		}
+	}
+}
+
+func withRebuildCommitment(cmd *cobra.Command) {
+	def := statecfg.ExperimentalParallelCommitment
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Name, statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Usage)
+	cmd.PreRun = func(*cobra.Command, []string) {
+		if statecfg.ExperimentalCommitmentV3 {
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		}
+	}
 }
 
 func withBatchSize(cmd *cobra.Command) {

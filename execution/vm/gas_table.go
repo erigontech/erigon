@@ -47,6 +47,14 @@ func coldAccountAccessCost(rules *chain.Rules) uint64 {
 	return params.ColdAccountAccessCostEIP2929
 }
 
+func accountWriteCost(rules *chain.Rules) uint64 {
+	return params.AccountWriteCostEIP8038
+}
+
+func sstoreClearsRefund(rules *chain.Rules) uint64 {
+	return params.SstoreClearsScheduleRefundEIP8038
+}
+
 func coldStorageAccessCost(rules *chain.Rules) uint64 {
 	if rules.IsAmsterdam {
 		return params.ColdStorageAccessCostEIP8038

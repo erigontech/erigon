@@ -278,6 +278,35 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	return nil
 }
 
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+	if hb.trace {
+		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
+	}
+	key := keyHex[len(keyHex)-length:]
+	hb.acc.Nonce = nonce
+	hb.acc.Balance.Set(balance)
+	hb.acc.Incarnation = incarnation
+
+	popped := 0
+	if fieldSet&AccountFieldStorageOnly != 0 {
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
+		popped++
+	} else {
+		copy(hb.acc.Root[:], empty.RootHash[:])
+	}
+
+	if fieldSet&AccountFieldCodeOnly != 0 {
+		var codeHashValue common.Hash
+		copy(codeHashValue[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
+		hb.acc.CodeHash = accounts.InternCodeHash(codeHashValue)
+		popped++
+	} else {
+		hb.acc.CodeHash = accounts.EmptyCodeHash
+	}
+
+	return hb.accountLeafHashWithKey(key, popped)
+}
+
 // To be called internally
 func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	// Compute the total length of binary representation

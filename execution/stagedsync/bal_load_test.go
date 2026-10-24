@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -97,7 +98,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	}
 
 	csBAL := newTestCalcState()
-	csBAL.LoadFromBAL(bal, true, false, true)
+	csBAL.LoadFromBALUpTo(bal, math.MaxUint32, true, false, true)
 
 	// Incremental equivalent: the same values fed as a multi-write stream
 	// in ascending tx order — ApplyWrites' last-write-wins must land on
@@ -146,7 +147,7 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false, true) // spuriousDragon on, non-AuRa
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, true, false, true) // spuriousDragon on, non-AuRa
 
 	require.True(t, cs.accounts[emptied].Deleted,
 		"an EIP-161 empty account in the BAL must be reconstructed as a delete, not a zero-valued update")
@@ -165,9 +166,9 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	// The carve-out: with SpuriousDragon inactive, empties are NOT removed
 	// (pre-fork a touched empty account is created and persists).
 	csPre := newTestCalcState()
-	csPre.LoadFromBAL(types.BlockAccessList{
+	csPre.LoadFromBALUpTo(types.BlockAccessList{
 		{Address: emptied.Value(), BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
-	}, false, false, false)
+	}, math.MaxUint32, false, false, false)
 	require.False(t, csPre.accounts[emptied].Deleted,
 		"pre-SpuriousDragon, an empty touched account is not removed")
 }
@@ -193,7 +194,7 @@ func TestLoadFromBAL_SelfDestructKeepsCodeNotDeleted(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false, true) // SpuriousDragon on
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, true, false, true) // SpuriousDragon on
 
 	require.False(t, cs.accounts[contract].Deleted,
 		"a zero-balance account that still has code must not be reconstructed as a delete")
@@ -220,7 +221,7 @@ func TestLoadFromBAL_CreatedThenDestroyedHasNoLeaf(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false, true)
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, true, false, true)
 
 	_, ok := cs.accounts[transient]
 	require.False(t, ok, "a created-then-destroyed account absent from the BAL must not enter calcState")

@@ -253,8 +253,9 @@ type Config struct {
 	// Consensus layer
 	InternalCL bool
 
-	OverrideOsakaTime     *uint64 `toml:",omitempty"`
-	OverrideAmsterdamTime *uint64 `toml:",omitempty"`
+	OverrideOsakaTime      *uint64 `toml:",omitempty"`
+	OverrideAmsterdamTime  *uint64 `toml:",omitempty"`
+	OverrideBinaryTrieTime *uint64 `toml:",omitempty"`
 
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
@@ -307,12 +308,14 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	MaxReorgDepth            uint64
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
-	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+	ChaosMonkey               bool
+	AlwaysGenerateChangesets  bool
+	MaxReorgDepth             uint64
+	KeepExecutionProofs       bool
+	ExperimentalBinCommitment bool
+	BinCommitmentHash         string
+	PersistReceiptsCacheV2    bool
+	SnapshotDownloadToBlock   uint64 // exclusive [0,toBlock)
 
 	SlowBlockThreshold *time.Duration
 }
