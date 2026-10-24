@@ -420,6 +420,11 @@ func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, jus
 		return head, headSlot, true, err
 	}
 	defer f.mu.Unlock()
+	if f.headHash != (common.Hash{}) {
+		head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
+		f.publishSelectedHead(head.Root, f.headSlot)
+		return head, f.headSlot, true, nil
+	}
 	if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
 		return ForkChoiceNode{}, 0, false, nil
 	}

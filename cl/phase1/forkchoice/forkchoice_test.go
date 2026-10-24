@@ -676,6 +676,29 @@ func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
 	}
 }
 
+func TestGetHeadOnceReusesCachedHead(t *testing.T) {
+	store, graph := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = store.beaconCfg.FarFutureEpoch
+	store.beaconCfg.InitializeForkSchedule()
+
+	root := common.HexToHash("0xbb")
+	graph.headers[root] = &cltypes.BeaconBlockHeader{Slot: 10}
+	wantHead := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
+	store.headHash = root
+	store.headSlot = 10
+	store.headPayloadStatus = cltypes.PayloadStatusFull
+	store.weights = map[common.Hash]uint64{root: 17}
+
+	head, slot, ok, err := store.getHeadOnce(nil, store.JustifiedCheckpoint())
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, wantHead, head)
+	require.Equal(t, uint64(10), slot)
+	require.Equal(t, map[common.Hash]uint64{root: 17}, store.weights)
+	require.Equal(t, &wantHead, store.selectedHead.Load())
+}
+
 func TestBlockProcessingTracksQueuedAndOverlappingImports(t *testing.T) {
 	store := &ForkChoiceStore{}
 	require.False(t, store.BlockProcessing())
