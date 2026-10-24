@@ -253,7 +253,7 @@ func inlineBody(srcs map[string][]byte, o fastOp) string {
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh", "SetFromData", "Set"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh", "SetFromData"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
@@ -301,13 +301,19 @@ func returns(n ast.Node) (found bool) {
 func callsOutOfLine(s ast.Node) (found bool) {
 	ast.Inspect(s, func(n ast.Node) bool {
 		if c, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
+			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && (slices.Contains(outOfLine, sel.Sel.Name) || sel.Sel.Name == "Set" && isMemory(sel.X)) {
 				found = true
 			}
 		}
 		return !found
 	})
 	return found
+}
+
+// isMemory reports whether x is a Memory field: uint256's inlined Set has the same name as Memory.Set.
+func isMemory(x ast.Expr) bool {
+	sel, ok := x.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == "Memory"
 }
 
 // mustStmt parses src as a statement without positions, so the printer lays it

@@ -639,9 +639,7 @@ run:
 					if jt[CHAINID].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						chainId := evm.ChainRules().ChainID
-						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().Set(chainId)
-						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
 					}
