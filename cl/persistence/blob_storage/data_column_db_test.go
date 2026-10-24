@@ -579,6 +579,25 @@ func TestGetSavedColumnIndexFallsBackToFilesWithoutARow(t *testing.T) {
 	require.True(t, exists)
 }
 
+func TestFirstColumnRowKeepsTheColumnsAlreadyOnDisk(t *testing.T) {
+	storage, _, _ := setupTestDataColumnStorage(t)
+	impl := storage.(*dataColumnStorageImpl)
+	root := common.Hash{1}
+	for _, column := range []uint64{0, 1} {
+		_, err := impl.write(1000, root, column, createTestDataColumnSidecar(1000, int64(column)))
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 2, createTestDataColumnSidecar(1000, 2)))
+
+	saved, err := storage.GetSavedColumnIndex(t.Context(), 1000, root)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 1, 2}, saved, "a root's first row must not hide columns stored before it")
+	exists, err := storage.ColumnSidecarExists(t.Context(), 1000, root, 0)
+	require.NoError(t, err)
+	require.True(t, exists, "peers are served only what reads as existing")
+}
+
 func TestColumnWriteSetsTheBitAfterTheCallerGaveUp(t *testing.T) {
 	storage, _, _ := setupTestDataColumnStorage(t)
 	root := common.Hash{1}

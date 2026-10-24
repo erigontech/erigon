@@ -69,7 +69,7 @@ func (s *dataColumnStorageImpl) columnRow(blockRoot common.Hash) ([]byte, error)
 	return row, err
 }
 
-func (s *dataColumnStorageImpl) markColumns(blockRoot common.Hash, stored bool, columns ...uint64) error {
+func (s *dataColumnStorageImpl) markColumns(slot uint64, blockRoot common.Hash, stored bool, columns ...uint64) error {
 	return s.db.Update(context.Background(), func(tx kv.RwTx) error {
 		row, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
 		if err != nil {
@@ -77,6 +77,17 @@ func (s *dataColumnStorageImpl) markColumns(blockRoot common.Hash, stored bool, 
 		}
 		bitmap := make([]byte, (s.beaconChainConfig.NumberOfColumns+7)/8)
 		copy(bitmap, row)
+		if row == nil && stored {
+			for column := range s.beaconChainConfig.NumberOfColumns {
+				exists, err := s.exists(slot, blockRoot, column)
+				if err != nil {
+					return err
+				}
+				if exists {
+					bitmap[column/8] |= 1 << (column % 8)
+				}
+			}
+		}
 		for _, column := range columns {
 			if column >= s.beaconChainConfig.NumberOfColumns {
 				continue
@@ -120,7 +131,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	}
 	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
 	if err == nil {
-		err = s.markColumns(blockRoot, true, uint64(columnIndex))
+		err = s.markColumns(slot, blockRoot, true, uint64(columnIndex))
 	}
 	s.finishWrite()
 	if created {
@@ -166,7 +177,7 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	for i, index := range columnIndices {
 		columns[i] = uint64(index)
 	}
-	if err := s.markColumns(blockRoot, false, columns...); err != nil {
+	if err := s.markColumns(slot, blockRoot, false, columns...); err != nil {
 		return err
 	}
 	var firstErr error
