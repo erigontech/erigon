@@ -1853,10 +1853,10 @@ func TestInvertedIndexChunks(t *testing.T) {
 	t.Run("delete_range", func(t *testing.T) {
 		tx, table, m := setup(t)
 		txNums := m["k"]
-		iiChunkDelete(t, tx, table, m, "k", txNums[500], txNums[1500])  // middle of chunks
+		iiChunkDelete(t, tx, table, m, "k", txNums[500], txNums[1500])
 		iiChunkDelete(t, tx, table, m, "k", txNums[2500]+1, math.MaxUint64) // tail: max of a chunk shrinks
-		iiChunkDelete(t, tx, table, m, "k", 0, txNums[300])                // head
-		iiChunkDelete(t, tx, table, m, "k", txNums[1500]+1, txNums[1500]+1) // empty range
+		iiChunkDelete(t, tx, table, m, "k", 0, txNums[300])
+		iiChunkDelete(t, tx, table, m, "k", txNums[1500]+1, txNums[1500]+1)
 		iiChunkDelete(t, tx, table, m, "k\x00", 0, math.MaxUint64)
 		iiChunkDelete(t, tx, table, m, "absent", 0, math.MaxUint64)
 		requireIIChunks(t, tx, table, m)
