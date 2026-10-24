@@ -87,6 +87,7 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
+	forkChoiceRerunAt            time.Time
 	chainTipRejections           *chainTipRejections
 }
 
@@ -199,9 +200,10 @@ func MetaCatchingUp(args Args) StageName {
 	return ""
 }
 
-// catchUpAfterImport is MetaCatchingUp for the stages that import blocks. Before going back to ChainTipSync, which can
-// wait a slot or longer for the next block, it publishes a newly imported head: validators attest to the served head.
-func catchUpAfterImport(args Args) StageName {
+// catchUpPublishingHead is MetaCatchingUp for the stages that import blocks or see the head move with the clock. Before
+// going back to ChainTipSync, which can wait a slot or longer for the next block, it publishes the fork choice head:
+// validators attest to and propose on the served head.
+func catchUpPublishingHead(args Args) StageName {
 	next := MetaCatchingUp(args)
 	if next == ChainTipSync && args.headUnpublished {
 		return ForkChoice
@@ -281,7 +283,10 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
-			if head, _, err := cfg.forkChoice.GetHead(nil); err == nil {
+			cfg.forkChoice.OnTick(uint64(cfg.ethClock.GetSlotTime(args.targetSlot).UnixMilli()))
+			if head, _, err := cfg.forkChoice.GetHead(nil); err != nil {
+				log.Debug("[Caplin] failed to read the fork choice head", "err", err)
+			} else {
 				args.headUnpublished = head != cfg.syncedData.HeadRoot()
 			}
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
@@ -364,7 +369,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if errors.Is(err, ErrForwardSyncStale) {
 						return ChainTipSync
 					}
-					if x := catchUpAfterImport(args); x != "" {
+					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
 					if args.headUnpublished && args.seenSlot < args.targetSlot {
@@ -377,7 +382,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := catchUpAfterImport(args); x != "" {
+					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
 					return ForkChoice
@@ -400,6 +405,12 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
+					}
+					// Gossip can import the slot's block during ForkChoice or this stage, and SleepForSlot polls the
+					// head only from Gloas on.
+					if args.headUnpublished && args.seenSlot >= args.targetSlot && time.Since(cfg.forkChoiceRerunAt) >= sleepForSlotRewakeInterval {
+						cfg.forkChoiceRerunAt = time.Now()
+						return ForkChoice
 					}
 					return SleepForSlot
 				},
@@ -426,7 +437,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
 					if cfg.sleepForSlotHeadChanged {
