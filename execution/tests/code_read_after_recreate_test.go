@@ -174,3 +174,66 @@ func TestCodeReadAfterRecreateOverCallRevival(t *testing.T) {
 		})
 	}
 }
+
+// Recreate-over-destruct shape read with EXTCODEHASH: a reader that observes X
+// after its destruct but before the CREATE2 recreate must still store the
+// recreated code's hash, not the empty hash it saw first. Complements the
+// EXTCODECOPY/EXTCODESIZE recreate tests above, which do not exercise EXTCODEHASH.
+func TestCodeHashReadAfterRecreate(t *testing.T) {
+	oldRuntime := program.New().Op(vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	runtime := program.New().Sstore(2, 0x42).Op(vm.STOP).Bytes()
+	wantHash := crypto.Keccak256Hash(runtime)
+	initCode := func(skip uint64) *program.Program {
+		p := program.New().Op(vm.SELFBALANCE, vm.PUSH1).Append([]byte{byte(skip)}).Op(vm.JUMPI)
+		return p.ReturnViaCodeCopy(oldRuntime)
+	}
+	_, deploy := initCode(0).Jumpdest()
+	init, _ := initCode(deploy).Jumpdest()
+	init.ReturnViaCodeCopy(runtime)
+
+	factory := common.HexToAddress("0xfac7")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init.Bytes())))
+	payer := common.HexToAddress("0x9a7e")
+	slowFactory := common.HexToAddress("0x5107")
+	reader := common.HexToAddress("0x9e0b")
+
+	factoryCode := program.New().Mstore(init.Bytes(), 0).Push(0).Push(len(init.Bytes())).Push(0).Op(vm.CALLVALUE, vm.CREATE2, vm.STOP).Bytes()
+	slow := program.New().Push(3000)
+	_, loop := slow.Jumpdest()
+	slow.Push(1024).Push(0).Op(vm.KECCAK256, vm.POP).Push(1).Op(vm.SWAP1, vm.SUB, vm.DUP1).Push(loop).Op(vm.JUMPI, vm.POP)
+	slow.Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.STOP)
+	readerCode := program.New().Push(x).Op(vm.EXTCODEHASH).Push(1).Op(vm.SSTORE, vm.STOP)
+
+	shanghai := chain.TestChainOsakaConfig.Copy()
+	shanghai.CancunTime, shanghai.PragueTime, shanghai.OsakaTime = nil, nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{{"berlin", chain.TestChainBerlinConfig}, {"shanghai", shanghai}} {
+		t.Run(fork.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory:     {Code: factoryCode},
+				payer:       {Code: program.New().Call(nil, x, 3, 0, 0, 0, 0).Op(vm.STOP).Bytes(), Balance: big.NewInt(3)},
+				slowFactory: {Code: slow.Bytes()},
+				reader:      {Code: readerCode.Bytes()},
+			}
+			keys := revivalKeys(t, alloc, 5)
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: factory},
+				{to: x},
+				{to: payer},
+				{to: slowFactory},
+				{to: reader},
+			})
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				code, err := st.GetCode(accounts.InternAddress(x))
+				require.NoError(t, err)
+				require.Equal(t, runtime, code)
+				got, err := st.GetState(accounts.InternAddress(reader), accounts.InternKey(common.BytesToHash([]byte{1})))
+				require.NoError(t, err)
+				require.Equal(t, *new(uint256.Int).SetBytes(wantHash[:]), got, "reader stored code hash")
+			})
+		})
+	}
+}

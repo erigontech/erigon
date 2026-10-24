@@ -285,3 +285,17 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 		})
 	}
 }
+
+// A value transfer debits the sender during execution, so charging the sender at
+// validation cannot let it run before its predecessor; only a zero-value call can.
+func TestChargesSenderAtValidationSkipsValueTransfer(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(value), GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.False(t, task(1).ChargesSenderAtValidation(0))
+}

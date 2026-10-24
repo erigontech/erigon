@@ -1164,10 +1164,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
-				if !blockExecutor.execStarted.IsZero() {
-					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
-					pe.blockExecMetrics.BlockCount.Add(1)
-				}
+				pe.recordBlockExecMetrics(blockExecutor)
 				if logNpPhases {
 					busy := time.Duration(blockExecutor.execCpuNanos.Load())
 					wall := npWait + npProc
@@ -1551,6 +1548,13 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 // by processRequest while the slot was busy gets scheduled — processRequest itself
 // only schedules when the map was empty at insert time, so without this a block
 // enqueued mid-flight would orphan in the map and never be validated.
+func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
+	if !be.execStarted.IsZero() {
+		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+		pe.blockExecMetrics.BlockCount.Add(1)
+	}
+}
+
 func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
@@ -1864,6 +1868,9 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// releases this worker's slot, waits for that writer's task to commit,
 		// reacquires a slot, and retries the read against the final value.
 		tv.waitCommit = func(dep int) bool {
+			if !waitsOnDependency(tv.Task, int(tv.version.Incarnation)) {
+				return false
+			}
 			releaseSlot()
 			// dep is a versionMap TxIndex; translate to task-index frontier space.
 			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
@@ -2618,6 +2625,13 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 }
 
 // touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
+// waitsOnDependency reports whether a run parks on an in-flight read. A run before the
+// sender charge is redone after its predecessor commits, so it does not park.
+func waitsOnDependency(task exec.Task, incarnation int) bool {
+	txTask, ok := task.(*exec.TxTask)
+	return !ok || !txTask.ChargesSenderAtValidation(incarnation)
+}
+
 func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	sender, err := txTask.TxSender()
 	if err != nil {

@@ -1899,3 +1899,44 @@ func TestOnBlockStartSeesOverlayBlock(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, block.Hash(), got.Hash())
 }
+
+// Each block is counted once, when its duration is recorded; counting it again
+// at scheduling time halved the average block duration (bdur, exec_block_dur).
+func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
+	t.Run("processRequest", func(t *testing.T) {
+		config := chain.AllProtocolChanges
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.blockExecMetrics = newBlockExecMetrics()
+		pe.workersCtx = t.Context()
+		header := &types.Header{Number: *uint256.NewInt(1)}
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		be := pe.blockExecutors[1]
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+	t.Run("scheduleNextPending", func(t *testing.T) {
+		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil)
+		pe := &parallelExecutor{
+			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
+			blockExecutors: map[uint64]*blockExecutor{1: be},
+		}
+		pe.scheduleNextPending(t.Context())
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+}
+
+func TestWaitsOnDependency(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	task := func(value uint64) *exec.TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(value), GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &exec.TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.False(t, waitsOnDependency(task(0), 0), "a run before the sender charge does not park")
+	require.True(t, waitsOnDependency(task(0), 1), "a re-run with the sender checks parks")
+	require.True(t, waitsOnDependency(task(1), 0), "a value transfer is charged during execution and parks")
+}
