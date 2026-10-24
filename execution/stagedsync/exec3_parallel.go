@@ -125,7 +125,10 @@ type parallelExecutor struct {
 	// keeps its object but releases its execSem slot, so resting does not reduce
 	// concurrency — another worker runs on a different object. runSem must hold enough
 	// objects for the peak of executing+resting workers; execSem sizes parallelism.
-	execSem    chan struct{}
+	execSem chan struct{}
+	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
+	// open and close one; like applyTx it lives for one exec loop.
+	slotTxs    chan kv.TemporalTx
 	runWG      sync.WaitGroup
 	workersCtx context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
@@ -1614,6 +1617,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 
+	pe.slotTxs = make(chan kv.TemporalTx, len(pe.execWorkers))
 	pe.execLoopGroup.Go(func() error {
 		pe.resetWorkers(pe.rs)
 		// Hand the reset worker contexts to the dispatcher as a semaphore. The buffer
@@ -1640,6 +1644,14 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// cancelWorkers unblocks any waiting on runSem, so no goroutine touches a
 		// worker after teardown.
 		pe.runWG.Wait()
+		for drained := false; !drained; {
+			select {
+			case tx := <-pe.slotTxs:
+				tx.Rollback()
+			default:
+				drained = true
+			}
+		}
 
 		pe.stopWorkers()
 
@@ -1759,9 +1771,18 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// (workersCtx cancelled — return silently), non-nil means an infrastructure
 		// failure the caller must surface as an operational result.
 		var slotErr error
-		releaseSlot := func() {
+		// Only a finished run pools its roTx: a paused EVM stays bound to it until
+		// the rebind, so pooling it would share one MDBX tx between two workers.
+		releaseSlot := func(pool bool) {
 			if !slotHeld {
 				return
+			}
+			if goRoTx != nil && pool {
+				select {
+				case pe.slotTxs <- goRoTx:
+					goRoTx = nil
+				default:
+				}
 			}
 			if goRoTx != nil {
 				goRoTx.Rollback()
@@ -1782,6 +1803,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			case <-pe.workersCtx.Done():
 				return false
 			}
+			select {
+			case goRoTx = <-pe.slotTxs:
+				return true
+			default:
+			}
 			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx) //nolint:gocritic // slot-tied rotx: rolled back on slot release (releaseSlot), not a defer here — it outlives this function
 			if err != nil {
 				pe.execSem <- struct{}{}
@@ -1792,7 +1818,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			goRoTx = tx
 			return true
 		}
-		defer releaseSlot()
+		defer releaseSlot(false)
 		// aborted latches once a terminal result (fatal verdict or operational infra
 		// failure) is sent. A mid-EVM waitCommit failure sends its result but cannot
 		// stop RunTxTask from continuing to completion, so the worker would otherwise
@@ -1827,7 +1853,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// releases this worker's slot, waits for that writer's task to commit,
 		// reacquires a slot, and retries the read against the final value.
 		tv.waitCommit = func(dep int) bool {
-			releaseSlot()
+			releaseSlot(false)
 			// dep is a versionMap TxIndex; translate to task-index frontier space.
 			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
 				return false
@@ -1892,7 +1918,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				return
 			}
 			if err := w.ResetTx(goRoTx); err != nil {
-				releaseSlot()
+				releaseSlot(false)
 				sendOperational(fmt.Errorf("block %d tx %d: reset roTx: %w", be.blockNum, tv.index, err))
 				return
 			}
@@ -1910,7 +1936,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				}
 			}
 			result := w.RunTxTask(tv)
-			releaseSlot()
+			releaseSlot(!aborted)
 			// A mid-EVM waitCommit failure already sent a terminal result and left the
 			// tx running against a dead roTx; its result is meaningless — stop here.
 			if aborted {
