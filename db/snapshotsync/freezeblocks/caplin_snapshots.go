@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -87,6 +88,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.KeepUnindexedlyCovered()
 	return c
 }
 
@@ -148,19 +150,103 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-// OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
-// segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
-
-func (s *CaplinSnapshots) OpenBeaconBlocks() error {
-	return s.openFolder(false, func(f snaptype.FileInfo) bool {
-		return f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks
-	})
+func (s *CaplinSnapshots) OpenFolder() error {
+	list, _, err := s.segmentsUpToGap()
+	if err != nil {
+		return err
+	}
+	return s.OpenList(list, false)
 }
 
-// Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
-// Go embedding has no virtual dispatch, so they would call the base OpenFolder.
+func (s *CaplinSnapshots) OpenBeaconBlocks() error {
+	list, _, err := s.segmentsUpToGap()
+	if err != nil {
+		return err
+	}
+	list = slices.DeleteFunc(list, func(name string) bool {
+		f, _, ok := snaptype.ParseFileName(s.Dir(), name)
+		return !ok || f.Type == nil || f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks
+	})
+	return s.OpenList(list, false)
+}
+
+func (s *CaplinSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	list, crossings, err := s.segmentsUpToGap()
+	if err != nil {
+		return err
+	}
+	keepers := make([]string, 0, len(list))
+	for _, t := range s.Types() {
+		s.WalkDirtySegments(t.Enum(), func(seg *snapshotsync.DirtySegment) bool {
+			if seg.IsIndexed() && slices.Contains(list, seg.FileName()) {
+				keepers = append(keepers, seg.FileName())
+			}
+			return true
+		})
+	}
+	var toRemove []string
+	for i := range crossings {
+		f := &crossings[i]
+		end := f.From
+		s.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(seg *snapshotsync.DirtySegment) bool {
+			if from, to := seg.GetRange(); from <= end && slices.Contains(keepers, seg.FileName()) {
+				end = max(end, to)
+			}
+			return true
+		})
+		if end < f.To {
+			continue
+		}
+		indexes, err := filepath.Glob(filepath.Join(s.Dir(), snaptype.IdxFileMask(f.From, f.To, snaptype.BeaconBlocks.Name())))
+		if err != nil {
+			return err
+		}
+		for _, index := range indexes {
+			toRemove = append(toRemove, filepath.Base(index))
+		}
+		toRemove = append(toRemove, f.Name())
+	}
+	if onDelete != nil && len(toRemove) > 0 {
+		if err := onDelete(toRemove); err != nil {
+			return fmt.Errorf("onDelete: %w", err)
+		}
+	}
+	return s.BaseRoSnapshots.RemoveOverlapsWithKeepers(onDelete, keepers, toRemove)
+}
+
+// Go embedding has no virtual dispatch: the promoted base version would open past a gap.
 func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
+
+// SegmentsMax is dirty-backed, so a beaconblocks segment past a gap or crossing must stay
+// closed: backfill stops at SegmentsMax and would never write the missing slots.
+func (s *CaplinSnapshots) segmentsUpToGap() ([]string, []snaptype.FileInfo, error) {
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
+	if err != nil {
+		return nil, nil, err
+	}
+	slices.SortFunc(files, func(a, b snaptype.FileInfo) int {
+		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(b.To, a.To))
+	})
+	list := make([]string, 0, len(files))
+	var crossings []snaptype.FileInfo
+	var end uint64
+	stopped := false
+	for i := range files {
+		if files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			stopped = stopped || (end > 0 && files[i].From > end)
+			if stopped {
+				continue
+			}
+			if files[i].From < end && files[i].To > end {
+				crossings = append(crossings, files[i])
+				continue
+			}
+			end = max(end, files[i].To)
+		}
+		list = append(list, files[i].Name())
+	}
+	return list, crossings, nil
+}
 
 type snapshotNotifier interface {
 	OnNewSnapshot()
@@ -174,23 +260,6 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 		notifier.OnNewSnapshot()
 	}
 	return nil
-}
-
-func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
-	if err != nil {
-		return err
-	}
-	list := make([]string, 0, len(files))
-	for i := range files {
-		if fileFilter != nil && !fileFilter(files[i]) {
-			continue
-		}
-		f := &files[i]
-		_, fName := filepath.Split(f.Path)
-		list = append(list, fName)
-	}
-	return s.OpenList(list, optimistic)
 }
 
 type CaplinView struct {
@@ -473,7 +542,11 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	if err := s.openFolder(true, nil); err != nil {
+	list, _, err := s.segmentsUpToGap()
+	if err != nil {
+		return err
+	}
+	if err := s.OpenList(list, true); err != nil {
 		return err
 	}
 

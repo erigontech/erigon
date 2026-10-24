@@ -536,25 +536,425 @@ func TestBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 1, "the reindexed segment must be published")
 }
 
-// SegmentsMax is dirty-backed and drives the archive backfill stop condition, so a segment
-// the backfill cannot walk back to must never reach the dirty set: caplin's own gap-filtered
-// scan is what keeps it out.
-func TestOpenFolderDropsSegmentsPastGap(t *testing.T) {
+func TestRemoveOverlapsUnlinksCoveredBeaconBlocks(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
 	dirs := datadir.New(t.TempDir())
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	segs, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.seg"))
+	require.NoError(t, err)
+	covering := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, 2*limit))
+	require.Equal(t, []string{covering}, segs, "covered segments must be unlinked")
+	require.Len(t, caplinIdxFiles(t, dirs), 1, "covered indexes must be unlinked")
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax(), "unlinking covered segments must not lower the dumped tip")
+}
+
+func TestRemoveOverlapsUnlinksBeaconBlocksBehindOlderVersionCover(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	files, err := filepath.Glob(filepath.Join(dirs.Snap, "v1.1-*-beaconblocks.*"))
+	require.NoError(t, err)
+	require.Len(t, files, 6)
+	for _, f := range files {
+		dir, name := filepath.Split(f)
+		require.NoError(t, os.Rename(f, filepath.Join(dir, "v1.0"+strings.TrimPrefix(name, "v1.1"))))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	segs, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.seg"))
+	require.NoError(t, err)
+	require.Len(t, segs, 1, "an indexed cover at an older version must still supersede what it covers")
+}
+
+func TestOpenStopsAtBeaconBlocksGap(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeIndexSalt(t, dirs)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, false)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 5*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.Len(t, caplinIdxFiles(t, dirs), 5)
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax(), "the dirty set must stop at the gap")
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+
+	segs, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.seg"))
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{
+		filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, 2*limit)),
+		filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 3*limit, 4*limit)),
+		filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 3*limit, 5*limit)),
+	}, segs, "only covered segments before the gap may be unlinked")
+	for _, name := range reported {
+		require.NotContains(t, name, "000030-000040", "a segment kept past the gap must keep seeding its index")
+	}
+}
+
+func TestOpenSkipsCrossingBeaconBlocks(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	for _, tc := range []struct {
+		followers []uint64
+		max       uint64
+	}{
+		{nil, 2*limit - 1},
+		{[]uint64{2 * limit, 3 * limit, 4 * limit}, 4*limit - 1},
+	} {
+		dirs := datadir.New(t.TempDir())
+		writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+		writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+		for i := 1; i < len(tc.followers); i++ {
+			writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, tc.followers[i-1], tc.followers[i], true)
+		}
+
+		sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+		t.Cleanup(sn.Close)
+		require.NoError(t, sn.OpenFolder())
+		require.Equal(t, tc.max, sn.SegmentsMax(), "followers: %v", tc.followers)
+		require.Equal(t, tc.max, sn.BlocksAvailable())
+		require.NoError(t, sn.RemoveOverlaps(nil))
+		for i := 1; i < len(tc.followers); i++ {
+			require.FileExists(t, filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, tc.followers[i-1], tc.followers[i])))
+		}
+		require.Equal(t, tc.max, sn.BlocksAvailable())
+		sn.Close()
+
+		reopened := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+		t.Cleanup(reopened.Close)
+		require.NoError(t, reopened.OpenFolder())
+		require.Equal(t, tc.max, reopened.SegmentsMax())
+	}
+}
+
+func TestRemoveOverlapsDoesNotReportBeaconBlocksBehindCrossingCover(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 4*limit, true)
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
 
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
 
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
 
+	for _, name := range reported {
+		require.NotContains(t, name, "000020-000030", "kept segments and their indexes must keep seeding")
+	}
+	segment := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 2*limit, 3*limit))
+	require.FileExists(t, segment)
+	require.FileExists(t, strings.TrimSuffix(segment, ".seg")+".idx")
+	require.Equal(t, uint64(3*limit-1), sn.BlocksAvailable())
+}
+
+func TestRemoveOverlapsUnlinksCoveredCrossingBeaconBlocks(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(4*limit-1), sn.BlocksAvailable())
+
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+
+	crossing := snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit)
+	crossingIdx := strings.TrimSuffix(crossing, ".seg") + ".idx"
+	require.NoFileExists(t, filepath.Join(dirs.Snap, crossing))
+	require.NoFileExists(t, filepath.Join(dirs.Snap, crossingIdx))
+	require.ElementsMatch(t, []string{crossing, crossingIdx}, reported)
+	for _, r := range [][2]uint64{{0, 2 * limit}, {2 * limit, 3 * limit}, {3 * limit, 4 * limit}} {
+		segment := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, r[0], r[1]))
+		require.FileExists(t, segment)
+		require.FileExists(t, strings.TrimSuffix(segment, ".seg")+".idx")
+	}
+	require.Equal(t, uint64(4*limit-1), sn.BlocksAvailable())
+	sn.Close()
+
+	reopened := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(reopened.Close)
+	require.NoError(t, reopened.OpenFolder())
+	require.Equal(t, uint64(4*limit-1), reopened.SegmentsMax())
+}
+
+func TestRemoveOverlapsUnlinksTorrentsOfCoveredCrossingBeaconBlocks(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+	crossing := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit))
+	crossingIdx := strings.TrimSuffix(crossing, ".seg") + ".idx"
+	for _, f := range []string{crossing, crossingIdx} {
+		require.NoError(t, os.WriteFile(f+".torrent", nil, 0o600))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+	sn.Close()
+
+	for _, f := range []string{crossing, crossingIdx} {
+		require.NoFileExists(t, f)
+		require.NoFileExists(t, f+".torrent")
+	}
+}
+
+func TestRemoveOverlapsDefersCrossingBeaconBlocksHeldByView(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
 	view := sn.View()
-	defer view.Close()
-	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
+	closeView := sync.OnceFunc(view.Close)
+	t.Cleanup(closeView)
+
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	crossing := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit))
+	crossingIdx := strings.TrimSuffix(crossing, ".seg") + ".idx"
+	require.FileExists(t, crossing, "a reader still maps the crossing segment")
+	require.FileExists(t, crossingIdx)
+
+	closeView()
+	require.NoFileExists(t, crossing, "the crossing segment must go once its readers drain")
+	require.NoFileExists(t, crossingIdx)
+	require.Equal(t, uint64(3*limit-1), sn.BlocksAvailable())
+}
+
+func TestRemoveOverlapsUnlinksCrossingIndexOfReplacedVersionHeldByView(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	files, err := filepath.Glob(filepath.Join(dirs.Snap, "v1.1-*-beaconblocks.*"))
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+	for _, f := range files {
+		dir, name := filepath.Split(f)
+		require.NoError(t, os.Rename(f, filepath.Join(dir, "v1.0"+strings.TrimPrefix(name, "v1.1"))))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	view := sn.View()
+	closeView := sync.OnceFunc(view.Close)
+	t.Cleanup(closeView)
+
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	require.NoError(t, sn.OpenFolder())
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+	closeView()
+	sn.Close()
+
+	_, crossingRange, _ := strings.Cut(snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit), "-")
+	left, err := filepath.Glob(filepath.Join(dirs.Snap, "*-"+strings.TrimSuffix(crossingRange, ".seg")+".*"))
+	require.NoError(t, err)
+	require.Empty(t, left, "no file of the crossing range may outlive its readers")
+	require.Contains(t, reported, "v1.0-"+strings.TrimSuffix(crossingRange, ".seg")+".idx")
+}
+
+func TestRemoveOverlapsKeepsUncoveredCrossingBeaconBlocks(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
+
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+
+	crossing := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit))
+	require.FileExists(t, crossing)
+	require.FileExists(t, strings.TrimSuffix(crossing, ".seg")+".idx")
+	require.Empty(t, reported)
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
+}
+
+func TestRemoveOverlapsKeepsBeaconBlocksBeyondNewGap(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(4*limit-1), sn.SegmentsMax())
+
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+
+	for _, r := range [][2]uint64{{limit, 3 * limit}, {3 * limit, 4 * limit}} {
+		segment := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, r[0], r[1]))
+		require.FileExists(t, segment)
+		require.FileExists(t, strings.TrimSuffix(segment, ".seg")+".idx")
+	}
+	require.Empty(t, reported)
+}
+
+func TestRemoveOverlapsKeepsIndexedBeaconBlocksBehindUnindexedCover(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	segs, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.seg"))
+	require.NoError(t, err)
+	require.Len(t, segs, 3, "indexed segments must stay until their cover is indexed")
+	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
+}
+
+func TestRemoveOverlapsKeepsBeaconBlocksBehindUnopenedCover(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
+	for _, from := range []uint64{0, limit} {
+		segment := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, from+limit))
+		require.FileExists(t, segment)
+		require.FileExists(t, strings.TrimSuffix(segment, ".seg")+".idx")
+	}
+}
+
+func TestRemoveOverlapsKeepsCrossingBeaconBlocksBehindUnopenedCover(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+
+	crossing := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit))
+	require.FileExists(t, crossing)
+	require.FileExists(t, strings.TrimSuffix(crossing, ".seg")+".idx")
+	require.Empty(t, reported)
+}
+
+func TestOpenAcceptsCoveredBeaconBlocks(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+
+	require.NoError(t, sn.OpenFolder(), "a covered segment is not a gap")
+	require.Equal(t, uint64(4*limit-1), sn.SegmentsMax())
+}
+
+func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
+	t.Helper()
+	salt := make([]byte, 4)
+	binary.BigEndian.PutUint32(salt, 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), salt, 0o600))
 }
 
 func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
@@ -576,7 +976,7 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
 
-	files, _, err := snapshotsync.SegmentsCaplin(dirs.Snap)
+	files, err := snapshotsync.AllTypedSegments(dirs.Snap, snaptype.CaplinSnapshotTypes)
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 	list := make([]string, 0, len(files))
@@ -599,57 +999,6 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 		})
 	}
 	require.NoError(t, eg.Wait())
-}
-
-// BaseRoSnapshots.BuildMissedIndices is promoted onto CaplinSnapshots and reopens the
-// folder after indexing. Go embedding has no virtual dispatch, so that reopen must not
-// reach the unfiltered base scan: SegmentsMax drives the archive backfill stop condition
-// and would then advance past a gap the backfill cannot walk back to.
-func TestPromotedBuildMissedIndicesKeepsGapFilter(t *testing.T) {
-	const limit = snaptype.CaplinMergeLimit
-
-	dirs := datadir.New(t.TempDir())
-	writeIndexSalt(t, dirs)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
-
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
-	require.NoError(t, sn.OpenFolder())
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax(), "the segment past the gap must not be dirty")
-
-	require.NoError(t, sn.BuildMissedIndices(t.Context(), "test", nil, dirs, nil, log.New()))
-
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax(), "the reopen after indexing must keep the gap filter")
-
-	view := sn.View()
-	defer view.Close()
-	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
-}
-
-// Caplin's own BuildMissingIndices reopens through the gap-filtered scan, so it is a
-// correct delegation target for the shadow above.
-func TestCaplinBuildMissingIndicesKeepsGapFilter(t *testing.T) {
-	const limit = snaptype.CaplinMergeLimit
-
-	dirs := datadir.New(t.TempDir())
-	writeIndexSalt(t, dirs)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
-
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
-	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
-
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
-	require.Len(t, caplinIdxFiles(t, dirs), 2, "both segments on disk must end up indexed")
-}
-
-func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
-	t.Helper()
-	salt := make([]byte, 4)
-	binary.BigEndian.PutUint32(salt, 1)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), salt, 0o600))
 }
 
 // Without a count from the blocks, a slot whose count row is missing from the blob store

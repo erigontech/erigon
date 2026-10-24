@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,59 +53,6 @@ import (
 type SortedRange interface {
 	GetRange() (from, to uint64)
 	GetGrouping() string
-}
-
-// NoOverlaps - keep largest ranges and avoid overlap
-func NoOverlaps[T SortedRange](in []T) (res []T) {
-	if len(in) == 1 {
-		return in
-	}
-
-	for i := 0; i < len(in); i++ {
-		r := in[i]
-		iFrom, iTo := r.GetRange()
-		if iFrom == iTo {
-			continue
-		}
-		for j := i + 1; j < len(in); j++ {
-			r2 := in[j]
-			jFrom, jTo := r2.GetRange()
-			if jFrom == jTo {
-				continue
-			}
-			if jFrom > iFrom {
-				break
-			}
-			r = r2
-			i++
-		}
-		res = append(res, r)
-	}
-	return res
-}
-
-func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	if len(in) == 1 {
-		return in, nil
-	}
-
-	prevTo, _ := in[0].GetRange()
-	for _, f := range in {
-		from, to := f.GetRange()
-		if to <= prevTo {
-			continue
-		}
-		if from != prevTo { // no gaps
-			missingRanges = append(missingRanges, Range{prevTo, from})
-			continue
-		}
-		prevTo = to
-		out = append(out, f)
-	}
-	return out, missingRanges
 }
 
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
@@ -521,7 +469,7 @@ type BaseRoSnapshots struct {
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
 	// keepUnindexedlyCovered opts RemoveOverlaps into refusing to unlink a subset whose only
-	// covering superset has no index. EL relies on the plain behaviour; caplin state does not.
+	// covering superset has no index. EL relies on the plain behaviour; caplin does not.
 	keepUnindexedlyCovered bool
 
 	// (type, from, to) of files a producer is currently building — a merge
@@ -575,6 +523,8 @@ type snapshotVisible struct {
 func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	return newRoSnapshots(cfg, snapDir, types, baseSegType, alignMin, logger)
 }
+
+func (s *BaseRoSnapshots) KeepUnindexedlyCovered() { s.keepUnindexedlyCovered = true }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	if cfg.ChainName == "" {
@@ -1527,13 +1477,20 @@ func supersededEqualRangeVersions(list []snaptype.FileInfo) (kept, superseded []
 // keepUnindexedlyCovered moves back any removal whose covering superset has no index on
 // disk. buildVisibleSegments requires IsIndexed, so unlinking an indexed subset for an
 // unindexed superset leaves the range unreadable until someone rebuilds indexes.
-func keepUnindexedlyCovered(dirPath string, keep, remove []snaptype.FileInfo) ([]snaptype.FileInfo, []snaptype.FileInfo) {
+func keepUnindexedlyCovered(idxList, keep, remove []snaptype.FileInfo, eligibleKeepers []string) ([]snaptype.FileInfo, []snaptype.FileInfo) {
 	if len(remove) == 0 {
 		return keep, remove
 	}
+	onDisk := make(map[string]struct{}, len(idxList))
+	for i := range idxList {
+		onDisk[unversionedName(idxList[i].Name())] = struct{}{}
+	}
 	indexed := make([]snaptype.FileInfo, 0, len(keep))
 	for i := range keep {
-		if isIndexedOnDisk(dirPath, keep[i]) {
+		if eligibleKeepers != nil && !slices.Contains(eligibleKeepers, keep[i].Name()) {
+			continue
+		}
+		if isIndexedOnDisk(onDisk, keep[i]) {
 			indexed = append(indexed, keep[i])
 		}
 	}
@@ -1561,20 +1518,28 @@ func hasIndexedKeeper(indexed []snaptype.FileInfo, rm *snaptype.FileInfo) bool {
 	return false
 }
 
-func isIndexedOnDisk(dirPath string, f snaptype.FileInfo) bool {
+func isIndexedOnDisk(onDisk map[string]struct{}, f snaptype.FileInfo) bool {
 	if f.Type == nil {
 		return false
 	}
 	for _, name := range f.Type.IdxFileNames(f.From, f.To) {
-		ok, err := dir.FileExist(filepath.Join(dirPath, name))
-		if err != nil || !ok {
+		if _, ok := onDisk[unversionedName(name)]; !ok {
 			return false
 		}
 	}
 	return true
 }
 
+func unversionedName(name string) string {
+	_, rest, _ := strings.Cut(name, "-")
+	return rest
+}
+
 func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	return s.RemoveOverlapsWithKeepers(onDelete, nil, nil)
+}
+
+func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) error, eligibleKeepers, crossings []string) error {
 	notOwned := func(f snaptype.FileInfo) bool { return !s.HasType(f.Type) }
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
@@ -1584,23 +1549,55 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	list, superseded := supersededEqualRangeVersions(list)
 	keepSegments, segmentsToRemove := findOverlaps(list)
 	segmentsToRemove = append(segmentsToRemove, superseded...)
-	if s.keepUnindexedlyCovered {
-		keepSegments, segmentsToRemove = keepUnindexedlyCovered(s.dir, keepSegments, segmentsToRemove)
-	}
-
-	keepNames := make([]string, 0, len(keepSegments))
-	for i := range keepSegments {
-		keepNames = append(keepNames, keepSegments[i].Name())
-	}
-
 	idxList, err := snaptype.IdxFiles(s.dir)
 	if err != nil {
 		return err
 	}
 	idxList = slices.DeleteFunc(idxList, notOwned)
+	if s.keepUnindexedlyCovered || eligibleKeepers != nil {
+		keepSegments, segmentsToRemove = keepUnindexedlyCovered(idxList, keepSegments, segmentsToRemove, eligibleKeepers)
+	}
+	keepSegments = slices.DeleteFunc(keepSegments, func(f snaptype.FileInfo) bool { return slices.Contains(crossings, f.Name()) })
+
+	keepNames := make([]string, 0, len(keepSegments))
+	for i := range keepSegments {
+		keepNames = append(keepNames, keepSegments[i].Name())
+	}
 	idxList, supersededIdx := supersededEqualRangeVersions(idxList)
 	_, accessorsToRemove := findOverlaps(idxList)
 	accessorsToRemove = append(accessorsToRemove, supersededIdx...)
+	if eligibleKeepers != nil {
+		keptIndexes := make(map[string]struct{})
+		for _, typ := range s.enums {
+			s.WalkDirtySegments(typ, func(seg *DirtySegment) bool {
+				if slices.Contains(keepNames, seg.FileName()) {
+					for _, index := range seg.indexes {
+						if index != nil {
+							keptIndexes[index.FilePath()] = struct{}{}
+						}
+					}
+				}
+				return true
+			})
+		}
+		retained := make(map[string]struct{})
+		for i := range keepSegments {
+			for _, name := range keepSegments[i].Type.IdxFileNames(keepSegments[i].From, keepSegments[i].To) {
+				retained[unversionedName(name)] = struct{}{}
+			}
+		}
+		for i := range idxList {
+			if _, ok := retained[unversionedName(idxList[i].Name())]; ok {
+				keptIndexes[idxList[i].Path] = struct{}{}
+			}
+		}
+		isKeptIndex := func(f snaptype.FileInfo) bool {
+			_, kept := keptIndexes[f.Path]
+			return kept
+		}
+		accessorsToRemove = slices.DeleteFunc(accessorsToRemove, isKeptIndex)
+		supersededIdx = slices.DeleteFunc(supersededIdx, isKeptIndex)
+	}
 
 	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone
 	// (kill between deletes): those have no DirtySegment, so reclamation can't reach them.
@@ -1634,6 +1631,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		defer s.dirtyLock.Unlock()
 		retired := s.retireSegmentsNotInList(mvcc.RetireReasonMerged, keepNames)
 		s.recalcVisibleFiles(s.alignMin, retired)
+		s.removeUnheld(crossings)
 	}()
 
 	s.removeOrphanedIdx(supersededIdx)
@@ -1715,6 +1713,30 @@ func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 		orphans = append(orphans, superseded[i].Path)
 	}
 	removeOldFiles(orphans) // pairs each file with its .torrent, as reclamation does
+}
+
+func (s *BaseRoSnapshots) removeUnheld(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	holders := make(map[string]*DirtySegment)
+	s.forEachRetired(func(seg *DirtySegment) {
+		for _, name := range seg.FilePaths(s.dir) {
+			holders[name] = seg
+		}
+	})
+	unheld := make([]string, 0, len(names))
+	for _, name := range names {
+		if holder, ok := holders[name]; ok {
+			holder.canDelete.Store(true)
+			if name != holder.FileName() {
+				holder.keepIdxFiles.Store(false)
+			}
+			continue
+		}
+		unheld = append(unheld, filepath.Join(s.dir, name))
+	}
+	removeOldFiles(unheld)
 }
 
 func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []string, err error) {
@@ -2159,36 +2181,4 @@ func removeOldFiles(toDel []string) {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
 	}
-}
-
-func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	{
-		var l, lSidecars []snaptype.FileInfo
-		var m []Range
-		for i := range list {
-			f := &list[i]
-			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-				continue
-			}
-			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, *f) // blobs are an exception
-				continue
-			}
-			l = append(l, *f)
-		}
-		l, m = NoGaps(NoOverlaps(l))
-		if len(m) > 0 {
-			lst := m[len(m)-1]
-			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.From())
-		}
-		res = append(res, l...)
-		res = append(res, lSidecars...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	return res, missingSnapshots, nil
 }
