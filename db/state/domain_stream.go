@@ -364,6 +364,10 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
+		if (*hi.h)[0].btCursor != nil {
+			lastKey = append(hi.k[:0], lastKey...)
+			lastVal = append(hi.v[:0], lastVal...)
+		}
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
