@@ -1771,16 +1771,21 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// (workersCtx cancelled — return silently), non-nil means an infrastructure
 		// failure the caller must surface as an operational result.
 		var slotErr error
-		releaseSlot := func() {
+		// Only a finished run pools its roTx: a paused EVM stays bound to it until
+		// the rebind, so pooling it would share one MDBX tx between two workers.
+		releaseSlot := func(pool bool) {
 			if !slotHeld {
 				return
 			}
-			if goRoTx != nil {
+			if goRoTx != nil && pool {
 				select {
 				case pe.slotTxs <- goRoTx:
+					goRoTx = nil
 				default:
-					goRoTx.Rollback()
 				}
+			}
+			if goRoTx != nil {
+				goRoTx.Rollback()
 				goRoTx = nil
 			}
 			pe.execSem <- struct{}{}
@@ -1813,7 +1818,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			goRoTx = tx
 			return true
 		}
-		defer releaseSlot()
+		defer releaseSlot(false)
 		// aborted latches once a terminal result (fatal verdict or operational infra
 		// failure) is sent. A mid-EVM waitCommit failure sends its result but cannot
 		// stop RunTxTask from continuing to completion, so the worker would otherwise
@@ -1848,7 +1853,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// releases this worker's slot, waits for that writer's task to commit,
 		// reacquires a slot, and retries the read against the final value.
 		tv.waitCommit = func(dep int) bool {
-			releaseSlot()
+			releaseSlot(false)
 			// dep is a versionMap TxIndex; translate to task-index frontier space.
 			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
 				return false
@@ -1913,7 +1918,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				return
 			}
 			if err := w.ResetTx(goRoTx); err != nil {
-				releaseSlot()
+				releaseSlot(false)
 				sendOperational(fmt.Errorf("block %d tx %d: reset roTx: %w", be.blockNum, tv.index, err))
 				return
 			}
@@ -1931,7 +1936,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				}
 			}
 			result := w.RunTxTask(tv)
-			releaseSlot()
+			releaseSlot(!aborted)
 			// A mid-EVM waitCommit failure already sent a terminal result and left the
 			// tx running against a dead roTx; its result is meaningless — stop here.
 			if aborted {
