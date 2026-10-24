@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -2824,58 +2823,6 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 		}
 		writes.deleteAddr(addr)
 	}
-}
-
-// removeTouchedEmptyAccounts deletes each account that existed before the tx
-// and that the tx touched and left empty (EIP-161). The deletion reaches the
-// version map with the writes, so later txs see the account as absent. The
-// incarnation write also invalidates a later tx that read only the account's
-// existence, as for a self-destruct.
-func (ibs *IntraBlockState) removeTouchedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet, deferredFeeRecipients []accounts.Address) {
-	if ibs.blockNum == 0 || chainRules == nil {
-		return
-	}
-	version := ibs.Version()
-	// Every touch writes the balance.
-	for addr, balance := range writes.balance {
-		if !balance.Val.IsZero() || !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) || slices.Contains(deferredFeeRecipients, addr) {
-			continue
-		}
-		if _, hasSelfDestructWrite := writes.selfDestruct[addr]; hasSelfDestructWrite {
-			continue
-		}
-		read, ok := ibs.versionedReads.GetAddress(addr)
-		if !ok || read.Val == nil || read.Val.IsNil() || !ibs.nonceAndCodeEmpty(addr, writes) {
-			continue
-		}
-		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version}, Val: true})
-		writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: version}})
-	}
-}
-
-// nonceAndCodeEmpty reports whether addr has a zero nonce and no code after the
-// tx, judged only from the tx's own writes and recorded reads, so validation
-// covers the verdict. A field the tx neither wrote nor read leaves it false.
-func (ibs *IntraBlockState) nonceAndCodeEmpty(addr accounts.Address, writes *WriteSet) bool {
-	nonce, ok := finalField(addr, writes.nonce, ibs.versionedReads.nonce)
-	if !ok || nonce != 0 {
-		return false
-	}
-	codeHash, ok := finalField(addr, writes.codeHash, ibs.versionedReads.codeHash)
-	return ok && codeHash.IsEmpty()
-}
-
-// finalField returns the tx's own write of a field, else the value it read. It
-// does not depend on the journal, which FinalizeTx clears.
-func finalField[T any](addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], reads map[accounts.Address]VersionedRead[T]) (T, bool) {
-	if vw, ok := writes[addr]; ok {
-		return vw.Val, true
-	}
-	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
-		return tr.Val, true
-	}
-	var zero T
-	return zero, false
 }
 
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.
