@@ -78,19 +78,32 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 // state deltas - but only Txs drives the txpool's removeMined, and a block that was not chosen
 // mined nothing.
 //
-// `canonical` reports the chosen hash at a height, and false when it cannot say. Cannot-say is
-// treated as not-canonical, because removing too little self-corrects on the next block while
-// removing too much strands a sender for ever.
-func (a *Accumulator) KeepOnlyCanonicalTxs(canonical func(height uint64) (common.Hash, bool)) {
+// `canonical` reports the chosen hash at a height, and false when it cannot say.
+//
+// ⚠ IT RETURNS WHAT IT CLEARED, AND THE CALLER MUST SAY SO. Clearing silently is how this went
+// wrong: "cannot say" was treated as not-canonical on the reasoning that removing too little
+// self-corrects, and it does not — the txpool is told a height mined nothing and never hears about
+// that height again. Measured across soaks: removals with reason Mined went 4,627 (live439, before
+// this function existed) to exactly 0 (live440 onward), and every departure fell back to the lazy
+// nonce-too-low sweep that only runs for a sender the pool is told changed.
+func (a *Accumulator) KeepOnlyCanonicalTxs(canonical func(height uint64) (common.Hash, bool)) (kept, unresolved, mismatched int) {
 	for i := range a.changes {
 		if len(a.changes[i].Txs) == 0 {
 			continue
 		}
 		h, ok := canonical(a.changes[i].BlockHeight)
-		if !ok || h != a.changes[i].BlockHash {
+		switch {
+		case !ok:
 			a.changes[i].Txs = nil
+			unresolved++
+		case h != a.changes[i].BlockHash:
+			a.changes[i].Txs = nil
+			mismatched++
+		default:
+			kept++
 		}
 	}
+	return kept, unresolved, mismatched
 }
 
 // StartChange begins accumulation of changes for a new block.

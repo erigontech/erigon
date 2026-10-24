@@ -166,13 +166,21 @@ func (d *Dispatcher) Dispatch(
 		// Now: no body is read, no height is special, and a block that was not chosen says nothing
 		// mined. A height whose canonical hash cannot be read is treated as not chosen, because
 		// removing too little self-corrects on the next block and removing too much strands a sender.
-		accumulator.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
+		kept, unresolved, mismatched := accumulator.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
 			h, err := rawdb.ReadCanonicalHash(tx, height)
 			if err != nil || h == (common.Hash{}) {
 				return common.Hash{}, false
 			}
 			return h, true
 		})
+		// NEVER CLEAR SILENTLY. If every height is cleared, the txpool is told nothing was ever
+		// mined and keeps every transaction the chain has already taken — which is what happened,
+		// unnoticed, because this said nothing. unresolved is the one to watch: it means the
+		// canonical hash for a height we just executed could not be read here at all.
+		if unresolved > 0 || mismatched > 0 {
+			d.logger.Warn("[accumulator] heights announcing no mined transactions",
+				"kept", kept, "unresolved", unresolved, "mismatched", mismatched)
+		}
 		// Genuinely empty flush (no change for the current head) — keep the empty backfill so consumers still
 		// see the head advance. Standard flow: exec already populated the change, so this is a no-op.
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {

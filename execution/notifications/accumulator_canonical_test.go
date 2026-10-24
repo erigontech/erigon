@@ -73,3 +73,37 @@ func TestOnlyTheCanonicalBlockAnnouncesItsTransactions(t *testing.T) {
 			"runs ahead, and a prediction may not say something mined")
 	}
 }
+
+// The counts are the contract now, because clearing silently is what let a total failure of
+// mined-removal run unnoticed for four soaks: every height cleared, the txpool told nothing was
+// ever mined, and no line anywhere said so.
+func TestKeepOnlyCanonicalTxsReportsWhatItCleared(t *testing.T) {
+	txn := func(n byte) []byte { return []byte{n} }
+	chosen := common.HexToHash("0xc0")
+
+	a := NewAccumulator()
+	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{txn(1)}, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(2)}, [][]byte{txn(2)}, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(3)}, [][]byte{txn(3)}, false)
+	// A change with no transactions is not counted either way.
+	a.StartChange(&types.Header{Number: *uint256.NewInt(4)}, nil, false)
+
+	chs := a.Changes()
+	chs[0].BlockHash = chosen
+	chs[1].BlockHash = chosen
+	chs[2].BlockHash = chosen
+
+	kept, unresolved, mismatched := a.KeepOnlyCanonicalTxs(func(height uint64) (common.Hash, bool) {
+		switch height {
+		case 1:
+			return chosen, true
+		case 2:
+			return common.HexToHash("0xbb"), true // another block won
+		default:
+			return common.Hash{}, false // cannot say
+		}
+	})
+	if kept != 1 || mismatched != 1 || unresolved != 1 {
+		t.Fatalf("kept=%d unresolved=%d mismatched=%d, want 1/1/1", kept, unresolved, mismatched)
+	}
+}
