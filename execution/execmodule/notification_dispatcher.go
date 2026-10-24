@@ -198,6 +198,10 @@ func (d *Dispatcher) Dispatch(
 
 		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
 
+		// ⚠ NOTHING ABOVE THE FCU'd HEIGHT MAY CLAIM TO HAVE MINED. SendAndReset publishes EVERY
+		// accumulated change, and pre-execution creates one per height it runs - ahead of this FCU. See
+		// ClearChangeTxsAbove: the state deltas still go out, only the mined-transaction claim does not.
+		accumulator.ClearChangeTxsAbove(finishProgressAfter)
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil

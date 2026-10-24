@@ -124,6 +124,30 @@ func (a *Accumulator) SetCanonicalChangeTxs(height uint64, txs [][]byte) {
 	}
 }
 
+// ClearChangeTxsAbove drops the transaction list from every accumulated change ABOVE `height`,
+// leaving the changes themselves intact.
+//
+// ⚠ A CHANGE ABOVE THE CANONICAL HEAD IS A PREDICTION, AND SendAndReset PUBLISHES ALL OF THEM.
+// Pre-execution starts a change for every height it runs, and it runs AHEAD of what has been
+// forkchoice-updated. Reconciling only the FCU'd height therefore left every height above it
+// carrying the pre-executed set, which went out as a FORWARD state change and the txpool took as
+// MINED - removing each sender's whole run at or below it, permanently.
+//
+// Measured across three successive fixes on the same soak, the hole shrank and did not close:
+// frontGap 93 (no fix) -> 87 (canonical body authoritative) -> 34 (empty body clears the guess).
+// Each fix closed one path into the same defect; this closes the one that remained.
+//
+// Only the Txs list drives removeMined, so the state deltas are left alone: pre-confirmation still
+// publishes them, which is the whole point of running ahead. What a prediction may not do is
+// announce that something MINED.
+func (a *Accumulator) ClearChangeTxsAbove(height uint64) {
+	for i := range a.changes {
+		if a.changes[i].BlockHeight > height && len(a.changes[i].Txs) > 0 {
+			a.changes[i].Txs = nil
+		}
+	}
+}
+
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	a.changes = append(a.changes, StateChange{

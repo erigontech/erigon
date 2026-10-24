@@ -68,3 +68,35 @@ func TestAnEmptyCanonicalBodyClearsThePreExecutedGuess(t *testing.T) {
 			"below it", got)
 	}
 }
+
+// A CHANGE ABOVE THE CANONICAL HEAD MAY NOT CLAIM ANYTHING MINED.
+//
+// SendAndReset publishes EVERY accumulated change, and pre-execution starts one for every height it
+// runs — ahead of what has been forkchoice-updated. Reconciling only the FCU'd height left every
+// height above it carrying the pre-executed set, which the txpool took as mined and deleted along
+// with each sender's whole run below it.
+//
+// The hole shrank across three fixes without closing — frontGap 93 -> 87 -> 34 — because each
+// closed one path into the same defect. This is the one that remained.
+func TestChangesAboveTheFCUHeightAnnounceNothingMined(t *testing.T) {
+	txn := func(n byte) []byte { return []byte{n} }
+	a := NewAccumulator()
+
+	// Canonical head is 1; pre-execution has already run 2 and 3.
+	a.StartChange(&types.Header{Number: *uint256.NewInt(1)}, [][]byte{txn(1)}, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(2)}, [][]byte{txn(2)}, false)
+	a.StartChange(&types.Header{Number: *uint256.NewInt(3)}, [][]byte{txn(3)}, false)
+
+	a.ClearChangeTxsAbove(1)
+
+	chs := a.Changes()
+	if len(chs[0].Txs) != 1 {
+		t.Fatalf("the FCU'd height lost its body: %d txs", len(chs[0].Txs))
+	}
+	for _, ch := range chs[1:] {
+		if len(ch.Txs) != 0 {
+			t.Fatalf("height %d is ABOVE the canonical head and still claims %d mined tx(s) — the pool "+
+				"will delete them and every nonce below them, permanently", ch.BlockHeight, len(ch.Txs))
+		}
+	}
+}
