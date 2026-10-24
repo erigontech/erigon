@@ -1775,7 +1775,7 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 				}
 			}
 		}
-		for _, target := range bounds[1:] {
+		for _, target := range append(bounds[1:], int(txNums[min(5, len(txNums)-1)])+1) {
 			for _, asc := range []order.By{order.Asc, order.Desc} {
 				s, err := newIIChunkStream(tx, table, []byte(k), -1, -1, asc, -1)
 				require.NoError(t, err)
