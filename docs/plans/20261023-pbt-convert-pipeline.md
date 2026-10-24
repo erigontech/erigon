@@ -458,14 +458,19 @@ flowchart LR
 - [x] run the gate — must pass before Task 14.
 
 ### Task 14: Scale benchmark
-**Files:**
-- Create: `db/state/pbt_convert_bench_test.go`
-
-- [ ] `BenchmarkPBinConvert` on a ≥ 100M-leaf generated datadir: per-phase wall time, CPU-seconds and RssAnon at
-      workers 1/4/8/16, plus the skip-lane share.
-- [ ] `--resume` over gaps of 1%, 5% and 20% of the leaves: wall time against a fresh convert.
-- [ ] record the numbers in the plan and the research log.
-- [ ] run the gate — must pass before Task 15.
+- [ ] Use a hard-linked clone of `/Volumes/dev/chains/hoodi-pbt/src4` (61 GB, commitment layout `0-16` and `16-17`);
+      no node runs.
+- [ ] Run the arms:
+  - the pre-change converter built from `c4892e8a808`;
+  - this branch at `--workers` 1, 4, 8 and 16;
+  - one resume with X at step 16, the newest unmerged step file removed from a clone, and Y at the full `src4`,
+    timed against a fresh convert at Y. Only one gap size is possible: `0-16` is a zero-start file, and resume
+    refuses it.
+- [ ] Measure per-phase wall time from the progress lines, CPU seconds and peak memory footprint with
+      `/usr/bin/time -l`, the skip-lane share per range, and the machine and its load at each start.
+- [ ] Check that bin files are byte-identical across worker counts, and that the resumed root equals the fresh
+      convert's, with C-d and C-e passing on both.
+- [ ] Drop `BenchmarkPBinConvert`.
 
 ### Task 15: Verify acceptance criteria
 - [ ] every Overview item is implemented and reached from `convert-pbt` or `attach-pbt`.
