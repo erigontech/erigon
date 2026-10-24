@@ -376,7 +376,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
 	if oldGasLimit != stateChanges.BlockGasLimit {
 		p.all.ascendAll(func(mt *metaTxn) bool {
-			if mt.TxnSlot.GetGas() < stateChanges.BlockGasLimit {
+			if mt.TxnSlot.GetGas() <= stateChanges.BlockGasLimit {
 				mt.subPool |= NotTooMuchGas
 			} else {
 				mt.subPool &^= NotTooMuchGas
@@ -797,7 +797,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		if mt.TxnSlot.GetGas() >= p.blockGasLimit.Load() {
+		if mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
 		}
@@ -2311,7 +2311,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 
 		mt.subPool &^= NotTooMuchGas
-		if mt.TxnSlot.GetGas() < blockGasLimit {
+		if mt.TxnSlot.GetGas() <= blockGasLimit {
 			mt.subPool |= NotTooMuchGas
 		}
 
