@@ -235,13 +235,13 @@ func pbinResumeEmitAddress(address []byte, accountStamp, codeStamp, storageStamp
 			eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey),
 			eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey),
 		} {
-			if err := pbinResumeCollectOp(collector, pbt.Op{Key: key}, headerStamp); err != nil {
-				return err
+			if collectErr := pbinResumeCollectOp(collector, pbt.Op{Key: key}, headerStamp); collectErr != nil {
+				return collectErr
 			}
 		}
 		for _, slot := range storageSlots {
-			if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyStorage(address, slot)}, storageStamps[string(eip8297.TreeKeyStorage(address, slot))]); err != nil {
-				return err
+			if collectErr := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyStorage(address, slot)}, storageStamps[string(eip8297.TreeKeyStorage(address, slot))]); collectErr != nil {
+				return collectErr
 			}
 		}
 		return nil

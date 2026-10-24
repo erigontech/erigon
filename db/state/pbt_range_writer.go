@@ -707,11 +707,13 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	defer w.closeRanges()
 	var err error
 	if w.resume {
-		if err := w.resumeDomain(tx); err != nil {
+		err = w.resumeDomain(tx)
+		if err != nil {
 			return common.Hash{}, err
 		}
 	} else {
-		fresh, err := w.freshDomain(tx)
+		var fresh bool
+		fresh, err = w.freshDomain(tx)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -782,8 +784,8 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return computeErr
 		}
 		if final {
-			if err := overlay.Flush(); err != nil {
-				return err
+			if flushErr := overlay.Flush(); flushErr != nil {
+				return flushErr
 			}
 			return nil
 		}
