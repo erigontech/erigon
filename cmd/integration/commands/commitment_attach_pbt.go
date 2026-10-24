@@ -209,6 +209,23 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := validatePBTAttachSalts(nodeDirs, publishedDirs); err != nil {
 		return err
 	}
+	manifestPath := filepath.Join(publishedDirs.Snap, "pbt-manifest.toml")
+	manifest, manifestErr := dbstate.ReadPBTManifest(manifestPath)
+	manifestAvailable := true
+	if errors.Is(manifestErr, fs.ErrNotExist) {
+		manifestAvailable = false
+	} else if manifestErr != nil {
+		return fmt.Errorf("commitment attach-pbt: read pbt-manifest.toml: %w", manifestErr)
+	}
+	if manifestAvailable {
+		sources, sourceErr := pbtAttachManifestSources(publishedDirs)
+		if sourceErr != nil {
+			return fmt.Errorf("commitment attach-pbt: manifest files: %w", sourceErr)
+		}
+		if fileSetErr := dbstate.ValidatePBTManifestFileSet(manifest, sources); fileSetErr != nil {
+			return fileSetErr
+		}
+	}
 	if marker == nil {
 		nodeFiles, fileErr := pbtAttachFiles(nodeDirs)
 		if fileErr != nil {
@@ -252,23 +269,6 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		}
 		if nodeBlock != blockNum || nodeTx != txNum {
 			return fmt.Errorf("commitment attach-pbt: resumed node state is (%d, %d), want (%d, %d)", nodeBlock, nodeTx, blockNum, txNum)
-		}
-	}
-	manifestPath := filepath.Join(publishedDirs.Snap, "pbt-manifest.toml")
-	manifest, manifestErr := dbstate.ReadPBTManifest(manifestPath)
-	manifestAvailable := true
-	if errors.Is(manifestErr, fs.ErrNotExist) {
-		manifestAvailable = false
-	} else if manifestErr != nil {
-		return fmt.Errorf("commitment attach-pbt: read pbt-manifest.toml: %w", manifestErr)
-	}
-	if manifestAvailable {
-		sources, sourceErr := pbtAttachManifestSources(publishedDirs)
-		if sourceErr != nil {
-			return fmt.Errorf("commitment attach-pbt: manifest files: %w", sourceErr)
-		}
-		if fileSetErr := dbstate.ValidatePBTManifestFileSet(manifest, sources); fileSetErr != nil {
-			return fileSetErr
 		}
 	}
 	if !manifestAvailable {
