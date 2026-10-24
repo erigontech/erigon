@@ -553,10 +553,21 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// state step has more work" (TestEngineApiEmptyBlockProduction and the
 					// engine-API cluster). When the applied range is complete, treat it as
 					// a clean batch end.
-					if lastBlockResult.BlockNum >= pe.maxBlockNum && len(applyLoopMissingBlocks(txResultBlocks, appliedBlocks)) == 0 {
+					missingHere := applyLoopMissingBlocks(txResultBlocks, appliedBlocks)
+					if lastBlockResult.BlockNum >= pe.maxBlockNum && len(missingHere) == 0 {
 						return nil
 					}
-					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+					// ⚠ SAY WHICH OF THE TWO CONDITIONS FAILED. The clean-exit test above is the one
+					// that is supposed to catch a single-block fork validation, and measured on soak
+					// live450 it did not: 228 exhaustions, every one of them from==to, every one
+					// reported as "block batch is full". A bare reason cannot tell "the batch ended
+					// before the block we were asked for" from "a block's results arrived but its
+					// blockResult never did", and those have opposite fixes.
+					return &ErrLoopExhausted{
+						From: startBlockNum, To: lastBlockResult.BlockNum,
+						Reason: fmt.Sprintf("block batch is full (last=%d max=%d missingResults=%d)",
+							lastBlockResult.BlockNum, pe.maxBlockNum, len(missingHere)),
+					}
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
