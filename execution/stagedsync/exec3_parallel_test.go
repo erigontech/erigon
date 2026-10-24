@@ -573,7 +573,7 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 	return nil
 }
 
-func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
+func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, logger log.Logger) time.Duration {
 	tb.Helper()
 	ctx := tb.Context()
 
@@ -621,7 +621,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	}
 
 	start := time.Now()
-	result, err := executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	result, err := executeParallelWithCheck(pe, tasks, false, validation)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 	if result != nil {
@@ -662,7 +662,7 @@ type propertyCheck func(*parallelExecutor) error
 // ParallelValidationsTotal exposes the parallel executor's validation count to stagedsync_test.
 func ParallelValidationsTotal() int64 { return validationsTotal.Load() }
 
-func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -716,7 +716,7 @@ func TestExecuteParallelWithCheckCancelsBeforeWait(t *testing.T) {
 	task := NewTestExecTask(0, nil, accounts.InternAddress(common.Address{}), 0)
 	done := make(chan error, 1)
 	go func() {
-		_, err := executeParallelWithCheck(t, pe, []exec.Task{task}, false, nil, false)
+		_, err := executeParallelWithCheck(pe, []exec.Task{task}, false, nil)
 		done <- err
 	}()
 
@@ -809,7 +809,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		task.ctx = executorContext //nolint:fatcontext
 	}
 
-	res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+	res, err := executeParallelWithCheck(pe, tasks, true, validation)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 
@@ -867,7 +867,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			task.ctx = executorCtx //nolint:fatcontext
 		}
 
-		res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+		res, err := executeParallelWithCheck(pe, tasks, true, validation)
 		assert.NoError(tb, err, "error during profiling pass")
 		cleanup() // cleanup eagerly so pass 2 gets a clean slate
 		allDeps = res.AllDeps
@@ -887,7 +887,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 
 	start := time.Now()
-	_, err := executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	_, err := executeParallelWithCheck(pe, tasks, false, validation)
 	assert.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
@@ -964,7 +964,7 @@ func TestZeroTx(t *testing.T) {
 	}
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(1))) }
 	tasks, _ := taskFactory(0, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestLessConflicts verifies correctness with low-contention sender distribution.
@@ -975,7 +975,7 @@ func TestLessConflicts(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0))
 	tasks, _ := taskFactory(10, lessConflictsSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestMoreConflicts verifies correctness with high-contention sender distribution.
@@ -986,7 +986,7 @@ func TestMoreConflicts(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0))
 	tasks, _ := taskFactory(10, moreConflictsSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestRandomTx verifies correctness with fully random sender assignment.
@@ -997,7 +997,7 @@ func TestRandomTx(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0))
 	tasks, _ := taskFactory(10, randomSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestAlternatingTx verifies correctness when txs alternate between two senders.
@@ -1009,7 +1009,7 @@ func TestAlternatingTx(t *testing.T) {
 		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 	}
 	tasks, _ := taskFactory(10, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestTxWithLongTailRead verifies correctness when occasional reads have 100x latency spikes.
@@ -1021,7 +1021,7 @@ func TestTxWithLongTailRead(t *testing.T) {
 	rng := rand.New(rand.NewSource(0))
 	longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
 	tasks, _ := taskFactory(10, moreConflictsSender(rng), 5, 5, 10, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // --- Simple correctness tests with metadata ---
@@ -1074,7 +1074,7 @@ func TestDexScenario(t *testing.T) {
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 	tasks, _ := taskFactory(10, sender, 5, 5, 10, dexPathGenerator, readTime, writeTime, nonIOTime)
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
-	runParallel(t, tasks, checks, false, log.New())
+	runParallel(t, tasks, checks, log.New())
 }
 
 // TestDexScenarioWithMetadata verifies correctness of the parallel executor with pre-computed

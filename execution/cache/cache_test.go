@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -83,12 +82,6 @@ func (c *blockingPutCache) Clear()                             {}
 func (c *blockingPutCache) Unwind(uint64)                      {}
 func (c *blockingPutCache) Close()                             {}
 func (c *blockingPutCache) Len() int                           { return 0 }
-
-func makeHash(i int) common.Hash {
-	var h common.Hash
-	h[31] = byte(i)
-	return h
-}
 
 func makeCode(i int) []byte {
 	return []byte{0x60, 0x00, byte(i)} // PUSH1 0x00 + unique byte
@@ -729,23 +722,6 @@ func TestStateCache_DomainIsolation(t *testing.T) {
 // =============================================================================
 // RevertWithDiffset Tests
 // =============================================================================
-
-// makeDiffKey creates a domain entry key with an 8-byte step suffix, matching
-// the format used by DomainEntryDiff (full key = base key + inverted step).
-func makeDiffKey(baseKey []byte, step uint64) string {
-	k := make([]byte, len(baseKey)+8)
-	copy(k, baseKey)
-	// Store inverted step in the suffix (same encoding as domain tables).
-	k[len(k)-8] = byte(^step >> 56)
-	k[len(k)-7] = byte(^step >> 48)
-	k[len(k)-6] = byte(^step >> 40)
-	k[len(k)-5] = byte(^step >> 32)
-	k[len(k)-4] = byte(^step >> 24)
-	k[len(k)-3] = byte(^step >> 16)
-	k[len(k)-2] = byte(^step >> 8)
-	k[len(k)-1] = byte(^step)
-	return string(k)
-}
 
 // --- txNum/epoch unwind invalidation (replaces the blockHash/diffset model) ---
 

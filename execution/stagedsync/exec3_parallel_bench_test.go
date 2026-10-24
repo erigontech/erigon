@@ -42,7 +42,7 @@ func BenchmarkLessConflicts(b *testing.B) {
 						rng := rand.New(rand.NewSource(0))
 						tasks, serialDuration := taskFactory(numTx, lessConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -74,9 +74,9 @@ func BenchmarkLessConflictsWithMetadata(b *testing.B) {
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
 		tasks, serialDuration := taskFactory(numTx, lessConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -110,7 +110,7 @@ func BenchmarkMoreConflicts(b *testing.B) {
 						rng := rand.New(rand.NewSource(0))
 						tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -142,9 +142,9 @@ func BenchmarkMoreConflictsWithMetadata(b *testing.B) {
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
 		tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -178,7 +178,7 @@ func BenchmarkRandomTx(b *testing.B) {
 						rng := rand.New(rand.NewSource(0))
 						tasks, serialDuration := taskFactory(numTx, randomSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -210,9 +210,9 @@ func BenchmarkRandomTxWithMetadata(b *testing.B) {
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
 		tasks, serialDuration := taskFactory(numTx, randomSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -247,7 +247,7 @@ func BenchmarkTxWithLongTailRead(b *testing.B) {
 						longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
 						tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -274,9 +274,9 @@ func BenchmarkTxWithLongTailReadWithMetadata(b *testing.B) {
 		rng := rand.New(rand.NewSource(0))
 		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
 		tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -299,7 +299,7 @@ func BenchmarkAlternatingTx(b *testing.B) {
 			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		return runParallel(b, tasks, defaultChecks, false, logger), serialDuration
+		return runParallel(b, tasks, defaultChecks, logger), serialDuration
 	}
 
 	testExecutorComb(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -322,9 +322,9 @@ func BenchmarkAlternatingTxWithMetadata(b *testing.B) {
 			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -358,7 +358,7 @@ func BenchmarkDexScenario(b *testing.B) {
 						}
 						tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, checks, false, logger)
+						parallelDuration := runParallel(b, tasks, checks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -389,7 +389,7 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(b, tasks, checks, false, logger)
+		parallelDuration := runParallel(b, tasks, checks, logger)
 
 		allDeps := runParallelGetMetadata(b, tasks, checks)
 		newTasks := make([]exec.Task, 0, len(tasks))
@@ -402,7 +402,7 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 			temp.dependencies = keys
 			newTasks = append(newTasks, temp)
 		}
-		return parallelDuration, runParallel(b, newTasks, checks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, newTasks, checks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)

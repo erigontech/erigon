@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -103,14 +102,6 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 			"got %x — this is the 24839762 trie-root race: Flush skipped "+
 			"the delete because committedStorage was never refreshed",
 	)
-}
-
-// ctxFor satisfies the expectation that NewTestRwTx-backed code paths use a
-// valid context; kept as a small helper so the intent of the test above is
-// crisp even if the helper signature evolves.
-func ctxFor(t testing.TB) context.Context { //nolint:unused
-	t.Helper()
-	return context.Background()
 }
 
 // TestBlockStateCacheFlushPreservesPerTxHistory pins down the per-tx
