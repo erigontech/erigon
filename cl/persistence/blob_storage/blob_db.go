@@ -55,8 +55,20 @@ type BlobStore struct {
 func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
 	bs := &BlobStore{db: db}
 	bs.bucketStore.init(fs)
+	bs.dropRows = bs.deleteCountRows
 	bs.slotLocks.initLocks()
 	return bs
+}
+
+func (bs *BlobStore) deleteCountRows(roots []common.Hash) error {
+	return bs.db.Update(context.Background(), func(tx kv.RwTx) error {
+		for _, root := range roots {
+			if err := tx.Delete(kv.BlockRootToKzgCommitments, root[:]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 /*

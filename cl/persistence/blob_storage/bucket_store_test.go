@@ -197,6 +197,17 @@ func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
 	require.Equal(t, []string{"1", "3"}, rootEntryNames(t, fs))
 }
 
+func TestBucketStorePruneBelowKeepsABucketWhoseRowsCouldNotBeDropped(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+	b.dropRows = func([]common.Hash) error { return errInducedFailure }
+	makeBuckets(t, fs, "0", "1")
+
+	require.ErrorIs(t, b.pruneBelow(2*subdivisionSlot), errInducedFailure)
+
+	require.Equal(t, []string{"0", "1"}, rootEntryNames(t, fs), "the files are the only record of the roots to drop")
+}
+
 func TestBucketStoreLowerPruneRetriesTheEstablishedFloor(t *testing.T) {
 	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
 	fs.failOn["1"] = errInducedFailure
