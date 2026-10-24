@@ -844,7 +844,7 @@ type Block struct {
 
 // Copy transaction senders from body into the transactions
 func (b *Body) SendersToTxs(senders []common.Address) {
-	if senders == nil {
+	if len(senders) == 0 {
 		return
 	}
 	for i, txn := range b.Transactions {
