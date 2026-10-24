@@ -906,19 +906,23 @@ func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
-	if pruneSizeMetric == nil {
-		pruneSizeMetric = mxPruneSizeIndex
-	}
-	if valDelCursor == nil {
-		return iit.hashSeekingPruneChunks(ctx, rwTx, txFrom, txTo, limit, logEvery, pruneSizeMetric)
-	}
 	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
 	}
 	defer keysCursor.Close()
+	if valDelCursor == nil {
+		c, err := rwTx.RwCursorDupSort(iit.ii.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+		valDelCursor = iiChunkPruneCursor{RwCursorDupSort: c, d: newIIChunkDeleter(c)}
+	}
 	defer valDelCursor.Close()
 
+	if pruneSizeMetric == nil {
+		pruneSizeMetric = mxPruneSizeIndex
+	}
 	pruneStat, err := prune.HashSeekingPrune(ctx, iit.name.String(), iit.ii.FilenameBase, iit.ii.dirs.Tmp, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mode)
 	if err != nil {

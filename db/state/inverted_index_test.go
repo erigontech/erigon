@@ -1779,33 +1779,21 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 			for _, asc := range []order.By{order.Asc, order.Desc} {
 				s, err := newIIChunkStream(tx, table, []byte(k), -1, -1, asc, -1)
 				require.NoError(t, err)
-				_, err = s.Next()
+				head, err := s.Next()
 				require.NoError(t, err)
 				require.NoError(t, s.Seek(uint64(target)))
-				i, _ := slices.BinarySearch(txNums, uint64(target))
-				if asc {
-					if i == 0 {
-						i = 1 // Seek never moves back over the consumed head
-					}
-					require.Equal(t, i < len(txNums), s.HasNext())
-					if i < len(txNums) {
-						n, err := s.Next()
-						require.NoError(t, err)
-						require.Equal(t, txNums[i], n, "asc seek %d", target)
-					}
-				} else {
-					j := i - 1
-					if i < len(txNums) && txNums[i] == uint64(target) {
-						j = i
-					}
-					j = min(j, len(txNums)-2)
-					require.Equal(t, j >= 0, s.HasNext())
-					if j >= 0 {
-						n, err := s.Next()
-						require.NoError(t, err)
-						require.Equal(t, txNums[j], n, "desc seek %d", target)
+				got, err := stream.ToArrayU64(s)
+				require.NoError(t, err)
+				var exp []uint64
+				for _, n := range txNums {
+					if asc && n > head && n >= uint64(target) || !asc && n < head && n <= uint64(target) {
+						exp = append(exp, n)
 					}
 				}
+				if !asc {
+					slices.Reverse(exp)
+				}
+				require.Equal(t, exp, got, "key=%x seek=%d asc=%t", k, target, asc)
 				s.Close()
 			}
 		}

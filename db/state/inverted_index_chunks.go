@@ -25,12 +25,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 // The values table of an inverted index is DupSort: key -> chunks of ascending txNums.
@@ -73,22 +70,15 @@ func decodeIIChunk(dst []uint64, v []byte) ([]uint64, error) {
 
 // iiChunkFit returns how many leading txNums fit into one chunk.
 func iiChunkFit(txNums []uint64) int {
+	var buf [binary.MaxVarintLen64]byte
 	size := 0
 	for i := 1; i < len(txNums); i++ {
-		size += uvarintLen(txNums[i] - txNums[i-1])
+		size += binary.PutUvarint(buf[:], txNums[i]-txNums[i-1])
 		if size > iiChunkGapsLimit {
 			return i
 		}
 	}
 	return len(txNums)
-}
-
-func uvarintLen(x uint64) int {
-	n := 1
-	for ; x >= 0x80; x >>= 7 {
-		n++
-	}
-	return n
 }
 
 // iiChunkWriter adds txNums arriving in ETL order (grouped by key) to the values table.
@@ -130,10 +120,12 @@ func (w *iiChunkWriter) put(key []byte, txNums []uint64) error {
 	if err != nil {
 		return err
 	}
-	if v != nil { // txNums go into or before existing chunks
-		return w.mergeFrom(key, seek[:], v, txNums)
+	if v == nil { // txNums go above every chunk: extend the last one
+		if v, err = w.lastChunk(key); err != nil {
+			return err
+		}
 	}
-	return w.appendToLast(key, txNums)
+	return w.mergeFrom(key, seek[:], v, txNums)
 }
 
 // mergeFrom rewrites the chunks of key from v, the one at the cursor, on together with txNums.
@@ -164,32 +156,12 @@ func (w *iiChunkWriter) takeChunk(v []byte) error {
 	return w.c.DeleteCurrent()
 }
 
-// appendToLast adds txNums above every chunk of key to its last chunk and new chunks after it.
-func (w *iiChunkWriter) appendToLast(key []byte, txNums []uint64) error {
+func (w *iiChunkWriter) lastChunk(key []byte) ([]byte, error) {
 	k, _, err := w.c.SeekExact(key)
-	if err != nil {
-		return err
+	if err != nil || k == nil {
+		return nil, err
 	}
-	if k == nil {
-		return w.putChunks(key, txNums)
-	}
-	last, err := w.c.LastDup()
-	if err != nil {
-		return err
-	}
-	if w.old, err = decodeIIChunk(w.old[:0], last); err != nil {
-		return err
-	}
-	lastLen := len(w.old)
-	w.old = append(w.old, txNums...)
-	n := iiChunkFit(w.old)
-	if n > lastLen {
-		w.buf = appendIIChunk(w.buf[:0], w.old[:n])
-		if err := w.c.PutCurrent(key, w.buf); err != nil {
-			return err
-		}
-	}
-	return w.putChunks(key, w.old[n:])
+	return w.c.LastDup()
 }
 
 func (w *iiChunkWriter) putChunks(key []byte, txNums []uint64) error {
@@ -269,82 +241,15 @@ func (d *iiChunkDeleter) pruneKey(k []byte, from, to uint64) ([]byte, error) {
 	return next, err
 }
 
-// hashSeekingPruneChunks removes [txFrom, txTo) of a standalone index, finding the keys via the keys table.
-func (iit *InvertedIndexRoTx) hashSeekingPruneChunks(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, pruneSizeMetric metrics.Counter) (*InvertedIndexPruneStat, error) {
-	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
-	if err != nil {
-		return nil, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
-	}
-	defer keysCursor.Close()
-	valsCursor, err := rwTx.RwCursorDupSort(iit.ii.ValuesTable)
-	if err != nil {
-		return nil, err
-	}
-	defer valsCursor.Close()
-	if limit == 0 {
-		limit = math.MaxUint64
-	}
-	collector := etl.NewCollectorWithAllocator(iit.ii.FilenameBase+".prune.ii", iit.ii.dirs.Tmp, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace)
-	defer collector.Close()
+// iiChunkPruneCursor lets prune.HashSeekingPrune delete single txNums from chunks.
+type iiChunkPruneCursor struct {
+	kv.RwCursorDupSort
+	d *iiChunkDeleter
+}
 
-	stat := &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.NextNoDup() {
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", iit.ii.FilenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo || limit == 0 {
-			break
-		}
-		limit--
-		stat.MinTxNum, stat.MaxTxNum = min(stat.MinTxNum, txNum), max(stat.MaxTxNum, txNum)
-		for ; v != nil; _, v, err = keysCursor.NextDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", iit.ii.FilenameBase, err)
-			}
-			if err := collector.Collect(v, k); err != nil {
-				return nil, err
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-	}
-	if stat.MinTxNum == math.MaxUint64 {
-		return stat, nil
-	}
-
-	// the keys table holds every txNum of [MinTxNum, MaxTxNum], so whole ranges can go per key
-	d := newIIChunkDeleter(valsCursor)
-	var prevKey []byte
-	if err := collector.Load(nil, "", func(k, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if prevKey != nil && bytes.Equal(k, prevKey) {
-			return nil
-		}
-		prevKey = append(prevKey[:0], k...)
-		return d.deleteRange(k, stat.MinTxNum, stat.MaxTxNum+1)
-	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return nil, err
-	}
-	stat.PruneCountValues = d.count
-
-	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
-	for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", iit.ii.FilenameBase, err)
-		}
-		if binary.BigEndian.Uint64(txnb) > stat.MaxTxNum {
-			break
-		}
-		stat.PruneCountTx++
-		if err := keysCursor.Delete(txnb); err != nil {
-			return nil, err
-		}
-	}
-	pruneSizeMetric.AddUint64(stat.PruneCountValues)
-	return stat, nil
+func (c iiChunkPruneCursor) DeleteExact(key, txNum []byte) error {
+	t := binary.BigEndian.Uint64(txNum)
+	return c.d.deleteRange(key, t, t+1)
 }
 
 // pruneChunks scans the values table of a standalone index and removes [txFrom, txTo), resuming from stat.
