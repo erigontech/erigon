@@ -62,6 +62,23 @@ func TestGetAssembledBlockDistinguishesAnUnknownIdFromAnEmptyOne(t *testing.T) {
 	require.Nil(t, block)
 }
 
+func TestGetAssembledBlockFillsNilExtraAndWithdrawals(t *testing.T) {
+	block := types.NewBlockWithHeader(&types.Header{}, nil)
+	require.Nil(t, block.Header().Extra)
+	require.Nil(t, block.Withdrawals())
+
+	reader := ChainReaderWriterEth1{executionModule: assembledBlockStub{result: execmodule.AssembledBlockResult{
+		Block:      &types.BlockWithReceipts{Block: block},
+		BlockValue: uint256.NewInt(0),
+	}}}
+	assembled, _, _, _, err := reader.GetAssembledBlock(t.Context(), 1)
+	require.NoError(t, err)
+	require.NotNil(t, assembled.Extra)
+	require.Empty(t, assembled.Extra.Bytes())
+	require.NotNil(t, assembled.Withdrawals)
+	require.Zero(t, assembled.Withdrawals.Len())
+}
+
 func TestGetAssembledBlockCarriesGloasPayloadFields(t *testing.T) {
 	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.HexToAddress("0x01")}})
 	balHash, err := sidecar.Hash()

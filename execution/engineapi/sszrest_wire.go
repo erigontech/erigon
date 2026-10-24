@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/engineadapter"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -67,7 +68,7 @@ func validatePayloadIDList(id *solid.ByteListSSZ) error {
 	return nil
 }
 
-func newPayloadRequestSchema(version clparams.StateVersion, payload *engine_types.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot *common.Hash, requests *solid.TransactionsSSZ) []any {
+func newPayloadRequestSchema(version clparams.StateVersion, payload *engineadapter.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot *common.Hash, requests *solid.TransactionsSSZ) []any {
 	switch version {
 	case clparams.BellatrixVersion, clparams.CapellaVersion:
 		return []any{payload}
@@ -79,39 +80,38 @@ func newPayloadRequestSchema(version clparams.StateVersion, payload *engine_type
 }
 
 func decodeNewPayloadRequest(buf []byte, version clparams.StateVersion) (*engine_types.ExecutionPayload, solid.HashListSSZ, common.Hash, *solid.TransactionsSSZ, error) {
-	payload := engine_types.NewExecutionPayloadSSZ(version)
+	payload := engineadapter.NewExecutionPayloadSSZ(version)
 	blobHashes := solid.NewHashList(sszMaxBlobHashes)
 	parentRoot := common.Hash{}
 	requests := &solid.TransactionsSSZ{}
 	err := ssz2.UnmarshalSSZ(buf, int(version), newPayloadRequestSchema(version, payload, blobHashes, &parentRoot, requests)...)
-	return payload, blobHashes, parentRoot, requests, err
+	return &payload.ExecutionPayload, blobHashes, parentRoot, requests, err
 }
 
 func encodeNewPayloadRequest(version clparams.StateVersion, payload *engine_types.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot common.Hash, requests *solid.TransactionsSSZ) ([]byte, error) {
-	return ssz2.MarshalSSZ(nil, newPayloadRequestSchema(version, payload, blobHashes, &parentRoot, requests)...)
+	wirePayload := &engineadapter.ExecutionPayload{ExecutionPayload: *payload, SSZVersion: version}
+	return ssz2.MarshalSSZ(nil, newPayloadRequestSchema(version, wirePayload, blobHashes, &parentRoot, requests)...)
 }
 
 func decodeForkchoiceRequest(buf []byte, version clparams.StateVersion) (engine_types.ForkChoiceState, *engine_types.PayloadAttributes, error) {
 	state := engine_types.ForkChoiceState{}
-	attrsList := solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
-	if err := ssz2.UnmarshalSSZ(buf, int(version), &state, attrsList); err != nil {
+	attrsList := solid.NewDynamicListSSZ[*engineadapter.PayloadAttributes](1)
+	if err := ssz2.UnmarshalSSZ(buf, int(version), (*engineadapter.ForkChoiceState)(&state), attrsList); err != nil {
 		return state, nil, err
 	}
 	if attrsList.Len() == 0 {
 		return state, nil, nil
 	}
 	attrs := attrsList.Get(0)
-	attrs.SSZVersion = version
-	return state, attrs, nil
+	return state, &attrs.PayloadAttributes, nil
 }
 
 func encodeForkchoiceRequest(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *engine_types.PayloadAttributes) ([]byte, error) {
-	attrsList := solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
+	attrsList := solid.NewDynamicListSSZ[*engineadapter.PayloadAttributes](1)
 	if attrs != nil {
-		attrs.SSZVersion = version
-		attrsList.Append(attrs)
+		attrsList.Append(&engineadapter.PayloadAttributes{PayloadAttributes: *attrs, SSZVersion: version})
 	}
-	return ssz2.MarshalSSZ(nil, state, attrsList)
+	return ssz2.MarshalSSZ(nil, (*engineadapter.ForkChoiceState)(state), attrsList)
 }
 
 func encodeForkchoiceResponse(resp *engine_types.ForkChoiceUpdatedResponse) ([]byte, error) {
@@ -124,7 +124,7 @@ func encodeForkchoiceResponse(resp *engine_types.ForkChoiceUpdatedResponse) ([]b
 	if err := validatePayloadIDList(payloadID); err != nil {
 		return nil, err
 	}
-	return ssz2.MarshalSSZ(nil, resp.PayloadStatus, payloadID)
+	return ssz2.MarshalSSZ(nil, (*engineadapter.PayloadStatus)(resp.PayloadStatus), payloadID)
 }
 
 func encodeCapabilities(names []string) ([]byte, error) {
@@ -202,19 +202,19 @@ func capabilityName(s string) *solid.ByteListSSZ {
 }
 
 func encodeClientVersionResponse(versions []engine_types.ClientVersionV1) ([]byte, error) {
-	list := solid.NewDynamicListSSZ[*engine_types.ClientVersionV1](4)
+	list := solid.NewDynamicListSSZ[*engineadapter.ClientVersionV1](4)
 	for i := range versions {
-		list.Append(&versions[i])
+		list.Append((*engineadapter.ClientVersionV1)(&versions[i]))
 	}
 	return ssz2.MarshalSSZ(nil, list)
 }
 
 func decodeClientVersionRequest(buf []byte) (*engine_types.ClientVersionV1, error) {
-	version := &engine_types.ClientVersionV1{}
+	version := &engineadapter.ClientVersionV1{}
 	if err := ssz2.UnmarshalSSZ(buf, 0, version); err != nil {
 		return nil, err
 	}
-	return version, nil
+	return (*engine_types.ClientVersionV1)(version), nil
 }
 
 func blockValueHash(v *hexutil.U256) common.Hash {
@@ -229,17 +229,15 @@ func blockValueHash(v *hexutil.U256) common.Hash {
 	return out
 }
 
-func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersion) *engine_types.BlobsBundle {
+func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersion) *engineadapter.BlobsBundle {
 	if b == nil {
-		return engine_types.NewBlobsBundleSSZ(version)
+		return engineadapter.NewBlobsBundleSSZ(version)
 	}
-	b.SSZVersion = version
-	return b
+	return &engineadapter.BlobsBundle{BlobsBundle: *b, SSZVersion: version}
 }
 
 func encodeGetPayloadResponse(cfg *clparams.BeaconChainConfig, resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
-	payload := resp.ExecutionPayload
-	payload.SSZVersion = version
+	payload := &engineadapter.ExecutionPayload{ExecutionPayload: *resp.ExecutionPayload, SSZVersion: version}
 	blockValue := blockValueHash(resp.BlockValue)
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
 	switch version {
@@ -261,29 +259,29 @@ func executionRequestsFromList(cfg *clparams.BeaconChainConfig, requests []hexut
 }
 
 func encodeGetBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {
-	list := solid.NewStaticListSSZ[*engine_types.BlobAndProofV1](sszMaxGetBlobHashes, sszBlobBytes+sszKZGBytes)
+	list := solid.NewStaticListSSZ[*engineadapter.BlobAndProofV1](sszMaxGetBlobHashes, sszBlobBytes+sszKZGBytes)
 	for _, blob := range blobs {
 		if blob != nil {
-			list.Append(blob)
+			list.Append((*engineadapter.BlobAndProofV1)(blob))
 		}
 	}
 	return ssz2.MarshalSSZ(nil, list)
 }
 
 func encodeGetBlobsV2Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error) {
-	list := solid.NewDynamicListSSZ[*engine_types.BlobAndProofV2](sszMaxGetBlobHashes)
+	list := solid.NewDynamicListSSZ[*engineadapter.BlobAndProofV2](sszMaxGetBlobHashes)
 	for _, blob := range blobs {
 		if blob != nil {
-			list.Append(blob)
+			list.Append((*engineadapter.BlobAndProofV2)(blob))
 		}
 	}
 	return ssz2.MarshalSSZ(nil, list)
 }
 
 func encodeGetBlobsV3Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error) {
-	list := solid.NewDynamicListSSZ[*engine_types.NullableBlobAndProofV2](sszMaxGetBlobHashes)
+	list := solid.NewDynamicListSSZ[*engineadapter.NullableBlobAndProofV2](sszMaxGetBlobHashes)
 	for _, blob := range blobs {
-		list.Append(engine_types.NewNullableBlobAndProofV2(blob))
+		list.Append(engineadapter.NewNullableBlobAndProofV2((*engineadapter.BlobAndProofV2)(blob)))
 	}
 	return ssz2.MarshalSSZ(nil, list)
 }

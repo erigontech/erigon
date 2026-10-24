@@ -17,6 +17,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/engineadapter"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -38,7 +39,7 @@ func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
 
 func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	latest := common.HexToHash("0x1234")
-	wire := &engine_types.PayloadStatus{
+	wire := &engineadapter.PayloadStatus{
 		Status:          engine_types.AcceptedStatus,
 		LatestValidHash: &latest,
 		ValidationError: engine_types.NewStringifiedErrorFromString("no"),
@@ -46,7 +47,7 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	enc, err := wire.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	var out engine_types.PayloadStatus
+	var out engineadapter.PayloadStatus
 	require.NoError(t, out.DecodeSSZ(enc, 0))
 	require.Equal(t, engine_types.AcceptedStatus, out.Status)
 	require.NotNil(t, out.LatestValidHash)
@@ -86,7 +87,7 @@ func TestSSZRESTBeaconChainConfigPrefersRuntimeConfig(t *testing.T) {
 }
 
 func encodeEmptyNewPayloadRequest(version clparams.StateVersion) ([]byte, error) {
-	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
+	return encodeNewPayloadRequest(version, &engine_types.ExecutionPayload{}, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
 }
 
 func decodeEmptyNewPayloadRequest(buf []byte, version clparams.StateVersion) error {
@@ -123,7 +124,7 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 				return encodeGetBlobsV1Response([]*engine_types.BlobAndProofV1{{Blob: blob, Proof: proof}, nil})
 			},
 			dec: func(buf []byte) error {
-				return ssz2.UnmarshalSSZ(buf, 0, solid.NewStaticListSSZ[*engine_types.BlobAndProofV1](sszMaxGetBlobHashes, sszBlobBytes+sszKZGBytes))
+				return ssz2.UnmarshalSSZ(buf, 0, solid.NewStaticListSSZ[*engineadapter.BlobAndProofV1](sszMaxGetBlobHashes, sszBlobBytes+sszKZGBytes))
 			},
 		},
 		{
@@ -132,7 +133,7 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 				return encodeGetBlobsV2Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil})
 			},
 			dec: func(buf []byte) error {
-				return ssz2.UnmarshalSSZ(buf, 0, solid.NewDynamicListSSZ[*engine_types.BlobAndProofV2](sszMaxGetBlobHashes))
+				return ssz2.UnmarshalSSZ(buf, 0, solid.NewDynamicListSSZ[*engineadapter.BlobAndProofV2](sszMaxGetBlobHashes))
 			},
 		},
 		{
@@ -141,7 +142,7 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 				return encodeGetBlobsV3Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil})
 			},
 			dec: func(buf []byte) error {
-				return ssz2.UnmarshalSSZ(buf, 0, solid.NewDynamicListSSZ[*engine_types.NullableBlobAndProofV2](sszMaxGetBlobHashes))
+				return ssz2.UnmarshalSSZ(buf, 0, solid.NewDynamicListSSZ[*engineadapter.NullableBlobAndProofV2](sszMaxGetBlobHashes))
 			},
 		},
 	} {
@@ -258,7 +259,7 @@ func TestSSZRESTEndpointVersionMapping(t *testing.T) {
 }
 
 func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
-	payload := engine_types.NewExecutionPayloadSSZ(clparams.GloasVersion)
+	payload := &engine_types.ExecutionPayload{}
 	slot := hexutil.Uint64(123)
 	payload.SlotNumber = &slot
 	bal := hexutil.Bytes{0x01, 0x02, 0x03}
@@ -287,7 +288,6 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 		Withdrawals:           nil,
 		SlotNumber:            &slotNumber,
 		TargetGasLimit:        &targetGasLimit,
-		SSZVersion:            clparams.GloasVersion,
 	}
 	state := engine_types.ForkChoiceState{}
 	enc, err := encodeForkchoiceRequest(clparams.GloasVersion, &state, attrs)
@@ -373,7 +373,7 @@ func TestEncodeGetPayloadResponseIgnoresExecutionRequestsBeforeElectra(t *testin
 	for _, version := range []clparams.StateVersion{clparams.CapellaVersion, clparams.DenebVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			resp := &engine_types.GetPayloadResponse{
-				ExecutionPayload:  engine_types.NewExecutionPayloadSSZ(version),
+				ExecutionPayload:  &engine_types.ExecutionPayload{},
 				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
 			}
 

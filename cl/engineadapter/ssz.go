@@ -1,7 +1,7 @@
 // Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 
-package engine_types
+package engineadapter
 
 import (
 	"bytes"
@@ -18,12 +18,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
 	sszMaxBlobHashes          = 4096
-	sszMaxGetBlobHashes       = 128
 	sszMaxBytesPerTransaction = 0x40000000
 	sszMaxValidationError     = 1024
 	sszBlobBytes              = 0x20000
@@ -33,6 +33,29 @@ const (
 )
 
 var mainnetBeaconCfg = &clparams.MainnetBeaconConfig
+
+type ExecutionPayload struct {
+	engine_types.ExecutionPayload
+	SSZVersion clparams.StateVersion `json:"-"`
+}
+
+type PayloadAttributes struct {
+	engine_types.PayloadAttributes
+	SSZVersion clparams.StateVersion `json:"-"`
+}
+
+type BlobsBundle struct {
+	engine_types.BlobsBundle
+	SSZVersion clparams.StateVersion `json:"-"`
+}
+
+type (
+	PayloadStatus   engine_types.PayloadStatus
+	ForkChoiceState engine_types.ForkChoiceState
+	ClientVersionV1 engine_types.ClientVersionV1
+	BlobAndProofV1  engine_types.BlobAndProofV1
+	BlobAndProofV2  engine_types.BlobAndProofV2
+)
 
 func NewExecutionPayloadSSZ(version clparams.StateVersion) *ExecutionPayload {
 	return &ExecutionPayload{SSZVersion: version}
@@ -68,7 +91,7 @@ func (p *ExecutionPayload) decodeSSZ(buf []byte, version int, strict bool) error
 	if err != nil {
 		return err
 	}
-	*p = *ExecutionPayloadFromSSZBlock(block, p.SSZVersion)
+	p.ExecutionPayload = *ExecutionPayloadFromSSZBlock(block, p.SSZVersion)
 	return nil
 }
 
@@ -143,47 +166,6 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	return block, nil
 }
 
-func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.StateVersion) *ExecutionPayload {
-	baseFee := new(uint256.Int)
-	_ = baseFee.UnmarshalSSZ(block.BaseFeePerGas[:])
-	body := block.Body()
-	p := &ExecutionPayload{
-		ParentHash:    block.ParentHash,
-		FeeRecipient:  block.FeeRecipient,
-		StateRoot:     block.StateRoot,
-		ReceiptsRoot:  block.ReceiptsRoot,
-		LogsBloom:     block.LogsBloom[:],
-		PrevRandao:    block.PrevRandao,
-		BlockNumber:   hexutil.Uint64(block.BlockNumber),
-		GasLimit:      hexutil.Uint64(block.GasLimit),
-		GasUsed:       hexutil.Uint64(block.GasUsed),
-		Timestamp:     hexutil.Uint64(block.Time),
-		ExtraData:     block.Extra.Bytes(),
-		BaseFeePerGas: (*hexutil.U256)(baseFee),
-		BlockHash:     block.BlockHash,
-		Transactions:  make([]hexutil.Bytes, 0, len(body.Transactions)),
-		Withdrawals:   body.Withdrawals,
-		SSZVersion:    version,
-	}
-	for _, tx := range body.Transactions {
-		p.Transactions = append(p.Transactions, tx)
-	}
-	if version >= clparams.DenebVersion {
-		bg, ebg := hexutil.Uint64(block.BlobGasUsed), hexutil.Uint64(block.ExcessBlobGas)
-		p.BlobGasUsed, p.ExcessBlobGas = &bg, &ebg
-	}
-	if version >= clparams.GloasVersion {
-		bal := hexutil.Bytes{}
-		if block.BlockAccessList != nil {
-			bal = block.BlockAccessList.Bytes()
-		}
-		p.BlockAccessList = &bal
-		slot := hexutil.Uint64(block.SlotNumber)
-		p.SlotNumber = &slot
-	}
-	return p
-}
-
 func newWithdrawalList(ws []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
 	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range ws {
@@ -247,7 +229,7 @@ func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 		s.LatestValidHash = &hash
 	}
 	if msg := string(errBytes.Bytes()); msg != "" {
-		s.ValidationError = NewStringifiedErrorFromString(msg)
+		s.ValidationError = engine_types.NewStringifiedErrorFromString(msg)
 	}
 	return nil
 }
@@ -257,31 +239,31 @@ func (*PayloadStatus) Clone() clonable.Clonable {
 	return &PayloadStatus{}
 }
 
-func payloadStatusByte(status EngineStatus) (uint8, error) {
+func payloadStatusByte(status engine_types.EngineStatus) (uint8, error) {
 	switch status {
-	case ValidStatus:
+	case engine_types.ValidStatus:
 		return 0, nil
-	case InvalidStatus:
+	case engine_types.InvalidStatus:
 		return 1, nil
-	case SyncingStatus:
+	case engine_types.SyncingStatus:
 		return 2, nil
-	case AcceptedStatus:
+	case engine_types.AcceptedStatus:
 		return 3, nil
 	default:
 		return 0, fmt.Errorf("unknown payload status %q", status)
 	}
 }
 
-func payloadStatusFromByte(status uint8) (EngineStatus, error) {
+func payloadStatusFromByte(status uint8) (engine_types.EngineStatus, error) {
 	switch status {
 	case 0:
-		return ValidStatus, nil
+		return engine_types.ValidStatus, nil
 	case 1:
-		return InvalidStatus, nil
+		return engine_types.InvalidStatus, nil
 	case 2:
-		return SyncingStatus, nil
+		return engine_types.SyncingStatus, nil
 	case 3:
-		return AcceptedStatus, nil
+		return engine_types.AcceptedStatus, nil
 	default:
 		return "", fmt.Errorf("unknown payload status %d", status)
 	}
