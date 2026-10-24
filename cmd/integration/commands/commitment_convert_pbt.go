@@ -1052,6 +1052,7 @@ func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) erro
 		if err != nil {
 			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", item.domain, err)
 		}
+		defer cursor.Close()
 		for key, value, cursorErr := cursor.First(); key != nil; key, value, cursorErr = cursor.NextNoDup() {
 			if cursorErr != nil {
 				cursor.Close()
@@ -1073,6 +1074,7 @@ func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) erro
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", kv.CodeDomain, err)
 	}
+	defer cursor.Close()
 	var previousKey []byte
 	for key, _, cursorErr := cursor.First(); key != nil; key, _, cursorErr = cursor.Next() {
 		if cursorErr != nil {
