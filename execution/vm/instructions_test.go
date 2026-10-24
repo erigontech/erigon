@@ -846,6 +846,34 @@ func TestOpDifficulty(t *testing.T) {
 	}
 }
 
+func TestPushMatchesSetBytes(t *testing.T) {
+	code := make([]byte, 70)
+	for i := range code {
+		code[i] = 0x5a ^ byte(i*37)
+	}
+	for size := uint64(1); size <= 32; size++ {
+		push := makePush(size, int(size))
+		for pc := range uint64(len(code)) {
+			scope := &CallContext{}
+			scope.Contract.Code = code
+			fillSlotAboveTopWithOnes(&scope.Stack)
+			next, _, err := push(pc, nil, scope)
+			require.NoError(t, err)
+			require.Equal(t, pc+size, next)
+			start, end := min(pc+1, uint64(len(code))), min(pc+1+size, uint64(len(code)))
+			want := new(uint256.Int).SetBytes(common.RightPadBytes(code[start:end], int(size)))
+			require.Equal(t, want, scope.Stack.peek(), "PUSH%d at pc %d", size, pc)
+			require.Equal(t, 2, scope.Stack.len())
+		}
+	}
+}
+
+func fillSlotAboveTopWithOnes(st *Stack) {
+	st.pushRef().SetAllOne()
+	st.pushRef().SetAllOne()
+	st.pop()
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
