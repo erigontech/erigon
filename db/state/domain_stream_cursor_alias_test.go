@@ -55,7 +55,6 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 	defer viewA.Close()
 	viewB := d.beginForTests()
 	defer viewB.Close()
-	t.Logf("files in view: %d", len(viewA.files))
 
 	drain := func(it *DomainLatestIterFile) (ks, vs [][]byte) {
 		for it.HasNext() {
@@ -71,7 +70,6 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 	wantK, wantV := drain(base)
 	base.Close()
 	require.NotEmpty(t, wantK)
-	t.Logf("expected keys: %d", len(wantK))
 
 	a, err := viewA.DebugRangeLatestFromFiles(nil, nil, -1)
 	require.NoError(t, err)
@@ -84,7 +82,6 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 		gotK, gotV = append(gotK, k), append(gotV, v)
 	}
 	require.True(t, a.HasNext(), "A never reached the state heap-empty with pending key")
-	t.Logf("A paused with %d returned, pending nextKey=%x", len(gotK), a.nextKey)
 
 	var b *DomainLatestIterFile
 	for j := 2; j < 40; j++ {
@@ -96,15 +93,11 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 	b, err = viewB.DebugRangeLatestFromFiles(append(bytes.Clone(wantK[len(wantK)-5]), 0), nil, -1)
 	require.NoError(t, err)
 	defer b.Close()
-	t.Logf("B opened; A.nextKey now=%x", a.nextKey)
 
 	k, v := drain(a)
 	gotK, gotV = append(gotK, k...), append(gotV, v...)
-	require.Equal(t, len(wantK), len(gotK))
-	for i := range wantK {
-		require.Equal(t, wantK[i], gotK[i], "key %d", i)
-		require.Equal(t, wantV[i], gotV[i], "val %d", i)
-	}
+	require.Equal(t, wantK, gotK)
+	require.Equal(t, wantV, gotV)
 }
 
 func TestDomainLatestIterFileKeepsEmptyFirstKey(t *testing.T) {
