@@ -920,7 +920,7 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 	return true
 }
 
-// seedOrigin handles an AddressPath versionMap miss: it reads the committed pre-block
+// seedOrigin handles an AddressPath versionMap miss: it reads the committed base
 // account once, seeds it at originIndex so later reads and apply resolve from the same
 // base, and records the read at originIndex so the tx's own re-reads agree. seeded=false
 // means the account does not exist committed, so the caller falls back to the miss record.
