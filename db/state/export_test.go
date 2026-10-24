@@ -46,6 +46,10 @@ func (w *PBinRangeWriter) SetPipelineHookForTest(hook func(string, int) error) {
 	w.pipelineHook = hook
 }
 
+func (w *PBinRangeWriter) SetWorkersForTest(workers int) {
+	w.workers = workers
+}
+
 func (w *PBinRangeWriter) SetRowLaneSkipBufferForTest(size uint64) {
 	for i := range w.ranges {
 		w.ranges[i].rows.setSkipBuffer(datasize.ByteSize(size))

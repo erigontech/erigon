@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
@@ -524,6 +525,9 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	defer at.Close()
 	files := pbinAccountFiles(at.Files(kv.AccountsDomain))
 	if len(files) == 0 {
+		if endTxNum == ^uint64(0) {
+			return nil, fmt.Errorf("pbin range writer: end txNum is too large")
+		}
 		if endTxNum == 0 {
 			return &PBinRangeWriter{aggregator: aggregator, domain: domain, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, workers: workers}, nil
 		}
@@ -547,10 +551,21 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			}},
 		}, nil
 	}
+	if endTxNum == ^uint64(0) && !limits.NoRangePastFrontier {
+		return nil, fmt.Errorf("pbin range writer: end txNum is too large")
+	}
 	if endTxNum == 0 {
 		endTxNum = files.EndRootNum() - 1
 	}
 	ranges := make([]pbinRange, 0, len(files))
+	success := false
+	defer func() {
+		if !success {
+			for i := range ranges {
+				ranges[i].rows.close()
+			}
+		}
+	}()
 	for _, file := range files {
 		start, end := file.StartRootNum(), file.EndRootNum()
 		if start > endTxNum {
@@ -591,6 +606,7 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			rows:  rows,
 		})
 	}
+	success = true
 	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, workers: workers, stateInFiles: stateInFiles}, nil
 }
 
@@ -855,43 +871,6 @@ type pbinRangeBuildPlan struct {
 	static          StaticFiles
 }
 
-type pbinRangeBuildLimiter struct {
-	mu       sync.Mutex
-	wake     chan struct{}
-	capacity uint64
-	used     uint64
-}
-
-func newPBinRangeBuildLimiter(capacity uint64) *pbinRangeBuildLimiter {
-	return &pbinRangeBuildLimiter{wake: make(chan struct{}), capacity: capacity}
-}
-
-func (l *pbinRangeBuildLimiter) acquire(ctx context.Context, weight uint64) error {
-	for {
-		l.mu.Lock()
-		if l.used == 0 || l.used+weight <= l.capacity {
-			l.used += weight
-			l.mu.Unlock()
-			return nil
-		}
-		wake := l.wake
-		l.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-wake:
-		}
-	}
-}
-
-func (l *pbinRangeBuildLimiter) release(weight uint64) {
-	l.mu.Lock()
-	l.used -= weight
-	close(l.wake)
-	l.wake = make(chan struct{})
-	l.mu.Unlock()
-}
-
 func pbinRangeBuildWorkers(rows []uint64, workers int) []int {
 	result := make([]int, len(rows))
 	if len(result) == 0 {
@@ -975,7 +954,8 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		Fields:  []any{"memory_cap_bytes", pbinRangeBuildMemoryCap, "ranges_in_flight", 0},
 	})
 	defer buildProgress.Done()
-	limiter := newPBinRangeBuildLimiter(max(pbinRangeBuildMemoryCap/pbinRangeBuildMemoryUnit, uint64(1)))
+	memoryCapacity := max(pbinRangeBuildMemoryCap/pbinRangeBuildMemoryUnit, uint64(1))
+	memoryLimiter := semaphore.NewWeighted(int64(memoryCapacity))
 	var inFlight atomic.Int32
 	setBuildProgress := func() {
 		buildProgress.SetFields("memory_cap_bytes", pbinRangeBuildMemoryCap, "ranges_in_flight", inFlight.Load())
@@ -1003,18 +983,20 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		firstErrorMu.Unlock()
 	}
 	g, buildCtx := errgroup.WithContext(ctx)
+	g.SetLimit(max(1, w.workers))
 	for i := range plans {
 		plan := &plans[i]
 		weight := max(uint64(1), (plan.budget+pbinRangeBuildMemoryUnit-1)/pbinRangeBuildMemoryUnit)
+		weight = min(weight, memoryCapacity)
 		g.Go(func() error {
-			if err := limiter.acquire(buildCtx, weight); err != nil {
+			if err := memoryLimiter.Acquire(buildCtx, int64(weight)); err != nil {
 				return err
 			}
 			inFlight.Add(1)
 			setBuildProgress()
 			defer func() {
 				inFlight.Add(-1)
-				limiter.release(weight)
+				memoryLimiter.Release(int64(weight))
 				setBuildProgress()
 			}()
 			if w.pipelineHook != nil {

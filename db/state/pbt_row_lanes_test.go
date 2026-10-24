@@ -127,6 +127,33 @@ func TestPBinRangeWriterBuildsRangesConcurrently(t *testing.T) {
 	require.True(t, overlapped.Load())
 }
 
+func TestPBinRangeWriterWorkersBoundRangeBuilds(t *testing.T) {
+	selectPBinRangeWriterPipeline(t)
+	run := openPBinRangeWriterRun(t, 7, 0, 23)
+	run.writer.SetWorkersForTest(1)
+	var inFlight atomic.Int32
+	var maximum atomic.Int32
+	run.writer.SetPipelineHookForTest(func(stage string, _ int) error {
+		if stage == "range-build-start" {
+			current := inFlight.Add(1)
+			for {
+				old := maximum.Load()
+				if old >= current || maximum.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if stage == "range-build-done" {
+			inFlight.Add(-1)
+		}
+		return nil
+	})
+	_, err := run.write(t.Context(), pbinRangeWriterCorpora()[0].leaves)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), maximum.Load())
+}
+
 func requirePBinRowLaneDirsRemoved(t *testing.T, dirs []string) {
 	t.Helper()
 	for _, dir := range dirs {

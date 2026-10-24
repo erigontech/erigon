@@ -78,6 +78,9 @@ func VerifyPBinSourceStamps(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx,
 	if !filesOnly && roTx == nil {
 		return fmt.Errorf("pbin stamp walk: nil database transaction")
 	}
+	if !filesOnly {
+		workers = 1
+	}
 	workers = max(workers, 1)
 	ranges := pbinStampAddressRanges(workers)
 	pin := at.Pin()

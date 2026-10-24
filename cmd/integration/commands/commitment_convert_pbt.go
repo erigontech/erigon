@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -521,9 +522,12 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbst
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: C-e output files: %w", err)
 	}
+	isBinary := func(file pbtAttachFile) bool {
+		return file.domain == kv.CommitmentBinDomain || settings.TrieVariantName() == dbstate.TrieVariantBin && file.domain == kv.CommitmentDomain
+	}
 	sourceByPath := make(map[string]pbtAttachFile)
 	for _, file := range pbtAttachVisibleFiles(sourceFiles) {
-		if pbtAttachAdoptsFile(file) {
+		if pbtAttachAdoptsFile(file) && !isBinary(file) {
 			rel, relErr := filepath.Rel(sourceDirs.Snap, file.path)
 			if relErr != nil {
 				return relErr
@@ -531,25 +535,32 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbst
 			sourceByPath[filepath.Clean(rel)] = file
 		}
 	}
-	isBinary := func(file pbtAttachFile) bool {
-		return file.domain == kv.CommitmentBinDomain || settings.TrieVariantName() == dbstate.TrieVariantBin && file.domain == kv.CommitmentDomain
-	}
 	identityFiles := make([]pbtAttachFile, 0, len(outputFiles))
 	for _, file := range pbtAttachVisibleFiles(outputFiles) {
 		if pbtAttachAdoptsFile(file) && !isBinary(file) {
 			identityFiles = append(identityFiles, file)
 		}
 	}
-	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output identity verify", Total: uint64(len(identityFiles))})
-	defer progress.Done()
+	outputByPath := make(map[string]pbtAttachFile, len(identityFiles))
 	for _, file := range identityFiles {
 		rel, relErr := filepath.Rel(outputDirs.Snap, file.path)
 		if relErr != nil {
 			return relErr
 		}
-		source, ok := sourceByPath[filepath.Clean(rel)]
+		outputByPath[filepath.Clean(rel)] = file
+	}
+	paths := make([]string, 0, len(sourceByPath))
+	for path := range sourceByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output identity verify", Total: uint64(len(paths))})
+	defer progress.Done()
+	for _, rel := range paths {
+		source := sourceByPath[rel]
+		file, ok := outputByPath[rel]
 		if !ok {
-			return fmt.Errorf("commitment convert-pbt: C-e output state file %s has no source file", file.path)
+			return fmt.Errorf("commitment convert-pbt: C-e output state file %s is missing", filepath.Join(outputDirs.Snap, rel))
 		}
 		sourceInfo, sourceErr := os.Stat(source.path)
 		if sourceErr != nil {
@@ -563,6 +574,11 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, settings *dbst
 			return fmt.Errorf("commitment convert-pbt: C-e output state file %s is not a hard link of %s", file.path, source.path)
 		}
 		progress.Add(1)
+	}
+	for rel, file := range outputByPath {
+		if _, ok := sourceByPath[rel]; !ok {
+			return fmt.Errorf("commitment convert-pbt: C-e output state file %s has no source file", file.path)
+		}
 	}
 	if err := verifyPBTOutputStateRecords(outputDirs, settings, domain, point); err != nil {
 		return err

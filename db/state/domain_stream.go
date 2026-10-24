@@ -195,7 +195,7 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 			key = btCursor.Key()
 			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 				val := btCursor.Value()
-				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
+				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: bytes.Clone(key), val: bytes.Clone(val), btCursor: btCursor, endTxNum: txNum, reverse: true})
 			} else {
 				btCursor.Close()
 			}
@@ -378,8 +378,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				if ci1.btCursor != nil {
 					// BTree cursor iteration
 					if ci1.btCursor.Next() {
-						ci1.key = ci1.btCursor.Key()
-						ci1.val = ci1.btCursor.Value()
+						ci1.key = bytes.Clone(ci1.btCursor.Key())
+						ci1.val = bytes.Clone(ci1.btCursor.Value())
 						if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 							heap.Push(hi.h, ci1)
 						} else {
@@ -524,7 +524,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
 			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: bytes.Clone(key), val: bytes.Clone(val), btCursor: cursor, endTxNum: txNum, reverse: true})
 		}
 	}
 
@@ -548,9 +548,9 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				indexList := dt.d.Accessors
 				if indexList.Has(statecfg.AccessorBTree) {
 					if ci1.btCursor.Next() {
-						ci1.key = ci1.btCursor.Key()
+						ci1.key = bytes.Clone(ci1.btCursor.Key())
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-							ci1.val = ci1.btCursor.Value()
+							ci1.val = bytes.Clone(ci1.btCursor.Value())
 							heap.Push(cpPtr, ci1)
 						} else {
 							ci1.btCursor.Close()

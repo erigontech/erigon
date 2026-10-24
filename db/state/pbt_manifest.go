@@ -320,7 +320,7 @@ func digestPBTManifestFile(ctx context.Context, source PBTManifestFileSource) (P
 		return PBTManifestFile{}, fmt.Errorf("pbt manifest: open %q: %w", source.Name, err)
 	}
 	hash := blake3.New(32, nil)
-	_, copyErr := io.CopyBuffer(hash, file, make([]byte, 1<<20))
+	_, copyErr := io.CopyBuffer(hash, pbtManifestContextReader{ctx: ctx, reader: file}, make([]byte, 1<<20))
 	closeErr := file.Close()
 	if copyErr != nil {
 		return PBTManifestFile{}, fmt.Errorf("pbt manifest: digest %q: %w", source.Name, copyErr)
@@ -334,6 +334,28 @@ func digestPBTManifestFile(ctx context.Context, source PBTManifestFileSource) (P
 	default:
 	}
 	return PBTManifestFile{Name: source.Name, Size: uint64(info.Size()), Blake3: hex.EncodeToString(hash.Sum(nil))}, nil
+}
+
+type pbtManifestContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r pbtManifestContextReader) Read(p []byte) (int, error) {
+	select {
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	default:
+	}
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		select {
+		case <-r.ctx.Done():
+			return n, r.ctx.Err()
+		default:
+		}
+	}
+	return n, err
 }
 
 func sortedPBTManifestNames(sources map[string]PBTManifestFileSource) []string {
