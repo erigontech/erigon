@@ -1130,7 +1130,7 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	require.Empty(t, batch, "a slot already complete in the store must not be queued for download")
 }
 
-// PruneBelow removes sidecar files but leaves their BlockRootToKzgCommitments rows, so a datadir
+// Earlier prunes removed sidecar files but leaked their BlockRootToKzgCommitments rows, so a datadir
 // pruned as non-archive and later reopened with --caplin.blobs-archive carries counts that no file
 // backs. A matching count is then not evidence the store can serve the slot, and skipping it lets
 // the pass report completion and move its target past work an archive node still owes.
@@ -1142,9 +1142,9 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testin
 	fs := afero.NewMemMapFs()
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
-	require.NoError(t, storage.PruneBelow(10_000))
+	require.NoError(t, fs.RemoveAll("0"))
 
-	// The count row survives pruning; the file does not.
+	// The count row an earlier prune leaked survives; the file does not.
 	count, err := storage.KzgCommitmentsCount(t.Context(), blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, uint32(1), count)
@@ -1193,7 +1193,7 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsMissingALaterSidecarFile(t *te
 }
 
 // A retention expansion can make a previously pruned bucket mandatory again after restart, while
-// its commitment-count row still makes the slot look complete.
+// the commitment-count row an earlier prune leaked still makes the slot look complete.
 func TestCollectIncompleteBlocksQueuesPrunedNonArchiveSlotInsideSelectedRange(t *testing.T) {
 	block, sidecar := validDenebRecoverySidecar(t, 100)
 	blockRoot, err := block.Block.HashSSZ()
@@ -1202,7 +1202,7 @@ func TestCollectIncompleteBlocksQueuesPrunedNonArchiveSlotInsideSelectedRange(t 
 	fs := afero.NewMemMapFs()
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
-	require.NoError(t, storage.PruneBelow(10_000))
+	require.NoError(t, fs.RemoveAll("0"))
 	storage = blob_storage.NewBlobStore(db, fs)
 
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
