@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -119,6 +121,41 @@ func TestAlignFilesToStepSizeIntegratesMergesThatSucceeded(t *testing.T) {
 		}
 		require.Equalf(t, factor, parsed.To-parsed.From, "%s was not integrated", entry.Name())
 	}
+}
+
+func TestAlignFilesToStepSizeIntegratesEachMergeOnCompletion(t *testing.T) {
+	const stepSize, factor = uint64(10), uint64(5)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 23)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	dirs := agg.Dirs()
+	aligned := func() (n int) {
+		for _, dir := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx} {
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			for _, entry := range entries {
+				parsed, _, ok := snaptype.ParseFileName(dir, entry.Name())
+				if ok && slices.Contains([]string{".kv", ".v", ".ef"}, parsed.Ext) && parsed.To-parsed.From == factor {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	atFirstDelete := -1
+	agg.OnFilesChange(func([]string) {}, func([]string) {
+		if atFirstDelete < 0 {
+			atFirstDelete = aligned()
+		}
+	})
+	mergeWorkers := dbg.MergeWorkers
+	dbg.MergeWorkers = 1 << 20
+	defer func() { dbg.MergeWorkers = mergeWorkers }()
+
+	_, err := agg.AlignFilesToStepSize(t.Context(), factor*stepSize)
+	require.NoError(t, err)
+	require.Less(t, atFirstDelete, aligned())
 }
 
 func readAlignedState(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, accounts, commitmentKeys [][]byte, end uint64) map[string][]byte {

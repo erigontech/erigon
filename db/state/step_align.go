@@ -73,22 +73,19 @@ func (a *Aggregator) mergeStepAligned(ctx context.Context, stepSize, end uint64)
 	compressWorkers := max(1, a.d[kv.AccountsDomain].CompressCfg.Workers)
 	limit := max(1, estimate.CompressSnapshot.WorkersByRAMOnly()/(compressWorkers*max(1, a.workers.getMerge())))
 	a.logger.Info("[snapshots] step alignment", "merges", len(merges), "input", datasize.ByteSize(input).HR(), "concurrent", limit, "compress_workers", compressWorkers)
-	results := make([]*MergeResult, len(merges))
-	errs := make([]error, len(merges))
 	var g errgroup.Group
 	g.SetLimit(limit)
-	for i, m := range merges {
+	for _, m := range merges {
 		g.Go(func() error {
-			results[i], errs[i] = a.mergeStepAlignedRange(ctx, m)
-			return errs[i]
+			in, mergeErr := a.mergeStepAlignedRange(ctx, m)
+			if mergeErr != nil {
+				return mergeErr
+			}
+			a.integrateMergedDirtyFiles(in)
+			return nil
 		})
 	}
 	err = g.Wait()
-	for i, in := range results {
-		if errs[i] == nil {
-			a.integrateMergedDirtyFiles(in)
-		}
-	}
 	return err == nil, err
 }
 
