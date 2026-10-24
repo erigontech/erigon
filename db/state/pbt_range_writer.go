@@ -50,6 +50,7 @@ type PBinRangeWriter struct {
 	aggregator   *Aggregator
 	domain       kv.Domain
 	endTxNum     uint64
+	baseTxNum    uint64
 	leafStamp    uint64
 	ranges       []pbinRange
 	maxOps       int
@@ -57,6 +58,7 @@ type PBinRangeWriter struct {
 	workers      int
 	state        []byte
 	stateInFiles bool
+	resume       bool
 	workerViews  atomic.Int32
 	stampTracker func() pbinStampTracker
 	pipelineHook func(string, int) error
@@ -147,6 +149,7 @@ type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
 	writes   map[string]pbinRangeWriterWrite
 	views    *atomic.Int32
+	base     bool
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
 	finished func() error
@@ -375,8 +378,14 @@ func (p *pbinFoldPipeline) close() error {
 }
 
 func (o *pbinRangeWriterOverlay) Absent(key []byte) bool {
-	_, held := o.writes[string(key)]
-	return !held
+	if _, held := o.writes[string(key)]; held {
+		return false
+	}
+	if !o.base {
+		return true
+	}
+	data, _, err := o.PatriciaContext.Branch(key)
+	return err != nil || len(data) == 0
 }
 
 func (o *pbinRangeWriterOverlay) DecorateWorkerContext(worker commitment.PatriciaContext) commitment.PatriciaContext {
@@ -504,6 +513,59 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 
 func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
 	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
+}
+
+func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64) (*PBinRangeWriter, error) {
+	if aggregator == nil {
+		return nil, fmt.Errorf("pbin resume range writer: nil aggregator")
+	}
+	if domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain {
+		return nil, fmt.Errorf("pbin resume range writer: invalid domain %s", domain)
+	}
+	if endTxNum < baseTxNum {
+		return nil, fmt.Errorf("pbin resume range writer: end txNum %d is before base txNum %d", endTxNum, baseTxNum)
+	}
+	stepSize := aggregator.StepSize()
+	if stepSize == 0 {
+		return nil, fmt.Errorf("pbin resume range writer: step size is zero")
+	}
+	at := aggregator.BeginFilesRo()
+	defer at.Close()
+	files := pbinAccountFiles(at.Files(domain))
+	if len(files) == 0 {
+		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no files", domain)
+	}
+	_, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
+	if err != nil {
+		return nil, fmt.Errorf("pbin resume range writer: read base state: %w", err)
+	}
+	if !found || stateEnd < baseTxNum {
+		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no state at txNum %d", domain, baseTxNum)
+	}
+	start := max(stateEnd, baseTxNum)
+	end := max(endTxNum+1, start+stepSize)
+	end = ((end + stepSize - 1) / stepSize) * stepSize
+	rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", start, end))
+	if err != nil {
+		return nil, err
+	}
+	return &PBinRangeWriter{
+		aggregator:   aggregator,
+		domain:       domain,
+		endTxNum:     endTxNum,
+		baseTxNum:    baseTxNum,
+		leafStamp:    endTxNum,
+		maxOps:       pbinRangeWriterMaxOps,
+		maxBytes:     pbinRangeWriterMaxBytes,
+		workers:      dbg.PBTWorkers,
+		stateInFiles: true,
+		resume:       true,
+		ranges: []pbinRange{{
+			start: start,
+			end:   end,
+			rows:  rows,
+		}},
+	}, nil
 }
 
 func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
@@ -643,16 +705,26 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return common.Hash{}, fmt.Errorf("pbin range writer: shared domains use %s, want %s", domains.GetCommitmentCtx().CommitmentDomain(), w.domain)
 	}
 	defer w.closeRanges()
-	fresh, err := w.freshDomain(tx)
-	if err != nil {
-		return common.Hash{}, err
+	var err error
+	if w.resume {
+		if err := w.resumeDomain(tx); err != nil {
+			return common.Hash{}, err
+		}
+	} else {
+		fresh, err := w.freshDomain(tx)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		if !fresh {
+			return common.Hash{}, fmt.Errorf("pbin range writer: target domain %s already holds rows; the range writer builds only into an empty domain", w.domain)
+		}
 	}
-	if !fresh {
-		return common.Hash{}, fmt.Errorf("pbin range writer: target domain %s already holds rows; the range writer builds only into an empty domain", w.domain)
-	}
-	var tracker pbinStampTracker = newPBinRowStampTracker()
-	if w.stampTracker != nil {
-		tracker = w.stampTracker()
+	var tracker pbinStampTracker
+	if !w.resume {
+		tracker = newPBinRowStampTracker()
+		if w.stampTracker != nil {
+			tracker = w.stampTracker()
+		}
 	}
 	var (
 		overlay  *pbinRangeWriterOverlay
@@ -668,13 +740,17 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			state = bytes.Clone(data)
 			return nil
 		}
-		stamp, stampErr := rowTracker.stamp(key)
-		if stampErr != nil {
-			return stampErr
-		}
-		rangeIndex, rangeErr := w.rangeForStamp(stamp)
-		if rangeErr != nil {
-			return rangeErr
+		rangeIndex := len(w.ranges) - 1
+		if !w.resume {
+			stamp, stampErr := rowTracker.stamp(key)
+			if stampErr != nil {
+				return stampErr
+			}
+			var rangeErr error
+			rangeIndex, rangeErr = w.rangeForStamp(stamp)
+			if rangeErr != nil {
+				return rangeErr
+			}
 		}
 		route, collectErr := w.ranges[rangeIndex].rows.collect(key, data)
 		if collectErr != nil {
@@ -686,13 +762,15 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return nil
 	}
 	serialVisit := func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error {
-		for i, op := range batch {
-			if observeErr := tracker.observe(op.Key, stamps[i]); observeErr != nil {
-				return observeErr
+		if tracker != nil {
+			for i, op := range batch {
+				if observeErr := tracker.observe(op.Key, stamps[i]); observeErr != nil {
+					return observeErr
+				}
 			}
-		}
-		if advanceErr := tracker.advance(lookahead); advanceErr != nil {
-			return advanceErr
+			if advanceErr := tracker.advance(lookahead); advanceErr != nil {
+				return advanceErr
+			}
 		}
 		domains.GetCommitmentCtx().SetPBinOps(batch)
 		var computeErr error
@@ -704,18 +782,24 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return computeErr
 		}
 		if final {
-			return overlay.Flush()
+			if err := overlay.Flush(); err != nil {
+				return err
+			}
+			return nil
 		}
 		return overlay.FlushFinished(lookahead)
 	}
 	overlay = &pbinRangeWriterOverlay{
 		writes: make(map[string]pbinRangeWriterWrite),
 		views:  &w.workerViews,
+		base:   w.resume,
 		write: func(key, data, _ []byte) error {
 			return onRow(tracker, key, data)
 		},
 		finished: func() error {
-			tracker.clearClosed()
+			if tracker != nil {
+				tracker.clearClosed()
+			}
 			return nil
 		},
 		release: func(key []byte) {
@@ -779,7 +863,8 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			}
 			var value [eip8297.ValueLength]byte
 			copy(value[:], leaf.Value)
-			return emit(pbt.Op{Key: bytes.Clone(leaf.Key), Value: value}, leaf.Stamp)
+			op := pbt.Op{Key: bytes.Clone(leaf.Key), Value: value}
+			return emit(op, leaf.Stamp)
 		})
 	}
 	streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream)
@@ -797,7 +882,14 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return common.Hash{}, pipelineErr
 	}
 	if !seen {
-		root = append([]byte(nil), eip8297.EmptyTreeHash[:]...)
+		if w.resume {
+			root, err = domains.GetCommitmentCtx().Trie().RootHash()
+			if err != nil {
+				return common.Hash{}, err
+			}
+		} else {
+			root = append([]byte(nil), eip8297.EmptyTreeHash[:]...)
+		}
 	}
 	if len(state) == 0 {
 		trie, ok := domains.GetCommitmentCtx().Trie().(commitment.StatefulTrie)
@@ -836,6 +928,27 @@ func (w *PBinRangeWriter) freshDomain(tx kv.Tx) (bool, error) {
 		return false, err
 	}
 	return len(firstKey) == 0, nil
+}
+
+func (w *PBinRangeWriter) resumeDomain(tx kv.Tx) error {
+	at := w.aggregator.BeginFilesRo()
+	defer at.Close()
+	inFiles, err := at.DebugRangeLatestFromFiles(w.domain, nil, nil, 1)
+	if err != nil {
+		return err
+	}
+	defer inFiles.Close()
+	if !inFiles.HasNext() {
+		return fmt.Errorf("pbin resume range writer: base domain %s has no rows", w.domain)
+	}
+	firstKey, err := kv.FirstKey(tx, w.aggregator.d[w.domain].ValuesTable)
+	if err != nil {
+		return err
+	}
+	if len(firstKey) != 0 {
+		return fmt.Errorf("pbin resume range writer: base domain %s has MDBX rows", w.domain)
+	}
+	return nil
 }
 
 func (w *PBinRangeWriter) rangeForStamp(stamp uint64) (int, error) {

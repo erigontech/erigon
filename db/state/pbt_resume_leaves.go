@@ -160,7 +160,6 @@ func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange p
 		}
 	}
 	reader := &pbinResumeStateReader{at: at, sourceTxNum: opts.SourceTxNum, stepSize: at.StepSize()}
-	emitter := pbt.NewRebuildFeedOpEmitter()
 	for cursors[0].ok || cursors[1].ok || cursors[2].ok {
 		select {
 		case <-ctx.Done():
@@ -174,6 +173,7 @@ func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange p
 		var accountStamp, codeStamp, storageStamp uint64
 		var codeTouched bool
 		var accountTouched bool
+		var storageReadSlots [][]byte
 		var storageSlots [][]byte
 		storageStamps := make(map[string]uint64)
 		if cursors[0].ok && bytes.Equal(cursors[0].key, address) {
@@ -195,6 +195,7 @@ func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange p
 			if len(slot) > eip8297.ValueLength {
 				return fmt.Errorf("pbin resume: storage slot for address %x has length %d", address, len(slot))
 			}
+			storageReadSlots = append(storageReadSlots, bytes.Clone(slot))
 			slot32 := eip8297.RightAlign32(slot)
 			slotKey := bytes.Clone(slot32[:])
 			storageSlots = append(storageSlots, slotKey)
@@ -207,22 +208,34 @@ func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange p
 		if !accountTouched && !codeTouched && len(storageSlots) == 0 {
 			continue
 		}
-		if err := pbinResumeEmitAddress(address, accountStamp, codeStamp, storageStamp, codeTouched, storageSlots, storageStamps, reader, emitter, collector); err != nil {
+		reader.storageAliases = make(map[string][]byte, len(storageReadSlots))
+		for _, slot := range storageReadSlots {
+			padded := make([]byte, eip8297.ValueLength)
+			copy(padded, slot)
+			normalizedKey := append(append([]byte(nil), address...), padded...)
+			rawKey := append(append([]byte(nil), address...), slot...)
+			reader.storageAliases[string(normalizedKey)] = rawKey
+		}
+		if err := pbinResumeEmitAddress(address, accountStamp, codeStamp, storageStamp, codeTouched, storageReadSlots, storageSlots, storageStamps, reader, collector); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func pbinResumeEmitAddress(address []byte, accountStamp, codeStamp, storageStamp uint64, codeTouched bool, storageSlots [][]byte, storageStamps map[string]uint64, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, collector *etl.Collector) error {
-	account, err := commitmentdb.BinFeedAccountFromState(address, storageSlots, true, false, reader)
+func pbinResumeEmitAddress(address []byte, accountStamp, codeStamp, storageStamp uint64, codeTouched bool, storageReadSlots, storageSlots [][]byte, storageStamps map[string]uint64, reader *pbinResumeStateReader, collector *etl.Collector) error {
+	account, err := commitmentdb.BinFeedAccountFromState(address, storageReadSlots, true, false, reader)
 	if err != nil {
 		return err
 	}
 	headerStamp := max(accountStamp, codeStamp, storageStamp)
 	if !account.Exists {
-		for index := range 3 {
-			if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyAccount(address, byte(index))}, headerStamp); err != nil {
+		for _, key := range [][]byte{
+			eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey),
+			eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey),
+			eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey),
+		} {
+			if err := pbinResumeCollectOp(collector, pbt.Op{Key: key}, headerStamp); err != nil {
 				return err
 			}
 		}
@@ -233,27 +246,45 @@ func pbinResumeEmitAddress(address []byte, accountStamp, codeStamp, storageStamp
 		}
 		return nil
 	}
-	return emitter.EmitAccount(account, func(op pbt.Op) error {
-		if len(op.Key) == 0 {
-			return errors.New("pbin resume: feed emitted a non-leaf operation")
-		}
-		if op.Key[0] == eip8297.CodeZone && !codeTouched {
-			return nil
-		}
-		stamp := headerStamp
-		switch op.Key[0] {
-		case eip8297.CodeZone:
-			stamp = codeStamp
-		case eip8297.StorageZone:
-			stamp = storageStamps[string(op.Key)]
-		case eip8297.AccountZone:
-			if len(op.Key) != eip8297.AccountKeyLength || op.Key[eip8297.AccountKeyLength-1] < eip8297.HeaderStorageOffset {
-				break
+	codeSize := uint64(len(account.Code))
+	basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, codeSize)
+	if err != nil {
+		return err
+	}
+	if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: basic}, headerStamp); err != nil {
+		return err
+	}
+	codeHash := eip8297.CodeHashValue(account.CodeHash)
+	delegation := [eip8297.ValueLength]byte{}
+	if eip8297.IsDelegation(account.Code) {
+		codeHash = [eip8297.ValueLength]byte{}
+		delegation = eip8297.EncodeDelegation(account.Code)
+	}
+	if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: codeHash}, headerStamp); err != nil {
+		return err
+	}
+	if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey), Value: delegation}, headerStamp); err != nil {
+		return err
+	}
+	if codeTouched && !eip8297.IsDelegation(account.Code) {
+		for index, chunk := range eip8297.ChunkifyCode(account.Code) {
+			if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyCodeChunk(account.CodeHash, index), Value: chunk}, codeStamp); err != nil {
+				return err
 			}
-			stamp = storageStamps[string(op.Key)]
 		}
-		return pbinResumeCollectOp(collector, op, stamp)
-	})
+	}
+	storageValues := make(map[string][]byte, len(account.Slots))
+	for _, slot := range account.Slots {
+		normalized := eip8297.RightAlign32(slot.Key)
+		storageValues[string(normalized[:])] = slot.Value
+	}
+	for _, slotKey := range storageSlots {
+		stamp := storageStamps[string(eip8297.TreeKeyStorage(address, slotKey))]
+		if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyStorage(address, slotKey), Value: eip8297.EncodeStorageValue(storageValues[string(slotKey)])}, stamp); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func pbinResumeCollectOp(collector *etl.Collector, op pbt.Op, stamp uint64) error {
@@ -264,9 +295,10 @@ func pbinResumeCollectOp(collector *etl.Collector, op pbt.Op, stamp uint64) erro
 }
 
 type pbinResumeStateReader struct {
-	at          *AggregatorRoTx
-	sourceTxNum uint64
-	stepSize    uint64
+	at             *AggregatorRoTx
+	sourceTxNum    uint64
+	stepSize       uint64
+	storageAliases map[string][]byte
 }
 
 func (r *pbinResumeStateReader) WithHistory() bool { return false }
@@ -274,7 +306,13 @@ func (r *pbinResumeStateReader) WithHistory() bool { return false }
 func (r *pbinResumeStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *pbinResumeStateReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, kv.Step, error) {
-	value, found, _, endTxNum, err := r.at.DebugGetLatestFromFiles(domain, key, r.sourceTxNum)
+	readKey := key
+	if domain == kv.StorageDomain {
+		if alias, ok := r.storageAliases[string(key)]; ok {
+			readKey = alias
+		}
+	}
+	value, found, _, endTxNum, err := r.at.DebugGetLatestFromFiles(domain, readKey, r.sourceTxNum)
 	if err != nil {
 		return nil, 0, err
 	}

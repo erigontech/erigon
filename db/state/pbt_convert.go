@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -45,6 +46,7 @@ type PBinConvertOptions struct {
 	WorkerViews       *atomic.Int32
 	Workers           int
 	SourceWorkerRuns  *atomic.Int32
+	Resume            *PBinResumeOptions
 }
 
 func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) error) (common.Hash, error) {
@@ -90,12 +92,41 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, err
 	}
 	defer domains.Close()
+	if opts.Resume != nil {
+		baseTxNum := opts.Resume.BaseTxNum
+		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentSplitStateReader(
+			commitmentdb.NewFilesOnlyStateReader(opts.TargetTx, baseTxNum),
+			commitmentdb.NewLatestStateReader(opts.TargetTx, domains, commitmentdb.LatestStateReaderOptions{}),
+			opts.TargetDomain,
+			false,
+		))
+		gotTxNum, _, seekErr := domains.SeekCommitment(ctx, opts.TargetTx)
+		if seekErr != nil {
+			return common.Hash{}, fmt.Errorf("pbin conversion: resume base seek: %w", seekErr)
+		}
+		if gotTxNum != baseTxNum {
+			return common.Hash{}, fmt.Errorf("pbin conversion: resume base state is at txNum %d, want %d", gotTxNum, baseTxNum)
+		}
+	}
 
 	sourceFiles := opts.SourceAggregator.BeginFilesRo()
 	defer sourceFiles.Close()
 	var streamRoot common.Hash
 	var streamErr error
 	leaves := func(emit func(PBinLeaf) error) error {
+		if opts.Resume != nil {
+			resume := *opts.Resume
+			if resume.SourceTxNum == 0 {
+				resume.SourceTxNum = opts.EndTxNum
+			}
+			if resume.Workers <= 0 {
+				resume.Workers = workers
+			}
+			if resume.SourceTxNum != opts.EndTxNum {
+				return fmt.Errorf("pbin conversion: resume source txNum %d differs from end txNum %d", resume.SourceTxNum, opts.EndTxNum)
+			}
+			return PBinResumeLeaves(ctx, sourceFiles, resume, emit)
+		}
 		rootInput := make(chan PBinLeaf, 1024)
 		rootDone := make(chan struct{})
 		go func() {
@@ -135,7 +166,18 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		limits = *opts.RangeWriterLimits
 	}
 	limits.Workers = workers
-	writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, limits)
+	if opts.Resume != nil {
+		resume := *opts.Resume
+		if resume.SourceTxNum == 0 {
+			resume.SourceTxNum = opts.EndTxNum
+		}
+		writer, err = NewPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum)
+		if writer != nil {
+			writer.workers = workers
+		}
+	} else {
+		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, limits)
+	}
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -146,7 +188,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if root != streamRoot {
+	if opts.Resume == nil && root != streamRoot {
 		return common.Hash{}, fmt.Errorf("pbin conversion: engine root %x differs from stream root %x", root, streamRoot)
 	}
 	return root, nil

@@ -415,23 +415,23 @@ flowchart LR
 - Modify: `db/state/pbt_range_writer.go`, `db/state/pbt_convert.go`
 - Create: `db/state/pbt_resume_test.go`
 
-- [ ] a resume mode of the range writer:
+- [x] a resume mode of the range writer:
   - seek the commitment state at X from the base bin files instead of `WithoutCommitmentSeek`;
   - read base rows through the trie context, and make the overlay's `Absent` consult the base;
   - accept a base domain that holds files up to X and no MDBX rows.
-- [ ] every row and tombstone written goes to the newest output range through the lanes (Task 7). This mode has no
+- [x] every row and tombstone written goes to the newest output range through the lanes (Task 7). This mode has no
       stamp tracker. The state record at Y goes to the same range.
 - [ ] verification: C-b does not apply to a delta. The default runs:
   - C-d (rows and root);
   - C-e (the stream root of the full leaf set at Y, compared with the state record);
   - C-c after the fork.
   `--skip-verify` skips C-d and C-e.
-- [ ] tests:
+- [x] tests:
   - the resumed latest row view and root equal a fresh convert at Y on the Task 11 corpora;
   - a deleted subtree leaves tombstones;
   - an empty gap gives the base root;
   - `-race`.
-- [ ] run the gate — must pass before Task 13.
+- [x] run the gate — must pass before Task 13.
 
 ### Task 13: Resume, part 3 — `convert-pbt --resume`
 **Files:**

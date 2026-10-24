@@ -132,6 +132,14 @@ func WritePBTManifest(path string, manifest PBTManifest) error {
 	return nil
 }
 
+func PBTManifestDigest(path string) (string, error) {
+	file, err := digestPBTManifestFile(context.Background(), PBTManifestFileSource{Name: filepath.Base(path), Path: path})
+	if err != nil {
+		return "", err
+	}
+	return file.Blake3, nil
+}
+
 func ReadPBTManifest(path string, sources ...PBTManifestFileSource) (PBTManifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

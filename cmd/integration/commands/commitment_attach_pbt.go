@@ -226,6 +226,21 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			return fileSetErr
 		}
 	}
+	if !manifestAvailable {
+		return errors.New("commitment attach-pbt: pbt-manifest.toml is missing; re-run convert-pbt with this binary")
+	}
+	manifestDigest, err := dbstate.PBTManifestDigest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("commitment attach-pbt: manifest digest: %w", err)
+	}
+	if marker != nil {
+		if marker.ManifestBlake3 == "" {
+			return errors.New("commitment attach-pbt: marker has no manifest digest; rerun attach-pbt from the published datadir")
+		}
+		if marker.ManifestBlake3 != manifestDigest {
+			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
+		}
+	}
 	if marker == nil {
 		nodeFiles, fileErr := pbtAttachFiles(nodeDirs)
 		if fileErr != nil {
@@ -262,6 +277,14 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			}
 			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
 		}
+	} else {
+		nodeBlock, nodeTx, nodeHexRoot, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, false, logger)
+		if err != nil {
+			return err
+		}
+		if nodeBlock != blockNum || nodeTx != txNum {
+			return fmt.Errorf("commitment attach-pbt: resumed node state is (%d, %d), want (%d, %d)", nodeBlock, nodeTx, blockNum, txNum)
+		}
 	}
 	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
@@ -274,9 +297,6 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if nodeProgress == blockNum && maxTxNum < txNum {
 			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)
 		}
-	}
-	if !manifestAvailable {
-		return errors.New("commitment attach-pbt: pbt-manifest.toml is missing; re-run convert-pbt with this binary")
 	}
 	manifestPbtRoot, err := parsePBTManifestHash("pbt_root", manifest.PBTRoot)
 	if err != nil {
@@ -331,19 +351,19 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if publishedHexRoot != manifestHexRoot {
 		return fmt.Errorf("commitment attach-pbt: published hex root %s differs from manifest root %s at (%d, %d)", publishedHexRoot, manifestHexRoot, blockNum, txNum)
 	}
+	if nodeHexRoot != manifestHexRoot {
+		return fmt.Errorf("commitment attach-pbt: node hex root %s differs from manifest root %s at (%d, %d)", nodeHexRoot, manifestHexRoot, blockNum, txNum)
+	}
+	if blockEnd {
+		wantHeaderRoot := manifestHexRoot
+		if afterFork {
+			wantHeaderRoot = manifestPbtRoot
+		}
+		if headerRoot != wantHeaderRoot {
+			return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
+		}
+	}
 	if marker == nil {
-		if nodeHexRoot != manifestHexRoot {
-			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from manifest root %s at (%d, %d)", nodeHexRoot, manifestHexRoot, blockNum, txNum)
-		}
-		if blockEnd {
-			wantHeaderRoot := manifestHexRoot
-			if afterFork {
-				wantHeaderRoot = manifestPbtRoot
-			}
-			if headerRoot != wantHeaderRoot {
-				return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
-			}
-		}
 		if err := hooks.genesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
 		}
@@ -363,7 +383,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	if marker != nil {
 		finalSettings = marker.Settings
-	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
+	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, ManifestBlake3: manifestDigest, Settings: finalSettings}); err != nil {
 		return err
 	}
 	if err := hooks.step("marker"); err != nil {
