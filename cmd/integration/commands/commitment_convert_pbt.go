@@ -596,21 +596,28 @@ func pbtResumeRejectOutputMDBXState(ctx context.Context, dirs datadir.Dirs) erro
 	}
 	defer tx.Rollback()
 	for _, table := range []string{kv.TblCommitmentVals, kv.TblCommitmentBinVals} {
-		cursor, cursorErr := tx.CursorDupSort(table)
-		if cursorErr != nil {
-			return fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, cursorErr)
+		hasRows, tableErr := pbtResumeOutputMDBXTableHasRows(tx, table)
+		if tableErr != nil {
+			return tableErr
 		}
-		defer cursor.Close()
-		key, _, cursorErr := cursor.First()
-		cursor.Close()
-		if cursorErr != nil {
-			return fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, cursorErr)
-		}
-		if key != nil {
+		if hasRows {
 			return fmt.Errorf("commitment convert-pbt: output MDBX rows are present in %s", table)
 		}
 	}
 	return nil
+}
+
+func pbtResumeOutputMDBXTableHasRows(tx kv.Tx, table string) (bool, error) {
+	cursor, err := tx.CursorDupSort(table)
+	if err != nil {
+		return false, fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, err)
+	}
+	defer cursor.Close()
+	key, _, err := cursor.First()
+	if err != nil {
+		return false, fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, err)
+	}
+	return key != nil, nil
 }
 
 func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected, command, role string) error {
