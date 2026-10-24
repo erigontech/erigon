@@ -25,37 +25,51 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
+func (a *Aggregator) StepAlignedEnd(stepSize uint64) (end, stoppedEnd uint64, err error) {
 	at := a.BeginFilesRo()
 	defer at.Close()
-	return at.stepAlignedEnd(stepSize)
+	return at.stepAlignedEnd(stepSize, a.stoppedCommitmentDomains())
 }
 
-func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) (uint64, error) {
+func (a *Aggregator) stoppedCommitmentDomains() (stopped []kv.Domain) {
 	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if a.isDomainFrozen(d) || a.CommitmentDomainStopped(d) {
-			return 0, fmt.Errorf("%s domain is frozen or stopped, its files cannot be merged", d)
+		if a.CommitmentDomainStopped(d) {
+			stopped = append(stopped, d)
 		}
 	}
-	end, err := a.StepAlignedEnd(stepSize)
+	return stopped
+}
+
+func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) (end, stoppedEnd uint64, err error) {
+	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if a.isDomainFrozen(d) {
+			return 0, 0, fmt.Errorf("%s domain is frozen, its files cannot be merged", d)
+		}
+	}
+	stopped := a.stoppedCommitmentDomains()
+	end, stoppedEnd, err = a.StepAlignedEnd(stepSize)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+	for _, d := range stopped {
+		a.stoppedCommitment[d].Store(false)
+		defer a.StopCommitmentDomain(d)
 	}
 	for {
-		merged, err := a.mergeStepAligned(ctx, stepSize, end)
+		merged, err := a.mergeStepAligned(ctx, stepSize, end, stoppedEnd, stopped)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if !merged {
-			return end, nil
+			return end, stoppedEnd, nil
 		}
 	}
 }
 
-func (a *Aggregator) mergeStepAligned(ctx context.Context, stepSize, end uint64) (bool, error) {
+func (a *Aggregator) mergeStepAligned(ctx context.Context, stepSize, end, stoppedEnd uint64, stopped []kv.Domain) (bool, error) {
 	at := a.BeginFilesRo()
 	defer at.Close()
-	r, err := at.stepAlignedMergeRanges(stepSize, end)
+	r, err := at.stepAlignedMergeRanges(stepSize, end, stoppedEnd, stopped)
 	if err != nil {
 		return false, err
 	}
@@ -76,13 +90,16 @@ func (a *Aggregator) mergeStepAligned(ctx context.Context, stepSize, end uint64)
 	return true, nil
 }
 
-func (at *AggregatorRoTx) stepAlignedFileLists() []visibleFiles {
+func (at *AggregatorRoTx) stepAlignedFileLists(stopped []kv.Domain, ofStopped bool) []visibleFiles {
 	var lists []visibleFiles
-	for _, d := range at.d {
-		if d == nil || !d.d.Enabled {
+	for id, d := range at.d {
+		if d == nil || !d.d.Enabled || slices.Contains(stopped, kv.Domain(id)) != ofStopped {
 			continue
 		}
 		lists = append(lists, d.files, d.ht.files, d.ht.iit.files)
+	}
+	if ofStopped {
+		return lists
 	}
 	for _, ii := range at.iis {
 		if ii == nil || !ii.ii.Enabled {
@@ -93,9 +110,28 @@ func (at *AggregatorRoTx) stepAlignedFileLists() []visibleFiles {
 	return lists
 }
 
-func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
-	lists := at.stepAlignedFileLists()
-	end := uint64(math.MaxUint64)
+func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64, stopped []kv.Domain) (end, stoppedEnd uint64, err error) {
+	if end, err = stepAlignedListsEnd(at.stepAlignedFileLists(stopped, false), stepSize, math.MaxUint64); err != nil {
+		return 0, 0, err
+	}
+	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled && !slices.Contains(stopped, kv.CommitmentDomain) {
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
+				return 0, 0, fmt.Errorf("%s and commitment files differ below txNum %d", d, end)
+			}
+		}
+	}
+	if len(stopped) == 0 {
+		return end, end, nil
+	}
+	if stoppedEnd, err = stepAlignedListsEnd(at.stepAlignedFileLists(stopped, true), stepSize, end); err != nil {
+		return 0, 0, err
+	}
+	return end, stoppedEnd, nil
+}
+
+func stepAlignedListsEnd(lists []visibleFiles, stepSize, limit uint64) (uint64, error) {
+	end := limit
 	for _, files := range lists {
 		if len(files) == 0 {
 			continue
@@ -127,13 +163,6 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
 			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
 				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
-			}
-		}
-	}
-	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
-		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
-				return 0, fmt.Errorf("%s and commitment files differ below txNum %d", d, end)
 			}
 		}
 	}
@@ -170,18 +199,22 @@ func stepAlignedMergeRange(files visibleFiles, stepSize, end uint64) MergeRange 
 	return MergeRange{}
 }
 
-func (at *AggregatorRoTx) stepAlignedMergeRanges(stepSize, end uint64) (*Ranges, error) {
+func (at *AggregatorRoTx) stepAlignedMergeRanges(stepSize, end, stoppedEnd uint64, stopped []kv.Domain) (*Ranges, error) {
 	r := &Ranges{}
 	for id, d := range at.d {
 		if d == nil || !d.d.Enabled {
 			continue
 		}
-		r.domain[id] = DomainRanges{name: d.name, aggStep: d.stepSize, values: stepAlignedMergeRange(d.files, stepSize, end)}
+		domainEnd := end
+		if slices.Contains(stopped, kv.Domain(id)) {
+			domainEnd = stoppedEnd
+		}
+		r.domain[id] = DomainRanges{name: d.name, aggStep: d.stepSize, values: stepAlignedMergeRange(d.files, stepSize, domainEnd)}
 		if r.domain[id].values.needMerge {
 			continue
 		}
-		history := stepAlignedMergeRange(d.ht.files, stepSize, end)
-		index := stepAlignedMergeRange(d.ht.iit.files, stepSize, end)
+		history := stepAlignedMergeRange(d.ht.files, stepSize, domainEnd)
+		index := stepAlignedMergeRange(d.ht.iit.files, stepSize, domainEnd)
 		if history.needMerge && !(index.needMerge && history.Equal(&index)) {
 			return nil, fmt.Errorf("%s history merge %d-%d has no index merge over the same range", d.name, history.from, history.to)
 		}

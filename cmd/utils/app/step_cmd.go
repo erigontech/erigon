@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -34,6 +36,7 @@ type stepRebasePlan struct {
 	fromStepSize uint64
 	alignFactor  uint64
 	alignEnd     uint64
+	stoppedEnds  map[kv.Domain]uint64
 	settings     state.ErigonDBSettings
 }
 
@@ -66,15 +69,17 @@ func stepRebase(ctx context.Context, cliCtx *cli.Command) error {
 		return nil
 	}
 	var alignEnd uint64
+	var stoppedEnds map[kv.Domain]uint64
 	if newStepSize > settings.StepSize {
-		if err := withStepRebaseAgg(ctx, dirs, keepBlocks, logger, func(agg *state.Aggregator) (err error) {
-			alignEnd, err = agg.StepAlignedEnd(newStepSize)
+		if err := withStepRebaseAgg(ctx, dirs, keepBlocks, logger, func(agg *state.Aggregator) error {
+			end, stoppedEnd, err := agg.StepAlignedEnd(newStepSize)
+			alignEnd, stoppedEnds = end, stoppedCommitmentEnds(agg, stoppedEnd)
 			return err
 		}); err != nil {
 			return err
 		}
 	}
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, keepBlocks, alignEnd, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, keepBlocks, alignEnd, stoppedEnds, logger)
 	if err != nil {
 		return err
 	}
@@ -89,7 +94,7 @@ func stepRebase(ctx context.Context, cliCtx *cli.Command) error {
 	return applyStepRebasePlan(ctx, dirs, plan, logger)
 }
 
-func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, alignEnd uint64, logger log.Logger) (stepRebasePlan, error) {
+func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, alignEnd uint64, stoppedEnds map[kv.Domain]uint64, logger log.Logger) (stepRebasePlan, error) {
 	currentStepSize := settings.StepSize
 	if newStepSize > currentStepSize && newStepSize%currentStepSize != 0 {
 		return stepRebasePlan{}, fmt.Errorf("new step size must be a multiple of %d", currentStepSize)
@@ -110,7 +115,7 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 	var alignFactor uint64
 	if decr {
 		for _, p := range stateSnapDirs(dirs) {
-			list, err := collectRenameList(p, decr, factor, math.MaxUint64)
+			list, err := collectRenameList(p, decr, factor, math.MaxUint64, nil)
 			if err != nil {
 				return stepRebasePlan{}, err
 			}
@@ -120,20 +125,27 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 		if settings.RefsInCommitmentBranches() {
 			return stepRebasePlan{}, fmt.Errorf("references_in_commitment_branches is on: merged commitment files would be referenced, and read as plain at step size %d", newStepSize)
 		}
+		if len(stoppedEnds) > 0 && !keepBlocks {
+			return stepRebasePlan{}, fmt.Errorf("a stopped commitment domain needs --keep-blocks: its stop marker is kept in chaindata")
+		}
 		alignFactor = factor
-		tail, err := collectFilesPast(stateSnapDirs(dirs), alignEnd/currentStepSize)
+		tail, err := collectFilesPast(stateSnapDirs(dirs), alignEnd/currentStepSize, stoppedEndSteps(stoppedEnds, currentStepSize))
 		if err != nil {
 			return stepRebasePlan{}, err
 		}
-		if alignEnd == 0 && len(tail) > 0 {
+		keptEnd := alignEnd
+		for _, end := range stoppedEnds {
+			keptEnd = min(keptEnd, end)
+		}
+		if keptEnd == 0 && len(tail) > 0 {
 			return stepRebasePlan{}, fmt.Errorf("no file boundary common to all state files is a multiple of %d txs, nothing would be kept", newStepSize)
 		}
 		_, conversionTxNum, converted, err := settings.ConversionPoint()
 		if err != nil {
 			return stepRebasePlan{}, err
 		}
-		if converted && alignEnd <= conversionTxNum {
-			return stepRebasePlan{}, fmt.Errorf("the last file boundary at a multiple of %d txs is txNum %d, not past the PBT conversion point txNum %d", newStepSize, alignEnd, conversionTxNum)
+		if converted && keptEnd <= conversionTxNum {
+			return stepRebasePlan{}, fmt.Errorf("the last file boundary at a multiple of %d txs is txNum %d, not past the PBT conversion point txNum %d", newStepSize, keptEnd, conversionTxNum)
 		}
 		dels = append(dels, tail...)
 	}
@@ -156,7 +168,28 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 	newSettings := *settings
 	newSettings.StepSize = newStepSize
 	newSettings.StepsInFrozenFile = newFrozenSteps
-	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, fromStepSize: currentStepSize, alignFactor: alignFactor, alignEnd: alignEnd, settings: newSettings}, nil
+	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, fromStepSize: currentStepSize, alignFactor: alignFactor, alignEnd: alignEnd, stoppedEnds: stoppedEnds, settings: newSettings}, nil
+}
+
+func stoppedCommitmentEnds(agg *state.Aggregator, end uint64) map[kv.Domain]uint64 {
+	var ends map[kv.Domain]uint64
+	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if agg.CommitmentDomainStopped(d) {
+			if ends == nil {
+				ends = make(map[kv.Domain]uint64)
+			}
+			ends[d] = end
+		}
+	}
+	return ends
+}
+
+func stoppedEndSteps(ends map[kv.Domain]uint64, stepSize uint64) map[string]uint64 {
+	steps := make(map[string]uint64, len(ends))
+	for d, end := range ends {
+		steps[d.String()] = end / stepSize
+	}
+	return steps
 }
 
 func printStepRebasePlan(plan stepRebasePlan) {
@@ -190,26 +223,27 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 	renames, deletions := plan.renames, slices.Clone(plan.deletions)
 	if plan.alignFactor != 0 {
 		if err := withStepRebaseAgg(ctx, dirs, plan.resetExec, logger, func(agg *state.Aggregator) error {
-			end, err := agg.AlignFilesToStepSize(ctx, plan.settings.StepSize)
+			end, stoppedEnd, err := agg.AlignFilesToStepSize(ctx, plan.settings.StepSize)
 			if err != nil {
 				return err
 			}
-			if end != plan.alignEnd {
-				return fmt.Errorf("state files changed since the plan: aligned up to txNum %d, planned %d", end, plan.alignEnd)
+			if end != plan.alignEnd || !maps.Equal(stoppedCommitmentEnds(agg, stoppedEnd), plan.stoppedEnds) {
+				return fmt.Errorf("state files changed since the plan: aligned up to txNum %d (stopped commitment %d), planned %d %v", end, stoppedEnd, plan.alignEnd, plan.stoppedEnds)
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
 		endStep := plan.alignEnd / plan.fromStepSize
+		keep := stoppedEndSteps(plan.stoppedEnds, plan.fromStepSize)
 		for _, p := range stateSnapDirs(dirs) {
-			list, err := collectRenameList(p, false, plan.alignFactor, endStep)
+			list, err := collectRenameList(p, false, plan.alignFactor, endStep, keep)
 			if err != nil {
 				return err
 			}
 			renames = append(renames, list...)
 		}
-		tail, err := collectFilesPast(stateSnapDirs(dirs), endStep)
+		tail, err := collectFilesPast(stateSnapDirs(dirs), endStep, keep)
 		if err != nil {
 			return err
 		}
@@ -273,7 +307,32 @@ func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err != nil {
 		return err
 	}
-	return rawdbreset.ResetExec(ctx, tdb)
+	var stopped []kv.Domain
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			ok, err := rawdb.ReadCommitmentDomainStopped(tx, d)
+			if err != nil {
+				return err
+			}
+			if ok {
+				stopped = append(stopped, d)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := rawdbreset.ResetExec(ctx, tdb); err != nil {
+		return err
+	}
+	return chainDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, d := range stopped {
+			if err := rawdb.WriteCommitmentDomainStopped(tx, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, logger log.Logger, fn func(*state.Aggregator) error) error {
@@ -297,7 +356,7 @@ func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, 
 	return fn(agg)
 }
 
-func collectFilesPast(roots []string, endStep uint64) ([]string, error) {
+func collectFilesPast(roots []string, endStep uint64, keepTo map[string]uint64) ([]string, error) {
 	var past []string
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
@@ -316,7 +375,11 @@ func collectFilesPast(roots []string, endStep uint64) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			if to > endStep {
+			limit, ok := keepTo[matches[2]]
+			if !ok {
+				limit = endStep
+			}
+			if to > limit {
 				past = append(past, filepath.Join(root, entry.Name()))
 			}
 		}
@@ -326,7 +389,7 @@ func collectFilesPast(roots []string, endStep uint64) ([]string, error) {
 
 // collectRenameList walks the snapshot domain directory and builds a list of
 // from/to file paths to be renamed according to the new step size rules.
-func collectRenameList(domainPath string, decr bool, factor, keepToStep uint64) ([]string, error) {
+func collectRenameList(domainPath string, decr bool, factor, keepToStep uint64, keepTo map[string]uint64) ([]string, error) {
 	renList := make([]string, 0, 100)
 
 	walkErr := fs.WalkDir(os.DirFS(domainPath), ".", func(path string, d fs.DirEntry, err error) error {
@@ -345,7 +408,11 @@ func collectRenameList(domainPath string, decr bool, factor, keepToStep uint64) 
 		if err != nil {
 			return err
 		}
-		if to > keepToStep {
+		limit, ok := keepTo[matches[2]]
+		if !ok {
+			limit = keepToStep
+		}
+		if to > limit {
 			return nil
 		}
 		if !decr && (from%factor != 0 || to%factor != 0) {

@@ -78,12 +78,12 @@ func TestStepRebaseIncreaseKeepsDualCommitment(t *testing.T) {
 	require.NoError(t, err)
 	var end uint64
 	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
-		end, err = agg.StepAlignedEnd(newStepSize)
+		end, _, err = agg.StepAlignedEnd(newStepSize)
 		return err
 	}))
 	require.NotZero(t, end)
 	require.Positive(t, countMisalignedFiles(t, dirs.SnapDomain, end/stepSize, factor), "files below the aligned end must need a merge")
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, logger)
 	require.NoError(t, err)
 	tail := filesPastStep(t, dirs.SnapDomain, end/stepSize)
 	require.NotEmpty(t, tail)

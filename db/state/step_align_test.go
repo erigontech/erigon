@@ -52,7 +52,7 @@ func TestAlignFilesToStepSize(t *testing.T) {
 	}
 	before := readAlignedState(t, db, agg, keys, commitmentKeys, wantEnd)
 
-	end, err := agg.AlignFilesToStepSize(t.Context(), newStepSize)
+	end, _, err := agg.AlignFilesToStepSize(t.Context(), newStepSize)
 	require.NoError(t, err)
 	require.Equal(t, wantEnd, end)
 	require.Equal(t, before, readAlignedState(t, db, agg, keys, commitmentKeys, wantEnd))
@@ -77,8 +77,8 @@ func TestAlignFilesToStepSizeRefusesFrozenCommitment(t *testing.T) {
 	_, agg := testDbAndAggregatorv3(t, 10)
 	require.NoError(t, state.WriteErigonDBSettings(agg.Dirs(), &state.ErigonDBSettings{StepSize: 10, StepsInFrozenFile: 64}))
 	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, 40))
-	_, err := agg.AlignFilesToStepSize(t.Context(), 100)
-	require.ErrorContains(t, err, "commitment domain is frozen or stopped")
+	_, _, err := agg.AlignFilesToStepSize(t.Context(), 100)
+	require.ErrorContains(t, err, "commitment domain is frozen")
 }
 
 func readAlignedState(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, accounts, commitmentKeys [][]byte, end uint64) map[string][]byte {

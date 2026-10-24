@@ -65,7 +65,7 @@ func TestStepRebaseIncreaseMergesStateFiles(t *testing.T) {
 
 	var end uint64
 	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
-		end, err = agg.StepAlignedEnd(newStepSize)
+		end, _, err = agg.StepAlignedEnd(newStepSize)
 		return err
 	}))
 	require.Equal(t, 20*stepSize, end)
@@ -81,7 +81,7 @@ func TestStepRebaseIncreaseMergesStateFiles(t *testing.T) {
 	closeDB()
 	require.NotEmpty(t, want[end-1])
 
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, logger)
 	require.NoError(t, err)
 	tail := filesPastStep(t, dirs.SnapDomain, end/stepSize)
 	require.NotEmpty(t, tail)
