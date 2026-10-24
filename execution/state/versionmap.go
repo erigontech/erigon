@@ -603,6 +603,7 @@ type lifecycleVerdict struct {
 	state        AccountLifecycleState
 	canonicalVer Version
 	destroyedAt  int
+	wipeInc      Incarnation
 }
 
 // readFloorLife is readFloor that also returns the account lifecycle verdict,
@@ -622,7 +623,7 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	life.state, life.canonicalVer, life.destroyedAt = accountLifecycleLocked(e, txIdx, false)
+	life.state, life.canonicalVer, life.destroyedAt, life.wipeInc = accountLifecycleLocked(e, txIdx, false)
 	cells := sel(e)
 	if cells == nil {
 		return val, res, false, life
@@ -857,7 +858,7 @@ const (
 )
 
 // AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
-func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int, wipeInc Incarnation) {
 	return vm.accountLifecycleAt(addr, txIdx, false)
 }
 
@@ -865,17 +866,17 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 // above a destruct that is still revertible may be withdrawn, so validation must
 // not take it as proof the account came back; the read path wants the opposite
 // and uses AccountLifecycleAt.
-func (vm *VersionMap) ResolvedAccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+func (vm *VersionMap) ResolvedAccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int, wipeInc Incarnation) {
 	return vm.accountLifecycleAt(addr, txIdx, true)
 }
 
-func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int, wipeInc Incarnation) {
 	if vm == nil {
-		return LifecycleLive, Version{}, 0
+		return LifecycleLive, Version{}, 0, 0
 	}
 	e := vm.load(addr)
 	if e == nil {
-		return LifecycleLive, Version{}, 0
+		return LifecycleLive, Version{}, 0, 0
 	}
 	// One RLock for the whole verdict so it cannot observe the account mid-flush.
 	e.mu.RLock()
@@ -886,14 +887,13 @@ func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resol
 // accountLifecycleLocked computes the lifecycle verdict for an already-loaded
 // entry; the caller must hold e.mu.RLock. Lets a floor read fold the lifecycle
 // check into its own lock instead of taking e.mu a second time.
-func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int, wipeInc Incarnation) {
 	if e.SelfDestruct == nil {
-		return LifecycleLive, Version{}, 0
+		return LifecycleLive, Version{}, 0, 0
 	}
 
 	var latest *WriteCell[bool]
 	var latestIdx int
-	var wipeInc Incarnation
 	haveLatest := false
 	wiped := false
 	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
@@ -911,7 +911,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		return true
 	})
 	if !wiped {
-		return LifecycleLive, Version{}, 0
+		return LifecycleLive, Version{}, 0, 0
 	}
 	if latest.flag == FlagDone || latest.flag == FlagValidated {
 		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
@@ -921,18 +921,18 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 
 	revivalLimit := txIdx - 1
 	if hi, ok := highestBelow(e.Address, revivalLimit, resolvedRevivalsOnly); ok && hi >= destroyedAt {
-		return LifecycleRevived, canonicalVer, destroyedAt
+		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
 	if hi, ok := highestBelow(e.Balance, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
-		return LifecycleRevived, canonicalVer, destroyedAt
+		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
 	if hi, ok := highestBelow(e.Nonce, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
-		return LifecycleRevived, canonicalVer, destroyedAt
+		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
 	if hi, ok := highestBelow(e.CodeHash, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
-		return LifecycleRevived, canonicalVer, destroyedAt
+		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
-	return LifecycleAbsent, canonicalVer, destroyedAt
+	return LifecycleAbsent, canonicalVer, destroyedAt, wipeInc
 }
 
 // highestBelow returns the largest TxIndex ≤ limit present in cells, if any. The
@@ -972,6 +972,40 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 	return findDoneSelfDestructLocked(e, lo, hi, target)
 }
 
+// selfDestructInRange is FindDoneSelfDestructInRange but also counts a Validated
+// (pre-seal) destruct as authoritative, matching accountLifecycleLocked. wipedCommitted
+// uses it so a code / code-size read is invalidated by an in-flight destruct that wiped
+// it before this tx — a Done-only scan misses the pre-seal destruct and the stale read
+// commits. Only the validator's wiped-code check needs this wider authority.
+func (vm *VersionMap) selfDestructInRange(addr accounts.Address, lo, hi int, target bool) (Version, bool) {
+	if vm == nil || hi <= lo {
+		return Version{}, false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return Version{}, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return Version{}, false
+	}
+	var ver Version
+	found := false
+	e.SelfDestruct.Descend(hi-1, func(k int, v *WriteCell[bool]) bool {
+		if k < lo {
+			return false
+		}
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value == target {
+			ver = Version{TxIndex: k, Incarnation: v.incarnation}
+			found = true
+			return false
+		}
+		return true
+	})
+	return ver, found
+}
+
 // findDoneSelfDestructLocked is the destruct scan every consumer shares, for
 // callers already holding e.mu. Estimate cells do not count: a verdict drawn from
 // one is published before the round that retracts it, and the reconstruction
@@ -998,7 +1032,7 @@ func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Versi
 
 // IsNetAbsent reports whether the account reads as gone at txIdx (LifecycleAbsent; see AccountLifecycleAt).
 func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
-	state, _, _ := vm.AccountLifecycleAt(addr, txIdx)
+	state, _, _, _ := vm.AccountLifecycleAt(addr, txIdx)
 	return state == LifecycleAbsent
 }
 
@@ -1582,13 +1616,15 @@ func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx i
 
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
-	// revived it, anchored on the destruct (canonicalVer) so it validates against the
-	// destruct dependency, not the stale wipe-blind pre-destruct floor.
-	if state, canonicalVer, destroyedAt := vm.AccountLifecycleAt(a, tx); state != LifecycleLive {
+	// revived it, anchored on the destruct ({destroyedAt, wipeInc}) so it validates by
+	// version alone — a later store above the destruct resolves here and version-mismatches.
+	// Anchoring on canonicalVer (the revival cell) instead churns as the revival tx
+	// re-executes, forcing the read to lean on the value tiebreaker to stay valid.
+	if state, _, destroyedAt, wipeInc := vm.AccountLifecycleAt(a, tx); state != LifecycleLive {
 		if val, res, ok := vm.ReadStorage(a, k, tx); ok && res.resolved() && res.DepIdx() > destroyedAt {
 			return val, res, ok
 		}
-		return uint256.Int{}, ReadResult{depIdx: canonicalVer.TxIndex, incarnation: canonicalVer.Incarnation}, true
+		return uint256.Int{}, ReadResult{depIdx: destroyedAt, incarnation: wipeInc}, true
 	}
 	return vm.ReadStorage(a, k, tx)
 }
@@ -1617,6 +1653,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// stays valid while that destruct holds and no later write revives the field.
 		if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed &&
 			version.TxIndex == sdRR.DepIdx() && version.Incarnation == sdRR.Incarnation() {
+			if hi, ok := vm.LatestTxIndex(addr, path, key, txIndex-1); ok && hi > version.TxIndex {
+				return VersionInvalid
+			}
+			return VersionValid
+		}
+	}
+	if !recursive && source == MapRead && (path == CodePath || path == CodeSizePath) {
+		// A wiped code read is recorded at an in-block destruct, which a later revival
+		// may hide from the latest SelfDestruct cell; only a code write above it ends it.
+		if sdVer, ok := vm.selfDestructInRange(addr, version.TxIndex, version.TxIndex+1, true); ok && sdVer == version {
 			if hi, ok := vm.LatestTxIndex(addr, path, key, txIndex-1); ok && hi > version.TxIndex {
 				return VersionInvalid
 			}
@@ -1673,7 +1719,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// stale. checkVersion misses it — the destruct writes no AddressPath cell — and
 		// the value tiebreaker above can forgive the version churn that would catch it.
 		if valid == VersionValid && path == AddressPath {
-			if st, _, destroyedAt := vm.ResolvedAccountLifecycleAt(addr, txIndex); st == LifecycleAbsent &&
+			if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIndex); st == LifecycleAbsent &&
 				destroyedAt > rr.Version().TxIndex {
 				valid = VersionInvalid
 			}
@@ -1861,8 +1907,8 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// A balance-only revival writes no code cell for a committed code read to
 	// version-mismatch against, but the destruct below it wiped the code.
 	wipedCommitted := func(addr accounts.Address, hdr ReadHeader) VersionValidity {
-		if hdr.Source == StorageRead {
-			if _, ok := vm.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
+		if hdr.Source == StorageRead || hdr.Source == MapRead {
+			if _, ok := vm.selfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
 				return VersionInvalid
 			}
 		}

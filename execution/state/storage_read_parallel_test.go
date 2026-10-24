@@ -15,6 +15,7 @@ type storageReader struct {
 	addr    accounts.Address
 	account *accounts.Account
 	storage map[accounts.StorageKey]uint256.Int
+	reads   int
 }
 
 func (r *storageReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
@@ -27,6 +28,7 @@ func (r *storageReader) ReadAccountData(addr accounts.Address) (*accounts.Accoun
 }
 
 func (r *storageReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	r.reads++
 	if addr == r.addr {
 		if v, ok := r.storage[key]; ok {
 			return v, true, nil
@@ -87,4 +89,32 @@ func TestStorageReadParallel_CommittedRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(7), &v)
 	assert.Empty(t, ibs.stateObjects, "cold parallel committed read must not materialize a stateObject")
+}
+
+// After the tx writes a slot it read, every committed read (the SSTORE gas rule asks for one
+// per SSTORE) returns the pre-tx value recorded by the first read, without reading again.
+func TestStorageReadParallel_CommittedReadAfterWriteUsesReadSet(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	key := accounts.InternKey([32]byte{0x03})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	reader := &storageReader{
+		addr:    addr,
+		account: &acc,
+		storage: map[accounts.StorageKey]uint256.Int{key: *uint256.NewInt(42)},
+	}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetTxContext(100, 0)
+	ibs.SetVersion(0)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	reads := reader.reads
+	for i := range 3 {
+		require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(uint64(100 + i))))
+		v, err := ibs.GetCommittedState(addr, key)
+		require.NoError(t, err)
+		assert.Equal(t, uint256.NewInt(42), &v)
+	}
+	assert.Equal(t, reads, reader.reads, "committed reads after the first read must not reach the state reader")
 }

@@ -1131,10 +1131,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
-				if !blockExecutor.execStarted.IsZero() {
-					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
-					pe.blockExecMetrics.BlockCount.Add(1)
-				}
+				pe.recordBlockExecMetrics(blockExecutor)
 				if logNpPhases {
 					busy := time.Duration(blockExecutor.execCpuNanos.Load())
 					wall := npWait + npProc
@@ -1518,6 +1515,13 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 // by processRequest while the slot was busy gets scheduled — processRequest itself
 // only schedules when the map was empty at insert time, so without this a block
 // enqueued mid-flight would orphan in the map and never be validated.
+func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
+	if !be.execStarted.IsZero() {
+		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+		pe.blockExecMetrics.BlockCount.Add(1)
+	}
+}
+
 func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
@@ -2008,7 +2012,11 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 	if prevWrites != nil {
 		for h := range prevWrites.AllHeaders() {
 			if !result.TxOut.Has(h) {
-				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, true)
+				// checkExists=false: the previous incarnation's write-set may hold a
+				// net-zero storage write that was never materialized in the versionMap
+				// (net-zero writes are skipped at flush), so deleting it must be a no-op,
+				// not a "path must already exist" panic.
+				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, false)
 			}
 		}
 	}
@@ -2304,11 +2312,35 @@ func (result *execResult) calcFees(
 		coinbaseCreatedContract = cw.Val
 	}
 	burntOverride := false
+	burntBalanceDeleted := false
+	burntSelfdestructed := false
+	burntWasContract := false
+	burntCreatedContract := false
+	burntNonce := uint64(0)
+	burntHasCodeHashWrite := false
+	burntEmptyCodeHash := burntAcc == nil || burntAcc.IsEmptyCodeHash()
+	if burntAcc != nil {
+		burntNonce = burntAcc.Nonce
+	}
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 			burntOverride = true
+			burntBalanceDeleted = bw.Deletes()
 		}
+		if sw, ok := result.TxOut.GetSelfDestruct(burntAddr); ok {
+			burntSelfdestructed = sw.Val
+		}
+		if nw, ok := result.TxOut.GetNonce(burntAddr); ok {
+			burntNonce = nw.Val
+		}
+		if _, ok := result.TxOut.GetCodeHash(burntAddr); ok {
+			burntHasCodeHashWrite = true
+		}
+		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
+			burntCreatedContract = true
+		}
+		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2325,8 +2357,12 @@ func (result *execResult) calcFees(
 	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
+	// Before EIP-8246, a SELFDESTRUCT of a contract burnt recipient burns the fee
+	// credited to it, like a destroyed coinbase tip. Mirrors burnCoinbaseTip.
+	burnBurntFee := !chainRules.IsAmsterdam && burntSelfdestructed && burntWasContract
+	burntNetDestructed := burnBurntFee && !burntCreatedContract
 	oldBurntBalance := newBurntBalance
-	if hasBurnt && chainRules.IsLondon {
+	if hasBurnt && chainRules.IsLondon && !burnBurntFee {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 
@@ -2343,15 +2379,33 @@ func (result *execResult) calcFees(
 	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
 	// the destroyed account.
 	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
-	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)) && !coinbaseNetDeleted
+	// Pre-EIP-161 the fee touch creates and persists the coinbase even at a zero tip, so a
+	// later CALL sees it as existing (no new-account gas). EIP-161+ prunes the empty touch
+	// instead (coinbaseEmptied below). Matching serial.
+	coinbaseCreatedEmpty := !chainRules.IsEIP161Enabled() && coinbaseAcc == nil && !coinbaseSelfdestructed &&
+		newCoinbaseBalance.IsZero() && !coinbaseNetDeleted
+	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed) || coinbaseCreatedEmpty) && !coinbaseNetDeleted
 	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
 	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 
+	// A destroyed burnt recipient whose fee was burned (or left it empty) is removed,
+	// matching serial; mirrors coinbaseNetDeleted.
+	burntNetDeleted := burntOverride && burntBalanceDeleted && (newBurntBalance.IsZero() || burnBurntFee)
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || (burntOverride && !burntNetDestructed)) && !burntNetDeleted
+	// A zero base-fee transfer still touches the burnt recipient, so EIP-161 removes
+	// an empty one with its storage. Mirrors coinbaseEmptied above.
+	burntEmptied := hasBurnt && chainRules.IsLondon && !emitBurnt && !burntSelfdestructed && burntAcc != nil &&
+		newBurntBalance.IsZero() && burntNonce == 0 && burntEmptyCodeHash && !burntHasCodeHashWrite &&
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr)
+
 	addWrites := &state.WriteSet{}
 	if coinbaseNetDeleted || coinbaseEmptied {
 		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+	}
+	if burntEmptied || burntNetDeleted {
+		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
 	}
 	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
 	// serial credits the tip before the tx's empty-account sweep, so the account and its
@@ -2404,7 +2458,7 @@ func (result *execResult) calcFees(
 			// per-path revival check needs a CodeHashPath write strictly above the
 			// destruct. Gated to revival cases: an unconditional emit would add a
 			// spurious block-access-list entry for an ordinary fee credit.
-			cbLifecycle, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
+			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
 			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && !coinbaseHasCodeHashWrite && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
 			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
 				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
@@ -2418,7 +2472,15 @@ func (result *execResult) calcFees(
 			}
 		}
 	}
-	if hasBurnt && (newBurntBalance != oldBurntBalance || burntOverride) {
+	// The worker's EIP-161 removal of a codeless burnt recipient is undone by the
+	// base-fee credit: serial credits the fee before the tx's empty-account sweep,
+	// so the account and its storage survive. Mirrors the coinbase revival above.
+	if hasBurnt && burntSelfdestructed && !burntWasContract && !newBurntBalance.IsZero() {
+		addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
+		})
+	}
+	if emitBurnt {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2430,7 +2492,7 @@ func (result *execResult) calcFees(
 		})
 		// Mirror the AddressPath emission above for the burnt address.
 		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
-		if burntAcc != nil {
+		if burntAcc != nil && !burntNetDestructed {
 			burntAddrAcc.Nonce = burntAcc.Nonce
 			burntAddrAcc.Incarnation = burntAcc.Incarnation
 			burntAddrAcc.CodeHash = burntAcc.CodeHash
@@ -3115,6 +3177,10 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.versionMap.FlushVersionedWrites(senderWrites, false, "")
 				be.markReadersDirty(tx, senderWrites)
+				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
+				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
+				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
+				txResult.TxOut = txResult.TxOut.Merge(senderWrites)
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
@@ -3427,11 +3493,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-		// Remove entries the previous incarnation wrote but this one dropped.
+		// Remove entries the previous incarnation wrote but this one dropped. Like
+		// selfLoopFlush, tolerate a net-zero BAL write that was never materialized.
 		for h := range prevWrites.AllHeaders() {
 			if !res.TxOut.Has(h) {
 				hasWriteChange = true
-				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
+				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
 			}
 		}
 
@@ -3578,10 +3645,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		receiptsComplete := !isPartial
 		if isPartial && be.blockNum > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
+			blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum+1)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
@@ -3593,6 +3660,30 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// The post-exec validator fills receipt blooms for full blocks but skips
 			// partial ones — do it here (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.blockHash)
+
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
+				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, be.tasks[0].Version().TxNum)
+				var block *types.Block
+				if err == nil {
+					block, _, err = pe.cfg.blockReader.BlockWithSenders(ctx, applyTx, be.blockHash, be.blockNum)
+				}
+				if err == nil && block == nil {
+					err = fmt.Errorf("block %d %x not found", be.blockNum, be.blockHash)
+				}
+				var vio *state.VersionedIO
+				if err == nil {
+					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, block, blockStartTxNum, pe.logger)
+				}
+				if err == nil {
+					_, err = bal.Process(applyTx, header, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+				}
+				if errors.Is(err, rules.ErrInvalidBlock) {
+					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.blockNum, err)), nil
+				}
+				if err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot validate its block access list: %w", be.blockNum, err)), nil
+				}
+			}
 		}
 
 		// Block finalize: run engine.Finalize so finalize writes land in the
