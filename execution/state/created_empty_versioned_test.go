@@ -135,6 +135,122 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
+// An account that exists before a tx and that the tx touches and leaves empty
+// is removed under EIP-161: a higher tx must see it as absent, and a higher tx
+// that already read it must fail validation.
+func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xe4})
+	empty := accounts.NewAccount()
+	reader := &emptyAccountReader{addr: addr, acc: &empty}
+	vm := NewVersionMap(nil)
+	newTx := func(txIndex int) *IntraBlockState {
+		ibs := NewWithVersionMap(reader, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, txIndex)
+		return ibs
+	}
+
+	early := newTx(2)
+	exists, err := early.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, early.VersionedReads())
+
+	toucher := newTx(1)
+	exists, err = toucher.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, 0))
+	vm.FlushVersionedWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true, "")
+
+	exists, err = newTx(2).Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
+}
+
+// Sequential executors run FinalizeTx, which clears the journal, before
+// FinalizedWrites. The removal verdict must still see the tx's own writes.
+func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		apply   func(ibs *IntraBlockState, addr accounts.Address) error
+		removed bool
+	}{
+		{"zero-value call", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if _, err := ibs.Exist(addr); err != nil {
+				return err
+			}
+			return ibs.AddBalance(addr, uint256.Int{}, 0)
+		}, true},
+		{"zero tip", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if _, err := ibs.GetBalance(addr); err != nil {
+				return err
+			}
+			return ibs.AddBalance(addr, uint256.Int{}, 0)
+		}, true},
+		{"value call", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if _, err := ibs.Empty(addr); err != nil {
+				return err
+			}
+			if _, err := ibs.Exist(addr); err != nil {
+				return err
+			}
+			return ibs.AddBalance(addr, *uint256.NewInt(1), 0)
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xe6})
+			empty := accounts.NewAccount()
+			ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 0)
+			rules := &chain.Rules{IsSpuriousDragon: true}
+
+			require.NoError(t, tc.apply(ibs, addr))
+			require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+
+			sd, ok := finalizedWrites(t, ibs, rules).GetSelfDestruct(addr)
+			require.Equal(t, tc.removed, ok && sd.Val)
+		})
+	}
+}
+
+// EIP-161 removes a touched empty account only from Spurious Dragon on, and AuRa
+// keeps the system address, which every system call touches.
+func TestFinalizedWritesRemovalFollowsEIP161(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xe7})
+	for _, tc := range []struct {
+		name    string
+		addr    accounts.Address
+		rules   *chain.Rules
+		removed bool
+	}{
+		{"from Spurious Dragon", addr, &chain.Rules{IsSpuriousDragon: true}, true},
+		{"before Spurious Dragon", addr, &chain.Rules{}, false},
+		{"AuRa system address", params.SystemAddress, &chain.Rules{IsSpuriousDragon: true, IsAura: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			empty := accounts.NewAccount()
+			ibs := NewWithVersionMap(&emptyAccountReader{addr: tc.addr, acc: &empty}, NewVersionMap(nil))
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 0)
+			_, err := ibs.Exist(tc.addr)
+			require.NoError(t, err)
+			require.NoError(t, ibs.AddBalance(tc.addr, uint256.Int{}, 0))
+
+			sd, ok := finalizedWrites(t, ibs, tc.rules).GetSelfDestruct(tc.addr)
+			require.Equal(t, tc.removed, ok && sd.Val)
+		})
+	}
+}
+
 func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	vm := NewVersionMap(nil)
