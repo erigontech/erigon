@@ -189,7 +189,9 @@ type ExecModule struct {
 	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
 	// (retried by the CL) or block, and the background FCU commit/prune
 	// goroutines inherit the semaphore, releasing it only when their work is done.
-	semaphore        *semaphore.Weighted
+	semaphore *semaphore.Weighted
+	// frozenBlocks gates inserts while a frozen-block pass holds the semaphore.
+	frozenBlocks     frozenBlocksGate
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
 
@@ -850,6 +852,14 @@ func isInitialSyncPublicationError(err error) bool {
 	return errors.As(err, &publicationErr)
 }
 
+// FrozenBlocksQuiescent reports whether a frozen-block pass has completed and
+// none is running. A pass holds the module semaphore for its whole duration,
+// so a consensus layer inserting during one is starved; it should wait on this
+// before each attempt to drive the chain, not once per process.
+func (e *ExecModule) FrozenBlocksQuiescent() bool {
+	return e.frozenBlocks.quiescent()
+}
+
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !commonerrors.IsOnlyCanceled(err) {
@@ -858,6 +868,9 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		return
 	}
 	defer e.semaphore.Release(1)
+
+	e.frozenBlocks.begin()
+	defer e.frozenBlocks.end()
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !isRoutineInitialSyncStop(err) {

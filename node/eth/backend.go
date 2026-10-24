@@ -1865,9 +1865,23 @@ func New(
 		// CaplinConfig) produce a functionally-equivalent closure; the
 		// hook is where cross-family recomputation of CaplinConfig
 		// would live.
+		// Re-evaluated on every Caplin launch, not sampled once: a restart
+		// after an unwind must wait again, and the headers-ready channel on
+		// its own cannot say that — it closes for good on the first pass.
+		headersOpened := backend.components.Storage.BlockHeadersReady
+		execReady := func() bool {
+			if headersOpened != nil {
+				select {
+				case <-headersOpened:
+				default:
+					return false
+				}
+			}
+			return backend.execModule == nil || backend.execModule.FrozenBlocksQuiescent()
+		}
 		backend.caplinLaunchBuilder = func(_ *chain.Config) caplincomp.LaunchFn {
 			return func(launchCtx context.Context) error {
-				return caplin1.RunCaplinService(launchCtx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady, localBlockTipFn)
+				return caplin1.RunCaplinService(launchCtx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, execReady, localBlockTipFn)
 			}
 		}
 		launchCaplin := backend.caplinLaunchBuilder(chainConfig)

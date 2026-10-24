@@ -214,24 +214,33 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
-	blockHeadersReady <-chan struct{}, localBlockTipFn func() uint64) error {
+	blockHeadersReady func() bool, localBlockTipFn func() uint64) error {
 	logger := log.Root()
 	caplinGroup := lifecycle.NewGroup(logger)
 	defer caplinGroup.Stop()
 
-	// Block until storage signals tip *-headers.seg is readable. Without
-	// this wait, stage_history_download reads engine.FrozenBlocks() at
-	// stage-init time and sees zero — Caplin falls back to Bellatrix-fork
-	// epoch and walks ~25M blocks via DevP2P (273h ETA). With the wait,
-	// FrozenBlocks() returns the real tip.
-	if blockHeadersReady != nil {
-		log.Info("[Caplin] waiting for storage to signal tip-header readable", "channel", "BlockHeadersReady")
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-blockHeadersReady:
-			log.Info("[Caplin] tip-header ready; proceeding with clstages")
+	// Block until the execution layer can be driven: its frozen-block pass
+	// has finished and none is running.
+	//
+	// Two reasons, and this service is re-launched on restart so both have to
+	// hold every time, not once per process. Starting before the first pass,
+	// stage_history_download reads engine.FrozenBlocks() at stage-init and
+	// sees zero — Caplin falls back to the Bellatrix-fork epoch and walks
+	// ~25M blocks over DevP2P. Starting during a later pass, every
+	// InsertBlocks is starved of the module semaphore the pass holds, so
+	// ChainTipSync never completes and ForkChoice never runs.
+	if blockHeadersReady != nil && !blockHeadersReady() {
+		log.Info("[Caplin] waiting for the execution layer to finish processing frozen blocks")
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for !blockHeadersReady() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
 		}
+		log.Info("[Caplin] execution layer ready; proceeding with clstages")
 	}
 
 	var networkConfig *clparams.NetworkConfig
