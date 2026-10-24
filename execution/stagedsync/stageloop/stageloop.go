@@ -311,10 +311,22 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 			if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
 				return err
 			}
-			// Unless the caller's deadline ended it, in which case work being left over is exactly what
-			// was asked for. Say so in the error, so a round the pre-exec valve stopped is not reported
-			// as a block that would not validate.
-			if cause := context.Cause(ctx); errors.Is(cause, context.DeadlineExceeded) {
+			// Unless the caller ENDED it, in which case work being left over is exactly what was asked
+			// for. Say so in the error, so a round the pre-exec valve stopped is not reported as a block
+			// that would not validate.
+			//
+			// ⚠ ANY cause, not just a deadline. The valve does not time out — it cancels with its own
+			// reason the moment a seal is wanted (execmodule.ExecutionStopped{StopSealWanted}, which
+			// this package cannot name: execmodule imports stageloop). Matching only DeadlineExceeded
+			// therefore missed every stop the driver actually makes, and a deliberately stopped round
+			// came back as "unexpected state step has more work". Measured on soak live447: 150 drain
+			// pre-exec failures and 130 pre-seal failures in one pass, all of them this string, with
+			// status=Success and an empty verification error — and nothing mined, because pre-exec
+			// failing is what stops the block taking its transactions.
+			//
+			// context.Cause is nil unless the context is done, so this stays exact: cancelled means
+			// someone asked, and only an un-cancelled context with work left is a real surprise.
+			if cause := context.Cause(ctx); cause != nil {
 				return fmt.Errorf("state step stopped with work left: %w", cause)
 			}
 			return errors.New("unexpected state step has more work")
