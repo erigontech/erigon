@@ -23,6 +23,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -44,19 +46,19 @@ func downloadGenesisState(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-//go:embed mainnet.state.ssz
+//go:embed mainnet.state.ssz.zst
 var mainnetStateSSZ []byte
 
-//go:embed sepolia.state.ssz
+//go:embed sepolia.state.ssz.zst
 var sepoliaStateSSZ []byte
 
-//go:embed gnosis.state.ssz
+//go:embed gnosis.state.ssz.zst
 var gnosisStateSSZ []byte
 
-//go:embed chiado.state.ssz
+//go:embed chiado.state.ssz.zst
 var chiadoStateSSZ []byte
 
-//go:embed bloatnet.state.ssz
+//go:embed bloatnet.state.ssz.zst
 var bloatnetStateSSZ []byte
 
 // Return genesis state
@@ -64,23 +66,17 @@ func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.
 	_, config := clparams.GetConfigsByNetwork(network)
 	returnState := state.New(config)
 
+	var compressed []byte
+	version := clparams.Phase0Version
 	switch network {
 	case chainspec.MainnetChainID:
-		if err := returnState.DecodeSSZ(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = mainnetStateSSZ
 	case chainspec.SepoliaChainID:
-		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = sepoliaStateSSZ
 	case chainspec.GnosisChainID:
-		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = gnosisStateSSZ
 	case chainspec.ChiadoChainID:
-		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = chiadoStateSSZ
 	case chainspec.HoodiChainID:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState(ctx, "https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
@@ -90,12 +86,23 @@ func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.
 		if err := returnState.DecodeSSZ(encodedState, int(clparams.DenebVersion)); err != nil {
 			return nil, err
 		}
+		return returnState, nil
 	case chainspec.BloatnetNetworkID:
-		if err := returnState.DecodeSSZ(bloatnetStateSSZ, int(clparams.ElectraVersion)); err != nil {
-			return nil, err
-		}
+		compressed, version = bloatnetStateSSZ, clparams.ElectraVersion
 	default:
 		return nil, nil
+	}
+	decoder, err := zstd.NewReader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer decoder.Close()
+	encodedState, err := decoder.DecodeAll(compressed, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := returnState.DecodeSSZ(encodedState, int(version)); err != nil {
+		return nil, err
 	}
 	return returnState, nil
 }
