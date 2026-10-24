@@ -362,11 +362,11 @@ func (iit *InvertedIndexRoTx) pruneChunks(ctx context.Context, c kv.RwCursorDupS
 
 // iiChunkStream iterates the txNums of one key: asc [from, to), desc (to, from]; -1 is unbounded.
 type iiChunkStream struct {
-	c        kv.CursorDupSort
-	key      []byte
-	from, to int
-	asc      bool
-	limit    int
+	c     kv.CursorDupSort
+	key   []byte
+	to    int
+	asc   bool
+	limit int
 
 	chunk   []uint64
 	i       int
@@ -380,7 +380,7 @@ func newIIChunkStream(tx kv.Tx, table string, key []byte, from, to int, asc orde
 	if err != nil {
 		return nil, err
 	}
-	s := &iiChunkStream{c: c, key: key, from: from, to: to, asc: bool(asc), limit: limit}
+	s := &iiChunkStream{c: c, key: key, to: to, asc: bool(asc), limit: limit}
 	start := uint64(math.MaxUint64)
 	if from >= 0 {
 		start = uint64(from)
