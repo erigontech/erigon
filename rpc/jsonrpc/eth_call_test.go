@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -82,11 +83,77 @@ func TestEstimateGas(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+	args := &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, nil, nil, nil)
+	}
+
+	t.Run("latest by default", func(t *testing.T) {
+		_, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("pending without pending block", func(t *testing.T) {
+		pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+		_, err := api.EstimateGas(context.Background(), args, &pending, nil, nil)
+		require.NoError(t, err)
+	})
+}
+
+func TestEstimateGasPendingHeaderCompatibility(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	var latestHeader *types.Header
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		latest, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+		if err != nil {
+			return err
+		}
+		latestHeader, err = m.BlockReader.HeaderByNumber(m.Ctx, tx, latest)
+		return err
+	}))
+	require.NotNil(t, latestHeader)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	data := hexutil.Bytes{1}
+	args := &ethapi.CallArgs{From: &from, To: &to, Data: &data}
+	latestGas, err := api.EstimateGas(m.Ctx, args, &latestExecutedNumOrHash, nil, nil)
 	require.NoError(t, err)
+
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	for _, tc := range []struct {
+		name        string
+		number      uint64
+		parentHash  common.Hash
+		wantPending bool
+	}{
+		{"compatible", latestHeader.Number.Uint64() + 1, latestHeader.Hash(), true},
+		{"wrong parent", latestHeader.Number.Uint64() + 1, common.Hash{1}, false},
+		{"wrong height", latestHeader.Number.Uint64() + 2, latestHeader.Hash(), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pendingHeader := types.CopyHeader(latestHeader)
+			pendingHeader.ParentHash = tc.parentHash
+			pendingHeader.Number = *uint256.NewInt(tc.number)
+			pendingHeader.Time++
+			// The latest header can run this call, while the pending header cannot.
+			// The error therefore identifies which execution environment was used.
+			pendingHeader.GasLimit = params.TxGas - 1
+			payload, err := rlp.EncodeToBytes(types.NewBlockWithHeader(pendingHeader, nil))
+			require.NoError(t, err)
+			api.filters.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
+
+			gas, err := api.EstimateGas(m.Ctx, args, &pending, nil, nil)
+			if tc.wantPending {
+				require.EqualError(t, err, fmt.Sprintf("gas required exceeds allowance (%d)", params.TxGas-1))
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, latestGas, gas)
+			}
+		})
+	}
 }
 
 // TestEstimateGasBlockOverridesGasLimit verifies that blockOverrides.gasLimit is
