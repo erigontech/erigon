@@ -195,8 +195,8 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 				return ctx.Err()
 			default:
 			}
-			if err := rootBuilder.AddContext(ctx, leaf.Key, leaf.Value); err != nil {
-				return err
+			if addErr := rootBuilder.AddContext(ctx, leaf.Key, leaf.Value); addErr != nil {
+				return addErr
 			}
 			return emit(leaf)
 		})
