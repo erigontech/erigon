@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -53,6 +54,7 @@ var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-
 type revision struct {
 	id           int
 	journalIndex int
+	logCount     int
 }
 
 type revisions struct {
@@ -65,10 +67,10 @@ func (r *revisions) init() {
 	r.valid = r.buf[:0]
 }
 
-func (r *revisions) snapshot(journal *journal) int {
+func (r *revisions) snapshot(journal *journal, logCount int) int {
 	id := r.nextId
 	r.nextId++
-	r.valid = append(r.valid, revision{id, journal.length()})
+	r.valid = append(r.valid, revision{id, journal.length(), logCount})
 	return id
 }
 
@@ -90,7 +92,7 @@ func (r *revisions) reset() {
 	r.nextId = 0
 }
 
-func (r *revisions) revertToSnapshot(revid int) int {
+func (r *revisions) revertToSnapshot(revid int) revision {
 	// Find the snapshot in the stack of valid snapshots.
 	idx := sort.Search(len(r.valid), func(i int) bool {
 		return r.valid[i].id >= revid
@@ -107,7 +109,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 	if r.nextId == snapshot.id+1 {
 		r.nextId = snapshot.id
 	}
-	return snapshot.journalIndex
+	return snapshot
 }
 
 // Snapshot depth tracks EVM call depth: the inline buf covers typical depth
@@ -520,7 +522,7 @@ const maxKeptTxOutput = int(datasize.MB)
 // held the entry before. The entry is owned by the arena and handed to a later
 // transaction, so it must never be passed on without copying.
 func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
-	return ibs.logs.alloc(ibs.journal, addr, ibs.txIndex, numTopics, dataSize)
+	return ibs.logs.alloc(addr, ibs.txIndex, numTopics, dataSize)
 }
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
@@ -2560,7 +2562,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 // Snapshot returns an identifier for the current revision of the state.
 func (ibs *IntraBlockState) PushSnapshot() int {
-	return ibs.revisions.snapshot(ibs.journal)
+	return ibs.revisions.snapshot(ibs.journal, len(ibs.logs.entries))
 }
 
 func (ibs *IntraBlockState) PopSnapshot(snapshot int) {
@@ -2585,10 +2587,11 @@ func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 
 	snapshot := ibs.revisions.revertToSnapshot(revid)
 	// Replay the journal to undo changes and remove invalidated snapshots
-	ibs.journal.revert(ibs, snapshot)
+	ibs.journal.revert(ibs, snapshot.journalIndex)
+	ibs.logs.truncate(snapshot.logCount)
 
 	if traced {
-		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", ibs.blockNum, ibs.txIndex, ibs.version, revid, snapshot)
+		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", ibs.blockNum, ibs.txIndex, ibs.version, revid, snapshot.journalIndex)
 	}
 }
 
@@ -2878,10 +2881,12 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 }
 
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
-// returns a detached committable snapshot.
-func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+// returns a detached committable snapshot. deferredFeeRecipients are credited
+// after this, so whether they end empty is not known yet.
+func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFeeRecipients ...accounts.Address) *WriteSet {
 	writes := ibs.versionedWrites.Finalize()
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
+	ibs.removeTouchedEmptyAccounts(chainRules, writes, deferredFeeRecipients)
 	return writes
 }
 
@@ -2889,7 +2894,7 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
 // absent and left empty (EIP-161): such an account is absent both before and
 // after the tx, so omitting its writes is exact and no deletion marker is
 // needed. An account that existed before is kept even when it ends empty —
-// clearing it needs an explicit delete, which commit-time normalization emits.
+// clearing it needs an explicit delete, which removeTouchedEmptyAccounts emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
 	if ibs.blockNum == 0 || chainRules == nil {
 		return
@@ -2904,6 +2909,58 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 		}
 		writes.deleteAddr(addr)
 	}
+}
+
+// removeTouchedEmptyAccounts deletes each account that existed before the tx
+// and that the tx touched and left empty (EIP-161). The deletion reaches the
+// version map with the writes, so later txs see the account as absent. The
+// incarnation write also invalidates a later tx that read only the account's
+// existence, as for a self-destruct.
+func (ibs *IntraBlockState) removeTouchedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet, deferredFeeRecipients []accounts.Address) {
+	if ibs.blockNum == 0 || chainRules == nil {
+		return
+	}
+	version := ibs.Version()
+	// Every touch writes the balance.
+	for addr, balance := range writes.balance {
+		if !balance.Val.IsZero() || !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) || slices.Contains(deferredFeeRecipients, addr) {
+			continue
+		}
+		if _, hasSelfDestructWrite := writes.selfDestruct[addr]; hasSelfDestructWrite {
+			continue
+		}
+		read, ok := ibs.versionedReads.GetAddress(addr)
+		if !ok || read.Val == nil || read.Val.IsNil() || !ibs.nonceAndCodeEmpty(addr, writes) {
+			continue
+		}
+		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version}, Val: true})
+		writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: version}})
+	}
+}
+
+// nonceAndCodeEmpty reports whether addr has a zero nonce and no code after the
+// tx, judged only from the tx's own writes and recorded reads, so validation
+// covers the verdict. A field the tx neither wrote nor read leaves it false.
+func (ibs *IntraBlockState) nonceAndCodeEmpty(addr accounts.Address, writes *WriteSet) bool {
+	nonce, ok := finalField(addr, writes.nonce, ibs.versionedReads.nonce)
+	if !ok || nonce != 0 {
+		return false
+	}
+	codeHash, ok := finalField(addr, writes.codeHash, ibs.versionedReads.codeHash)
+	return ok && codeHash.IsEmpty()
+}
+
+// finalField returns the tx's own write of a field, else the value it read. It
+// does not depend on the journal, which FinalizeTx clears.
+func finalField[T any](addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], reads map[accounts.Address]VersionedRead[T]) (T, bool) {
+	if vw, ok := writes[addr]; ok {
+		return vw.Val, true
+	}
+	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+		return tr.Val, true
+	}
+	var zero T
+	return zero, false
 }
 
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.

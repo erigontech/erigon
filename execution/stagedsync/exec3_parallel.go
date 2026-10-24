@@ -689,8 +689,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above.
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(block.Time())
-					// A partial block records only suffix I/O, so it cannot be checked
-					// against a full-block BAL.
+					// A partial block records only suffix I/O; for an Amsterdam block
+					// nextResult checks its BAL against a re-derived one instead.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
 						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)
@@ -2182,10 +2182,18 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
+	burnBurntFee := false
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 		}
+		// Like the coinbase tip: before EIP-8246 serial credits the burn inside the tx, so
+		// a burnt contract the tx self-destructs loses it.
+		sw, _ := result.TxOut.GetSelfDestruct(burntAddr)
+		_, hasCodeWrite := result.TxOut.GetCodeHash(burntAddr)
+		cw, _ := result.TxOut.GetCreateContract(burntAddr)
+		wasContract := (burntAcc != nil && !burntAcc.IsEmptyCodeHash()) || hasCodeWrite || cw != nil && cw.Val
+		burnBurntFee = !chainRules.IsAmsterdam && sw != nil && sw.Val && wasContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2198,7 +2206,7 @@ func (result *execResult) calcFees(
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
 	oldBurntBalance := newBurntBalance
-	if hasBurnt {
+	if hasBurnt && !burnBurntFee {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 	emitBurnt := hasBurnt && newBurntBalance != oldBurntBalance
@@ -2280,13 +2288,16 @@ func (e *feeEntry) shapeRecordedIn(ws *state.WriteSet, version state.Version, ad
 }
 
 // feeWritePaths are the account paths a fee credit can occupy — see writeTo.
-var feeWritePaths = [...]state.AccountPath{state.AddressPath, state.BalancePath, state.SelfDestructPath}
+var feeWritePaths = [...]state.AccountPath{state.AddressPath, state.BalancePath, state.SelfDestructPath, state.IncarnationPath}
 
 // hasFeeWrite reports whether ws carries a fee write for addr. The version tells
 // one apart from the worker's own write to the same address: the task version
 // carries a TxNum, a worker's own writes do not.
 func hasFeeWrite(ws *state.WriteSet, version state.Version, addr accounts.Address) bool {
 	if sd, ok := ws.GetSelfDestruct(addr); ok && sd.Version == version {
+		return true
+	}
+	if iw, ok := ws.GetIncarnation(addr); ok && iw.Version == version {
 		return true
 	}
 	if bw, ok := ws.GetBalance(addr); ok && bw.Version == version {
@@ -2324,6 +2335,11 @@ func (e *feeEntry) writeTo(ws *state.WriteSet, version state.Version) {
 		ws.SetSelfDestruct(e.addr, &state.VersionedWrite[bool]{
 			WriteHeader: state.WriteHeader{Address: e.addr, Path: state.SelfDestructPath, Version: version},
 			Val:         true,
+		})
+		// Like the worker's EIP-161 removal: the incarnation write also
+		// invalidates a later tx that read only the account's existence.
+		ws.SetIncarnation(e.addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: e.addr, Path: state.IncarnationPath, Version: version},
 		})
 		return
 	}
@@ -2870,6 +2886,10 @@ func overwriteFeeWrites(dst, tip *state.WriteSet) {
 	}
 	for a, vw := range tip.SelfDestructs() {
 		dst.SetSelfDestruct(a, vw)
+		copied++
+	}
+	for a, vw := range tip.Incarnations() {
+		dst.SetIncarnation(a, vw)
 		copied++
 	}
 	if dbg.AssertEnabled && copied != tip.Count() {
@@ -3424,10 +3444,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		receiptsComplete := !isPartial
 		if isPartial && be.number() > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
+			blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum+1)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.number(), "startTxIndex", startTxIndex, "err", err)
@@ -3440,6 +3460,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// blocks, skips partial ones — do it here, even when prior receipts
 			// couldn't be reconstructed (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.hash())
+
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
+				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, be.tasks[0].Version().TxNum)
+				var vio *state.VersionedIO
+				if err == nil {
+					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)
+				}
+				if err == nil {
+					err = bal.Process(header, be.block.BlockAccessList(), vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+					vio.ReleaseOutputMaps()
+				}
+				if errors.Is(err, rules.ErrInvalidBlock) {
+					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.number(), err)), nil
+				}
+				if err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot validate its block access list: %w", be.number(), err)), nil
+				}
+			}
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
