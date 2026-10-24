@@ -428,6 +428,7 @@ func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
 	if e.readAheader == nil {
 		return func() {}, nil
 	}
+	e.readAheader.CancelWarmup()
 	return e.readAheader.SuspendWarmup(ctx)
 }
 
@@ -501,6 +502,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	if e.readAheader != nil {
+		defer e.readAheader.CancelWarmup()
+	}
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
