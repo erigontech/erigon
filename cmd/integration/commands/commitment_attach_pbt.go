@@ -263,12 +263,12 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
 		}
 	} else {
-		nodeBlock, nodeTx, nodeHexRoot, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, false, logger)
+		nodeBlock, nodeTx, ok, err = marker.Settings.ConversionPoint()
 		if err != nil {
 			return err
 		}
-		if nodeBlock != blockNum || nodeTx != txNum {
-			return fmt.Errorf("commitment attach-pbt: resumed node state is (%d, %d), want (%d, %d)", nodeBlock, nodeTx, blockNum, txNum)
+		if !ok || nodeBlock != blockNum || nodeTx != txNum {
+			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
 		}
 	}
 	if !manifestAvailable {
@@ -285,10 +285,23 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if marker.ManifestBlake3 != manifestDigest {
 			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
 		}
+		nodeHexRoot, err = parsePBTAttachHash("marker node hex root", marker.NodeHexRoot)
+		if err != nil {
+			return err
+		}
 	}
 	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
 		return err
+	}
+	if marker != nil {
+		markerHeaderRoot, markerErr := parsePBTAttachHash("marker header root", marker.HeaderRoot)
+		if markerErr != nil {
+			return markerErr
+		}
+		if headerRoot != markerHeaderRoot {
+			return fmt.Errorf("commitment attach-pbt: current header root %s differs from marker root %s", headerRoot, markerHeaderRoot)
+		}
 	}
 	if marker == nil {
 		if nodeProgress > blockNum {
@@ -383,7 +396,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	if marker != nil {
 		finalSettings = marker.Settings
-	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, ManifestBlake3: manifestDigest, Settings: finalSettings}); err != nil {
+	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, ManifestBlake3: manifestDigest, NodeHexRoot: nodeHexRoot.Hex(), HeaderRoot: headerRoot.Hex(), Settings: finalSettings}); err != nil {
 		return err
 	}
 	if err := hooks.step("marker"); err != nil {
@@ -457,12 +470,16 @@ func configurePBTNodeVariant(settings *dbstate.ErigonDBSettings, v3 bool) {
 }
 
 func parsePBTManifestHash(name, value string) (common.Hash, error) {
+	return parsePBTAttachHash("manifest "+name, value)
+}
+
+func parsePBTAttachHash(name, value string) (common.Hash, error) {
 	if len(value) != 66 || !strings.HasPrefix(value, "0x") {
-		return common.Hash{}, fmt.Errorf("commitment attach-pbt: manifest %s is not a 32-byte hash", name)
+		return common.Hash{}, fmt.Errorf("commitment attach-pbt: %s is not a 32-byte hash", name)
 	}
 	decoded, err := hex.DecodeString(value[2:])
 	if err != nil || len(decoded) != len(common.Hash{}) {
-		return common.Hash{}, fmt.Errorf("commitment attach-pbt: manifest %s is not a 32-byte hash", name)
+		return common.Hash{}, fmt.Errorf("commitment attach-pbt: %s is not a 32-byte hash", name)
 	}
 	return common.BytesToHash(decoded), nil
 }

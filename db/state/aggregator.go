@@ -1536,6 +1536,43 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	return a.mergeLoop(ctx)
 }
 
+func (a *Aggregator) MergePBinRange(ctx context.Context, domain kv.Domain, from, to uint64) error {
+	if a == nil {
+		return errors.New("pbin merge: nil aggregator")
+	}
+	if domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain {
+		return fmt.Errorf("pbin merge: invalid domain %s", domain)
+	}
+	if from >= to {
+		return fmt.Errorf("pbin merge: invalid range %d-%d", from, to)
+	}
+	if !a.background.TryAdd() {
+		return errors.New("pbin merge: aggregator is closing")
+	}
+	defer a.background.Done()
+	if !a.mergingFiles.CompareAndSwap(false, true) {
+		return errors.New("pbin merge: another merge is running")
+	}
+	defer a.mergingFiles.Store(false)
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
+	ranges := &Ranges{}
+	ranges.domain[domain] = NewDomainRanges(domain, *NewMergeRange(domain.String(), true, from, to), HistoryRanges{}, a.StepSize())
+	at := a.BeginFilesRo()
+	defer at.Close()
+	files, err := at.filesInRange(ranges)
+	if err != nil {
+		return err
+	}
+	in, err := at.mergeFiles(ctx, files, ranges)
+	if err != nil {
+		in.Close()
+		return err
+	}
+	a.integrateMergedDirtyFiles(in)
+	return nil
+}
+
 func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited

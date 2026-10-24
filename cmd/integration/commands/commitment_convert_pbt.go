@@ -19,6 +19,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -129,13 +130,16 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	} else if nested {
 		return fmt.Errorf("commitment convert-pbt: output datadir %s overlaps source datadir %s", outputDirs.DataDir, sourceDirs.DataDir)
 	}
-	if err := os.MkdirAll(outputDirs.DataDir, 0o755); err != nil {
-		return err
+	var outputHasFiles bool
+	if _, statErr := os.Stat(outputDirs.DataDir); statErr == nil {
+		outputHasFiles, err = datadirHasFiles(outputDirs.DataDir)
+		if err != nil {
+			return err
+		}
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return statErr
 	}
-	outputHasFiles, err := datadirHasFiles(outputDirs.DataDir)
-	if err != nil {
-		return err
-	} else if outputHasFiles && !resume {
+	if outputHasFiles && !resume {
 		return fmt.Errorf("commitment convert-pbt: output datadir %s is not empty", outputDirs.DataDir)
 	}
 
@@ -197,31 +201,12 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 			return fmt.Errorf("commitment convert-pbt: --keep-hex does not match the resume base trie variant %q", resumeBase.settings.TrieVariantName())
 		}
 	}
-	if err := os.MkdirAll(outputDirs.Snap, 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(outputDirs.Tmp, 0o755); err != nil {
-		return err
-	}
 	if resume {
-		if err := preparePBTResumeOutput(sourceDirs, outputDirs, outputHasFiles, resumeBase, keepHex); err != nil {
-			return err
-		}
 		resumeSourceSettings := sourceSettings
 		if resumeSourceSettings == nil {
 			resumeSourceSettings = resumeBase.settings
 		}
 		if err := pbtResumeValidateBaseLayout(sourceDirs, outputDirs, resumeSourceSettings, resumeBase.settings, keepHex, outputHasFiles, resumeBase.point.TxNum); err != nil {
-			return err
-		}
-	}
-	if hooks.afterOutput != nil {
-		if err := hooks.afterOutput(); err != nil {
-			return err
-		}
-	}
-	if !resume {
-		if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, outputDirs.Snap); err != nil {
 			return err
 		}
 	}
@@ -352,6 +337,30 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := commitment.SetPBinHashSuite(hashName); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(outputDirs.DataDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(outputDirs.Snap, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(outputDirs.Tmp, 0o755); err != nil {
+		return err
+	}
+	if resume {
+		if err := preparePBTResumeOutput(sourceDirs, outputDirs, outputHasFiles, resumeBase, keepHex); err != nil {
+			return err
+		}
+	}
+	if hooks.afterOutput != nil {
+		if err := hooks.afterOutput(); err != nil {
+			return err
+		}
+	}
+	if !resume {
+		if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, outputDirs.Snap); err != nil {
+			return err
+		}
+	}
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = keepHex
 	statecfg.ConfigureCommitmentV3Records(keepHex)
@@ -360,6 +369,17 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if keepHex || resume && outputHasFiles && resumeBase.settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		trieVariant = dbstate.TrieVariantHexBin
 		targetDomain = kv.CommitmentBinDomain
+	}
+	var resumeBaseMergeRanges [][2]uint64
+	if resume {
+		resumeSourceSettings := sourceSettings
+		if resumeSourceSettings == nil {
+			resumeSourceSettings = resumeBase.settings
+		}
+		resumeBaseMergeRanges, err = pbtResumeBaseMergeRanges(sourceDirs, outputDirs, resumeSourceSettings, resumeBase.settings, keepHex, outputHasFiles, resumeBase.point.TxNum)
+		if err != nil {
+			return err
+		}
 	}
 	targetSettings := &dbstate.ErigonDBSettings{
 		StepSize:                       sourceAgg.StepSize(),
@@ -390,6 +410,15 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if resume {
 		if err := targetAgg.ReloadFiles(); err != nil {
 			return err
+		}
+		if err := targetAgg.MergeLoop(ctx); err != nil {
+			return err
+		}
+		targetAgg.WaitForFiles()
+		for _, mergeRange := range resumeBaseMergeRanges {
+			if err := targetAgg.MergePBinRange(ctx, targetDomain, mergeRange[0], mergeRange[1]); err != nil {
+				return err
+			}
 		}
 	}
 	targetDB, err := dbtemporal.New(targetRaw, targetAgg, nil)
@@ -843,12 +872,20 @@ func pbtResumeValidateSourceLayout(dirs datadir.Dirs, settings *dbstate.ErigonDB
 	if stepSize == 0 {
 		return errors.New("commitment convert-pbt: resume source step size is zero")
 	}
+	baseEnd := pbtResumeBaseEnd(baseTxNum)
 	for _, file := range files {
-		if file.from == 0 && file.to*stepSize > baseTxNum {
+		if file.from == 0 && file.to*stepSize > baseEnd {
 			return fmt.Errorf("commitment convert-pbt: source %s file range %d-%d starts at step 0 and spans resume txNum %d", domain, file.from, file.to, baseTxNum)
 		}
 	}
 	return nil
+}
+
+func pbtResumeBaseEnd(baseTxNum uint64) uint64 {
+	if baseTxNum == ^uint64(0) {
+		return baseTxNum
+	}
+	return baseTxNum + 1
 }
 
 func pbtResumeValidateBaseLayout(sourceDirs, outputDirs datadir.Dirs, sourceSettings, baseSettings *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool, baseTxNum uint64) error {
@@ -861,25 +898,86 @@ func pbtResumeValidateBaseLayout(sourceDirs, outputDirs datadir.Dirs, sourceSett
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: resume source commitment files: %w", err)
 	}
-	outputFiles, err := pbtResumeCommitmentFiles(outputDirs, targetDomain)
+	var outputFiles []pbtAttachFile
+	if outputHasFiles {
+		outputFiles, err = pbtResumeCommitmentFiles(outputDirs, targetDomain)
+	} else {
+		outputFiles, err = pbtResumeCommitmentFiles(sourceDirs, targetDomain)
+	}
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: resume base commitment files: %w", err)
 	}
-	outputRanges := make(map[string]struct{}, len(outputFiles))
-	for _, file := range outputFiles {
-		outputRanges[pbtResumeLayoutKey(file)] = struct{}{}
-	}
 	stepSize := sourceSettings.StepSize
+	baseEnd := pbtResumeBaseEnd(baseTxNum)
 	for _, file := range sourceFiles {
-		if file.to*stepSize > baseTxNum {
+		if file.to*stepSize > baseEnd {
 			continue
 		}
-		key := pbtResumeLayoutKey(file)
-		if _, ok := outputRanges[key]; !ok {
+		if !pbtResumeRangeCovered(file, outputFiles, stepSize) {
 			return fmt.Errorf("commitment convert-pbt: resume base is missing commitment file range %d-%d", file.from, file.to)
 		}
 	}
 	return nil
+}
+
+func pbtResumeRangeCovered(want pbtAttachFile, files []pbtAttachFile, stepSize uint64) bool {
+	covered := want.from * stepSize
+	wantEnd := want.to * stepSize
+	for _, file := range files {
+		fileStart := file.from * stepSize
+		fileEnd := file.to * stepSize
+		if fileEnd <= covered {
+			continue
+		}
+		if fileStart > covered {
+			return false
+		}
+		covered = max(covered, fileEnd)
+		if covered >= wantEnd {
+			return true
+		}
+	}
+	return covered >= wantEnd
+}
+
+func pbtResumeBaseMergeRanges(sourceDirs, outputDirs datadir.Dirs, sourceSettings, baseSettings *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool, baseTxNum uint64) ([][2]uint64, error) {
+	sourceDomain, err := pbtResumeLayoutSourceDomain(sourceSettings)
+	if err != nil {
+		return nil, err
+	}
+	targetDomain := pbtResumeTargetDomain(baseSettings, keepHex, outputHasFiles)
+	sourceFiles, err := pbtResumeCommitmentFiles(sourceDirs, sourceDomain)
+	if err != nil {
+		return nil, fmt.Errorf("commitment convert-pbt: resume source commitment files: %w", err)
+	}
+	outputFiles, err := pbtResumeCommitmentFiles(outputDirs, targetDomain)
+	if err != nil {
+		return nil, fmt.Errorf("commitment convert-pbt: resume base commitment files: %w", err)
+	}
+	exact := make(map[string]struct{}, len(outputFiles))
+	for _, file := range outputFiles {
+		if filepath.Ext(file.path) == ".kv" {
+			exact[pbtResumeLayoutKey(file)] = struct{}{}
+		}
+	}
+	baseEnd := pbtResumeBaseEnd(baseTxNum)
+	seen := make(map[string]struct{})
+	ranges := make([][2]uint64, 0)
+	for _, file := range sourceFiles {
+		if filepath.Ext(file.path) != ".kv" || file.to*sourceSettings.StepSize > baseEnd {
+			continue
+		}
+		key := pbtResumeLayoutKey(file)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if _, ok := exact[key]; ok || !pbtResumeRangeCovered(file, outputFiles, sourceSettings.StepSize) {
+			continue
+		}
+		ranges = append(ranges, [2]uint64{file.from * sourceSettings.StepSize, file.to * sourceSettings.StepSize})
+	}
+	return ranges, nil
 }
 
 func pbtResumeValidateFinalLayout(sourceDirs, outputDirs datadir.Dirs, sourceSettings, baseSettings *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool) error {
@@ -942,28 +1040,67 @@ func pbtResumeSourceFilesEnd(dirs datadir.Dirs, stepSize uint64) (uint64, error)
 }
 
 func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) error {
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		iter, err := tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
+	tables := []struct {
+		domain kv.Domain
+		table  string
+	}{
+		{domain: kv.AccountsDomain, table: kv.TblAccountVals},
+		{domain: kv.StorageDomain, table: kv.TblStorageVals},
+	}
+	for _, item := range tables {
+		cursor, err := tx.CursorDupSort(item.table)
 		if err != nil {
-			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, err)
+			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", item.domain, err)
 		}
-		for iter.HasNext() {
-			key, _, nextErr := iter.Next()
-			if nextErr != nil {
-				iter.Close()
-				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, nextErr)
+		for key, value, cursorErr := cursor.First(); key != nil; key, value, cursorErr = cursor.NextNoDup() {
+			if cursorErr != nil {
+				cursor.Close()
+				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", item.domain, cursorErr)
 			}
-			_, step, found, getErr := tx.Debug().GetLatestFromDB(domain, key)
-			if getErr != nil {
-				iter.Close()
-				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", domain, getErr)
+			if len(value) < 8 {
+				cursor.Close()
+				return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s row %x has invalid step", item.domain, key)
 			}
-			if found && step.ToTxNum(stepSize) > sourceEnd {
-				iter.Close()
-				return fmt.Errorf("commitment convert-pbt: source MDBX %s row %x is past source files end txNum %d", domain, key, sourceEnd)
+			step := kv.Step(^binary.BigEndian.Uint64(value[:8]))
+			if err := pbtResumeCheckMDBXRow(item.domain, key, step, stepSize, sourceEnd); err != nil {
+				cursor.Close()
+				return err
 			}
 		}
-		iter.Close()
+		cursor.Close()
+	}
+	cursor, err := tx.Cursor(kv.TblCodeVals)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", kv.CodeDomain, err)
+	}
+	var previousKey []byte
+	for key, _, cursorErr := cursor.First(); key != nil; key, _, cursorErr = cursor.Next() {
+		if cursorErr != nil {
+			cursor.Close()
+			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s: %w", kv.CodeDomain, cursorErr)
+		}
+		if len(key) < 8 {
+			cursor.Close()
+			return fmt.Errorf("commitment convert-pbt: inspect source MDBX %s row %x has invalid step", kv.CodeDomain, key)
+		}
+		bareKey := key[:len(key)-8]
+		if bytes.Equal(bareKey, previousKey) {
+			continue
+		}
+		previousKey = bytes.Clone(bareKey)
+		step := kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:]))
+		if err := pbtResumeCheckMDBXRow(kv.CodeDomain, bareKey, step, stepSize, sourceEnd); err != nil {
+			cursor.Close()
+			return err
+		}
+	}
+	cursor.Close()
+	return nil
+}
+
+func pbtResumeCheckMDBXRow(domain kv.Domain, key []byte, step kv.Step, stepSize, sourceEnd uint64) error {
+	if step.ToTxNum(stepSize) > sourceEnd {
+		return fmt.Errorf("commitment convert-pbt: source MDBX %s row %x is past source files end txNum %d", domain, key, sourceEnd)
 	}
 	return nil
 }

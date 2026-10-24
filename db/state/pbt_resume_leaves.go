@@ -137,6 +137,10 @@ func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOp
 
 func pbinResumeValidateSource(at *AggregatorRoTx, opts PBinResumeOptions) error {
 	var hasGap bool
+	baseEnd := opts.BaseTxNum
+	if baseEnd < ^uint64(0) {
+		baseEnd++
+	}
 	for _, domain := range [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		domainRoTx := at.d[domain]
 		if domainRoTx == nil {
@@ -147,7 +151,7 @@ func pbinResumeValidateSource(at *AggregatorRoTx, opts PBinResumeOptions) error 
 				continue
 			}
 			hasGap = true
-			if file.startTxNum == 0 {
+			if file.startTxNum == 0 && file.endTxNum > baseEnd {
 				return fmt.Errorf("pbin resume: source %s file starts at txNum 0 and spans base txNum %d", domain, opts.BaseTxNum)
 			}
 		}

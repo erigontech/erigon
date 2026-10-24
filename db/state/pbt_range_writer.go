@@ -539,13 +539,25 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 	if len(baseFiles) == 0 {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no files", domain)
 	}
+	for _, file := range baseFiles {
+		if file.StartRootNum() > endTxNum {
+			return nil, fmt.Errorf("pbin resume range writer: target %s file range %d-%d is past selected end txNum %d", domain, file.StartRootNum(), file.EndRootNum(), endTxNum)
+		}
+	}
 	if len(baseState) == 0 {
-		_, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
+		state, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
 		if err != nil {
 			return nil, fmt.Errorf("pbin resume range writer: read base state: %w", err)
 		}
 		if !found || stateEnd < baseTxNum {
 			return nil, fmt.Errorf("pbin resume range writer: base domain %s has no state at txNum %d", domain, baseTxNum)
+		}
+		if len(state) < 16 {
+			return nil, fmt.Errorf("pbin resume range writer: target %s state is invalid", domain)
+		}
+		stateTx, _ := commitmentdb.DecodeTxBlockNums(state)
+		if stateTx > baseTxNum {
+			return nil, fmt.Errorf("pbin resume range writer: target %s state is past selected base txNum %d at %d", domain, baseTxNum, stateTx)
 		}
 		start := max(stateEnd, baseTxNum)
 		end := max(endTxNum+1, start+stepSize)
@@ -575,7 +587,14 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 	}
 	stateEnd := baseStateEnd
 	if stateEnd == 0 {
-		stateEnd = files.EndRootNum() * stepSize
+		stateEnd = files.EndRootNum()
+	}
+	if len(baseState) < 16 {
+		return nil, fmt.Errorf("pbin resume range writer: target %s state is invalid", domain)
+	}
+	stateTx, _ := commitmentdb.DecodeTxBlockNums(baseState)
+	if stateTx > baseTxNum {
+		return nil, fmt.Errorf("pbin resume range writer: target %s state is past selected base txNum %d at %d", domain, baseTxNum, stateTx)
 	}
 	if stateEnd <= baseTxNum {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no state at txNum %d", domain, baseTxNum)
