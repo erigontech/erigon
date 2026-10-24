@@ -50,6 +50,7 @@ func TestShouldBackoffHistoricalStateRead(t *testing.T) {
 		{name: "missing history vector", err: historical_states_reader.ErrMissingHistoryVectorData, want: true},
 		{name: "corrupt queue diff", err: base_encoding.ErrCorruptQueueDiff, want: true},
 		{name: "history rebuild required", err: state_accessors.ErrHistoryRebuildRequired, want: true},
+		{name: "missing parent block", err: historical_states_reader.ErrMissingParentBlock, want: true},
 		{name: "generic error", err: errors.New("read failed"), want: false},
 	}
 	for _, test := range tests {
