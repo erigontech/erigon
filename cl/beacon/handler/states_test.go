@@ -685,6 +685,44 @@ func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
 }
 
+// A pending queue missing from the fork choice cache must not turn into a 404
+// while the state is still readable from the historical path.
+func TestGetPendingQueuesFallBackToHistoricalOnCacheMiss(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	get := func(endpoint string) (int, string) {
+		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/head/"+endpoint, nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.StatusCode, string(body)
+	}
+
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		historicalOnly := fcu.HeadSlotVal
+		fcu.LowestAvailableSlotVal = &historicalOnly
+		status, want := get(endpoint)
+		require.Equal(t, http.StatusOK, status, endpoint)
+
+		inMemoryRange := uint64(0)
+		fcu.LowestAvailableSlotVal = &inMemoryRange
+		status, got := get(endpoint)
+		require.Equal(t, http.StatusOK, status, "%s: %s", endpoint, got)
+		require.JSONEq(t, want, got, endpoint)
+	}
+}
+
 // The response can be hundreds of MB on mainnet, so it must not stay in the pool.
 func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
 	seed := new(strings.Builder)
