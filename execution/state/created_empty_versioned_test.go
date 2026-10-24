@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -148,7 +147,6 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	newTx := func(txIndex int) *IntraBlockState {
 		ibs := NewWithVersionMap(reader, vm)
 		t.Cleanup(ibs.Close)
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, txIndex)
 		return ibs
 	}
@@ -204,24 +202,21 @@ func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
 			return ibs.AddBalance(addr, *uint256.NewInt(1), 0)
 		}, false},
 	} {
-		for _, materialize := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/materialize=%v", tc.name, materialize), func(t *testing.T) {
-				t.Parallel()
-				addr := accounts.InternAddress([20]byte{0xe6})
-				empty := accounts.NewAccount()
-				ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
-				t.Cleanup(ibs.Close)
-				ibs.SetNoMaterialize(!materialize)
-				ibs.SetTxContext(1, 0)
-				rules := &chain.Rules{IsSpuriousDragon: true}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xe6})
+			empty := accounts.NewAccount()
+			ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 0)
+			rules := &chain.Rules{IsSpuriousDragon: true}
 
-				require.NoError(t, tc.apply(ibs, addr))
-				require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+			require.NoError(t, tc.apply(ibs, addr))
+			require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
 
-				sd, ok := finalizedWrites(t, ibs, rules).GetSelfDestruct(addr)
-				require.Equal(t, tc.removed, ok && sd.Val)
-			})
-		}
+			sd, ok := finalizedWrites(t, ibs, rules).GetSelfDestruct(addr)
+			require.Equal(t, tc.removed, ok && sd.Val)
+		})
 	}
 }
 
@@ -245,7 +240,6 @@ func TestFinalizedWritesRemovalFollowsEIP161(t *testing.T) {
 			empty := accounts.NewAccount()
 			ibs := NewWithVersionMap(&emptyAccountReader{addr: tc.addr, acc: &empty}, NewVersionMap(nil))
 			t.Cleanup(ibs.Close)
-			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(1, 0)
 			_, err := ibs.Exist(tc.addr)
 			require.NoError(t, err)
