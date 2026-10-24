@@ -594,7 +594,7 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, visibleRanges 
 	stateErr := verifyPBTOutputStateRecords(outputDirs, settings, domain, point)
 	if missing != nil {
 		if stateErr != nil {
-			return fmt.Errorf("%v; %w", missing, stateErr)
+			return errors.Join(missing, stateErr)
 		}
 		return missing
 	}
