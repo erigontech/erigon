@@ -616,9 +616,10 @@ func TestGloasRecoveryPersistsGeneratedCustodyColumnAtOriginalIdentity(t *testin
 	t.Cleanup(func() { cancel(); <-done })
 
 	var stored *cltypes.DataColumnSidecar
+	freshDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	for index := range custodyColumns {
 		require.Eventually(t, func() bool {
-			fresh := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), columnFS, &cfg, beaconevents.NewEventEmitter())
+			fresh := blob_storage.NewDataColumnStore(freshDB, columnFS, &cfg, beaconevents.NewEventEmitter())
 			var readErr error
 			stored, readErr = fresh.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, int64(index))
 			return readErr == nil
