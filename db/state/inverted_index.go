@@ -395,16 +395,30 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 }
 
 func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx) error {
+	c, err := tx.RwCursorDupSort(w.indexTable)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	chunks := &iiChunkWriter{c: c}
+	if err := w.loadIndex(ctx, chunks); err != nil {
+		return err
+	}
+	return chunks.flush()
+}
+
+func (w *InvertedIndexBufferedWriter) loadIndex(ctx context.Context, chunks *iiChunkWriter) error {
+	add := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error { return chunks.add(k, v) }
 	if w.prefetcher == nil {
-		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+		return w.index.Load(nil, "", add, etl.TransformArgs{Quit: ctx.Done()})
 	}
 	if err := w.prefetcher.open(ctx); err != nil {
 		w.logger.Warn("inverted index flush prefetch failed", "table", w.indexTable, "err", err)
-		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+		return w.index.Load(nil, "", add, etl.TransformArgs{Quit: ctx.Done()})
 	}
 	defer w.prefetcher.close()
 	pairs := make([][2][]byte, 0, w.prefetchBatchSize)
-	flush := func(next etl.LoadNextFunc) error {
+	flush := func() error {
 		if err := w.prefetcher.prefetch(ctx, pairs); err != nil {
 			w.logger.Warn("inverted index flush prefetch failed", "table", w.indexTable, "err", err)
 		}
@@ -412,23 +426,23 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 			return err
 		}
 		for _, pair := range pairs {
-			if err := next(pair[0], pair[0], pair[1]); err != nil {
+			if err := chunks.add(pair[0], pair[1]); err != nil {
 				return err
 			}
 		}
 		pairs = pairs[:0]
 		return nil
 	}
-	if err := w.index.Load(tx, w.indexTable, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := w.index.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		pairs = append(pairs, [2][]byte{k, v})
 		if uint64(len(pairs)) >= w.prefetchBatchSize {
-			return flush(next)
+			return flush()
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	return flush(func(_, k, v []byte) error { return tx.Put(w.indexTable, k, v) })
+	return flush()
 }
 
 func (w *InvertedIndexBufferedWriter) keysCollector() *etl.Collector {
@@ -691,7 +705,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	}
 
 	// Adjust DB query bounds to exclude the range already covered by files.
-	// RangeDupSort semantics: asc=[from,to), desc=(to,from].
+	// Range semantics: asc=[from,to), desc=(to,from].
 	// Files cover [0, filesEndTxNum).
 	// Asc:  DB should cover [filesEndTxNum, endTxNum) — adjust inclusive lower bound.
 	// Desc: DB should cover (filesEndTxNum-1, startTxNum] — adjust exclusive lower bound.
@@ -706,25 +720,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 			dbEndTxNum = max(dbEndTxNum, filesEndTxNum-1)
 		}
 	}
-
-	var from []byte
-	if dbStartTxNum >= 0 {
-		from = make([]byte, 8)
-		binary.BigEndian.PutUint64(from, uint64(dbStartTxNum))
-	}
-
-	var to []byte
-	if dbEndTxNum >= 0 {
-		to = make([]byte, 8)
-		binary.BigEndian.PutUint64(to, uint64(dbEndTxNum))
-	}
-	it, err := roTx.RangeDupSort(iit.ii.ValuesTable, key, from, to, asc, limit)
-	if err != nil {
-		return nil, err
-	}
-	return stream.TransformKV2U64Seekable(it, func(_, v []byte) (uint64, error) {
-		return binary.BigEndian.Uint64(v), nil
-	}, binary.BigEndian.AppendUint64), nil
+	return newIIChunkStream(roTx, iit.ii.ValuesTable, key, dbStartTxNum, dbEndTxNum, asc, limit)
 }
 
 // IdxRange is to be used in public API, therefore it relies on read-only transaction
@@ -910,22 +906,19 @@ func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
+	if pruneSizeMetric == nil {
+		pruneSizeMetric = mxPruneSizeIndex
+	}
+	if valDelCursor == nil {
+		return iit.hashSeekingPruneChunks(ctx, rwTx, txFrom, txTo, limit, logEvery, pruneSizeMetric)
+	}
 	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
 	}
 	defer keysCursor.Close()
-	if valDelCursor == nil {
-		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-	}
 	defer valDelCursor.Close()
 
-	if pruneSizeMetric == nil {
-		pruneSizeMetric = mxPruneSizeIndex
-	}
 	pruneStat, err := prune.HashSeekingPrune(ctx, iit.name.String(), iit.ii.FilenameBase, iit.ii.dirs.Tmp, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mode)
 	if err != nil {
@@ -953,13 +946,15 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
 	}
 	defer keysCursor.Close()
+	var chunksCursor kv.RwCursorDupSort // values of a standalone index: pruned here, not by the prune package
 	if valDelCursor == nil {
-		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable)
-		if err != nil {
+		if chunksCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable); err != nil {
 			return nil, err
 		}
+		defer chunksCursor.Close()
+	} else {
+		defer valDelCursor.Close()
 	}
-	defer valDelCursor.Close()
 
 	if pruneSizeMetric == nil {
 		pruneSizeMetric = mxPruneSizeIndex
@@ -997,6 +992,9 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, prs, mode)
+	if err == nil && chunksCursor != nil && pruneStat.KeyProgress == prune.Done {
+		err = iit.pruneChunks(ctx, chunksCursor, txFrom, txTo, logEvery, pruneStat)
+	}
 	if err != nil {
 		iit.ii.logger.Error("prune table", "name", iit.ii.FilenameBase, "err", err)
 		return nil, err

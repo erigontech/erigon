@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -252,12 +253,14 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			icc2, err := tx.CursorDupSort(ii.ValuesTable)
 			require.NoError(t, err)
 			defer icc2.Close()
-			key, txn, err := icc2.First()
-			t.Logf("key: %x, txn: %x", key, txn)
+			key, chunk, err := icc2.First()
+			t.Logf("key: %x, chunk: %x", key, chunk)
+			require.NoError(t, err)
+			txNums, err := decodeIIChunk(nil, chunk)
 			require.NoError(t, err)
 			// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 			// If we would prune by txnum then txTo prune should be available after prune is finished
-			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
+			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(txNums[0]-1))
 		})
 	}) // hash_prune
 
@@ -1302,18 +1305,11 @@ type prefetchIndexTx struct {
 	cursor *prefetchIndexCursor
 }
 
-func (tx *prefetchIndexTx) RwCursor(table string) (kv.RwCursor, error) {
+func (tx *prefetchIndexTx) RwCursorDupSort(table string) (kv.RwCursorDupSort, error) {
 	if table != tx.table {
-		return tx.RwTx.RwCursor(table)
+		return tx.RwTx.RwCursorDupSort(table)
 	}
 	return tx.cursor, nil
-}
-
-func (tx *prefetchIndexTx) Put(table string, k, v []byte) error {
-	if table == tx.table {
-		require.GreaterOrEqual(tx.cursor.t, tx.cursor.prefetched.Add(-1), int32(0), "prefetch must precede every write")
-	}
-	return tx.RwTx.Put(table, k, v)
 }
 
 type prefetchIndexCursor struct {
@@ -1328,6 +1324,27 @@ type prefetchIndexCursor struct {
 func (c *prefetchIndexCursor) Put(k, v []byte) error {
 	require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
 	return c.RwCursorDupSort.Put(k, v)
+}
+
+func (c *prefetchIndexCursor) PutCurrent(k, v []byte) error {
+	require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
+	return c.RwCursorDupSort.PutCurrent(k, v)
+}
+
+func (c *prefetchIndexCursor) Close() {}
+
+// iiValuePairs lists the values table of an inverted index as key:txNum pairs.
+func iiValuePairs(tb testing.TB, tx kv.Tx, table string) []string {
+	tb.Helper()
+	var pairs []string
+	require.NoError(tb, tx.ForEach(table, nil, func(k, v []byte) error {
+		txNums, err := decodeIIChunk(nil, v)
+		for _, txNum := range txNums {
+			pairs = append(pairs, fmt.Sprintf("%x:%016x", k, txNum))
+		}
+		return err
+	}))
+	return pairs
 }
 
 type prefetchIndexDB struct {
@@ -1468,7 +1485,6 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 					}
 				}
 				require.NoError(t, w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor}))
-				require.Zero(t, cursor.prefetched.Load())
 				require.EqualValues(t, workers, cursor.prefetchCalls.Load(), "open readers once per flush")
 				require.EqualValues(t, workers, cursor.rollbacks.Load(), "release readers before returning from flush")
 				for table, values := range expected {
@@ -1477,10 +1493,14 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 						want = append(want, value)
 					}
 					var got []string
-					require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
-						got = append(got, fmt.Sprintf("%x:%x", k, v))
-						return nil
-					}))
+					if table == ii.ValuesTable {
+						got = iiValuePairs(t, tx, table)
+					} else {
+						require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
+							got = append(got, fmt.Sprintf("%x:%x", k, v))
+							return nil
+						}))
+					}
 					require.ElementsMatch(t, want, got, table)
 				}
 			})
@@ -1539,11 +1559,10 @@ func TestInvertedIndexPrefetchReuse(t *testing.T) {
 				require.EqualValues(t, txNum*tc.workers, cursor.rollbacks.Load())
 			}
 			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-				for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
-					n, err := tx.Count(table)
-					require.NoError(t, err)
-					require.EqualValues(t, 2, n)
-				}
+				n, err := tx.Count(ii.KeysTable)
+				require.NoError(t, err)
+				require.EqualValues(t, 2, n)
+				require.Len(t, iiValuePairs(t, tx, ii.ValuesTable), 2)
 				return nil
 			}))
 		})
@@ -1659,4 +1678,204 @@ func TestInvIndexHasTxNumsInDB(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got, "txNums [%d, %d)", tc.from, tc.to)
 	}
+}
+
+// iiChunkModel is the expected content of a values table: key -> ascending txNums.
+type iiChunkModel map[string][]uint64
+
+func (m iiChunkModel) add(key string, txNums ...uint64) {
+	m[key] = append(m[key], txNums...)
+	slices.Sort(m[key])
+	m[key] = slices.Compact(m[key])
+}
+
+func (m iiChunkModel) delete(key string, from, to uint64) {
+	m[key] = slices.DeleteFunc(m[key], func(n uint64) bool { return n >= from && n < to })
+	if len(m[key]) == 0 {
+		delete(m, key)
+	}
+}
+
+func iiChunkAdd(t *testing.T, tx kv.RwTx, table string, m iiChunkModel, key string, txNums ...uint64) {
+	t.Helper()
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer c.Close()
+	w := &iiChunkWriter{c: c}
+	for _, n := range txNums {
+		require.NoError(t, w.add([]byte(key), binary.BigEndian.AppendUint64(nil, n)))
+	}
+	require.NoError(t, w.flush())
+	m.add(key, txNums...)
+}
+
+func iiChunkDelete(t *testing.T, tx kv.RwTx, table string, m iiChunkModel, key string, from, to uint64) {
+	t.Helper()
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer c.Close()
+	d := newIIChunkDeleter(c)
+	want := len(m[key])
+	require.NoError(t, d.deleteRange([]byte(key), from, to))
+	m.delete(key, from, to)
+	require.EqualValues(t, want-len(m[key]), d.count)
+}
+
+func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
+	t.Helper()
+	var want []string
+	for k, txNums := range m {
+		for _, n := range txNums {
+			want = append(want, fmt.Sprintf("%x:%016x", k, n))
+		}
+	}
+	require.ElementsMatch(t, want, iiValuePairs(t, tx, table))
+
+	var prevKey []byte
+	var prevMax uint64
+	require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
+		require.LessOrEqual(t, len(v), 8+iiChunkGapsLimit)
+		txNums, err := decodeIIChunk(nil, v)
+		require.NoError(t, err)
+		require.Equal(t, binary.BigEndian.Uint64(v), txNums[len(txNums)-1], "chunk prefix is its max")
+		if bytes.Equal(k, prevKey) {
+			require.Less(t, prevMax, txNums[0], "chunks of a key are disjoint and ordered")
+		}
+		prevKey, prevMax = bytes.Clone(k), txNums[len(txNums)-1]
+		return nil
+	}))
+
+	for k, txNums := range m {
+		lo, hi := int(txNums[0]), int(txNums[len(txNums)-1])
+		bounds := []int{-1, lo, lo + 1, (lo + hi) / 2, hi, hi + 1}
+		for _, from := range bounds {
+			for _, to := range bounds {
+				for _, asc := range []order.By{order.Asc, order.Desc} {
+					for _, limit := range []int{-1, 3} {
+						var exp []uint64
+						for _, n := range txNums {
+							if asc && (from < 0 || n >= uint64(from)) && (to < 0 || n < uint64(to)) ||
+								!asc && (from < 0 || n <= uint64(from)) && (to < 0 || n > uint64(to)) {
+								exp = append(exp, n)
+							}
+						}
+						if !asc {
+							slices.Reverse(exp)
+						}
+						if limit >= 0 && len(exp) > limit {
+							exp = exp[:limit]
+						}
+						s, err := newIIChunkStream(tx, table, []byte(k), from, to, asc, limit)
+						require.NoError(t, err)
+						got, err := stream.ToArrayU64(s)
+						s.Close()
+						require.NoError(t, err)
+						require.Equal(t, exp, got, "key=%x from=%d to=%d asc=%t limit=%d", k, from, to, asc, limit)
+					}
+				}
+			}
+		}
+		for _, target := range bounds[1:] {
+			for _, asc := range []order.By{order.Asc, order.Desc} {
+				s, err := newIIChunkStream(tx, table, []byte(k), -1, -1, asc, -1)
+				require.NoError(t, err)
+				_, err = s.Next()
+				require.NoError(t, err)
+				require.NoError(t, s.Seek(uint64(target)))
+				i, _ := slices.BinarySearch(txNums, uint64(target))
+				if asc {
+					if i == 0 {
+						i = 1 // Seek never moves back over the consumed head
+					}
+					require.Equal(t, i < len(txNums), s.HasNext())
+					if i < len(txNums) {
+						n, err := s.Next()
+						require.NoError(t, err)
+						require.Equal(t, txNums[i], n, "asc seek %d", target)
+					}
+				} else {
+					j := i - 1
+					if i < len(txNums) && txNums[i] == uint64(target) {
+						j = i
+					}
+					j = min(j, len(txNums)-2)
+					require.Equal(t, j >= 0, s.HasNext())
+					if j >= 0 {
+						n, err := s.Next()
+						require.NoError(t, err)
+						require.Equal(t, txNums[j], n, "desc seek %d", target)
+					}
+				}
+				s.Close()
+			}
+		}
+	}
+}
+
+func TestInvertedIndexChunks(t *testing.T) {
+	sparse := func(seed, n int, from uint64) []uint64 {
+		txNums := make([]uint64, n)
+		for i := range txNums {
+			from += uint64(1 + (seed*31+i*17)%300)
+			txNums[i] = from
+		}
+		return txNums
+	}
+	setup := func(t *testing.T) (kv.RwTx, string, iiChunkModel) {
+		db, ii := testDbAndInvertedIndex(t, 16, log.New())
+		tx, err := db.BeginRw(t.Context())
+		require.NoError(t, err)
+		t.Cleanup(tx.Rollback)
+		m := iiChunkModel{}
+		txNums := sparse(1, 3000, 1000)
+		for i := 0; i < len(txNums); i += 50 {
+			iiChunkAdd(t, tx, ii.ValuesTable, m, "k", txNums[i:i+50]...)
+		}
+		iiChunkAdd(t, tx, ii.ValuesTable, m, "k\x00", sparse(2, 700, 0)...)
+		iiChunkAdd(t, tx, ii.ValuesTable, m, "", 5)
+		return tx, ii.ValuesTable, m
+	}
+
+	t.Run("append_splits_chunks", func(t *testing.T) {
+		tx, table, m := setup(t)
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		require.Greater(t, n, uint64(4))
+		requireIIChunks(t, tx, table, m)
+	})
+	t.Run("merge_below_last_chunk", func(t *testing.T) {
+		tx, table, m := setup(t)
+		txNums := m["k"]
+		iiChunkAdd(t, tx, table, m, "k", txNums[100]+1, txNums[2000]+1, txNums[2999]+7, txNums[0]-1)
+		iiChunkAdd(t, tx, table, m, "k", txNums[10], txNums[11]) // already present
+		requireIIChunks(t, tx, table, m)
+	})
+	t.Run("delete_range", func(t *testing.T) {
+		tx, table, m := setup(t)
+		txNums := m["k"]
+		iiChunkDelete(t, tx, table, m, "k", txNums[500], txNums[1500])  // middle of chunks
+		iiChunkDelete(t, tx, table, m, "k", txNums[2500]+1, math.MaxUint64) // tail: max of a chunk shrinks
+		iiChunkDelete(t, tx, table, m, "k", 0, txNums[300])                // head
+		iiChunkDelete(t, tx, table, m, "k", txNums[1500]+1, txNums[1500]+1) // empty range
+		iiChunkDelete(t, tx, table, m, "k\x00", 0, math.MaxUint64)
+		iiChunkDelete(t, tx, table, m, "absent", 0, math.MaxUint64)
+		requireIIChunks(t, tx, table, m)
+		iiChunkAdd(t, tx, table, m, "k", txNums[2600], txNums[2601])
+		requireIIChunks(t, tx, table, m)
+	})
+	t.Run("legacy_values", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 16, log.New())
+		tx, err := db.BeginRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		m := iiChunkModel{}
+		for _, n := range []uint64{3, 9, 12} { // one 8-byte txNum per dup: the layout before chunking
+			require.NoError(t, tx.Put(ii.ValuesTable, []byte("k"), binary.BigEndian.AppendUint64(nil, n)))
+			m.add("k", n)
+		}
+		requireIIChunks(t, tx, ii.ValuesTable, m)
+		iiChunkAdd(t, tx, ii.ValuesTable, m, "k", 15, 20)
+		iiChunkDelete(t, tx, ii.ValuesTable, m, "k", 9, 16)
+		requireIIChunks(t, tx, ii.ValuesTable, m)
+	})
 }
