@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +62,7 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 		now: func() time.Time {
 			return ethClockMock.GetSlotTime(ethClockMock.GetCurrentSlot())
 		},
+		validationViews: newProposerPreferencesViewCache(),
 	}
 
 	return service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock
@@ -252,7 +254,7 @@ func TestProposerPreferencesServiceRejectsUnrepresentableSlotBeforeState(t *test
 			cfg.MinSeedLookahead = 1
 			stateCalls := 0
 			fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-			fc.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+			fc.GetStateAtBlockRootFn = func(common.Hash) (*state2.CachingBeaconState, error) {
 				stateCalls++
 				return nil, nil
 			}
@@ -395,7 +397,7 @@ func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.
 	ctrl := gomock.NewController(t)
 	service, _, _, epbsPool, forkChoice := setupProposerPreferencesService(t, ctrl)
 	validationState := forkChoice.StateAtBlockRootVal[testDependentRoot]
-	forkChoice.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	forkChoice.GetStateAtBlockRootFn = func(common.Hash) (*state2.CachingBeaconState, error) {
 		return validationState, nil
 	}
 	emitter := beaconevents.NewEventEmitter()
@@ -547,18 +549,87 @@ func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
 	require.False(t, service.hasSeenPreference(seenKey))
 }
 
-func TestProposerPreferencesServiceMissingStatePrecedesBoundaryReject(t *testing.T) {
+func TestProposerPreferencesServiceLateDependentRootRejectedWithoutStateLoad(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
-	msg := newTestSignedProposerPreferences(100, 42)
 	fc.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{Slot: 64}
-	delete(fc.StateAtBlockRootVal, testDependentRoot)
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
 
-	err := service.ProcessMessage(context.Background(), nil, msg)
+	err := service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(100, 42))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "after shuffling dependent slot")
+	require.Zero(t, stateLoads)
+}
+
+func TestProposerPreferencesServiceImpossibleDependentRootSkipsStateLoad(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	fc.HeadVal = common.HexToHash("0x99")
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
+
+	err := service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(100, 42))
 	require.ErrorIs(t, err, ErrIgnore)
-	require.Contains(t, err.Error(), "state for dependent_root")
+	require.Contains(t, err.Error(), "not a possible dependent block")
+	require.Zero(t, stateLoads)
+}
+
+func TestProposerPreferencesServiceSharesDependentStateAcrossSlots(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(96, 42)))
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(100, 42)))
+	require.Equal(t, 1, stateLoads)
+}
+
+func TestProposerPreferencesServiceSharesDependentStateLoadInFlight(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	var stateLoads atomic.Int32
+	release := make(chan struct{})
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
+		stateLoads.Add(1)
+		<-release
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, slot := range []uint64{96, 100} {
+		wg.Go(func() {
+			errs <- service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(slot, 42))
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(1), stateLoads.Load())
 }
 
 func TestProposerPreferencesDependentRootValidity(t *testing.T) {
@@ -652,10 +723,8 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 
 	depState := newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 42})
 	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = depState
-	var requestedCopy bool
 	var ownedState *state2.CachingBeaconState
-	forkChoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
-		requestedCopy = alwaysCopy
+	forkChoiceMock.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
 		var err error
 		ownedState, err = forkChoiceMock.StateAtBlockRootVal[root].Copy()
 		return ownedState, err
@@ -667,7 +736,6 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
-	require.True(t, requestedCopy)
 	require.NotSame(t, depState, ownedState)
 	require.Equal(t, uint64(64), depState.Slot())
 

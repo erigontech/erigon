@@ -51,7 +51,7 @@ func TestFetchBlocksFromReqRespPacesRetriesAfterRequestErrors(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	sentinel := &failingRequestSentinel{}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &beaconCfg)
-	cfg := &Cfg{rpc: rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil)}
+	cfg := &Cfg{rpc: rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock)}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 
@@ -70,7 +70,7 @@ func TestStartFetchingBlocksMissedByGossipPacesSuccessfulPolls(t *testing.T) {
 		beaconCfg:  &beaconCfg,
 		ethClock:   clock,
 		forkChoice: &forkchoice.ForkChoiceStore{},
-		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil),
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -95,7 +95,7 @@ func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t
 		beaconCfg:  &beaconCfg,
 		ethClock:   clock,
 		forkChoice: &forkchoice.ForkChoiceStore{},
-		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil),
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

@@ -291,7 +291,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	}
 
 	// Re-executes with overridden code, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
 	if err != nil {
 		return nil, err
 	}
@@ -413,11 +413,7 @@ blockLoop:
 }
 
 func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.Hash) []*types.Log {
-	addrMap := make(map[common.Address]struct{}, len(addresses))
-	for _, v := range addresses {
-		addrMap[v] = struct{}{}
-	}
-	return logs.Filter(addrMap, topics, 0)
+	return logs.Filter(addresses, topics, 0)
 }
 
 func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, stateOverride *ethapi.StateOverrides) ([]*types.Log, error) {

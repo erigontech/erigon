@@ -115,6 +115,12 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	return fv.extendingForkHeadHash
 }
 
+// IsValidated reports whether a payload with this hash already passed validation.
+func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
+	_, ok := fv.validHashes.Get(hash)
+	return ok
+}
+
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()

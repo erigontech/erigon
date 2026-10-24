@@ -49,16 +49,18 @@ type ForkChoiceStorageReader interface {
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	GetHeadNode() (ForkChoiceNode, uint64, error)
+	HeadStateHasTargetShuffling(headState *state.CachingBeaconState, headRoot common.Hash, target solid.Checkpoint) bool
+	TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error)
 	HighestSeen() uint64
 	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
+	TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (attemptCtx context.Context, finish func() bool, ok bool)
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
-	GetStateAtBlockRoot(
-		blockRoot common.Hash,
-		alwaysCopy bool,
-	) (*state.CachingBeaconState, error)
+	GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
+	GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
+	// ViewStateAtBlockRoot callbacks must not call fork choice, mutate the state or keep it after returning.
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
@@ -139,6 +141,8 @@ type ForkChoiceStorageReader interface {
 }
 
 type ForkChoiceStorageWriter interface {
+	BeginPayloadImport(uint64) func()
+	BeginPendingPayloadEnvelope(common.Hash) func()
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnBlock(
@@ -178,7 +182,7 @@ type ForkChoiceStorageWriter interface {
 	// [New in Gloas:EIP7732] OnGossipPayloadAttestationMessage processes a PTC attestation message from gossip.
 	// ErrPayloadAttestationNotCurrentSlot means the message is valid gossip whose vote is not counted.
 	// Otherwise it returns ErrIgnore for IGNORE conditions and other errors for REJECT conditions.
-	OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error
+	OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, verifySignature PayloadAttestationSignatureVerifier) error
 	// [New in Gloas:EIP7732] StoreAnchorEnvelope persists an envelope to disk and updates
 	// eth2Roots without running state transition. Used during checkpoint sync where the
 	// finalized state already incorporates the envelope's effects but subsequent blocks

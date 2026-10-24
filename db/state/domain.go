@@ -1626,12 +1626,24 @@ func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found 
 }
 
 // Returns the first txNum from available history
-func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
+func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) (uint64, error) {
 	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
-		firstTxNumInMdbx := dt.ht.h.minTxNumInDB(tx)
-		return firstTxNumInMdbx
+		return dt.ht.h.minTxNumInDB(tx)
 	}
-	return dt.ht.files[0].startTxNum
+	return dt.ht.files[0].startTxNum, nil
+}
+
+// HistoryCoverageStart returns the first txNum the domain's history covers, as
+// opposed to the first txNum it happens to hold a record for. With history
+// files that is the later start of the values and the index files, since a read
+// needs both. Without them the DB holds every change made after the domain's
+// frozen files, since pruning never reaches past them. This does not hold for a
+// history with snapshots disabled, which is pruned on its own.
+func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
+	if len(dt.ht.files) == 0 || len(dt.ht.iit.files) == 0 {
+		return dt.files.EndTxNum()
+	}
+	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine

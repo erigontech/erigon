@@ -294,6 +294,22 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	return t.sender, nil
 }
 
+// ChargesSenderAtValidation reports whether this run skips the sender charge (nonce, gas, value) and validation applies it.
+func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
+	if incarnation != 0 || t.Config.Aura != nil || t.Rules().IsAmsterdam {
+		return false
+	}
+	txn := t.Tx()
+	isPlainCall := txn != nil && txn.GetTo() != nil && len(txn.GetAuthorizations()) == 0 &&
+		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType
+	if !isPlainCall {
+		return false
+	}
+	sender, err := t.TxSender()
+	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
+	return senderOnlyPays
+}
+
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
@@ -577,9 +593,12 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			var applyRes *evmtypes.ExecutionResult
 			var applyErr error
 
-			if !calcFees {
+			switch {
+			case !calcFees && t.ChargesSenderAtValidation(ibs.Incarnation()):
+				applyRes, applyErr = protocol.ApplyMessageChargeSenderAtValidation(evm, message, t.GasPool(), engine)
+			case !calcFees:
 				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, t.GasPool(), true, false, engine)
-			} else {
+			default:
 				applyRes, applyErr = protocol.ApplyMessage(evm, message, t.GasPool(), true, false, engine)
 			}
 
@@ -625,7 +644,15 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites(rules)
+			var deferredFeeRecipients []accounts.Address
+			if !calcFees {
+				deferredFeeRecipients = []accounts.Address{result.Coinbase}
+				// calcFees credits the burnt-fee recipient only for a non-zero burn.
+				if !result.ExecutionResult.FeeBurnt.IsZero() {
+					deferredFeeRecipients = append(deferredFeeRecipients, result.ExecutionResult.BurntContractAddress)
+				}
+			}
+			result.TxOut = ibs.FinalizedWrites(rules, deferredFeeRecipients...)
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
