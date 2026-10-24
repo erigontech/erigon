@@ -207,7 +207,7 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
 
-	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	g := newGrowLRUEntries[uint64](128*1024, 16, nil)
 	defer g.Close()
 	startCap := g.curCap.Load()
 
