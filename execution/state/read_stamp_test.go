@@ -146,3 +146,60 @@ func TestDepWait_SetCodeLoadsInFlightCode(t *testing.T) {
 	_, wrote := ibs.VersionedWrites().GetCode(addr)
 	require.True(t, wrote, "clearing an in-flight delegation must write the empty code")
 }
+
+// A read that waits on a predecessor still in flight must apply that predecessor's
+// self-destruct once it commits: a burned balance reads zero, not the in-flight value.
+func TestDepWait_ResumeSeesSelfDestruct(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
+	writer := Version{TxIndex: 0}
+	writes := func() *WriteSet {
+		ws := &WriteSet{}
+		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
+		return ws
+	}
+	mvhm.FlushVersionedWrites(writes(), false, "")
+	ibs.SetWaitCommit(func(int) bool {
+		mvhm.FlushVersionedWrites(writes(), true, "")
+		return true
+	})
+
+	b, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, b.IsZero(), "a balance burned by a predecessor's self-destruct must read zero, got %s", b.String())
+}
+
+// A field read while the predecessor's self-destruct is still in flight must wait for it:
+// the balance cell may already read as Done while the destruct that burns it is not.
+func TestDepWait_InFlightSelfDestructIsWaitedOn(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
+	writer := Version{TxIndex: 0}
+	destruct := &WriteSet{}
+	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
+	burn := &WriteSet{}
+	burn.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
+	mvhm.FlushVersionedWrites(destruct, false, "")
+	mvhm.FlushVersionedWrites(burn, true, "")
+	ibs.SetWaitCommit(func(int) bool {
+		mvhm.FlushVersionedWrites(destruct, true, "")
+		return true
+	})
+
+	b, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, b.IsZero(), "a balance burned by an in-flight self-destruct must read zero, got %s", b.String())
+}
