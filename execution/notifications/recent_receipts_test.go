@@ -22,11 +22,16 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type recordingChainEventNotifier struct {
-	logs []*LogNotification
+	logs           []*LogNotification
+	logBatches     [][]*LogNotification
+	receipts       []*ReceiptNotification
+	receiptBatches [][]*ReceiptNotification
 }
 
 func (n *recordingChainEventNotifier) OnNewHeader([][]byte) {}
@@ -35,13 +40,25 @@ func (n *recordingChainEventNotifier) OnNewPendingLogs(types.Logs) {}
 
 func (n *recordingChainEventNotifier) OnLogs(logs []*LogNotification) {
 	n.logs = append(n.logs, logs...)
+	n.logBatches = append(n.logBatches, logs)
 }
 
 func (n *recordingChainEventNotifier) HasLogSubscriptions() bool { return true }
 
-func (n *recordingChainEventNotifier) OnReceipts([]*ReceiptNotification) {}
+func (n *recordingChainEventNotifier) OnReceipts(receipts []*ReceiptNotification) {
+	n.receipts = append(n.receipts, receipts...)
+	n.receiptBatches = append(n.receiptBatches, receipts)
+}
 
-func (n *recordingChainEventNotifier) HasReceiptSubscriptions() bool { return false }
+func (n *recordingChainEventNotifier) HasReceiptSubscriptions() bool { return true }
+
+type noSubscriptionNotifier struct {
+	recordingChainEventNotifier
+}
+
+func (n *noSubscriptionNotifier) HasLogSubscriptions() bool { return false }
+
+func (n *noSubscriptionNotifier) HasReceiptSubscriptions() bool { return false }
 
 func TestRecentReceipts(t *testing.T) {
 	t.Parallel()
@@ -81,8 +98,121 @@ func TestRecentReceiptsNotifyLogsIncludesBlockTimestamp(t *testing.T) {
 	}}, nil, &types.Header{Time: 123})
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1, 2, false)
+	recent.NotifyLogs(notifier, 1, 2)
 
 	require.Len(t, notifier.logs, 1)
 	require.Equal(t, uint64(123), notifier.logs[0].BlockTimestamp)
+}
+
+func TestRecentReceiptsNotifyLogsAfterUnwind(t *testing.T) {
+	recent := NewRecentReceipts(3)
+	oldLog := &types.Log{Data: []byte("old")}
+	newLog := &types.Log{Data: []byte("new")}
+	recent.Add(types.Receipts{{
+		BlockNumber: uint256.NewInt(2),
+		Logs:        types.Logs{oldLog},
+	}}, nil, nil)
+	recent.Unwind(1)
+	recent.Add(types.Receipts{{
+		BlockNumber: uint256.NewInt(2),
+		Logs:        types.Logs{newLog},
+	}}, nil, nil)
+	notifier := &recordingChainEventNotifier{}
+
+	recent.NotifyLogs(notifier, 2, 3)
+
+	require.Len(t, notifier.logBatches, 2)
+	require.Len(t, notifier.logBatches[0], 1)
+	require.Same(t, oldLog, notifier.logBatches[0][0].Log)
+	require.True(t, notifier.logBatches[0][0].Removed)
+	require.Len(t, notifier.logBatches[1], 1)
+	require.Same(t, newLog, notifier.logBatches[1][0].Log)
+	require.False(t, notifier.logBatches[1][0].Removed)
+}
+
+func TestRecentReceiptsNotifiesRemovedLogsBelowAddedRange(t *testing.T) {
+	recent := NewRecentReceipts(3)
+	removedLog := &types.Log{Data: []byte("removed")}
+	recent.Add(types.Receipts{{
+		BlockNumber: uint256.NewInt(2),
+		Logs:        types.Logs{removedLog},
+	}}, nil, nil)
+	recent.Unwind(1)
+	notifier := &recordingChainEventNotifier{}
+
+	recent.NotifyLogs(notifier, 1_000, 1_001)
+
+	require.Len(t, notifier.logs, 1)
+	require.Same(t, removedLog, notifier.logs[0].Log)
+	require.True(t, notifier.logs[0].Removed)
+}
+
+func TestRecentReceiptsBatchesRemovedBlocksInOrder(t *testing.T) {
+	recent := NewRecentReceipts(3)
+	for _, blockNum := range []uint64{3, 1, 2} {
+		log := &types.Log{BlockNumber: hexutil.Uint64(blockNum)}
+		recent.Add(types.Receipts{{
+			BlockNumber: uint256.NewInt(blockNum),
+			Logs:        types.Logs{log},
+		}}, nil, nil)
+	}
+	recent.Unwind(0)
+	notifier := &recordingChainEventNotifier{}
+
+	recent.NotifyLogs(notifier, 4, 4)
+
+	require.Len(t, notifier.logBatches, 1)
+	require.Len(t, notifier.logBatches[0], 3)
+	for i, blockNum := range []uint64{1, 2, 3} {
+		require.Equal(t, blockNum, uint64(notifier.logBatches[0][i].Log.BlockNumber))
+	}
+}
+
+func TestRecentReceiptsNotifiesAddedBlocksInOrder(t *testing.T) {
+	recent := NewRecentReceipts(3)
+	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)
+	for _, blockNum := range []uint64{3, 1, 2} {
+		log := &types.Log{BlockNumber: hexutil.Uint64(blockNum)}
+		recent.Add(types.Receipts{{
+			BlockNumber:      uint256.NewInt(blockNum),
+			TransactionIndex: 0,
+			Logs:             types.Logs{log},
+		}}, []types.Transaction{tx}, &types.Header{Number: *uint256.NewInt(blockNum)})
+	}
+	notifier := &recordingChainEventNotifier{}
+
+	recent.NotifyLogs(notifier, 1, 4)
+	recent.NotifyReceipts(notifier, 1, 4)
+
+	require.Len(t, notifier.logBatches, 3)
+	require.Len(t, notifier.receiptBatches, 3)
+	for i, blockNum := range []uint64{1, 2, 3} {
+		require.Equal(t, blockNum, uint64(notifier.logBatches[i][0].Log.BlockNumber))
+		require.Equal(t, blockNum, notifier.receiptBatches[i][0].Header.Number.Uint64())
+	}
+}
+
+func TestRecentReceiptsDoesNotSendEmptyRemovedLogBatch(t *testing.T) {
+	recent := NewRecentReceipts(1)
+	recent.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, nil, nil)
+	recent.Unwind(0)
+	notifier := &recordingChainEventNotifier{}
+
+	recent.NotifyLogs(notifier, 1, 1)
+
+	require.Empty(t, notifier.logBatches)
+}
+
+func TestRecentReceiptsDropsUnwindWithoutSubscriptions(t *testing.T) {
+	recent := NewRecentReceipts(3)
+	recent.Add(types.Receipts{{
+		BlockNumber: uint256.NewInt(2),
+		Logs:        types.Logs{{}},
+	}}, nil, nil)
+	recent.Unwind(1)
+	notifier := &noSubscriptionNotifier{}
+
+	recent.NotifyLogs(notifier, 2, 3)
+
+	require.Empty(t, recent.removedLogs)
 }
