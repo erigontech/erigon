@@ -201,6 +201,7 @@ func TestStepRebaseIncreaseRefusesUnmergedMisalignedFiles(t *testing.T) {
 	}))
 	closeDB()
 	statecfg.Schema.RCacheDomain = saved
+	statecfg.Schema.RCacheDomain.Hist.IiCfg.Enabled = false
 	unmerged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.16-20.v"))
 	require.NoError(t, err)
 	require.Len(t, unmerged, 1)
