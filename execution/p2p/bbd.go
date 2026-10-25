@@ -479,7 +479,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	// download from available peers until all batches are downloaded
 	fetcherOpts := []FetcherOption{
 		WithResponseTimeout(config.bodiesBatchFetchTimeout),
-		WithMaxRetries(config.bodiesBatchFetchRetries),
+		WithMaxRetries(0),
 	}
 	type batchAssignment struct {
 		peerId     PeerId
@@ -644,6 +644,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			if err != nil && !exhaustedPeersCleared {
 				exhaustedPeersCleared = true
 				clear(peers.exhaustedPeers)
+				fetcherOpts = append(fetcherOpts, WithMaxRetries(config.bodiesBatchFetchRetries))
 				availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
 			}
 			if err != nil {

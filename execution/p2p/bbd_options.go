@@ -85,7 +85,7 @@ var defaultBbdRequestConfig = bbdRequestConfig{
 	headerChainBatchFetchTimeout: 10 * time.Second,
 	headerChainBatchFetchRetries: 1,
 	bodiesBatchFetchTimeout:      time.Minute,
-	bodiesBatchFetchRetries:      0,
+	bodiesBatchFetchRetries:      1,
 	balsBatchFetchTimeout:        time.Minute,
 	balsRequestTimeout:           10 * time.Second,
 }

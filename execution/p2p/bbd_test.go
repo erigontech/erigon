@@ -273,6 +273,7 @@ func TestBackwardBlockDownloader_DeliversBlocksDespitePersistentBALDeficit(t *te
 type flakyBodyPeerFetcher struct {
 	chainServingBbdFetcher
 	requests map[PeerId]*atomic.Int64
+	pageSize int
 }
 
 func newFlakyBodyPeerFetcher(headers []*types.Header, flakyPeers ...uint64) *flakyBodyPeerFetcher {
@@ -284,17 +285,26 @@ func newFlakyBodyPeerFetcher(headers []*types.Header, flakyPeers ...uint64) *fla
 }
 
 func (s *flakyBodyPeerFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
-	res, err := fetchWithRetry(defaultFetcherConfig.CopyWithOptions(opts...), func() (*FetcherResponse[[]*types.Body], error) {
-		if n, ok := s.requests[*peerId]; ok && n.Add(1)%2 == 1 {
-			return nil, context.DeadlineExceeded
-		}
-		res, err := s.chainServingBbdFetcher.FetchBodies(ctx, headers, peerId)
-		return &res, err
-	})
-	if err != nil {
-		return FetcherResponse[[]*types.Body]{}, err
+	pageSize := s.pageSize
+	if pageSize == 0 {
+		pageSize = len(headers)
 	}
-	return *res, nil
+	var bodies []*types.Body
+	for start := 0; start < len(headers); start += pageSize {
+		page := headers[start:min(start+pageSize, len(headers))]
+		res, err := fetchWithRetry(defaultFetcherConfig.CopyWithOptions(opts...), func() (*FetcherResponse[[]*types.Body], error) {
+			if n, ok := s.requests[*peerId]; ok && n.Add(1)%2 == 1 {
+				return nil, context.DeadlineExceeded
+			}
+			res, err := s.chainServingBbdFetcher.FetchBodies(ctx, page, peerId)
+			return &res, err
+		})
+		if err != nil {
+			return FetcherResponse[[]*types.Body]{}, err
+		}
+		bodies = append(bodies, res.Data...)
+	}
+	return FetcherResponse[[]*types.Body]{Data: bodies}, nil
 }
 
 // Every window waits for its slowest body batch, so a peer that let a body
@@ -387,6 +397,23 @@ func TestBackwardBlockDownloader_DeliversWholeWindowWhenPeersRunShort(t *testing
 	for i := uint64(1); i <= 3; i++ {
 		peerTracker.PeerConnected(PeerIdFromUint64(i))
 	}
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+}
+
+// A batch fetched page by page loses every page when one page fails, so the
+// last peer standing must get its per-page retries back.
+func TestBackwardBlockDownloader_LastPeerKeepsPerPageRetry(t *testing.T) {
+	headers := newTestHeaderChain(11, nil)
+	fetcher := newFlakyBodyPeerFetcher(headers, 1)
+	fetcher.pageSize = 5
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	peerTracker.PeerConnected(PeerIdFromUint64(1))
 	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
