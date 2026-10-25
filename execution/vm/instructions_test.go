@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
@@ -845,6 +846,34 @@ func TestOpDifficulty(t *testing.T) {
 	}
 }
 
+func TestPushMatchesSetBytes(t *testing.T) {
+	code := make([]byte, 70)
+	for i := range code {
+		code[i] = 0x5a ^ byte(i*37)
+	}
+	for size := uint64(1); size <= 32; size++ {
+		push := makePush(size, int(size))
+		for pc := range uint64(len(code)) {
+			scope := &CallContext{}
+			scope.Contract.Code = code
+			fillSlotAboveTopWithOnes(&scope.Stack)
+			next, _, err := push(pc, nil, scope)
+			require.NoError(t, err)
+			require.Equal(t, pc+size, next)
+			start, end := min(pc+1, uint64(len(code))), min(pc+1+size, uint64(len(code)))
+			want := new(uint256.Int).SetBytes(common.RightPadBytes(code[start:end], int(size)))
+			require.Equal(t, want, scope.Stack.peek(), "PUSH%d at pc %d", size, pc)
+			require.Equal(t, 2, scope.Stack.len())
+		}
+	}
+}
+
+func fillSlotAboveTopWithOnes(st *Stack) {
+	st.pushRef().SetAllOne()
+	st.pushRef().SetAllOne()
+	st.pop()
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
@@ -1191,6 +1220,35 @@ func TestExpSmallOperandBoundaries(t *testing.T) {
 			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
 			got := scope.Stack.popCopy()
 			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpMatchesBigInt(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	edges := []uint256.Int{{}, {1}, {2}, {3}, {1<<62 - 1}, {1 << 62}, {1<<62 + 1}, {1 << 63}, {0, 1}, {0, 0, 1}, {0, 0, 0, 1 << 63}, *new(uint256.Int).SetAllOne()}
+	rng := rand.New(rand.NewPCG(1, 2))
+	random := func() uint256.Int {
+		x := uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64()}
+		return *x.Rsh(&x, uint(rng.IntN(256)))
+	}
+	bases := append([]uint256.Int{{3}, {5}, {0x081f7721}, {1 << 32}, {^uint64(0) - 2, ^uint64(0), ^uint64(0), ^uint64(0)}}, edges...)
+	exponents := append([]uint256.Int(nil), edges...)
+	for range 200 {
+		bases = append(bases, random())
+		exponents = append(exponents, random())
+	}
+	for _, base := range bases {
+		for _, exponent := range exponents {
+			scope := &CallContext{}
+			scope.Stack.push(exponent)
+			scope.Stack.push(base)
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%x exponent=%x", &base, &exponent)
 		}
 	}
 }

@@ -79,10 +79,10 @@ type beaconStatesCollector struct {
 	payloadExpectedWithdrawalsCollectorDump *etl.Collector
 	executionPayloadAvailabilityCollector   *etl.Collector
 	builderPendingPaymentsCollector         *etl.Collector
-	ptcWindowCollector                      *etl.Collector
+	ptcWindowEpochCollector                 *etl.Collector
 	latestExecutionPayloadBidCollector      *etl.Collector
 	// gloas -- diffs data structures
-	buildersWriter                   *base_encoding.SSZQueueEncoder[*cltypes.Builder]
+	buildersWriter                   *state_accessors.BuildersDiffWriter
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
@@ -140,10 +140,10 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		payloadExpectedWithdrawalsCollectorDump: etl.NewCollectorWithAllocator(kv.PayloadExpectedWithdrawalsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		executionPayloadAvailabilityCollector:   etl.NewCollectorWithAllocator(kv.ExecutionPayloadAvailabilityTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		builderPendingPaymentsCollector:         etl.NewCollectorWithAllocator(kv.BuilderPendingPaymentsTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
-		ptcWindowCollector:                      etl.NewCollectorWithAllocator(kv.PtcWindowTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		ptcWindowEpochCollector:                 etl.NewCollectorWithAllocator(kv.PtcWindowEpochTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		latestExecutionPayloadBidCollector:      etl.NewCollectorWithAllocator(kv.LatestExecutionPayloadBidTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 
-		buildersWriter:                   base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b }),
+		buildersWriter:                   new(state_accessors.BuildersDiffWriter),
 		builderPendingWithdrawalsWriter:  base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b }),
 		payloadExpectedWithdrawalsWriter: base_encoding.NewSSZQueueEncoder[*cltypes.Withdrawal](func(a, b *cltypes.Withdrawal) bool { return *a == *b }),
 
@@ -183,6 +183,10 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 	if err := i.storeEpochData(state); err != nil {
 		return err
 	}
+	epoch := slot / i.beaconCfg.SlotsPerEpoch
+	if err := i.collectActiveIndices(epoch, state.GetActiveValidatorsIndices(epoch)); err != nil {
+		return err
+	}
 
 	if state.Version() >= clparams.AltairVersion {
 		// dump inactivity scores
@@ -215,6 +219,14 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 		if err := antiquateListSSZ(slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
 			return err
 		}
+		i.buildersWriter.Initialize(state.GetBuilders())
+		i.buf.Reset()
+		if err := i.buildersWriter.WriteDiff(i.buf, state.GetBuilders()); err != nil {
+			return err
+		}
+		if err := i.buildersCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+			return err
+		}
 		if err := antiquateListSSZ(slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}
@@ -227,7 +239,7 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 		if err := i.collectBuilderPendingPayments(slot, state.GetBuilderPendingPayments()); err != nil {
 			return err
 		}
-		if err := i.collectPtcWindow(slot, state.GetPtcWindow()); err != nil {
+		if err := i.collectPtcWindowEpoch(state); err != nil {
 			return err
 		}
 		if err := i.collectLatestExecutionPayloadBid(slot, state.GetLatestExecutionPayloadBid()); err != nil {
@@ -430,8 +442,11 @@ func (i *beaconStatesCollector) collectBuilderPendingPayments(slot uint64, bpp *
 	return i.builderPendingPaymentsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectPtcWindow(slot uint64, ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ]) error {
-	encoded, err := ptcWindow.EncodeSSZ(nil)
+func (i *beaconStatesCollector) collectPtcWindowEpoch(st *state.CachingBeaconState) error {
+	if st.Version() < clparams.GloasVersion {
+		return nil
+	}
+	encoded, err := st.GetPtcWindow().EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -443,7 +458,8 @@ func (i *beaconStatesCollector) collectPtcWindow(slot uint64, ptcWindow *solid.V
 	if err := i.compressor.Close(); err != nil {
 		return err
 	}
-	return i.ptcWindowCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+	slot := i.beaconCfg.RoundSlotToEpoch(st.Slot())
+	return i.ptcWindowEpochCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) collectLatestExecutionPayloadBid(slot uint64, bid *cltypes.ExecutionPayloadBid) error {
@@ -623,7 +639,7 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.builderPendingPaymentsCollector.Load(tx, kv.BuilderPendingPaymentsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.ptcWindowCollector.Load(tx, kv.PtcWindowTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.ptcWindowEpochCollector.Load(tx, kv.PtcWindowEpochTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := i.latestExecutionPayloadBidCollector.Load(tx, kv.LatestExecutionPayloadBidTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -666,7 +682,7 @@ func (i *beaconStatesCollector) close() {
 	i.payloadExpectedWithdrawalsCollectorDump.Close()
 	i.executionPayloadAvailabilityCollector.Close()
 	i.builderPendingPaymentsCollector.Close()
-	i.ptcWindowCollector.Close()
+	i.ptcWindowEpochCollector.Close()
 	i.latestExecutionPayloadBidCollector.Close()
 }
 

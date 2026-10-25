@@ -2385,3 +2385,67 @@ func TestValueTransferRecipientWaitsForValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessRequestSetsEIP8246FromBlockTime(t *testing.T) {
+	amsterdam := uint64(100)
+	config := chain.AllProtocolChanges.Copy()
+	config.AmsterdamTime = &amsterdam
+	addr := accounts.InternAddress(common.Address{0x82, 0x46})
+	equalVersion := func(r, w state.Version) state.VersionValidity {
+		if r != w {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	for _, tc := range []struct {
+		time uint64
+		want state.VersionValidity
+	}{
+		{amsterdam - 1, state.VersionValid},
+		{amsterdam, state.VersionInvalid},
+	} {
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.blockExecutors = map[uint64]*blockExecutor{0: nil}
+		header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time}
+		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		vm := pe.blockExecutors[1].versionMap
+		vm.WriteBalance(addr, state.Version{TxIndex: 0}, *uint256.NewInt(100), true)
+		vm.WriteSelfDestruct(addr, state.Version{TxIndex: 0}, true, true)
+		reads := state.ReadSet{}
+		reads.SetBalance(addr, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}}})
+		io := state.NewVersionedIO(2)
+		io.RecordReads(state.Version{TxIndex: 1}, reads)
+		require.Equal(t, tc.want, vm.ValidateVersion(1, io, equalVersion, true, false, false, ""), "block time %d", tc.time)
+	}
+}
+
+// Each block is counted once, when its duration is recorded; counting it again
+// at scheduling time halved the average block duration (bdur, exec_block_dur).
+func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
+	t.Run("processRequest", func(t *testing.T) {
+		config := chain.AllProtocolChanges
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.in = exec.NewQueueWithRetry(16)
+		pe.blockExecMetrics = newBlockExecMetrics()
+		header := &types.Header{Number: *uint256.NewInt(1)}
+		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		be := pe.blockExecutors[1]
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+	t.Run("scheduleNextPending", func(t *testing.T) {
+		be := newBlockExec(newParallelTestBlock(1), nil, nil, nil, nil, false, nil)
+		pe := &parallelExecutor{
+			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
+			blockExecutors: map[uint64]*blockExecutor{1: be},
+			in:             exec.NewQueueWithRetry(16),
+		}
+		pe.scheduleNextPending(t.Context())
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+}
