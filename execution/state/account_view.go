@@ -198,4 +198,16 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	return &acc
 }
 
+// GetAccount returns the account composed at txIdx and whether it exists there, in
+// comma-ok form. A false ok means the account is deleted/absent (self-destructed with
+// no revival, or removed as an EIP-161 empty via the self-destruct-encoded write), so
+// the caller removes rather than writes its leaf — no separate emptiness check needed.
+func (v *VersionedAccountView) GetAccount() (accounts.Account, bool) {
+	acc := v.Account()
+	if acc == nil {
+		return accounts.Account{}, false
+	}
+	return *acc, true
+}
+
 var _ accounts.AccountView = (*VersionedAccountView)(nil)

@@ -152,6 +152,17 @@ func (vm *VersionMap) blockTxIndex(txNum uint64) int {
 	return int(txNum-vm.baseTxNum.Load()) - 1
 }
 
+// GetAccount returns addr's account composed at the given global txNum — including
+// the writes of the tx at that txNum — and whether it exists there, in comma-ok form.
+// It is the post-seal projection accessor commitment uses instead of folding per-field
+// cells and re-deriving existence: a false ok means the account is deleted/absent.
+// Reading one past the tx's TxIndex (txNum - baseTxNum, since txNum = baseTxNum +
+// TxIndex + 1) includes that tx's own writes.
+func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base StateReader) (accounts.Account, bool) {
+	txIdx := int(txNum - vm.baseTxNum.Load())
+	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
+}
+
 // txAccessKey addresses the per-tx access list. The block-end task's execution
 // writes and its engine.Finalize writes share one txNum but are consumed as two
 // separate apply units, so finalize distinguishes their slots.
