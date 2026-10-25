@@ -224,9 +224,9 @@ func (c *JsonRpcClient) NewPayloadV6(
 	parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes,
 	inclusionList []hexutil.Bytes,
-) (*enginetypes.PayloadStatusV2, error) {
-	return backoff.RetryWithData(func() (*enginetypes.PayloadStatusV2, error) {
-		var result enginetypes.PayloadStatusV2
+) (*enginetypes.PayloadStatus, error) {
+	return backoff.RetryWithData(func() (*enginetypes.PayloadStatus, error) {
+		var result enginetypes.PayloadStatus
 		err := c.rpcClient.CallContext(
 			ctx,
 			&result,

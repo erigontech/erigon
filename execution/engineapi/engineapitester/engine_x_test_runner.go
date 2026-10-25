@@ -538,9 +538,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 			case "5":
 				r, err = tester.EngineApiClient.NewPayloadV5(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
 			case "6":
-				var r6 *enginetypes.PayloadStatusV2
-				r6, err = tester.EngineApiClient.NewPayloadV6(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests, inclusionList)
-				r = r6.ToPayloadStatus()
+				r, err = tester.EngineApiClient.NewPayloadV6(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests, inclusionList)
 			default:
 				return nil, "", fmt.Errorf("unsupported new payload version: %s", payload.NewPayloadVersion)
 			}

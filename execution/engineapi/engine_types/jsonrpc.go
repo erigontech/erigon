@@ -161,30 +161,12 @@ type ExecutionPayloadBodyV2 struct {
 }
 
 type PayloadStatus struct {
-	Status          EngineStatus      `json:"status"`
-	ValidationError *StringifiedError `json:"validationError"`
-	LatestValidHash *common.Hash      `json:"latestValidHash"`
-	CriticalError   error             `json:"-"`
-}
-
-type PayloadStatusV2 struct {
-	Status                 EngineStatus      `json:"status"`
-	ValidationError        *StringifiedError `json:"validationError"`
-	LatestValidHash        *common.Hash      `json:"latestValidHash"`
-	InclusionListSatisfied *bool             `json:"inclusionListSatisfied"`
-	CriticalError          error             `json:"-"`
-}
-
-func (s *PayloadStatusV2) ToPayloadStatus() *PayloadStatus {
-	if s == nil {
-		return nil
-	}
-	return &PayloadStatus{
-		Status:          s.Status,
-		ValidationError: s.ValidationError,
-		LatestValidHash: s.LatestValidHash,
-		CriticalError:   s.CriticalError,
-	}
+	Status                 EngineStatus          `json:"status"`
+	ValidationError        *StringifiedError     `json:"validationError"`
+	LatestValidHash        *common.Hash          `json:"latestValidHash"`
+	CriticalError          error                 `json:"-"`
+	InclusionListSatisfied *bool                 `json:"inclusionListSatisfied,omitempty"`
+	SSZVersion             clparams.StateVersion `json:"-"`
 }
 
 type ForkChoiceUpdatedResponse struct {
