@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/rawdb"
 )
 
 // newTestMigrationsDB opens an in-memory migrations-tracking DB for use in tests.
@@ -295,6 +296,36 @@ func TestCommitCallRequired(t *testing.T) {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Empty(applied)
+		return nil
+	}))
+}
+
+func TestUpgradeRejectsDowngradeToSchema7_0(t *testing.T) {
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	migrationsDB := newTestMigrationsDB(t)
+	require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, []byte{0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0})
+	}))
+	require.NoError(migrationsDB.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, m := range migrations[dbcfg.ChainDB] {
+			if m.Name == "db_schema_version7_1" {
+				continue
+			}
+			if err := tx.Put(kv.Migrations, []byte(m.Name), []byte{1}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(NewMigrator(dbcfg.ChainDB).Apply(db, migrationsDB, t.TempDir(), "", log.New()))
+
+	require.NoError(db.View(t.Context(), func(tx kv.Tx) error {
+		major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(uint32(7), major)
+		require.Positive(minor, "binaries at schema 7.0 read chunked inverted index values as single txNums")
 		return nil
 	}))
 }
