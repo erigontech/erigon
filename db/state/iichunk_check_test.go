@@ -22,17 +22,24 @@ func TestIIChunksMatchKeysTable(t *testing.T) {
 	if path == "" {
 		return
 	}
-	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(path).Readonly(true).Accede(true).MustOpen()
+	tables := [][2]string{
+		{kv.TblLogAddressKeys, kv.TblLogAddressIdx}, {kv.TblLogTopicsKeys, kv.TblLogTopicsIdx},
+		{kv.TblTracesFromKeys, kv.TblTracesFromIdx}, {kv.TblTracesToKeys, kv.TblTracesToIdx},
+	}
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(path).Readonly(true).Accede(true).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+		cfg := kv.TableCfg{}
+		for _, tbl := range tables {
+			cfg[tbl[0]], cfg[tbl[1]] = kv.TableCfgItem{Flags: kv.DupSort}, kv.TableCfgItem{Flags: kv.DupSort}
+		}
+		return cfg
+	}).MustOpen()
 	defer db.Close()
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	bad := 0
-	for _, tbl := range [][2]string{
-		{kv.TblLogAddressKeys, kv.TblLogAddressIdx}, {kv.TblLogTopicsKeys, kv.TblLogTopicsIdx},
-		{kv.TblTracesFromKeys, kv.TblTracesFromIdx}, {kv.TblTracesToKeys, kv.TblTracesToIdx},
-	} {
+	for _, tbl := range tables {
 		want := map[string][]uint64{}
 		minKeyTx, nKeys := uint64(1<<63), 0
 		kc, err := tx.Cursor(tbl[0])
