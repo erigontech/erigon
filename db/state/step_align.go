@@ -29,6 +29,11 @@ func (a *Aggregator) StepAlignedEnd(stepSize uint64) (end, stoppedEnd uint64, er
 	if a.CommitmentDomainStopped(kv.CommitmentDomain) {
 		return 0, 0, fmt.Errorf("%s domain is stopped, its files cannot be merged apart from accounts and storage", kv.CommitmentDomain)
 	}
+	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if a.isDomainFrozen(d) {
+			return 0, 0, fmt.Errorf("%s domain is frozen, its files cannot be merged", d)
+		}
+	}
 	at := a.BeginFilesRo()
 	defer at.Close()
 	return at.stepAlignedEnd(stepSize, a.stoppedCommitmentDomains())
@@ -43,12 +48,21 @@ func (a *Aggregator) stoppedCommitmentDomains() (stopped []kv.Domain) {
 	return stopped
 }
 
-func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) (end, stoppedEnd uint64, err error) {
-	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if a.isDomainFrozen(d) {
-			return 0, 0, fmt.Errorf("%s domain is frozen, its files cannot be merged", d)
+func (a *Aggregator) StepAlignedNames() (names []string) {
+	for _, d := range a.d {
+		if d != nil && d.Enabled {
+			names = append(names, d.FilenameBase)
 		}
 	}
+	for _, ii := range a.iis {
+		if ii != nil && ii.Enabled {
+			names = append(names, ii.FilenameBase)
+		}
+	}
+	return names
+}
+
+func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) (end, stoppedEnd uint64, err error) {
 	stopped := a.stoppedCommitmentDomains()
 	end, stoppedEnd, err = a.StepAlignedEnd(stepSize)
 	if err != nil {
@@ -56,8 +70,12 @@ func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) 
 	}
 	for _, d := range stopped {
 		a.stoppedCommitment[d].Store(false)
-		defer a.StopCommitmentDomain(d)
 	}
+	defer func() {
+		for _, d := range stopped {
+			a.StopCommitmentDomain(d)
+		}
+	}()
 	for {
 		merged, err := a.mergeStepAligned(ctx, stepSize, end, stoppedEnd, stopped)
 		if err != nil {
@@ -124,10 +142,11 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64, stopped []kv.Domain) (
 			}
 		}
 	}
-	if len(stopped) == 0 {
+	stoppedLists := at.stepAlignedFileLists(stopped, true)
+	if !slices.ContainsFunc(stoppedLists, func(files visibleFiles) bool { return len(files) > 0 }) {
 		return end, end, nil
 	}
-	if stoppedEnd, err = stepAlignedListsEnd(at.stepAlignedFileLists(stopped, true), stepSize, end); err != nil {
+	if stoppedEnd, err = stepAlignedListsEnd(stoppedLists, stepSize, end); err != nil {
 		return 0, 0, err
 	}
 	return end, stoppedEnd, nil

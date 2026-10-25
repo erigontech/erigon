@@ -67,7 +67,9 @@ func TestStepRebaseIncreaseMergesStateFiles(t *testing.T) {
 	closeDB()
 
 	var end uint64
+	var merged []string
 	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
+		merged = agg.StepAlignedNames()
 		end, _, err = agg.StepAlignedEnd(newStepSize)
 		return err
 	}))
@@ -84,7 +86,7 @@ func TestStepRebaseIncreaseMergesStateFiles(t *testing.T) {
 	closeDB()
 	require.NotEmpty(t, want[end-1])
 
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, merged, logger)
 	require.NoError(t, err)
 	tail := filesPastStep(t, dirs.SnapDomain, end/stepSize)
 	require.NotEmpty(t, tail)
@@ -159,17 +161,53 @@ func TestStepRebaseIncreaseMergesReceiptCacheFiles(t *testing.T) {
 	require.Len(t, unmerged, 1)
 
 	var end uint64
+	var names []string
 	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
+		names = agg.StepAlignedNames()
 		end, _, err = agg.StepAlignedEnd(newStepSize)
 		return err
 	}))
 	require.Equal(t, 20*stepSize, end)
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, names, logger)
 	require.NoError(t, err)
 	require.NoError(t, applyStepRebasePlan(t.Context(), dirs, plan, logger))
 	merged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.0-2.v"))
 	require.NoError(t, err)
 	require.Len(t, merged, 1)
+}
+
+func TestStepRebaseIncreaseRefusesUnmergedMisalignedFiles(t *testing.T) {
+	const stepSize, factor, steps = uint64(10), uint64(10), uint64(23)
+	const newStepSize = stepSize * factor
+	saved := statecfg.Schema.RCacheDomain
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+	statecfg.EnableHistoricalRCache()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, stepSize, 64)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+
+	db, closeDB := openTestTemporalDB(t, dirs, settings)
+	writeAccountSteps(t, db, steps*stepSize)
+	writeReceiptCacheSteps(t, db, steps*stepSize)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(steps), execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
+	agg.WaitForFiles()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return kvcfg.PersistReceipts.ForceWrite(tx, false)
+	}))
+	closeDB()
+	statecfg.Schema.RCacheDomain = saved
+	unmerged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.16-20.v"))
+	require.NoError(t, err)
+	require.Len(t, unmerged, 1)
+
+	_, err = planStepRebase(t.Context(), dirs, settings, newStepSize, true, logger)
+	require.ErrorContains(t, err, "is not merged by the aggregator and does not start and end at a multiple of 10 steps")
+	require.ErrorContains(t, err, "-rcache.")
 }
 
 func writeReceiptCacheSteps(t *testing.T, db kv.TemporalRwDB, txNums uint64) {

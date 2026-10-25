@@ -77,7 +77,9 @@ func TestAlignFilesToStepSizeRefusesFrozenCommitment(t *testing.T) {
 	_, agg := testDbAndAggregatorv3(t, 10)
 	require.NoError(t, state.WriteErigonDBSettings(agg.Dirs(), &state.ErigonDBSettings{StepSize: 10, StepsInFrozenFile: 64}))
 	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, 40))
-	_, _, err := agg.AlignFilesToStepSize(t.Context(), 100)
+	_, _, err := agg.StepAlignedEnd(100)
+	require.ErrorContains(t, err, "commitment domain is frozen")
+	_, _, err = agg.AlignFilesToStepSize(t.Context(), 100)
 	require.ErrorContains(t, err, "commitment domain is frozen")
 }
 

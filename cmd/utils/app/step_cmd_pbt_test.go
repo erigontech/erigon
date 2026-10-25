@@ -77,13 +77,15 @@ func TestStepRebaseIncreaseKeepsDualCommitment(t *testing.T) {
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	require.NoError(t, err)
 	var end uint64
+	var merged []string
 	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
+		merged = agg.StepAlignedNames()
 		end, _, err = agg.StepAlignedEnd(newStepSize)
 		return err
 	}))
 	require.NotZero(t, end)
 	require.Positive(t, countMisalignedFiles(t, dirs.SnapDomain, end/stepSize, factor), "files below the aligned end must need a merge")
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, merged, logger)
 	require.NoError(t, err)
 	tail := filesPastStep(t, dirs.SnapDomain, end/stepSize)
 	require.NotEmpty(t, tail)
@@ -201,10 +203,11 @@ func TestStepRebaseIncreaseKeepsStoppedShadowBehind(t *testing.T) {
 		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
 	}))
 	chainDB.Close()
+	var merged []string
 	stepAligned := func() (end uint64, stoppedEnds map[kv.Domain]uint64) {
 		require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) error {
 			e, stoppedEnd, err := agg.StepAlignedEnd(newStepSize)
-			end, stoppedEnds = e, stoppedCommitmentEnds(agg, stoppedEnd)
+			end, stoppedEnds, merged = e, stoppedCommitmentEnds(agg, stoppedEnd), agg.StepAlignedNames()
 			return err
 		}))
 		return end, stoppedEnds
@@ -217,7 +220,7 @@ func TestStepRebaseIncreaseKeepsStoppedShadowBehind(t *testing.T) {
 		require.NoError(t, err)
 		for _, entry := range entries {
 			matches := stepFileRe.FindStringSubmatch(entry.Name())
-			if matches == nil || matches[2] != kv.CommitmentBinDomain.String() {
+			if len(matches) < 5 || matches[2] != kv.CommitmentBinDomain.String() {
 				continue
 			}
 			to, err := strconv.ParseUint(matches[4], 10, 64)
@@ -235,7 +238,7 @@ func TestStepRebaseIncreaseKeepsStoppedShadowBehind(t *testing.T) {
 
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	require.NoError(t, err)
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, stoppedEnds, logger)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, stoppedEnds, merged, logger)
 	require.NoError(t, err)
 	require.NoError(t, applyStepRebasePlan(t.Context(), dirs, plan, logger))
 
@@ -284,6 +287,48 @@ func TestStepRebaseIncreaseKeepsStoppedShadowBehind(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+func TestStepRebaseIncreaseKeepsStoppedShadowWithoutFiles(t *testing.T) {
+	commitmentflags.Restore(t)
+	const stepSize, stepsInFrozenFile, factor = uint64(1), uint64(64), uint64(32)
+	const newStepSize = stepSize * factor
+	logger := log.New()
+	fixture, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, false, true, stepSize, stepsInFrozenFile, 54)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	dirs := fixture.Tester.Dirs
+	buildMergedStateFiles(t, fixture)
+
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	require.NoError(t, chainDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	}))
+	chainDB.Close()
+	for _, root := range stateSnapDirs(dirs) {
+		paths, err := filepath.Glob(filepath.Join(root, "*-"+kv.CommitmentBinDomain.String()+".*"))
+		require.NoError(t, err)
+		for _, path := range paths {
+			require.NoError(t, dir.RemoveFile(path))
+		}
+	}
+
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := planStepRebase(t.Context(), dirs, settings, newStepSize, true, logger)
+	require.NoError(t, err)
+	require.NotZero(t, plan.alignEnd)
+	require.Equal(t, map[kv.Domain]uint64{kv.CommitmentBinDomain: plan.alignEnd}, plan.stoppedEnds)
+	require.NotEmpty(t, filesPastStep(t, dirs.SnapDomain, plan.alignEnd/stepSize))
+	require.NoError(t, applyStepRebasePlan(t.Context(), dirs, plan, logger))
+
+	chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	require.NoError(t, chainDB.View(t.Context(), func(tx kv.Tx) error {
+		stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+		require.True(t, stopped)
+		return err
+	}))
+	chainDB.Close()
 }
 
 func buildMergedStateFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
