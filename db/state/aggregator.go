@@ -1261,7 +1261,87 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) error {
+const maxCollationBatchSteps = 32
+
+type collationBatch struct {
+	from, to kv.Step
+	values   [kv.DomainLen][]*seg.Compressor
+}
+
+func (b *collationBatch) take(domain kv.Domain, step kv.Step) *seg.Compressor {
+	if b == nil || step < b.from || step >= b.to || b.values[domain] == nil {
+		return nil
+	}
+	comp := b.values[domain][step-b.from]
+	b.values[domain][step-b.from] = nil
+	return comp
+}
+
+func (b *collationBatch) covers(step kv.Step) bool {
+	return b != nil && step >= b.from && step < b.to
+}
+
+func (b *collationBatch) Close() {
+	if b == nil {
+		return
+	}
+	for _, comps := range b.values {
+		for _, comp := range comps {
+			if comp != nil {
+				comp.Close()
+			}
+		}
+	}
+}
+
+func (a *Aggregator) collateBatch(ctx context.Context, db kv.TemporalRoDB, from, limit kv.Step, finalityCtx kv.FinalityContext, onlyCommitment bool) (*collationBatch, error) {
+	to := from
+	for to < limit && to < from+maxCollationBatchSteps {
+		_, _, _, _, ok, err := a.readyForCollation(ctx, db, to, finalityCtx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			break
+		}
+		to++
+	}
+	if to-from < 2 {
+		return nil, nil
+	}
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
+	batch := &collationBatch{from: from, to: to}
+	ac := a.BeginFilesRo()
+	defer ac.Close()
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(a.workers.getCollateAndBuild())
+	for id, d := range a.d {
+		if d == nil || !d.Enabled || d.LargeValues || a.isDomainFrozen(kv.Domain(id)) || a.CommitmentDomainStopped(kv.Domain(id)) {
+			continue
+		}
+		if onlyCommitment && kv.Domain(id) != kv.CommitmentDomain && kv.Domain(id) != kv.CommitmentBinDomain {
+			continue
+		}
+		if from < ac.d[id].FirstStepNotInFiles() {
+			continue
+		}
+		g.Go(func() error {
+			return db.View(gctx, func(tx kv.Tx) (err error) {
+				batch.values[id], err = d.collateValuesBatch(gctx, from, to, tx)
+				return err
+			})
+		})
+	}
+	if err := g.Wait(); err != nil {
+		batch.Close()
+		return nil, fmt.Errorf("domain batch collation [%d, %d): %w", from, to, err)
+	}
+	a.logger.Debug("[snapshots] batch collated", "fromStep", from, "toStep", to)
+	return batch, nil
+}
+
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, batch *collationBatch, onlyCommitment bool) error {
 	// Pin worker counts for the duration of buildFiles. The collate/build phases
 	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
 	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
@@ -1319,6 +1399,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		if d == nil || !d.Enabled || a.isDomainFrozen(kv.Domain(id)) || a.CommitmentDomainStopped(kv.Domain(id)) {
 			continue
 		}
+		if onlyCommitment && kv.Domain(id) != kv.CommitmentDomain && kv.Domain(id) != kv.CommitmentBinDomain {
+			continue
+		}
 
 		firstStepNotInFiles := ac.d[id].FirstStepNotInFiles()
 		if step < firstStepNotInFiles {
@@ -1328,7 +1411,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		g.Go(func() error {
 			var collation Collation
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
+				collation, err = d.collateWithValues(ctx, step, txFrom, txTo, tx, batch.take(kv.Domain(id), step))
 				return err
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
@@ -1356,7 +1439,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled {
+		if !ii.Enabled || onlyCommitment {
 			continue
 		}
 
@@ -1466,8 +1549,17 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
+		var batch *collationBatch
+		defer func() { batch.Close() }()
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, finalityCtx); err != nil {
+			if !batch.covers(step) {
+				batch.Close()
+				var err error
+				if batch, err = a.collateBatch(ctx, db, step, toStep, finalityCtx, false); err != nil {
+					panic(err)
+				}
+			}
+			if err := a.buildFiles(ctx, db, step, finalityCtx, batch, false); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2628,12 +2720,39 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}
 		}
 
+		canonicalStep := step
+		vis := a.visible.Load()
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			d := a.d[domain]
+			if d == nil || !d.Enabled || vis.d[domain] == nil || a.isDomainFrozen(domain) || a.CommitmentDomainStopped(domain) {
+				continue
+			}
+			if end := vis.d[domain].files.EndTxNum(); end > 0 {
+				step = min(step, kv.Step(end/a.StepSize()))
+			}
+		}
+
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
+		var batch *collationBatch
+		defer func() { batch.Close() }()
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx); err != nil {
+			onlyCommitment := step < canonicalStep
+			if !batch.covers(step) {
+				batch.Close()
+				limit := lastInDB
+				if onlyCommitment {
+					limit = canonicalStep
+				}
+				var err error
+				if batch, err = a.collateBatch(a.ctx, db, step, limit, finalityCtx, onlyCommitment); err != nil {
+					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+					break
+				}
+			}
+			if err := a.buildFiles(a.ctx, db, step, finalityCtx, batch, onlyCommitment); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
