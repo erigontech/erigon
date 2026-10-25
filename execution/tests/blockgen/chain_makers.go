@@ -488,12 +488,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		needsVersionMap := dbg.Exec3Parallel || config.AmsterdamTime != nil
 		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
+			// SetVersionMap forces noMaterialize: the stateObject cache would let a
+			// reused IBS serve stale account state across txs (e.g. a revived account's
+			// code hash), producing a header the executor's cache-free run disagrees with.
 			ibs.SetVersionMap(versionMap)
-			// Generation must match the parallel executor's cache-free path: the
-			// stateObject cache lets a reused IBS serve stale account state across
-			// txs (e.g. a revived account's code hash), producing a header the
-			// executor's noMaterialize run then disagrees with.
-			ibs.SetNoMaterialize(true)
 		}
 
 		b := &BlockGen{

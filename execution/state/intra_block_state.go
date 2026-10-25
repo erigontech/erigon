@@ -260,7 +260,15 @@ func New(stateReader StateReader) *IntraBlockState {
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
 	ibs := New(stateReader)
-	ibs.versionMap = mvhm
+	ibs.SetVersionMap(mvhm)
+	return ibs
+}
+
+// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
+func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
+	ibs := New(stateReader)
+	ibs.versionMap = NewVersionMap(nil)
+	ibs.noMaterialize = false
 	return ibs
 }
 
@@ -296,8 +304,14 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
+// SetVersionMap binds the IBS to a versionMap; noMaterialize follows versionMap presence.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
+	noMaterialize := versionMap != nil
+	if dbg.AssertEnabled && noMaterialize != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
+		panic("noMaterialize changed with arena slots outstanding")
+	}
 	ibs.versionMap = versionMap
+	ibs.noMaterialize = noMaterialize
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
@@ -313,15 +327,6 @@ func (ibs *IntraBlockState) SetWaitCommit(f func(depTxIndex int) bool) {
 
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
 	return ibs.versionMap
-}
-
-// SetNoMaterialize enables the cache-free parallel path: create/write flows
-// record only versioned cells and never populate the stateObject map.
-func (ibs *IntraBlockState) SetNoMaterialize(v bool) {
-	if dbg.AssertEnabled && v != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
-		panic("noMaterialize changed with arena slots outstanding")
-	}
-	ibs.noMaterialize = v
 }
 
 func (ibs *IntraBlockState) IsVersioned() bool {

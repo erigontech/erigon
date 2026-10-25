@@ -145,11 +145,10 @@ func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	if header == nil {
 		return
 	}
-	workerTx := rw.chainTx
 	br := rw.blockReader
 	ctx := rw.ctx
 	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := br.Header(ctx, workerTx, hash, number)
+		h, err := br.Header(ctx, rw.chainTx, hash, number)
 		if h == nil && err == nil {
 			h = &types.Header{}
 		}

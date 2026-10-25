@@ -1521,10 +1521,17 @@ func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) 
 	})
 
 	require.NoError(t, ibs.ApplyVersionedWrites(writes))
-	stateObject := ibs.stateObjects[addr]
-	require.NotNil(t, stateObject)
-	require.True(t, stateObject.selfdestructed)
-	require.False(t, stateObject.createdContract)
+
+	// Selfdestruct dominates: applying a write-set that carries both a destruct
+	// and a create leaves the account destructed. The cache-free path records this
+	// on the version map (createdContract was a materialized-object flag the
+	// finalize write-set never carried).
+	destructed, err := ibs.HasSelfdestructed(addr)
+	require.NoError(t, err)
+	require.True(t, destructed)
+	sd, ok := ibs.VersionedWrites().GetSelfDestruct(addr)
+	require.True(t, ok)
+	require.True(t, sd.Val)
 }
 
 func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testing.T) {

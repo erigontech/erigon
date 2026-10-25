@@ -26,7 +26,6 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 			t.Parallel()
 			vm := NewVersionMap(nil)
 			ibs := NewWithVersionMap(&emptyReader{}, vm)
-			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(0, 1)
 			ibs.SetVersion(0)
 
