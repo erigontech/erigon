@@ -32,13 +32,8 @@ import (
 var ErrPruned = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 implements StateReader and StateWriter. Reads chain from
-// most-recent to persisted: blockCache (in-flight per-field parallel-block
-// writes) → sd.GetAsOf (in-batch memory) → ttx.GetAsOf (DB history + snapshots).
-//
-// blockCache holds writes that have not yet reached sd.mem until the block
-// boundary Flush, so a finalize-time IBS in historic mode would otherwise read
-// pre-block state and stomp a prior tx's in-block update. When sd is nil the
-// reader serves strictly persisted history.
+// most-recent to persisted: sd.GetAsOf (in-batch memory) → ttx.GetAsOf (DB
+// history + snapshots). When sd is nil the reader serves strictly persisted history.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
 	sd          execctx.DomainReader
