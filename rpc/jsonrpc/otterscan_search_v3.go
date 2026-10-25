@@ -54,7 +54,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	reachedPageSize := false
 	hasMore := false
 	for txNumsIter.HasNext() {
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
+		txNum, blockNum, txIndex, isFinalTxn, _, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, nil, false, err
 		}
