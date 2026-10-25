@@ -1452,6 +1452,7 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
 }
+
 func TestValidateRead_ChangedValueInvalidatesStorageRead(t *testing.T) {
 	t.Parallel()
 
@@ -1573,3 +1574,81 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(1000), bal)
 }
 
+// TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip pins the reader↔validator
+// round-trip for a shadowed destruct (SELFDESTRUCT at tx2, revived SelfDestruct=false
+// at tx3): a tx reading the wiped field at tx5 must get the post-wipe value from the
+// reader AND have that recorded read validate, or the tx livelocks re-reaching the same
+// conclusion. The code read additionally invalidates once a tx4 redeploy lands above the
+// wipe. CodeHashPath is intentionally omitted: on this branch a revived (latest-SD-false)
+// account's CodeHashPath cell is not wiped by the lifecycle gate (only Code/CodeSize/
+// Storage/Nonce are), so GetCodeHash returns the shadowed cell.
+func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
+	code := []byte{0x60, 0x00}
+	newVM := func(addr accounts.Address) *VersionMap {
+		vm := NewVersionMap(nil)
+		vm.WriteCode(addr, Version{TxIndex: 1}, accounts.NewCode(code), true)
+		vm.WriteCodeHash(addr, Version{TxIndex: 1}, accounts.InternCodeHash([32]byte{0xaa}), true)
+		vm.WriteCodeSize(addr, Version{TxIndex: 1}, len(code), true)
+		vm.WriteNonce(addr, Version{TxIndex: 1}, 1, true)
+		vm.WriteStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(1))), Version{TxIndex: 1}, *uint256.NewInt(5), true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 3}, false, true)
+		vm.WriteAddress(addr, Version{TxIndex: 3}, &accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1), true)
+		return vm
+	}
+	newIBS := func(vm *VersionMap) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, vm)
+		t.Cleanup(func() { ibs.Release(false) })
+		ibs.SetTxContext(0, 5)
+		ibs.SetVersion(0)
+		return ibs
+	}
+	validate := func(vm *VersionMap, ibs *IntraBlockState) VersionValidity {
+		io := NewVersionedIO(6)
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.versionedReads)
+		return vm.ValidateVersion(5, io, validateEqualVersion, true, "")
+	}
+	t.Run("code read is witnessed and a redeploy flush invalidates it", func(t *testing.T) {
+		addr := getAddress(220)
+		vm := newVM(addr)
+		ibs := newIBS(vm)
+		got, err := ibs.GetCode(addr)
+		require.NoError(t, err)
+		require.Empty(t, got)
+		_, recorded := ibs.versionedReads.GetCode(addr)
+		require.True(t, recorded)
+		require.Equal(t, VersionValid, validate(vm, ibs))
+		vm.WriteCode(addr, Version{TxIndex: 4}, accounts.NewCode(code), true)
+		require.Equal(t, VersionInvalid, validate(vm, ibs))
+	})
+	t.Run("nonce read serves the wipe and validates", func(t *testing.T) {
+		addr := getAddress(221)
+		vm := newVM(addr)
+		ibs := newIBS(vm)
+		nonce, err := ibs.GetNonce(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), nonce)
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+	t.Run("code size read serves the wipe and validates", func(t *testing.T) {
+		addr := getAddress(222)
+		vm := newVM(addr)
+		ibs := newIBS(vm)
+		size, err := ibs.GetCodeSize(addr)
+		require.NoError(t, err)
+		require.Equal(t, 0, size)
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+	t.Run("storage wiped-zero read validates without livelock", func(t *testing.T) {
+		addr := getAddress(224)
+		key := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+		vm := newVM(addr)
+		ibs := newIBS(vm)
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		require.True(t, v.IsZero())
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+}
