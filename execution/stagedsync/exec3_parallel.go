@@ -1326,6 +1326,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		executor.tasks = append(executor.tasks, t)
+		if len(executor.tasks) == 1 {
+			v := t.Version()
+			executor.versionMap.SetBaseTxNum(v.TxNum - uint64(v.TxIndex) - 1)
+		}
 		executor.results = append(executor.results, nil)
 		executor.execFailed = append(executor.execFailed, 0)
 
@@ -1753,7 +1757,11 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
-	rules                 *chain.Rules
+	// versionMap is the block's map; with the per-tx access list recorded at publish,
+	// the commitment calculator reads this tx's final writes from it (WritesAtTxNum)
+	// rather than from a retained write-set.
+	versionMap *state.VersionMap
+	rules      *chain.Rules
 	// balTxs carries the sealed reads and writes of txs before the block's final one,
 	// so the apply loop builds the block access list while the block runs.
 	balTxs []balTx
@@ -3184,6 +3192,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		return nil, err
 	}
 	txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
+	be.versionMap.RecordWriteKeysAtTxIndex(txVersion.TxIndex, false, rawWrites)
 
 	// Snapshot before pushing so the publish loop can't see a later incarnation if
 	// be.results[tx] is overwritten by a concurrent worker.
@@ -3696,6 +3705,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+			applyResult.versionMap = be.versionMap
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
@@ -3868,6 +3878,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// A read-only versionMap-slice view over the finalize write-set.
 				finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
+				be.versionMap.RecordWriteKeysAtTxIndex(finalVersion.TxIndex, true, ivw)
 				be.applyCount += finalizeWrites.Count()
 			}
 		}
@@ -3888,6 +3899,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:      txTask.Version().TxNum,
 				rules:      lastResult.Rules(),
 				writes:     finalizeWrites,
+				versionMap: be.versionMap,
 				logs:       blockEndLogs,
 				isFinalize: true,
 			}, false); err != nil {

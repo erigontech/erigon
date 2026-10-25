@@ -17,6 +17,7 @@
 package state
 
 import (
+	"iter"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -79,6 +80,58 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 
 	// An unrecorded slot yields an empty view.
 	require.True(t, vm.WritesAtTxIndex(99, false).IsEmpty())
+}
+
+// TestTxAccessList_StoragesChangedMatchesWriteSet pins the B→C equivalence: the
+// key-only access-list view and a retained-write-set view produce the same
+// StoragesChanged result (net-zero ValueUnchanged writes filtered) because the
+// status is read from the version map cell, not the key-set.
+func TestTxAccessList_StoragesChangedMatchesWriteSet(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xb2})
+	changed := accounts.InternKey([32]byte{0x01})
+	unchanged := accounts.InternKey([32]byte{0x02})
+	const txIdx = 4
+
+	vm := NewVersionMap(nil)
+
+	ws := &WriteSet{}
+	ws.SetStorage(addr, changed, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: changed, Version: Version{TxIndex: txIdx}, valStatus: ValueChanged},
+		Val:         *uint256.NewInt(9),
+	})
+	ws.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, Version: Version{TxIndex: txIdx}, valStatus: ValueUnchanged},
+		Val:         *uint256.NewInt(0),
+	})
+	vm.FlushVersionedWrites(ws, true, "")
+	vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
+
+	collect := func(view WriteSetView, seq func(WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]) map[accounts.StorageKey]uint256.Int {
+		got := map[accounts.StorageKey]uint256.Int{}
+		for a, slots := range seq(view) {
+			if a != addr {
+				continue
+			}
+			for k, vw := range slots {
+				got[k] = vw.Val
+			}
+		}
+		return got
+	}
+	changedSeq := func(v WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+		return v.StoragesChanged()
+	}
+	allSeq := func(v WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+		return v.Storages()
+	}
+
+	wsView := NewVersionMapWriteView(ws, vm, txIdx)
+	alView := vm.WritesAtTxIndex(txIdx, false)
+
+	require.Equal(t, collect(wsView, changedSeq), collect(alView, changedSeq), "StoragesChanged must match across view backings")
+	require.Len(t, collect(alView, changedSeq), 1, "ValueUnchanged write must be filtered")
+	require.Equal(t, collect(wsView, allSeq), collect(alView, allSeq), "Storages (unfiltered) must match across view backings")
+	require.Len(t, collect(alView, allSeq), 2, "unfiltered view keeps both writes")
 }
 
 // TestVersionMap_BlockTxIndex pins the global-txNum ⇄ block-relative-TxIndex mapping

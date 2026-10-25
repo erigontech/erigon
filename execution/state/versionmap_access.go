@@ -44,9 +44,14 @@ const (
 // read back from the version map — so it is the enumerable access list the domain
 // apply and commitment range over in place of a retained write-set. Built once when
 // the tx publishes and never mutated afterwards, so its enumeration needs no lock.
+// storage retains each written slot's valStatus (the one byte decided at write
+// time from the tx's own lifecycle-aware prior read): a BAL block never materializes
+// a net-zero cell and StoragesChanged filters before reading one, so the status
+// cannot be recovered from the map. Non-storage paths read their status from the
+// cell, which always carries it.
 type txAccessList struct {
 	paths   map[accounts.Address]pathBits
-	storage map[accounts.Address]map[accounts.StorageKey]struct{}
+	storage map[accounts.Address]map[accounts.StorageKey]valueStatus
 	count   int
 }
 
@@ -105,8 +110,8 @@ func (t *txAccessList) storageSeq() iter.Seq2[accounts.Address, map[accounts.Sto
 		}
 		for addr, inner := range t.storage {
 			out := make(map[accounts.StorageKey]*VersionedWrite[uint256.Int], len(inner))
-			for k := range inner {
-				out[k] = &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: k}}
+			for k, vs := range inner {
+				out[k] = &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: k, valStatus: vs}}
 			}
 			if !yield(addr, out) {
 				return
@@ -119,8 +124,8 @@ func (t *txAccessList) Storages() iter.Seq2[accounts.Address, map[accounts.Stora
 	return t.storageSeq()
 }
 
-// StoragesChanged is key-only on the access list — the net-zero filtering happens in
-// the versionMapWriteView that wraps it and reads the cells' valStatus from the map.
+// StoragesChanged carries each slot's valStatus; the net-zero filtering is applied by
+// the versionMapWriteView that wraps the access list before the domain/commitment read.
 func (t *txAccessList) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return t.storageSeq()
 }
@@ -202,18 +207,18 @@ func (vm *VersionMap) RecordWriteKeysAtTxIndex(txIdx int, finalize bool, ws Writ
 			continue
 		}
 		if tal.storage == nil {
-			tal.storage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
+			tal.storage = map[accounts.Address]map[accounts.StorageKey]valueStatus{}
 		}
 		m := tal.storage[addr]
 		if m == nil {
-			m = make(map[accounts.StorageKey]struct{}, len(inner))
+			m = make(map[accounts.StorageKey]valueStatus, len(inner))
 			tal.storage[addr] = m
 		}
-		for k := range inner {
+		for k, vw := range inner {
 			if _, ok := m[k]; !ok {
-				m[k] = struct{}{}
 				tal.count++
 			}
+			m[k] = vw.valStatus
 		}
 	}
 	vm.writeKeys.Store(key, tal)
