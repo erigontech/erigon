@@ -17,15 +17,19 @@
 package exec
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -167,4 +171,37 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	got := rw.chain.GetHeaderByHash(hash)
 	require.NotNil(t, got, "committed-MDBX header must still resolve when no overlay is active")
 	require.Equal(t, number, got.Number.Uint64())
+}
+
+type headerTxRecorder struct {
+	dbservices.FullBlockReader
+	tx kv.Getter
+}
+
+func (r *headerTxRecorder) Header(_ context.Context, tx kv.Getter, _ common.Hash, blockNum uint64) (*types.Header, error) {
+	r.tx = tx
+	return &types.Header{Number: *uint256.NewInt(blockNum)}, nil
+}
+
+type namedTx struct {
+	kv.TemporalTx
+	name string
+}
+
+// A mid-EVM dependency pause rebinds the worker to another roTx; BLOCKHASH must
+// read through the rebound tx, not the released one another worker may now hold.
+func TestWorker_GetHashReadsTheRebound(t *testing.T) {
+	t.Parallel()
+
+	br := &headerTxRecorder{}
+	rw := NewWorkerContext(t.Context(), true, nil, nil, br,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, datadir.New(t.TempDir()), log.New())
+	released, rebound := &namedTx{name: "released"}, &namedTx{name: "rebound"}
+	require.NoError(t, rw.ResetTx(released))
+	rw.installWorkerGetHash(&TxTask{Header: &types.Header{Number: *uint256.NewInt(10)}})
+	require.NoError(t, rw.BindTxHeld(rebound))
+
+	_, err := rw.evm.Context.GetHash(5)
+	require.NoError(t, err)
+	require.Same(t, rebound, br.tx)
 }

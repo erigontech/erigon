@@ -2677,152 +2677,181 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	if io == nil {
 		return nil
 	}
+	b := NewBlockAccessListBuilder()
+	b.AddRemaining(io)
+	return b.Build()
+}
 
-	ac := make(map[accounts.Address]*accountState)
-	maxTxIndex := io.Len() - 1
+// BlockAccessListBuilder assembles the block access list one tx index at a time,
+// so a block's list can be built while its txs are published.
+type BlockAccessListBuilder struct {
+	ac   map[accounts.Address]*accountState
+	next int
+}
 
-	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
-		// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
-		rs := io.ReadSet(txIndex)
-		for addr, tr := range rs.balance {
-			if addr.IsNil() || tr.internal {
+func NewBlockAccessListBuilder() *BlockAccessListBuilder {
+	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState), next: -1}
+}
+
+// Next is the tx index Add expects; indexes start at -1, the pre-block system calls.
+func (b *BlockAccessListBuilder) Next() int { return b.next }
+
+// AddRemaining adds every index of io from Next on.
+func (b *BlockAccessListBuilder) AddRemaining(io *VersionedIO) {
+	for txIndex := b.next; txIndex <= io.Len()-1; txIndex++ {
+		b.Add(txIndex, io.ReadSet(txIndex), io.WriteSet(txIndex))
+	}
+}
+
+// Add folds the reads and writes recorded for txIndex, which must be Next.
+func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) {
+	if txIndex != b.next {
+		panic(fmt.Sprintf("block access list: added tx %d, expected %d", txIndex, b.next))
+	}
+	b.next++
+	ac := b.ac
+	// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
+	for addr, tr := range rs.balance {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
+	}
+	for addr, inner := range rs.storage {
+		if addr.IsNil() {
+			continue
+		}
+		for key, tr := range inner {
+			if tr.internal {
 				continue
 			}
-			ensureAccountState(ac, addr).updateReadBalance(tr.Val)
+			ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
 		}
-		for addr, inner := range rs.storage {
+	}
+	for addr, tr := range rs.address {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		// Skip validation-only reads for non-existent accounts.
+		// These are recorded when the version map has no entry
+		// (MVReadResultNone) so that conflict detection works across
+		// transactions, but they should not appear in the block access list.
+		if tr.Val == nil || tr.Val.IsNil() {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+	for addr, tr := range rs.nonce {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+	for addr, tr := range rs.incarnation {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+	for addr, tr := range rs.selfDestruct {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+	for addr, tr := range rs.createContract {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+	for addr, tr := range rs.code {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+	for addr, tr := range rs.codeHash {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		account := ensureAccountState(ac, addr)
+		// A pre-block-empty code hash marks the baseline empty so applyToCode
+		// drops a net-zero same-tx set-then-clear. Only an empty read seen
+		// before any code change is the pre-block value.
+		if tr.Val.IsEmpty() && len(account.code.changes.entries) == 0 {
+			account.initialCodeEmpty = true
+		}
+	}
+	for addr, tr := range rs.codeSize {
+		if addr.IsNil() || tr.internal {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+
+	if writes != nil {
+		// Self-destruct is applied before the balance writes so the EIP-7928
+		// burn (zeroing a non-zero balance written by the destroying tx) fires.
+		for addr, w := range writes.SelfDestructs() {
+			if addr.IsNil() || !w.Val {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, w := range writes.Balances() {
 			if addr.IsNil() {
 				continue
 			}
-			for key, tr := range inner {
-				if tr.internal {
-					continue
-				}
-				ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
-			}
+			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, tr := range rs.address {
-			if addr.IsNil() || tr.internal {
+		for addr, w := range writes.Nonces() {
+			if addr.IsNil() {
 				continue
 			}
-			// Skip validation-only reads for non-existent accounts.
-			// These are recorded when the version map has no entry
-			// (MVReadResultNone) so that conflict detection works across
-			// transactions, but they should not appear in the block access list.
-			if tr.Val == nil || tr.Val.IsNil() {
+			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
+		}
+		for addr, w := range writes.Codes() {
+			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr)
+			ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, tr := range rs.nonce {
-			if addr.IsNil() || tr.internal {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-		for addr, tr := range rs.incarnation {
-			if addr.IsNil() || tr.internal {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-		for addr, tr := range rs.selfDestruct {
-			if addr.IsNil() || tr.internal {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-		for addr, tr := range rs.createContract {
-			if addr.IsNil() || tr.internal {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-		for addr, tr := range rs.code {
-			if addr.IsNil() || tr.internal {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-		for addr, tr := range rs.codeHash {
-			if addr.IsNil() || tr.internal {
+		for addr, byKey := range writes.Storages() {
+			if addr.IsNil() {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
-			// A pre-block-empty code hash marks the baseline empty so applyToCode
-			// drops a net-zero same-tx set-then-clear. Only an empty read seen
-			// before any code change is the pre-block value.
-			if tr.Val.IsEmpty() && len(account.code.changes.entries) == 0 {
-				account.initialCodeEmpty = true
+			for key, w := range byKey {
+				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
-		for addr, tr := range rs.codeSize {
-			if addr.IsNil() || tr.internal {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-
-		if writes := io.WriteSet(txIndex); writes != nil {
-			// Self-destruct is applied before the balance writes so the EIP-7928
-			// burn (zeroing a non-zero balance written by the destroying tx) fires.
-			for addr, w := range writes.SelfDestructs() {
-				if addr.IsNil() || !w.Val {
-					continue
-				}
-				ensureAccountState(ac, addr)
-			}
-			for addr, w := range writes.Balances() {
-				if addr.IsNil() {
-					continue
-				}
-				ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
-			}
-			for addr, w := range writes.Nonces() {
-				if addr.IsNil() {
-					continue
-				}
-				ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
-			}
-			for addr, w := range writes.Codes() {
-				if addr.IsNil() {
-					continue
-				}
-				ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
-			}
-			for addr, byKey := range writes.Storages() {
-				if addr.IsNil() {
-					continue
-				}
-				account := ensureAccountState(ac, addr)
-				for key, w := range byKey {
-					account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
-				}
-			}
-			// EIP-7928 requires every touched address to appear; a sweep over the
-			// full address union covers the paths the value-carrying loops above
-			// didn't already register.
-			for addr := range writes.addrs() {
-				if addr.IsNil() {
-					continue
-				}
-				account := ensureAccountState(ac, addr)
-				// A contract created this block has empty pre-block code; applyToCode
-				// uses this to drop a net-zero empty code change.
-				if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
-					account.initialCodeEmpty = true
-				}
-			}
-		}
-
-		for addr := range io.ReadSet(txIndex).access {
+		// EIP-7928 requires every touched address to appear; a sweep over the
+		// full address union covers the paths the value-carrying loops above
+		// didn't already register.
+		for addr := range writes.addrs() {
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr)
+			account := ensureAccountState(ac, addr)
+			// A contract created this block has empty pre-block code; applyToCode
+			// uses this to drop a net-zero empty code change.
+			if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+				account.initialCodeEmpty = true
+			}
 		}
 	}
 
+	for addr := range rs.access {
+		if addr.IsNil() {
+			continue
+		}
+		ensureAccountState(ac, addr)
+	}
+}
+
+// Build finalizes the list; the builder must not be used after it.
+func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 	// Sorting AccountChanges by value moves 144-byte structs and calls
 	// bytes.Compare per step; sort small integer keys instead.
 	type sortKey struct {
@@ -2830,8 +2859,8 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		lo      uint32
 		account *accountState
 	}
-	keys := make([]sortKey, 0, len(ac))
-	for _, account := range ac {
+	keys := make([]sortKey, 0, len(b.ac))
+	for _, account := range b.ac {
 		a := &account.changes.Address
 		keys = append(keys, sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account})
 	}
