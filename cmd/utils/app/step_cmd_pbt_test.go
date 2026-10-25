@@ -17,6 +17,7 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -55,7 +56,7 @@ func TestStepRebaseIncreaseKeepsDualCommitment(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			want[block] = root
+			want[block] = bytes.Clone(root)
 		}
 		return nil
 	}))
