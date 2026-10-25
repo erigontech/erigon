@@ -24,6 +24,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -124,15 +127,15 @@ func TestSerialBlockEndChecksInclusionList(t *testing.T) {
 		*types.LatestSignerForChainID(se.cfg.chainConfig.ChainID), key,
 	)
 	require.NoError(t, err)
-	block := types.NewBlockFromStorage(task.Header.Hash(), task.Header, nil, nil, nil, nil)
-	se.cfg.readAheader.AddInclusionList(block.Hash(), types.Transactions{omitted})
+	blockHash := task.BlockHash()
+	se.cfg.readAheader.AddInclusionList(blockHash, types.Transactions{omitted})
 
-	_, err = se.executeBlock(t.Context(), block, []exec.Task{task}, true)
+	_, err = se.executeBlock(t.Context(), []exec.Task{task}, true, false)
 	require.NoError(t, err)
 
-	_, ilHash, ok := se.cfg.readAheader.ReadInclusionList(block.Hash())
+	_, ilHash, ok := se.cfg.readAheader.ReadInclusionList(blockHash)
 	require.True(t, ok)
-	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(block.Hash(), ilHash)
+	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(blockHash, ilHash)
 	require.True(t, checked)
 	require.False(t, satisfied)
 }
