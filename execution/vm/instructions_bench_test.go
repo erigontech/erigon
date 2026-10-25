@@ -432,6 +432,19 @@ func BenchmarkExpSmallOperands(b *testing.B) {
 	}
 }
 
+func BenchmarkExpTower(b *testing.B) {
+	// Fixed points x = base**x mod 2**256: the operands of every EXP in EEST exp_bench_arithmetic.
+	for _, tc := range []struct{ base, exponent string }{
+		{"03", "8a5e0b27221309b932be85af9c8a042a0b3ad21d2543c3646504dbb73cb57b3b"},
+		{"07", "12770d0214a04265a8b18f64aebe54b60d92f96e13c9a6244f5768f4377a1e77"},
+		{"081f7721", "f7bcb1106bd6d3afaa5c95433be3b1bfc6f620b89ed0a439a7edafc1008cfb21"},
+	} {
+		b.Run(tc.base, func(b *testing.B) {
+			opBenchmark(b, opExp, tc.exponent, tc.base)
+		})
+	}
+}
+
 func BenchmarkExpInterpreter(b *testing.B) {
 	for _, base := range []uint64{3, 13, 136279841} {
 		b.Run(fmt.Sprint(base), func(b *testing.B) {
@@ -555,6 +568,36 @@ func BenchmarkContextAddress(b *testing.B) {
 				}
 				scope.Stack.Reset()
 			}
+		})
+	}
+}
+
+// BenchmarkCopyLoop runs 64 KB of one zero-length copy after the other, as the
+// codecopy benchmark fixture does, and ADD for comparison.
+func BenchmarkCopyLoop(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		iter []byte
+	}{
+		{"CODECOPY", []byte{byte(PUSH1), 0, byte(PUSH0), byte(PUSH0), byte(CODECOPY)}},
+		{"CALLDATACOPY", []byte{byte(PUSH1), 0, byte(PUSH0), byte(PUSH0), byte(CALLDATACOPY)}},
+		{"RETURNDATACOPY", []byte{byte(PUSH1), 0, byte(PUSH0), byte(PUSH0), byte(RETURNDATACOPY)}},
+		{"ADD", []byte{byte(PUSH1), 1, byte(PUSH1), 1, byte(ADD), byte(POP)}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
+			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			n := 64 * 1024 / len(tc.iter)
+			contract.Code = append([]byte{byte(PUSH1), 0xff, byte(PUSH1), 0x20, byte(MSTORE8), byte(JUMPDEST)}, bytes.Repeat(tc.iter, n)...)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, _, err := evm.Run(*contract, mdgas.MdGas{Execution: 1_000_000}, nil, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/iter")
 		})
 	}
 }
