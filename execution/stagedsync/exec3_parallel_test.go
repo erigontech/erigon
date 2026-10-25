@@ -1938,5 +1938,5 @@ func TestWaitsOnDependency(t *testing.T) {
 	}
 	require.False(t, waitsOnDependency(task(0), 0), "a run before the sender charge does not park")
 	require.True(t, waitsOnDependency(task(0), 1), "a re-run with the sender checks parks")
-	require.False(t, waitsOnDependency(task(1), 0), "a value transfer is charged at validation too")
+	require.True(t, waitsOnDependency(task(1), 0), "a value transfer is charged during execution and parks")
 }
