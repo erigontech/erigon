@@ -50,7 +50,7 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 }
 
 func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
-	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum})
+	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum}, nil)
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
