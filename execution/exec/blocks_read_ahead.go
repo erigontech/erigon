@@ -539,6 +539,26 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 	return bra.bodies.Get(blockHash)
 }
 
+// ExecRecoversBALSenders reports whether parallel exec workers recover the senders of
+// blocks with a non-empty BAL; the Execution stage then writes them.
+func ExecRecoversBALSenders() bool {
+	return dbg.Exec3Parallel && !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks
+}
+
+func RecoversSenders(header *types.Header) bool {
+	return ExecRecoversBALSenders() && header.HasNonEmptyBAL()
+}
+
+// ExecRecoversSenders is RecoversSenders for a cached block: execution recovers the
+// senders only when it can load the block's access list, else it takes the plain path.
+func (bra *BlockReadAheader) ExecRecoversSenders(header *types.Header) bool {
+	if !RecoversSenders(header) {
+		return false
+	}
+	bal, ok := bra.bals.Get(header.Hash())
+	return ok && len(bal.BlockAccessList()) > 0
+}
+
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
 	header, ok := bra.headers.Get(blockHash)
 	if header == nil || !ok {
@@ -549,7 +569,7 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 		return nil, false
 	}
 	senders, ok := bra.senders.Get(blockHash)
-	if len(senders) == 0 || !ok {
+	if (len(senders) == 0 || !ok) && !bra.ExecRecoversSenders(header) {
 		return nil, false
 	}
 	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)

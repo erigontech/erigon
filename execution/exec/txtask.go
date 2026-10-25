@@ -289,11 +289,14 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 	}
-	sender, err := t.signer.Sender(t.Tx())
+	sender, err := t.Tx().Sender(*t.signer)
 	if err != nil {
 		return accounts.NilAddress, err
 	}
 	t.sender = sender
+	if RecoversSenders(t.Header) {
+		return t.sender, nil
+	}
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
 	return t.sender, nil
 }
