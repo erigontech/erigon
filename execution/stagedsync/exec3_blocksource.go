@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/exec"
@@ -68,6 +69,9 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 	}
 	if b.BlockAccessList() == nil && blockBAL != nil {
 		b = b.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(blockBAL))
+	}
+	if dbg.IgnoreBAL {
+		return b, nil, nil
 	}
 	return b, blockBAL, nil
 }

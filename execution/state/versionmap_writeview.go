@@ -30,11 +30,11 @@ func NewVersionMapWriteView(keys WriteSetView, vm *VersionMap, txIdx int) WriteS
 func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint256.Int]) bool) {
 		for addr, kw := range v.keys.Balances() {
-			val, ok := versionedUpdateBalance(v.vm, addr, v.txIdx+1)
-			if !ok {
-				val = kw.Val
+			vw := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, valStatus: kw.valStatus}, Val: kw.Val}
+			if val, res, ok := v.vm.ReadBalance(addr, v.txIdx+1); ok && res.Status() != MVReadResultNone {
+				vw.Val, vw.valStatus = val, res.ValStatus()
 			}
-			if !yield(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: val}) {
+			if !yield(addr, vw) {
 				return
 			}
 		}
@@ -125,14 +125,65 @@ func (v *versionMapWriteView) Count() int {
 
 func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
+		// The map and the writes it points at are scratch, reused for every address:
+		// a consumer must read what it needs inside the loop body and retain neither.
+		// Allocating per address made this the hot path of storage-heavy blocks.
+		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
+		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
-			out := make(map[accounts.StorageKey]*VersionedWrite[uint256.Int], len(inner))
+			clear(out)
+			if cap(scratch) < len(inner) {
+				scratch = make([]VersionedWrite[uint256.Int], len(inner))
+			}
+			scratch = scratch[:len(inner)]
+			i := 0
 			for key, kw := range inner {
 				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
 				if !ok {
 					val = kw.Val
 				}
-				out[key] = &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				out[key] = &scratch[i]
+				i++
+			}
+			if !yield(addr, out) {
+				return
+			}
+		}
+	}
+}
+
+// StoragesChanged drops the no-op writes — those the writing tx stamped
+// ValueUnchanged because their value equalled what the tx read, so they leave the
+// domain/commitment leaf untouched. The status is decided at write time from the
+// tx's own (lifecycle-aware) prior read, so there is no baseline to re-derive here
+// and a destruct needs no special case. Only the domain and commitment paths may
+// use it — the access list and notification accumulator must see every write.
+func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
+		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
+		var scratch []VersionedWrite[uint256.Int]
+		for addr, inner := range v.keys.Storages() {
+			clear(out)
+			if cap(scratch) < len(inner) {
+				scratch = make([]VersionedWrite[uint256.Int], len(inner))
+			}
+			scratch = scratch[:len(inner)]
+			i := 0
+			for key, kw := range inner {
+				if kw.valStatus == ValueUnchanged {
+					continue
+				}
+				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
+				if !ok {
+					val = kw.Val
+				}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				out[key] = &scratch[i]
+				i++
+			}
+			if len(out) == 0 {
+				continue
 			}
 			if !yield(addr, out) {
 				return
@@ -142,3 +193,48 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 }
 
 var _ WriteSetView = (*versionMapWriteView)(nil)
+
+// WithoutVanished returns ws without the accounts tx txIdx created and self-destructed
+// that did not exist before it: they leave no state, so publishing their deletes would
+// only cost domain lookups and commitment work. preBlock reads the state before the block.
+func WithoutVanished(ws *WriteSet, vm *VersionMap, txIdx int, eip8246 bool, preBlock StateReader) (*WriteSet, error) {
+	var vanished map[accounts.Address]bool
+	for addr := range ws.SelfDestructs() {
+		gone, err := vanishedInTx(ws, vm, addr, txIdx, eip8246, preBlock)
+		if err != nil {
+			return nil, err
+		}
+		if gone {
+			if vanished == nil {
+				vanished = map[accounts.Address]bool{}
+			}
+			vanished[addr] = true
+		}
+	}
+	if vanished == nil {
+		return ws, nil
+	}
+	return ws.Filter(func(h WriteHeader) bool { return !vanished[h.Address] }), nil
+}
+
+func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int, eip8246 bool, preBlock StateReader) (bool, error) {
+	if sd, res, ok := vm.ReadSelfDestruct(addr, txIdx+1); !ok || !res.resolved() || !sd {
+		return false, nil
+	}
+	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
+		return false, nil
+	}
+	if bal, res, ok := vm.ReadBalance(addr, txIdx+1); eip8246 && ok && (!res.resolved() || !bal.IsZero()) {
+		return false, nil
+	}
+	// An earlier tx of the block may have funded addr, or before EIP-161 left it empty,
+	// where preBlock cannot see it.
+	if vm.accountLiveAt(addr, txIdx) {
+		return false, nil
+	}
+	if acc, res, ok := vm.ReadAddress(addr, txIdx); ok && (!res.resolved() || acc != nil) {
+		return false, nil
+	}
+	acc, err := preBlock.ReadAccountData(addr)
+	return acc == nil, err
+}
