@@ -244,6 +244,15 @@ type VersionMap struct {
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
 
+	// writeKeys is the per-tx access list (txAccessKey -> *txAccessList): the frozen
+	// key-set each tx wrote, enumerable lock-free. Commitment and domain-apply source
+	// their key enumeration here and read values back from the cells, so a tx's
+	// write-set need not escape execution. See versionmap_access.go.
+	writeKeys sync.Map
+	// baseTxNum is the block's first global txNum (block-start system tx, TxIndex -1),
+	// so a global txNum maps to the block-relative TxIndex the access list is keyed by.
+	baseTxNum atomic.Uint64
+
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
