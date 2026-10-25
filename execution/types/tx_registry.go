@@ -77,6 +77,14 @@ func RegisterTxType(id byte, spec TxTypeSpec) {
 	txTypeRegistry[id] = spec
 }
 
+// UnregisterTxTypeForTesting removes id from the registry, undoing a test's
+// RegisterTxType.
+func UnregisterTxTypeForTesting(id byte) {
+	txTypeRegistryMu.Lock()
+	defer txTypeRegistryMu.Unlock()
+	delete(txTypeRegistry, id)
+}
+
 // IsRegisteredTxType reports whether id was registered with RegisterTxType.
 func IsRegisteredTxType(id byte) bool {
 	_, ok := registeredTxType(id)
