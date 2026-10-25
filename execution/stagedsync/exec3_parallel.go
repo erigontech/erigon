@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -143,8 +145,8 @@ type parallelExecutor struct {
 	// currentChangeSet is the block's changeset while it is being built: the exec
 	// loop creates it and saves it by hash, then the apply fold and the committer
 	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
-	// persistent live accumulator — under splitApply the apply loop is the sole
-	// sd.mem writer, so a global install would only race the fold's own transient bind.
+	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
+	// global install would only race the fold's own transient bind.
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
@@ -265,6 +267,21 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// foldTx applies one published tx's versionMap view and indexes to sd.mem. The
+// finalize tx skips ApplyTxIndexes' receipt-cache write: it shares the last regular
+// tx's txNum, so a write here would clobber that entry.
+func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
+	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
+	defer restoreCS()
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
+		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	return nil
+}
+
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
@@ -298,8 +315,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// applyResults feeds the apply goroutine; commitResults feeds the commitment
 	// calculator. Both are fed by the fan-out in the execLoop's blockExecutor.
-	applyResults := make(chan applyResult, 2_048)
-	commitResults := make(chan applyResult, 2_048)
+	// Room for a whole 150M-gas block of transfers, so the exec loop does not stall
+	// on a consumer that folds each tx as it is published.
+	applyResults := make(chan applyResult, 16_384)
+	commitResults := make(chan applyResult, 16_384)
 	// Exec-only (DISCARD_COMMITMENT): nil the commit stream so no commitment work
 	// runs — fan-out and batch-commit trigger no-op on a nil channel, and the
 	// calculator exits immediately and closes rootResults.
@@ -486,9 +505,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// splitApply: buffer each block's per-tx results and fold them to sd.mem at
-		// block end, so sd.mem stays N-1 during exec.
-		var splitApplyBuf []*txResult
+		// balBuilder holds the current block's access list up to its last published tx.
+		var balBuilder *state.BlockAccessListBuilder
+		// foldErr is the first per-tx fold error of the current block, surfaced at
+		// its blockResult.
+		var foldErr error
 
 		// handleCommitResult classifies a commitment result with NO unwind
 		// side-effects: a wrong-root is routed through the fail/finalized machinery
@@ -641,15 +662,30 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, writeCount)
 					}
 					blockUpdateCount += writeCount
-					// The apply loop is the sole sd.mem writer: buffer each tx result
-					// and fold the buffer to sd.mem at block end.
-					splitApplyBuf = append(splitApplyBuf, applyResult)
+					// The apply loop is the sole sd.mem writer. Folding mid-block is safe:
+					// every cell a published tx wrote is in the versionMap, so later txs
+					// resolve it there and never read it from sd.mem.
+					if !finalized && foldErr == nil {
+						foldErr = pe.foldTx(ctx, rwTx, applyResult)
+					}
+					for _, t := range applyResult.balTxs {
+						if t.index == -1 {
+							balBuilder = state.NewBlockAccessListBuilder()
+						}
+						if balBuilder == nil || t.index != balBuilder.Next() {
+							balBuilder = nil
+							break
+						}
+						balBuilder.Add(t.index, t.reads, t.writes)
+					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					built := balBuilder
+					balBuilder = nil
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
@@ -683,29 +719,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						finalized = true
 						deliberateCancel()
 					}
-					// Fold the block's per-tx versionMap views to sd.mem at block end in
-					// publish order; the versionMap composes each tx's base. The finalize
-					// tx skips ApplyTxIndexes, matching the exec loop.
-					restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
-					var applyErr error
-					for _, r := range splitApplyBuf {
-						if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
-							applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-							break
-						}
-						// Index on the apply loop — the sole sd.mem writer — for every
-						// result including finalize (whose logs are the block-end syscall
-						// logs). skipReceiptCache for finalize: it shares the last regular
-						// tx's txNum, so a receipt-cache write here would clobber that entry.
-						if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
-							applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-							break
-						}
-					}
-					restoreCS()
-					splitApplyBuf = splitApplyBuf[:0]
-					if applyErr != nil {
-						failInfra(applyErr)
+					if foldErr != nil {
+						failInfra(foldErr)
+						foldErr = nil
 						continue
 					}
 					// This block's writes are now in the shared domain: drop it from the
@@ -716,39 +732,26 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						panic(fmt.Sprintf("prevBlocks tail block %d != committed block %d", tb, applyResult.BlockNum))
 					}
 					pe.prevBlocks.RemoveTail()
-					// StartChange + NotifyAccumulator both run in the apply goroutine to
-					// keep accumulator access single-threaded. StartChange must precede
-					// NotifyAccumulator: it initialises the latestChange entry the notify
-					// writes into.
-					if pe.accumulator != nil && applyResult.Header != nil {
-						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
-						if marshalErr != nil {
-							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
-							continue
-						}
-						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						for _, writes := range pendingAccumulatorWrites {
-							state.NotifyAccumulator(pe.accumulator, writes)
-						}
-						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-					}
-
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
-						b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
-						if err != nil {
-							failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
-							continue
-						}
-						if b == nil {
-							failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
-							continue
+						header, txs := applyResult.Header, applyResult.Txs
+						if header == nil {
+							b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
+							if err != nil {
+								failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
+								continue
+							}
+							if b == nil {
+								failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
+								continue
+							}
+							header, txs = b.HeaderNoCopy(), b.Transactions()
 						}
 
-						lastHeader = b.HeaderNoCopy()
+						lastHeader = header
 
 						if lastHeader.Number.Uint64() != applyResult.BlockNum {
 							failInfra(fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash))
@@ -763,8 +766,42 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// Spawn per-block validation concurrently; joined via Wait() below
 						// after the other per-result work has run alongside it.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
+							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
+					}
 
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					var computedBAL types.BlockAccessList
+					var balErr error
+					var storedBAL []byte
+					if isAmsterdam && lastHeader != nil {
+						storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+						storedBAL = bytes.Clone(storedBAL)
+					}
+					balDone := make(chan struct{})
+					h, txIO := lastHeader, applyResult.TxIO
+					go func() {
+						defer close(balDone)
+						if balErr == nil {
+							computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						}
+					}()
+
+					// StartChange + NotifyAccumulator both run in the apply goroutine to
+					// keep accumulator access single-threaded. StartChange must precede
+					// NotifyAccumulator: it initialises the latestChange entry the notify
+					// writes into.
+					if pe.accumulator != nil && applyResult.Header != nil {
+						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
+						if marshalErr != nil {
+							<-balDone
+							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
+							continue
+						}
+						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						for _, writes := range pendingAccumulatorWrites {
+							state.NotifyAccumulator(pe.accumulator, writes)
+						}
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 					}
 
 					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
@@ -781,8 +818,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					// Join the per-block validator spawned above (post-execution
-					// receipt/BAL checks).
+					<-balDone
+					// Join the per-block validator spawned above; its verdict wins over
+					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						// Block-validity verdict: route through failCandidate and keep
 						// draining rather than bare-returning (which would wedge pe.wait).
@@ -793,17 +831,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						continue
 					}
 
-					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						var computedBAL types.BlockAccessList
-						computedBAL, err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						if err != nil {
-							failInfra(err)
-							continue
-						}
-						if pe.cfg.balSink != nil {
-							pe.cfg.balSink(applyResult.BlockNum, computedBAL)
-						}
+					if balErr != nil {
+						failInfra(balErr)
+						continue
+					}
+					if (isAmsterdam || pe.cfg.experimentalBAL) && pe.cfg.balSink != nil {
+						pe.cfg.balSink(applyResult.BlockNum, computedBAL)
 					}
 
 					appliedBlocks[applyResult.BlockNum] = struct{}{}
@@ -1709,10 +1742,19 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
 	rules                 *chain.Rules
+	// balTxs carries the sealed reads and writes of txs before the block's final one,
+	// so the apply loop builds the block access list while the block runs.
+	balTxs []balTx
 	// isFinalize marks the block-end result. It shares the last regular tx's txNum,
 	// so its indexing skips the receipt cache; its logs are the block-end syscall
 	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
 	isFinalize bool
+}
+
+type balTx struct {
+	index  int
+	reads  state.ReadSet
+	writes *state.WriteSet
 }
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
@@ -2765,6 +2807,8 @@ type blockExecutor struct {
 
 	// Publish tasks stores the state tasks ready for publication
 	publishTasks execStatusList
+	// balAttached counts the tx indexes, from -1, whose sets went out on a txResult.
+	balAttached int
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -3107,12 +3151,13 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		be.markReadersDirty(tx, merged)
 	}
 
-	{
-		// A read-only versionMap-slice view over the tx's raw write-set; apply and
-		// the calculator resolve each account's base from the versionMap.
-		rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-		txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
+	// A read-only versionMap-slice view over the tx's raw write-set; apply and
+	// the calculator resolve each account's base from the versionMap.
+	rawWrites, err := state.WithoutVanished(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap, txVersion.TxIndex, txTask.Rules().IsAmsterdam, *stateReader)
+	if err != nil {
+		return nil, err
 	}
+	txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
 
 	// Snapshot before pushing so the publish loop can't see a later incarnation if
 	// be.results[tx] is overwritten by a concurrent worker.
@@ -3616,14 +3661,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				close(be.slFin[tx])
 			}
 
+			// The final task's sets are recorded again at block end, so it is left to the block result.
+			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
+			buildsBAL := task.Rules().IsAmsterdam || pe.cfg.experimentalBAL
+			for i := be.balAttached - 1; buildsBAL && i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
+				applyResult.balTxs = append(applyResult.balTxs, balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)})
+				be.balAttached++
+			}
+
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
 			}
 
-			// The apply loop folds these versionMap views to sd.mem at block end,
-			// keeping sd.mem at N-1 during exec so seedOrigin reads the committed base.
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
@@ -3697,8 +3748,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if err == nil {
 					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, block, blockStartTxNum, pe.logger)
 				}
+				var storedBAL []byte
 				if err == nil {
-					_, err = bal.Process(applyTx, header, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+					storedBAL, err = rawdb.ReadBlockAccessListBytes(applyTx, be.blockHash, be.blockNum)
+				}
+				if err == nil {
+					_, err = bal.Process(storedBAL, header, nil, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
 				}
 				if errors.Is(err, rules.ErrInvalidBlock) {
 					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.blockNum, err)), nil
