@@ -3967,9 +3967,13 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		budget := len(be.tasks)
 		// Dispatch at most window tasks past the commit frontier, so results arrive
 		// close to block order and the per-result reader scans stay short.
+		// Without a BAL, a task dispatched past the execution slots reads stale state
+		// and re-executes.
 		lastTx := len(be.tasks) - 1
 		if be.versionMap.HasBAL {
 			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
+		} else {
+			lastTx = min(lastTx, be.frontier()+cap(pe.execSem))
 		}
 		for {
 			nextTx := be.execTasks.minPending()
