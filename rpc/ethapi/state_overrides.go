@@ -93,11 +93,8 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 	return nil
 }
 
-func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
-	if precompiles == nil {
-		precompiles = make(vm.PrecompiledContracts)
-	}
-	// Sort addresses for deterministic iteration order across both loops (map iteration is random in Go).
+// sortedAddrs gives a deterministic iteration order (map iteration is random in Go).
+func (so *StateOverrides) sortedAddrs() []accounts.Address {
 	addrs := make([]accounts.Address, 0, len(*so))
 	for addr := range *so {
 		addrs = append(addrs, addr)
@@ -106,12 +103,49 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		av, bv := a.Value(), b.Value()
 		return bytes.Compare(av[:], bv[:])
 	})
+	return addrs
+}
 
+func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	if precompiles == nil {
+		precompiles = make(vm.PrecompiledContracts)
+	}
+	addrs := so.sortedAddrs()
 	err := so.override(ibs, addrs)
 	if err != nil {
 		return err
 	}
+	if err := so.overridePrecompiles(precompiles, addrs); err != nil {
+		return err
+	}
 
+	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
+	overrideRules := *rules
+	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
+	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// ActivePrecompiles returns the precompile set of rules with the code overrides and precompile
+// moves applied, for a call that runs under other rules than the ones Override saw. It returns
+// nil, the chain's own set, when there are no overrides.
+func (so *StateOverrides) ActivePrecompiles(rules *chain.Rules) (vm.PrecompiledContracts, error) {
+	if so == nil {
+		return nil, nil
+	}
+	precompiles := vm.ActivePrecompiledContracts(rules)
+	if err := so.overridePrecompiles(precompiles, so.sortedAddrs()); err != nil {
+		return nil, err
+	}
+	return precompiles, nil
+}
+
+func (so *StateOverrides) overridePrecompiles(precompiles vm.PrecompiledContracts, addrs []accounts.Address) error {
 	// Tracks destinations of precompiles that were moved.
 	dirtyAddresses := make(map[accounts.Address]struct{})
 	for _, addr := range addrs {
@@ -138,16 +172,6 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		if isPrecompile {
 			delete(precompiles, addr)
 		}
-	}
-
-	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
-	overrideRules := *rules
-	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
-		return err
-	}
-	if ibs.IsVersioned() {
-		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
 	}
 	return nil
 }
