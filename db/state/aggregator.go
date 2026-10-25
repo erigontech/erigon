@@ -1018,7 +1018,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-const maxCollationBatchSteps = 32
+const maxCollationBatchSteps = 8
 
 type collationBatch struct {
 	from, to kv.Step

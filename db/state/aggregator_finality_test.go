@@ -108,6 +108,7 @@ func TestBuildFilesClosesBatchValuesWhenCollationTxFails(t *testing.T) {
 	writeDupSortStepBacklog(t, db, d, 16, 2, 8, 3)
 	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer roTx.Rollback()
 	comps, err := d.collateValuesBatch(t.Context(), 0, 2, roTx)
 	roTx.Rollback()
 	require.NoError(t, err)
@@ -121,4 +122,16 @@ func TestBuildFilesClosesBatchValuesWhenCollationTxFails(t *testing.T) {
 	leftover, err := filepath.Glob(filepath.Join(agg.dirs.Tmp, "*.idt"))
 	require.NoError(t, err)
 	require.Empty(t, leftover)
+}
+
+func TestCollateBatchCoversAtMostMaxSteps(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 16)
+	writeDupSortStepBacklog(t, db, agg.d[kv.AccountsDomain], 16, 12, 8, 5)
+
+	batch, err := agg.collateBatch(t.Context(), asTemporalRoDB(db), 0, 12, unboundedFinalityCtx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.Equal(t, kv.Step(0), batch.from)
+	require.Equal(t, kv.Step(8), batch.to)
+	require.Len(t, batch.values[kv.AccountsDomain], 8)
 }
