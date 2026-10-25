@@ -625,7 +625,7 @@ func TestSetupGenesis(t *testing.T) {
 	}
 }
 
-// rpchelper replays genesis over an aggregator opened on the node's own files, where the alloc accounts already hold their balances.
+// Genesis is computed over empty state: a SharedDomains that already holds the alloc must not get it added a second time.
 func TestComputeGenesisCommitmentOverExistingAllocKeepsTheRoot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
