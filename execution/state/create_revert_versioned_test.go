@@ -20,7 +20,6 @@ func TestNoMaterialize_CreateRevertDropsCells(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xc0, 0x11})
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 
@@ -53,7 +52,6 @@ func TestNoMaterialize_RecreateRevertRestoresPrior(t *testing.T) {
 	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	reader := &fieldReader{addr: addr, account: &committed, code: code}
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 
@@ -76,7 +74,6 @@ func TestNoMaterialize_TouchFundCreateRevertReadsZeroBalance(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xc0, 0x33})
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.TouchAccount(addr))
@@ -247,7 +244,6 @@ func TestNoMaterialize_CreateAfterBurnedCreditDependsOnDestruct(t *testing.T) {
 
 func newNoMaterializeTx(vm *VersionMap, txIndex int) *IntraBlockState {
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, txIndex)
 	return ibs
 }
@@ -259,7 +255,6 @@ func TestNoMaterialize_CreatedAccountSetCode(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xc0, 0x44})
 	code := []byte("created-contract-code")
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 

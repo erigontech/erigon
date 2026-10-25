@@ -169,7 +169,6 @@ func TestSetCodeParallel_ValidatedFloorNotSuppressed(t *testing.T) {
 	// TX 17: re-delegate to B, flushed as Validated (pre-seal early-break state).
 	ibs17 := NewWithVersionMap(reader, vm)
 	defer ibs17.Close()
-	ibs17.SetNoMaterialize(true)
 	ibs17.SetTxContext(100, 17)
 	ibs17.SetVersion(0)
 	require.NoError(t, ibs17.SetCode(addr, delegationCodeB, tracing.CodeChangeAuthorization))
@@ -185,7 +184,6 @@ func TestSetCodeParallel_ValidatedFloorNotSuppressed(t *testing.T) {
 	// TX 46: re-delegate back to A. A != Validated floor B, so the write stands.
 	ibs46 := NewWithVersionMap(reader, vm)
 	defer ibs46.Close()
-	ibs46.SetNoMaterialize(true)
 	ibs46.SetTxContext(100, 46)
 	ibs46.SetVersion(0)
 	require.NoError(t, ibs46.SetCode(addr, delegationCodeA, tracing.CodeChangeAuthorization))
@@ -225,7 +223,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	reader := &codeReader{addr: addr, account: &acc}
 
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
@@ -249,7 +246,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeAbsentAccount(t *testin
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 
 	_, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
@@ -274,7 +270,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeBALCreatedAccount(t *te
 	vm := NewVersionMap(bal)
 	vm.WriteAddress(addr, Version{TxIndex: 0}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 1)
 
 	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
@@ -300,7 +295,6 @@ func TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite(t *testing.T) {
 	reader := &codeReader{addr: addr, account: &acc}
 
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
@@ -363,13 +357,16 @@ func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 	hash := accounts.InternCodeHash([32]byte{0x12, 0x34})
 	r := &codeReader{addr: addr, account: &accounts.Account{CodeHash: hash, Incarnation: 1}, code: code}
-	for _, noMaterialize := range []bool{false, true} {
-		ibs := New(r)
-		ibs.SetVersionMap(NewVersionMap(nil))
-		ibs.SetNoMaterialize(noMaterialize)
+	for _, versioned := range []bool{false, true} {
+		var ibs *IntraBlockState
+		if versioned {
+			ibs = NewWithVersionMap(r, NewVersionMap(nil))
+		} else {
+			ibs = New(r)
+		}
 		got, err := ibs.ResolveCode(addr)
 		require.NoError(t, err)
-		require.Equal(t, code, got.Bytes, "noMaterialize=%v", noMaterialize)
-		require.Equal(t, hash, got.Hash, "noMaterialize=%v", noMaterialize)
+		require.Equal(t, code, got.Bytes, "versioned=%v", versioned)
+		require.Equal(t, hash, got.Hash, "versioned=%v", versioned)
 	}
 }

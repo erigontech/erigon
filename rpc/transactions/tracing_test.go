@@ -258,7 +258,6 @@ func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	ibs.SetTxContext(0, 0)
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
@@ -293,7 +292,6 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	ibs.SetTxContext(1, 0)
 	exists, err := ibs.Exist(addr)
@@ -315,7 +313,6 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	rules := &chain.Rules{IsSpuriousDragon: true}
 

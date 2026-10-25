@@ -63,7 +63,6 @@ func newNoMaterializeIBS(reader StateReader) (*IntraBlockState, *VersionMap) {
 func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.Reset()
 	ibs.SetVersionMap(vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, txIndex)
 }
 
@@ -75,7 +74,6 @@ func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 
 	first := ibs.allocStateObject()
 	require.True(t, first.arena)
@@ -117,15 +115,15 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 // TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path
 // takes arena slots, the materializing path takes pooled objects.
 func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
-	ibs, _ := newNoMaterializeIBS(&emptyReader{})
-	defer ibs.Close()
-
-	pooled := ibs.allocStateObject()
+	materializing := New(&emptyReader{})
+	defer materializing.Close()
+	pooled := materializing.allocStateObject()
 	assert.False(t, pooled.arena, "materializing path must use the pool")
 	pooled.release()
 
-	ibs.SetNoMaterialize(true)
-	assert.True(t, ibs.allocStateObject().arena, "parallel path must use the arena")
+	versioned, _ := newNoMaterializeIBS(&emptyReader{})
+	defer versioned.Close()
+	assert.True(t, versioned.allocStateObject().arena, "parallel path must use the arena")
 }
 
 // TestNoMaterializeOverflowSkipsPool pins that once the arena is full the
@@ -134,7 +132,6 @@ func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 
 	for range arenaMaxObjects {
 		require.True(t, ibs.allocStateObject().arena)
@@ -236,13 +233,11 @@ func TestNoMaterializeIsStableWhileSlotsOutstanding(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
 
-	ibs.SetNoMaterialize(true)
 	require.True(t, ibs.allocStateObject().arena)
 	require.NotPanics(t, ibs.clearJournalAndRefund, "drawn under noMaterialize, rewinds cleanly")
 
-	ibs.SetNoMaterialize(true)
 	require.True(t, ibs.allocStateObject().arena)
-	require.Panics(t, func() { ibs.SetNoMaterialize(false) }, "flipping with slots outstanding")
+	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "flipping with slots outstanding")
 }
 
 // TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its

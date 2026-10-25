@@ -63,7 +63,6 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 
 	reader := &codeReader{addr: addr, account: &acc, code: staleDelegation} // ...but CodeDomain still holds the stale bytes
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
@@ -96,7 +95,6 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Bytes: []byte{0x60, 0x00}}, true)
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 

@@ -1294,7 +1294,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execFailed = append(executor.execFailed, 0)
 
 		executor.execTasks.pushPending(i)
-		executor.validateTasks.pushPending(i)
 
 		switch {
 		case len(t.Dependencies()) > 0:
@@ -2705,7 +2704,6 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
 		r.SetBlock(ev.version.BlockNum)
 	}
-	ibs.SetNoMaterialize(true)
 	ibs.SetVersion(ev.version.Incarnation)
 	ibs.SetWaitCommit(ev.waitCommit)
 	return nil

@@ -573,7 +573,6 @@ func TestApplyWrites_TouchedEmptyAccountWithIncarnationDeletes(t *testing.T) {
 	reader := &seededReader{NoopReader: state.NewNoopReader(), addr: addr, acc: acc}
 	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 	ibs.SetTxContext(1, 0)
-	ibs.SetNoMaterialize(true)
 	require.NoError(t, ibs.TouchAccount(addr))
 	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 
