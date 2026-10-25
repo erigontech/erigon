@@ -272,7 +272,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -296,6 +296,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			timestamp = header.Time
 			blockCount++
 		}
+		if isSystemTxn {
+			continue
+		}
 		var logIndex uint
 		var blockLogs types.Logs
 
@@ -304,7 +307,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, err
 		}
 		if !ok {
-			continue
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 		}
 
 		err = exec.ExecTxn(txNum, txIndex, txn, true)
