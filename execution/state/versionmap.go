@@ -1253,6 +1253,55 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
 // no values (each cell must already hold the write's value at its incarnation). It is the
 // commit-boundary check enforcing one-value-per-version — a mismatch panics.
+func cellDone[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) bool {
+	if cells == nil {
+		return false
+	}
+	ci, ok := cells.Get(txIdx)
+	return ok && ci.flag == FlagDone
+}
+
+// allCellsDone reports whether every cell MarkWritesComplete would mark for addr is
+// already Done. Caller holds e's read lock.
+func allCellsDone(e *AddressEntry, writes *WriteSet, addr accounts.Address) bool {
+	if vw, ok := writes.address[addr]; ok && !cellDone(e.Address, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.selfDestruct[addr]; ok && !cellDone(e.SelfDestruct, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.balance[addr]; ok && !cellDone(e.Balance, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.nonce[addr]; ok && !cellDone(e.Nonce, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.incarnation[addr]; ok && !cellDone(e.Incarnation, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.code[addr]; ok && !cellDone(e.Code, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.codeHash[addr]; ok && !cellDone(e.CodeHash, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.codeSize[addr]; ok && !cellDone(e.CodeSize, vw.Version.TxIndex) {
+		return false
+	}
+	if vw, ok := writes.createContract[addr]; ok && !cellDone(e.CreateContract, vw.Version.TxIndex) {
+		return false
+	}
+	for key, vw := range writes.storage[addr] {
+		if vw.valStatus == ValueUnchanged {
+			continue
+		}
+		if !cellDone(e.Storage[key], vw.Version.TxIndex) {
+			return false
+		}
+	}
+	return true
+}
+
 func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 	if writes == nil {
 		return
@@ -1266,6 +1315,16 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		e := vm.load(addr)
 		if e == nil {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
+		}
+		// A BAL block pre-seeds its cells as Done, so completing them is usually a no-op:
+		// check under the read lock so a hot account (the coinbase) is not write-locked per tx.
+		if vm.HasBAL && !dbg.AssertEnabled {
+			e.mu.RLock()
+			done := allCellsDone(e, writes, addr)
+			e.mu.RUnlock()
+			if done {
+				return
+			}
 		}
 		e.mu.Lock()
 		defer e.mu.Unlock()
