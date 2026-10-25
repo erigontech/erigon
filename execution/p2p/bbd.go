@@ -437,6 +437,9 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	if config.peerId == nil {
 		current := bbd.peerTracker.ListPeersMayHaveBlockNum(headers[len(headers)-1].Number.Uint64())
 		if len(current) == 0 {
+			current = bbd.peerTracker.ListPeers()
+		}
+		if len(current) == 0 {
 			return errors.New("no peers available")
 		}
 		peers = newPeersContext(current)
@@ -487,6 +490,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	balBatches := make([]map[common.Hash]*types.BlockAccessListSidecar, len(availablePeers))
 	pendingBatches := true
 	attempts := 1
+	exhaustedPeersCleared := false
 	for pendingBatches {
 		// assign remaining batches to available peers
 		var peerIndex int
@@ -622,10 +626,14 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			panic(err) // workers do not return errs
 		}
 		// mark peers as exhausted for those that had unsuccessful fetches
-		var incompleteBatches int
 		for _, assignment := range batchAssignments {
 			if bodyBatches[assignment.batchIndex] == nil {
 				peers.exhaustedPeers[peers.peerIdToIndex[assignment.peerId]] = true
+			}
+		}
+		var incompleteBatches int
+		for batchIndex := range headerBatches {
+			if bodyBatches[batchIndex] == nil {
 				incompleteBatches++
 			}
 		}
@@ -633,6 +641,11 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			attempts++
 			// recalculate the available peers as some have become exhausted
 			availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
+			if err != nil && !exhaustedPeersCleared {
+				exhaustedPeersCleared = true
+				clear(peers.exhaustedPeers)
+				availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
+			}
 			if err != nil {
 				return err
 			}
