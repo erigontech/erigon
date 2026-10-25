@@ -861,8 +861,7 @@ run:
 						continue run
 					}
 				}
-			}
-			if isRareOp[op] {
+			} else if isRareOp[op] {
 				switch op {
 				case CLZ:
 					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {

@@ -329,10 +329,10 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"dupnend":         append(dirty(20), byte(DUPN)),
 		"swapn":           prog(dirty(20), SWAPN, 128, SWAPN, 129),
 		"swapnbad":        prog(dirty(20), SWAPN, 127),
-		"swapnunder":      prog(dirty(16), SWAPN, 128),
+		"swapnunder":      prog(dirty(17), SWAPN, 128),
 		"exchange":        prog(dirty(20), EXCHANGE, 142, EXCHANGE, 128),
 		"exchangebad":     prog(dirty(20), EXCHANGE, 82),
-		"exchangeunder":   prog(dirty(15), EXCHANGE, 128),
+		"exchangeunder":   prog(dirty(16), EXCHANGE, 128),
 	}
 	// A copy op's dst src len over 64 distinct bytes, returning all of memory. RETURNDATACOPY
 	// copies the 32 bytes the identity precompile returns.

@@ -456,7 +456,7 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 // coldSwitch is fastSwitch behind a lookup in table, so a generic op skips
 // its compare tree with one branch.
 func coldSwitch(srcs map[string][]byte, ops []fastOp, table string) string {
-	return "if " + table + "[op] {\n" + fastSwitch(srcs, ops) + "}\n"
+	return "if " + table + "[op] {\n" + fastSwitch(srcs, ops) + "}"
 }
 
 // coldTable declares table, which is true for the ops of the coldSwitch it guards.
@@ -612,7 +612,7 @@ func read(name string) []byte {
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	srcs := map[string][]byte{"instructions.go": read("instructions.go"), "eips.go": read("eips.go")}
-	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps(), "isColdOp") + coldSwitch(srcs, rareOps(), "isRareOp")
+	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps(), "isColdOp") + " else " + coldSwitch(srcs, rareOps(), "isRareOp") + "\n"
 	ops := slices.Concat(fastOps(), coldOps(), rareOps())
 	files := []struct {
 		name string
