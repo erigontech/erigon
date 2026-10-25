@@ -301,7 +301,7 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	if err != nil {
 		return err
 	}
-	if fcuStatus != execmodule.ExecutionStatusSuccess {
+	if fcuStatus != execmodule.ExecutionStatusSuccess && fcuStatus != execmodule.ExecutionStatusTooFarAway {
 		return fmt.Errorf(
 			"unsuccessful status when updating fork choice for batch download: status=%s, tip=%s, latestValidHash=%s",
 			fcuStatus,
