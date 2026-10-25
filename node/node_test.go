@@ -21,7 +21,6 @@ package node
 
 import (
 	"errors"
-	"os"
 	"reflect"
 	"runtime"
 	"testing"
@@ -29,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -418,6 +418,6 @@ func TestOpenDatabaseStampsSchemaVersionOnRecreatedChaindata(t *testing.T) {
 		}))
 	}
 	requireSchemaVersion()
-	require.NoError(t, os.RemoveAll(cfg.Dirs.Chaindata)) // a downgrade removes chaindata; the migrations DB stays
+	require.NoError(t, dir.RemoveAll(cfg.Dirs.Chaindata)) // a downgrade removes chaindata; the migrations DB stays
 	requireSchemaVersion()
 }
