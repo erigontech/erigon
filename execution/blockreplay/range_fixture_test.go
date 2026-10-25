@@ -61,3 +61,24 @@ func TestRangeSaveLoadRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(7), got.Blocks[0].Accounts[addr].Nonce)
 	require.Equal(t, uint64(8), got.Outputs.Accounts[addr].Nonce)
 }
+
+// TestRangeMergedWitnessDropsStorageWithoutAccount pins that the merged witness never
+// carries storage for an address with no present account in the merge: SeedDomains seeds
+// storage unconditionally (seed.go) while skipping non-present accounts, so orphan storage
+// would be written against an account that was never seeded and the replay then diverges.
+func TestRangeMergedWitnessDropsStorageWithoutAccount(t *testing.T) {
+	t.Parallel()
+	addr := [20]byte{0xbb}
+	slot := [32]byte{0x01}
+	// A block whose witness recorded storage for addr but no present account record for it.
+	orphan := fxWith(
+		map[[20]byte]acctData{},
+		map[[20]byte]map[[32]byte][32]byte{addr: {slot: {0x33}}},
+	)
+	rf := &RangeFixture{Blocks: []*Fixture{orphan}}
+
+	m := rf.MergedWitness()
+
+	_, hasStorage := m.Storage[addr]
+	require.False(t, hasStorage, "merged witness must drop storage for an account with no present record")
+}
