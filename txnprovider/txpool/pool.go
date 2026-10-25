@@ -144,6 +144,9 @@ type TxPool struct {
 	// nonceGapEvictions counts transactions dropped because their sender's sequence has a hole; see the
 	// [nonce-gap] log. A contiguous stream should never produce one.
 	nonceGapEvictions int
+	// aboveChainRemovals counts removals of a nonce at or above the sender's chain nonce — each one
+	// strands that sender behind a hole. See the [above-chain] log.
+	aboveChainRemovals uint64
 	// frontHoles counts senders whose NEXT nonce the pool does not hold; see the [nonce-front] log.
 	frontHoles int
 	// lowNonceDiscards counts transactions the state nonce has already passed; see the [low-nonce] log.
@@ -459,7 +462,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	if err = p.removeMined(p.all, minedTxns.Txns); err != nil {
+	if err = p.removeMined(p.all, minedTxns.Txns, cacheView); err != nil {
 		return err
 	}
 
@@ -2214,7 +2217,7 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) error {
+func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot, cacheView kvcache.CacheView) error {
 	noncesToRemove := map[uint64]uint64{}
 	for _, txn := range minedTxns {
 		nonce, ok := noncesToRemove[txn.SenderID]
@@ -2228,6 +2231,31 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	discarded := 0
 
 	for senderID, nonce := range noncesToRemove {
+		// ⚠ REMOVING ABOVE THE CHAIN'S NONCE STRANDS THE SENDER FOR EVER, AND IT MUST SAY SO WHEN IT
+		// HAPPENS. This deletes every transaction at or below `nonce`, which is sound only if the
+		// chain really did include them. A nonce removed but never mined is gone from the pool and
+		// absent from the chain; nothing re-sends it, and every later nonce from that sender sits
+		// behind a hole that cannot close.
+		//
+		// Measured on live451: the pool had removed the sponsor to nonce 23500 while the chain stood
+		// at 23466, and that account landed NOTHING for seven hours and 14,537 blocks while every
+		// other sender kept flowing. [sender-exits] reported it as ABOVE-CHAIN, but only for the
+		// busiest sender and only at census time — hours after the removal that caused it. Said here,
+		// it names the moment.
+		//
+		// Guarded on the sender being mapped: an unmapped id leaves the chain nonce at zero, against
+		// which every removal reads as above-chain, and a probe that cries wolf is worse than none.
+		if _, mapped := p.senders.senderID2Addr[senderID]; mapped {
+			if chainNonce, _, infErr := p.senders.info(cacheView, senderID); infErr == nil && nonce >= chainNonce {
+				p.aboveChainRemovals++
+				if p.aboveChainRemovals == 1 || p.aboveChainRemovals%100 == 0 {
+					p.logger.Warn("[above-chain] removing as mined a nonce the chain has NOT reached — the sender is stranded behind the gap",
+						"sender", p.senders.senderID2Addr[senderID].String(),
+						"removingTo", nonce, "chainNext", chainNonce,
+						"gap", int64(nonce)-int64(chainNonce)+1, "seenSoFar", p.aboveChainRemovals)
+				}
+			}
+		}
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
 			if mt.TxnSlot.Nonce > nonce {
 				if mt.TxnSlot.Traced {
