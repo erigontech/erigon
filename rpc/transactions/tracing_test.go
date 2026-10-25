@@ -295,14 +295,14 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 	ibs.SetVersionMap(state.NewVersionMap(nil))
 	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
 
-	ibs.SetTxContext(0, 1)
+	ibs.SetTxContext(1, 1)
 	exists, err = ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -319,11 +319,11 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	ibs.SetNoConflictDetection()
 	rules := &chain.Rules{IsSpuriousDragon: true}
 
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(0, 1)
+	ibs.SetTxContext(1, 1)
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -331,7 +331,7 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(0, 2)
+	ibs.SetTxContext(1, 2)
 	exists, err = ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)

@@ -38,8 +38,6 @@ func newAmsterdamIBS(reader *accountStateReader, vm *VersionMap, txIdx int, noMa
 	ibs.SetTxContext(1, txIdx)
 	ibs.SetNoMaterialize(noMaterialize)
 	ibs.SetVersion(0)
-	ibs.eip8246 = true
-	ibs.eip161 = true
 	return ibs
 }
 
@@ -68,9 +66,9 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, err)
 	require.True(t, destroyed)
 	require.NoError(t, destroyer.FinalizeTx(amsterdamRules, NewNoopWriter()))
-	destroyWrites := destroyer.FinalizedWrites(amsterdamRules)
+	destroyWrites := finalizedWrites(t, destroyer, amsterdamRules)
 	t.Cleanup(destroyWrites.ReleaseAndReset)
-	vm.FlushVersionedWrites(destroyWrites, true)
+	vm.FlushVersionedWrites(destroyWrites, true, "")
 
 	recreator := newAmsterdamIBS(reader, vm, 1, true)
 	t.Cleanup(recreator.Close)
@@ -82,7 +80,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 	require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
 	require.NoError(t, recreator.FinalizeTx(amsterdamRules, NewNoopWriter()))
-	recreateWrites := recreator.FinalizedWrites(amsterdamRules)
+	recreateWrites := finalizedWrites(t, recreator, amsterdamRules)
 	t.Cleanup(recreateWrites.ReleaseAndReset)
 
 	io := NewVersionedIO(3)
@@ -101,7 +99,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 func validateReads(vm *VersionMap, ibs *IntraBlockState, txIdx int) VersionValidity {
 	io := NewVersionedIO(txIdx + 1)
 	io.RecordReads(Version{TxIndex: txIdx}, ibs.VersionedReads())
-	return vm.ValidateVersion(txIdx, io, validateEqualVersion, true, false, false, "")
+	return vm.ValidateVersion(txIdx, io, validateEqualVersion, true, "")
 }
 
 // A later tx's CREATE2 at a destroyed address is visible to a concurrent
@@ -118,7 +116,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	destroyWrites, recreateWrites, changes := destroyThenRecreate(t, reader, addr, code)
 
 	vm := NewVersionMap(changes)
-	vm.FlushVersionedWrites(destroyWrites, true)
+	vm.FlushVersionedWrites(destroyWrites, true, "")
 	ibs := newAmsterdamIBS(reader, vm, 2, true)
 	defer ibs.Close()
 
@@ -139,10 +137,17 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
-	require.False(t, ibs.consumedAddressAbsence(addr))
 
-	vm.FlushVersionedWrites(recreateWrites, true)
-	require.Equal(t, VersionValid, validateReads(vm, ibs, 2))
+	vm.FlushVersionedWrites(recreateWrites, true, "")
+	rerun := newAmsterdamIBS(reader, vm, 2, true)
+	defer rerun.Close()
+	exists, err = rerun.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	nonce, err = rerun.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), nonce)
+	require.Equal(t, VersionValid, validateReads(vm, rerun, 2))
 }
 
 // Once a tx has concluded that a destroyed address is absent, a re-creation
@@ -160,16 +165,15 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 			destroyWrites, recreateWrites, _ := destroyThenRecreate(t, reader, addr, []byte{0x60, 0x01})
 
 			vm := NewVersionMap(nil)
-			vm.FlushVersionedWrites(destroyWrites, true)
+			vm.FlushVersionedWrites(destroyWrites, true, "")
 			ibs := newAmsterdamIBS(reader, vm, 2, noMaterialize)
 			defer ibs.Close()
 
 			empty, err := ibs.Empty(addr)
 			require.NoError(t, err)
 			require.True(t, empty)
-			require.True(t, ibs.consumedAddressAbsence(addr))
 
-			vm.FlushVersionedWrites(recreateWrites, true)
+			vm.FlushVersionedWrites(recreateWrites, true, "")
 
 			exists, err := ibs.Exist(addr)
 			require.NoError(t, err)
@@ -177,7 +181,6 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 			so, err := ibs.getStateObject(addr, true)
 			require.NoError(t, err)
 			require.Nil(t, so)
-			require.True(t, ibs.consumedAddressAbsence(addr))
 			require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 		})
 	}
