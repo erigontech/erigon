@@ -367,10 +367,18 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// with seekInFiles(txNum=0) on datadirs whose history window starts past
 		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
 		// it only affects the lazy-load path, never the trie fold.
-		if r.writes != nil && !r.writes.IsEmpty() {
+		// Source this tx's writes from the version map's per-tx access list: the
+		// key-set is enumerated from the access list and each value read from the
+		// map's cells, so the executor need not keep a per-tx write-set alive for
+		// commitment. r.writes is the fallback for any sender that carries no map.
+		writes := r.writes
+		if r.versionMap != nil {
+			writes = r.versionMap.WritesAtTxNum(r.txNum, r.isFinalize)
+		}
+		if writes != nil && !writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
-			cc.state.ApplyWrites(r.writes)
+			cc.state.ApplyWrites(writes)
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
