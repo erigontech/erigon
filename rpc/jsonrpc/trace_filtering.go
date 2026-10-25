@@ -578,7 +578,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFnalTxn, _, blockNumChanged, err := it.Next()
 		if err != nil {
 			return err
 		}
