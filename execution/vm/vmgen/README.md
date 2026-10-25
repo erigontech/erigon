@@ -21,6 +21,6 @@ vmgen/main.go    fastOps(): which ops are inlined   ─┘   fast_path_gen_test.
 
 ## Adding an op to the fast path
 
-1. Add it to `fastOps()` in `main.go`. An op qualifies if it charges constant gas (plus copy gas per word for copies) and needs no check beyond its stack and gas checks. An error from its execute func, such as a bad JUMP or JUMPI destination, leaves the loop; jumps set `jump`. A memory op (MLOAD, MSTORE, MCOPY) is inlined only while memory does not grow: set `memorySize`, `dynamicGas` and `allocated`; when memory must grow, the op takes the jump-table path.
+1. Add it to `fastOps()` in `main.go`. An op qualifies if it charges constant gas (plus copy gas per word for copies) and needs no check beyond its stack and gas checks. An error from its execute func, such as a bad JUMP or JUMPI destination, leaves the loop; jumps set `jump`. A memory op (MLOAD, MSTORE, MCOPY) is inlined only while memory does not grow: set `memorySize`, `dynamicGas` and `allocated`; when memory must grow, the op takes the jump-table path. A copy op also sets `copyLen`, or its case charges only the constant gas. An op that earlier forks lack starts `allocated` with a fork guard, as MCOPY does with `jt[MCOPY].memorySize != nil`.
 2. Run `make evm-interpreter-gen`.
 3. Run `go test ./execution/vm/`. `TestFastPathMatchesJumpTables` checks the gas and stack numbers against every fork; `TestRunMatchesRunTraced` checks the inlined body against the jump-table op.
