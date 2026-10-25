@@ -53,6 +53,7 @@ var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-
 type revision struct {
 	id           int
 	journalIndex int
+	logCount     int
 }
 
 type revisions struct {
@@ -65,10 +66,10 @@ func (r *revisions) init() {
 	r.valid = r.buf[:0]
 }
 
-func (r *revisions) snapshot(journal *journal) int {
+func (r *revisions) snapshot(journal *journal, logCount int) int {
 	id := r.nextId
 	r.nextId++
-	r.valid = append(r.valid, revision{id, journal.length()})
+	r.valid = append(r.valid, revision{id, journal.length(), logCount})
 	return id
 }
 
@@ -90,7 +91,7 @@ func (r *revisions) reset() {
 	r.nextId = 0
 }
 
-func (r *revisions) revertToSnapshot(revid int) int {
+func (r *revisions) revertToSnapshot(revid int) revision {
 	// Find the snapshot in the stack of valid snapshots.
 	idx := sort.Search(len(r.valid), func(i int) bool {
 		return r.valid[i].id >= revid
@@ -107,7 +108,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 	if r.nextId == snapshot.id+1 {
 		r.nextId = snapshot.id
 	}
-	return snapshot.journalIndex
+	return snapshot
 }
 
 // A revisions slice grown beyond this cap indicates broken push/pop discipline;
@@ -263,14 +264,7 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
-// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject
-// cache on. Genesis is the sole caller that needs both representations at once:
-// its writes must reach the executor as versioned writes AND be read back and
-// persisted through the materialize path (ComputeGenesisCommitment's FinalizeTx,
-// the serial executor's MakeWriteSet). Every other versioned caller runs
-// cache-free via NewWithVersionMap; the version-map-implies-noMaterialize
-// invariant SetVersionMap enforces holds for all of them. Retire this with the
-// materialize path.
+// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
 func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
 	ibs := New(stateReader)
 	ibs.versionMap = NewVersionMap(nil)
@@ -535,7 +529,7 @@ const maxKeptTxOutput = int(datasize.MB)
 // held the entry before. The entry is owned by the arena and handed to a later
 // transaction, so it must never be passed on without copying.
 func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
-	return ibs.logs.alloc(ibs.journal, addr, ibs.txIndex, numTopics, dataSize)
+	return ibs.logs.alloc(addr, ibs.txIndex, numTopics, dataSize)
 }
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
@@ -854,6 +848,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := ibs.stateReader.ReadAccountCodeSize(addr)
+		ibs.recordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}
@@ -1385,6 +1380,10 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 	}
 	ibs.stateReader.SetTrace(false, "")
 	if err != nil {
+		// Route a committed-base read failure (e.g. a corrupt account record) operationally
+		// like the origin* readers, so the executor surfaces it instead of letting the
+		// EVM swallow it as a gas failure and condemn the block as invalid.
+		ibs.recordStateReadError(err)
 		return nil, err
 	}
 	if ibs.committedBase == nil {
@@ -1870,7 +1869,7 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 
 	// Deliberately no StoragePath=0 writes for the dirty slots: the account
 	// stays alive until end-of-tx, so a re-entry's GetState must still see the
-	// dirty values. The per-slot DELETE entries come from Normalize's SD cascade.
+	// dirty values.
 
 	return true, nil
 }
@@ -2355,12 +2354,19 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// prefund, and reading after createObject would see the just-written zero.
 	var carryBalance uint256.Int
 	carryBalanceValid := previous != nil && !previous.selfdestructed
-	if carryBalanceValid {
+	if previous != nil {
 		b, _, err := ibs.getBalance(addr)
 		if err != nil {
 			return err
 		}
-		carryBalance = b
+		// Carry the live balance over the create. Normally zero for a self-destructed
+		// previous, but a same-tx credit may have revived the account before this create
+		// (the EVM preserves funds sent to a not-yet-created address), so carry a non-zero
+		// revived balance too.
+		if carryBalanceValid || !b.IsZero() {
+			carryBalance = b
+			carryBalanceValid = true
+		}
 	}
 	newObj := ibs.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
@@ -2371,15 +2377,18 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
+	} else if previous == nil && balSource == MapRead {
+		// This tx already read the account destroyed, so there is no record, but a
+		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
+		newObj.data.Balance.Set(&preTxBalance)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
-		// Record contract creation in the versioned writes so that
-		// Normalize knows this address was created (prevents
-		// empty account deletion for newly deployed contracts).
+		// Record contract creation so FinalizedWrites does not remove a newly
+		// deployed contract as empty.
 		ibs.recordWriteCreateContract(addr, true)
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
@@ -2413,7 +2422,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 // Snapshot returns an identifier for the current revision of the state.
 func (ibs *IntraBlockState) PushSnapshot() int {
-	return ibs.revisions.snapshot(ibs.journal)
+	return ibs.revisions.snapshot(ibs.journal, len(ibs.logs.entries))
 }
 
 func (ibs *IntraBlockState) PopSnapshot(snapshot int) {
@@ -2438,10 +2447,11 @@ func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 
 	snapshot := ibs.revisions.revertToSnapshot(revid)
 	// Replay the journal to undo changes and remove invalidated snapshots
-	ibs.journal.revert(ibs, snapshot)
+	ibs.journal.revert(ibs, snapshot.journalIndex)
+	ibs.logs.truncate(snapshot.logCount)
 
 	if traced {
-		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", ibs.blockNum, ibs.txIndex, ibs.version, revid, snapshot)
+		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", ibs.blockNum, ibs.txIndex, ibs.version, revid, snapshot.journalIndex)
 	}
 }
 
@@ -2527,8 +2537,7 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		// In parallel mode only modified fields land in the versionMap WriteSet;
-		// Normalize fills the rest from the stateReader.
+		// In parallel mode only modified fields land in the versionMap WriteSet.
 	}
 	return nil
 }
@@ -2793,7 +2802,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 // absent and left empty (EIP-161): such an account is absent both before and
 // after the tx, so omitting its writes is exact and no deletion marker is
 // needed. An account that existed before is kept even when it ends empty —
-// clearing it needs an explicit delete, which commit-time normalization emits.
+// clearing it needs an explicit delete, which encodeExistingEmptyRemovals emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
 	if chainRules == nil {
 		return

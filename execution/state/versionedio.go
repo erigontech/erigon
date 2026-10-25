@@ -2125,7 +2125,7 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
+		if state, _, destroyedAt, _ := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
 			// Self-destructed in-block: a slot cell at or below the destruct is
 			// wiped to zero; only a write above it survives.
 			if val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex); ok &&
@@ -2154,7 +2154,7 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	// Check version map for CodePath entries written by prior transactions
 	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
 	if vr.versionMap != nil {
-		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
+		if state, _, destroyedAt, _ := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
 			if code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex); ok &&
 				res.resolved() && res.DepIdx() > destroyedAt {
 				return code.Bytes, nil
@@ -2179,7 +2179,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	}
 
 	if vr.versionMap != nil {
-		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
+		if state, _, destroyedAt, _ := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
 			if code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex); ok &&
 				res.resolved() && res.DepIdx() > destroyedAt {
 				return len(code.Bytes), nil

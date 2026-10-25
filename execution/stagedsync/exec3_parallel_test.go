@@ -21,7 +21,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -31,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -652,6 +655,29 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 			require.Len(t, pe.execWorkers, tc.poolSize)
 		})
 	}
+}
+
+// Tasks waiting for an execution slot must not take worker contexts. A worker holds
+// its context briefly after giving back its slot, so a few extra contexts are
+// expected; one per queued task is the regression.
+func TestQueuedTasksDoNotGrowWorkerPool(t *testing.T) {
+	sender := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1000 + i))))
+	}
+	ownSlot := func(i int, j int, _ int) opkey {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1_000_000 + i))))
+		return opkey{addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(j)))), state.StoragePath}
+	}
+	tasks, _ := taskFactory(1000, sender, 2, 2, 1, ownSlot, readTime, writeTime, nonIOTime)
+	noExtraContexts := func(pe *parallelExecutor) error {
+		pe.mintMu.Lock()
+		defer pe.mintMu.Unlock()
+		if n := len(pe.mintedWorkers); n > pe.workerCount {
+			return fmt.Errorf("%d extra worker contexts for independent tasks", n)
+		}
+		return nil
+	}
+	runParallel(t, tasks, composeValidations([]propertyCheck{defaultChecks, noExtraContexts}), false, log.New())
 }
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
@@ -1800,4 +1826,104 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	// not the batch-local task index (0).
 	assert.ErrorContains(err, "missing finalized receipt for tx 1")
 	assert.Nil(res)
+}
+
+// On a BAL block a net-zero storage write is never materialized in the
+// versionMap, so a re-execution that drops it must not panic in nextResult.
+func TestParallelNextResultDropsUnmaterializedNetZeroWrite(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+
+	other := accounts.InternAddress([20]byte{0xaa})
+	guard := accounts.InternAddress([20]byte{0xbb})
+	slot := accounts.InternKey(common.Hash{0x01})
+	bal := types.BlockAccessList{{
+		Address:        other.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}},
+	}}
+
+	txs := []types.Transaction{signedTx, signedTx}
+	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
+	pending := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
+	pe, roTx := newResumeTestExec(t, db, config)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil)
+	be.tasks = []*execTask{eTask, pending}
+	be.results = []*execResult{nil, nil}
+	be.execTasks.setInProgress(0)
+	be.execTasks.setInProgress(1)
+
+	netZero := &state.WriteSet{}
+	netZero.SetStorage(guard, slot, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: guard, Path: state.StoragePath, Key: slot, Version: state.Version{BlockNum: 1, TxIndex: 0}},
+		Val:         *uint256.NewInt(1),
+	})
+	be.blockIO.RecordWrites(state.Version{BlockNum: 1, TxIndex: 0}, netZero)
+
+	rerun := &exec.TxResult{
+		Task:     &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}},
+		TxOut:    &state.WriteSet{},
+		Coinbase: accounts.ZeroAddress,
+	}
+	require.NotPanics(t, func() { _, _ = be.nextResult(context.Background(), pe, rerun, roTx) })
+}
+
+// A newPayload block lives only in the block overlay until commit; the tracer
+// must still get its OnBlockStart.
+func TestOnBlockStartSeesOverlayBlock(t *testing.T) {
+	db := newResumeTestDB(t)
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+	logger := log.New()
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	doms, err := execctx.NewSharedDomains(t.Context(), roTx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+	require.NoError(t, doms.InitBlockOverlay(roTx))
+
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+	require.NoError(t, rawdb.WriteBlock(doms.BlockOverlay(), block))
+
+	var got *types.Block
+	te := &txExecutor{
+		cfg:     ExecuteBlockCfg{db: db, blockReader: br, chainConfig: chain.TestChainBerlinConfig},
+		doms:    doms,
+		applyTx: roTx,
+		logger:  logger,
+		hooks:   &tracing.Hooks{OnBlockStart: func(ev tracing.BlockEvent) { got = ev.Block }},
+	}
+	te.onBlockStart(t.Context(), 1, block.Hash())
+	require.NotNil(t, got)
+	require.Equal(t, block.Hash(), got.Hash())
+}
+
+// Each block is counted once, when its duration is recorded; counting it again
+// at scheduling time halved the average block duration (bdur, exec_block_dur).
+func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
+	t.Run("processRequest", func(t *testing.T) {
+		config := chain.AllProtocolChanges
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.blockExecMetrics = newBlockExecMetrics()
+		pe.workersCtx = t.Context()
+		header := &types.Header{Number: *uint256.NewInt(1)}
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		be := pe.blockExecutors[1]
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
+	t.Run("scheduleNextPending", func(t *testing.T) {
+		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil)
+		pe := &parallelExecutor{
+			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
+			blockExecutors: map[uint64]*blockExecutor{1: be},
+		}
+		pe.scheduleNextPending(t.Context())
+		require.False(t, be.execStarted.IsZero())
+		pe.recordBlockExecMetrics(be)
+		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
+	})
 }

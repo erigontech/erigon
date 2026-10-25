@@ -428,7 +428,13 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.resolved() {
+		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok {
+			if !rr.resolved() {
+				// An in-flight cell: storage holds the pre-block code, so wait through the versioned
+				// path. Its result is this read's view, not the object's state, so it is not cached.
+				c, _, _, err := readCode(so.db, so.address)
+				return c, err
+			}
 			so.code = c
 			so.data.CodeHash = c.Hash
 			so.original.CodeHash = c.Hash

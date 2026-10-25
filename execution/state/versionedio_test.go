@@ -2096,3 +2096,21 @@ func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	acc := &accounts.Account{Nonce: 3}
 	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }
+
+// TestAsBlockAccessList_SystemAddressIsOrdinary pins that SystemAddress follows
+// the same BAL rules as any other address: an access-only entry is included even
+// from the system-call slot (txIndex -1). System calls do not record their
+// caller, so no SystemAddress exclusion belongs in AsBlockAccessList.
+func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
+	t.Parallel()
+
+	io := NewVersionedIO(1)
+	rs := io.ReadSet(-1)
+	rs.access = AccessSet{params.SystemAddress: accessOptions{revertable: true}}
+	io.RecordReads(Version{TxIndex: -1}, rs)
+
+	bal := io.AsBlockAccessList()
+
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
+}
