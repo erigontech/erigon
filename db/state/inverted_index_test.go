@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"os"
 	"slices"
 	"sync"
@@ -1873,6 +1874,48 @@ func TestInvertedIndexChunks(t *testing.T) {
 		iiChunkAdd(t, tx, ii.ValuesTable, m, "k", 15, 20)
 		iiChunkDelete(t, tx, ii.ValuesTable, m, "k", 9, 16)
 		requireIIChunks(t, tx, ii.ValuesTable, m)
+	})
+
+	t.Run("random_flush_prune_unwind", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 16, log.New())
+		tx, err := db.BeginRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		r := rand.New(rand.NewPCG(25304, 1))
+		keys := []string{"a", "ab", "b", "hot"}
+		m := iiChunkModel{}
+		tip := uint64(0)
+		for ; tip < 400; tip += 7 {
+			require.NoError(t, tx.Put(ii.ValuesTable, []byte("hot"), binary.BigEndian.AppendUint64(nil, tip)))
+			m.add("hot", tip)
+		}
+		for range 300 {
+			key := keys[r.IntN(len(keys))]
+			switch r.IntN(5) {
+			case 0, 1:
+				var txNums []uint64
+				for range r.IntN(300) {
+					tip += 1 + r.Uint64N(3)
+					txNums = append(txNums, tip)
+				}
+				iiChunkAdd(t, tx, ii.ValuesTable, m, key, txNums...)
+			case 2:
+				txNums := make([]uint64, 1+r.IntN(50))
+				for i := range txNums {
+					txNums[i] = r.Uint64N(tip + 1)
+				}
+				slices.Sort(txNums)
+				iiChunkAdd(t, tx, ii.ValuesTable, m, key, slices.Compact(txNums)...)
+			case 3:
+				iiChunkDelete(t, tx, ii.ValuesTable, m, key, 0, r.Uint64N(tip+1))
+			case 4:
+				tip -= min(tip, r.Uint64N(500))
+				for _, k := range keys {
+					iiChunkDelete(t, tx, ii.ValuesTable, m, k, tip+1, math.MaxUint64)
+				}
+			}
+			requireIIChunks(t, tx, ii.ValuesTable, m)
+		}
 	})
 }
 
