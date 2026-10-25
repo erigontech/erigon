@@ -146,6 +146,10 @@ func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
 	return f.PreparationImports.BeginImport(slot)
 }
 
+func (f *ForkChoiceStorageMock) PayloadImportInProgress(slot uint64) bool {
+	return f.PreparationImports.ImportInProgress(slot)
+}
+
 func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
 	return f.PreparationImports.BeginPendingEnvelope(blockRoot)
 }

@@ -605,6 +605,27 @@ func attemptsMade(attempts int) string {
 	return fmt.Sprintf("%d attempts", attempts)
 }
 
+const (
+	attestationDataImportWait         = time.Second
+	attestationDataImportPollInterval = 5 * time.Millisecond
+)
+
+func (a *ApiHandler) waitForSlotImport(ctx context.Context, slot uint64) {
+	waitedSlot := slot + 1
+	deadline := time.Now().Add(attestationDataImportWait)
+	for a.attestationDataWaitedSlot.Load() != waitedSlot && a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot) {
+		if !time.Now().Before(deadline) {
+			a.attestationDataWaitedSlot.Store(waitedSlot)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(attestationDataImportPollInterval):
+		}
+	}
+}
+
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -618,12 +639,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 	start := time.Now()
 
-	tx, err := a.indiciesDB.BeginRo(r.Context())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -636,6 +651,10 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
+	}
+	a.waitForSlotImport(r.Context(), *slot)
+	if err := r.Context().Err(); err != nil {
+		return nil, err
 	}
 
 	var attestationData solid.AttestationData
@@ -679,6 +698,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	if !ok {
+		tx, err := a.indiciesDB.BeginRo(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
 		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 			attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 				tx,

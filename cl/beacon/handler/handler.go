@@ -254,6 +254,7 @@ type ApiHandler struct {
 	syncMessagePool           sync_contribution_pool.SyncContributionPool
 	committeeSub              committee_subscription.CommitteeSubscribe
 	attestationProducer       attestation_producer.AttestationDataProducer
+	attestationDataWaitedSlot atomic.Uint64
 	aggregatePool             aggregation.AggregationPool
 
 	// services

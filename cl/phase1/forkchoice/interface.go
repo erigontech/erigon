@@ -55,6 +55,7 @@ type ForkChoiceStorageReader interface {
 	HighestSeen() uint64
 	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
+	PayloadImportInProgress(slot uint64) bool
 	TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (attemptCtx context.Context, finish func() bool, ok bool)
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64

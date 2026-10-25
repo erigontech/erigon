@@ -5332,6 +5332,17 @@ type cachedAttestationDataProducer struct {
 	calls  *int
 }
 
+type doneObservedContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
 func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
 	if p.calls != nil {
 		(*p.calls)++
@@ -5417,6 +5428,221 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			require.Equal(t, attestationSlot/handler.beaconChainCfg.SlotsPerEpoch, response.Data.Target.Epoch)
 			require.Equal(t, tt.forkChoiceHeadRoot, response.Data.Target.Root)
 		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
+	oldRoot := common.HexToHash("0x1234")
+	newRoot := common.HexToHash("0x5678")
+	for _, tt := range []struct {
+		name              string
+		claim             bool
+		claimNextSlot     bool
+		finishAfter       time.Duration
+		cancelAfter       time.Duration
+		highestSeenAtSlot bool
+		wantNewHead       bool
+		minWait           time.Duration
+		maxWait           time.Duration
+		wantStatus        int
+	}{
+		{name: "in-flight block finishes", claim: true, finishAfter: 50 * time.Millisecond, wantNewHead: true, minWait: 40 * time.Millisecond, maxWait: 500 * time.Millisecond},
+		{name: "no claim", maxWait: 500 * time.Millisecond},
+		{name: "import does not finish", claim: true, minWait: time.Second, maxWait: 2 * time.Second},
+		{name: "claim for another slot", claim: true, claimNextSlot: true, maxWait: 500 * time.Millisecond},
+		{name: "block already seen", claim: true, highestSeenAtSlot: true, maxWait: 500 * time.Millisecond},
+		{name: "request canceled", claim: true, cancelAfter: 50 * time.Millisecond, minWait: 40 * time.Millisecond, maxWait: 500 * time.Millisecond, wantStatus: http.StatusInternalServerError},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			oldSlot := headState.Slot()
+			attestationSlot := oldSlot + 1
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+			handler.ethClock = clock
+			calls := 0
+			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
+
+			oldHead := forkchoice.ForkChoiceNode{Root: oldRoot}
+			newHead := forkchoice.ForkChoiceNode{Root: newRoot}
+			var currentHead atomic.Pointer[forkchoice.ForkChoiceNode]
+			currentHead.Store(&oldHead)
+			fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+				head := currentHead.Load()
+				slot := oldSlot
+				if head.Root == newRoot {
+					slot = attestationSlot
+				}
+				return *head, slot, nil
+			}
+			fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{
+					Slot:            slot,
+					BeaconBlockRoot: headRoot,
+					Target:          solid.Checkpoint{Epoch: slot / handler.beaconChainCfg.SlotsPerEpoch, Root: headRoot},
+				}, true
+			}
+			fcu.HighestSeenVal = oldSlot
+			if tt.highestSeenAtSlot {
+				fcu.HighestSeenVal = attestationSlot
+			}
+
+			var finishImport func()
+			if tt.claim {
+				claimSlot := attestationSlot
+				if tt.claimNextSlot {
+					claimSlot++
+				}
+				finishImport = fcu.BeginPayloadImport(claimSlot)
+				if tt.finishAfter == 0 {
+					defer finishImport()
+				}
+			}
+
+			start := time.Now()
+			var importFinished chan struct{}
+			if tt.finishAfter > 0 {
+				importFinished = make(chan struct{})
+				go func() {
+					time.Sleep(tt.finishAfter)
+					currentHead.Store(&newHead)
+					finishImport()
+					close(importFinished)
+				}()
+			}
+			requestContext := t.Context()
+			if tt.cancelAfter > 0 {
+				var cancel context.CancelFunc
+				requestContext, cancel = context.WithTimeout(requestContext, tt.cancelAfter)
+				defer cancel()
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(requestContext, http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody))
+			elapsed := time.Since(start)
+			if importFinished != nil {
+				<-importFinished
+			}
+
+			require.GreaterOrEqual(t, elapsed, tt.minWait)
+			require.Less(t, elapsed, tt.maxWait)
+			require.Zero(t, calls)
+			wantStatus := tt.wantStatus
+			if wantStatus == 0 {
+				wantStatus = http.StatusOK
+			}
+			require.Equal(t, wantStatus, recorder.Code, recorder.Body.String())
+			if wantStatus != http.StatusOK {
+				return
+			}
+			var response struct {
+				Data solid.AttestationData `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			wantRoot := oldRoot
+			if tt.wantNewHead {
+				wantRoot = newRoot
+			}
+			require.Equal(t, wantRoot, response.Data.BeaconBlockRoot)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	headSlot := headState.Slot()
+	attestationSlot := headSlot + 1
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(attestationSlot + 1).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationProducer = cachedAttestationDataProducer{}
+	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: root}, headSlot, nil
+	}
+	fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+	}
+	fcu.HighestSeenVal = headSlot
+	finishImport := fcu.BeginPayloadImport(attestationSlot)
+	defer finishImport()
+	finishNextImport := fcu.BeginPayloadImport(attestationSlot + 1)
+	defer finishNextImport()
+
+	request := func(slot uint64) time.Duration {
+		start := time.Now()
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+			fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", slot), http.NoBody))
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		var response struct {
+			Data solid.AttestationData `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Equal(t, root, response.Data.BeaconBlockRoot)
+		return time.Since(start)
+	}
+
+	require.GreaterOrEqual(t, request(attestationSlot), attestationDataImportWait)
+	require.Less(t, request(attestationSlot), 500*time.Millisecond)
+	require.GreaterOrEqual(t, request(attestationSlot+1), attestationDataImportWait)
+}
+
+func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	headSlot := headState.Slot()
+	attestationSlot := headSlot + 1
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationProducer = cachedAttestationDataProducer{}
+	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: root}, headSlot, nil
+	}
+	fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+	}
+	fcu.HighestSeenVal = headSlot
+	finishImport := fcu.BeginPayloadImport(attestationSlot)
+	defer finishImport()
+
+	type requestResult struct {
+		elapsed time.Duration
+		code    int
+		body    []byte
+	}
+	request := func(ctx context.Context) requestResult {
+		start := time.Now()
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(ctx, http.MethodGet,
+			fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody))
+		return requestResult{elapsed: time.Since(start), code: recorder.Code, body: recorder.Body.Bytes()}
+	}
+
+	firstEntered := make(chan struct{})
+	firstResult := make(chan requestResult, 1)
+	go func() {
+		firstResult <- request(&doneObservedContext{Context: t.Context(), entered: firstEntered})
+	}()
+	select {
+	case <-firstEntered:
+	case <-firstResult:
+		t.Fatal("first request returned without waiting")
+	}
+	secondResult := make(chan requestResult, 1)
+	time.AfterFunc(700*time.Millisecond, func() { secondResult <- request(t.Context()) })
+	first := <-firstResult
+	second := <-secondResult
+	require.GreaterOrEqual(t, first.elapsed, attestationDataImportWait)
+	require.Less(t, second.elapsed, 600*time.Millisecond)
+	for _, result := range []requestResult{first, second} {
+		require.Equal(t, http.StatusOK, result.code, string(result.body))
+		var response struct {
+			Data solid.AttestationData `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(result.body, &response))
+		require.Equal(t, root, response.Data.BeaconBlockRoot)
 	}
 }
 
