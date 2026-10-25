@@ -677,11 +677,8 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental lazy-load: %w", err))
 		return
 	}
-	// Mirror compute(): the raw versionMap view carries no EIP-161 deletion
-	// marker, so a touched-empty account must be removed before the flush or the
-	// recompute keeps a spurious leaf the BAL-driven root dropped.
-	emptyRemoval := r.BlockNum != 0 && cc.chainConfig.IsEIP161Enabled(r.BlockNum)
-	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	// Mirror compute(): the version map writes already carry the EIP-161 removal as
+	// a self-destruct cell, so no empty→removal re-derivation is needed here.
 	cc.finishPrefetch()
 	cc.state.flushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
@@ -787,10 +784,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		})
 		return
 	}
-	// The raw versionMap view carries no EIP-161 deletion marker; synthesize the
-	// empty→removal here.
-	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
-	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	// The version map writes already carry the EIP-161 removal as a self-destruct
+	// cell (FinalizedWrites.encodeExistingEmptyRemovals), so ApplyWrites has already
+	// marked every touched-empty account deleted — commitment needs no EIP knowledge.
 	cc.finishPrefetch()
 	cc.state.flushToUpdates(cc.updates)
 	if !m.midBlock {
