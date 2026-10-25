@@ -315,7 +315,7 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
-// retune a per-task overlay (OverlayStateReader.SetBlock) without rebuilding the IBS.
+// retune a per-task overlay (PrevBlockReader.SetBlock) without rebuilding the IBS.
 func (ibs *IntraBlockState) StateReader() StateReader {
 	return ibs.stateReader
 }
