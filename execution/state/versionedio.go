@@ -2063,12 +2063,12 @@ func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex i
 	return 0, false
 }
 
-func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
+func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.Code, bool) {
 	val, res, ok := vm.ReadCode(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
-		return val.Bytes, true
+		return val, true
 	}
-	return nil, false
+	return accounts.Code{}, false
 }
 
 func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
@@ -2162,7 +2162,7 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 			return nil, nil
 		}
 		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
-			return code, nil
+			return code.Bytes, nil
 		}
 	}
 
@@ -2187,7 +2187,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 			return 0, nil
 		}
 		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
-			return len(code), nil
+			return len(code.Bytes), nil
 		}
 	}
 
