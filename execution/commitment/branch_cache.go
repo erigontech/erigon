@@ -481,6 +481,17 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	return entry, true
 }
 
+// loadSlot returns the root or trunk entry for prefix, nil for a deeper prefix.
+func (c *BranchCache) loadSlot(prefix []byte) *branchCacheEntry {
+	if isRootPrefix(prefix) {
+		return c.root.Load()
+	}
+	if slot := c.trunkSlot(prefix, false); slot != nil {
+		return slot.Load()
+	}
+	return nil
+}
+
 func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 	if isRootPrefix(prefix) {
 		c.root.Store(entry)
@@ -625,6 +636,10 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64) {
 	epoch := c.coh.Epoch()
 	if viewID < c.committedView.Load() || isCommitmentStateKey(prefix) {
+		return
+	}
+	// Concurrent readers miss the same shallow branches together; skip the stripe when the entry is already there.
+	if cur := c.loadSlot(prefix); cur != nil && cur.step == step && cur.txN == txN && cur.epoch == epoch {
 		return
 	}
 	dataCopy := make([]byte, len(data))
