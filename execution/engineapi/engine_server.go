@@ -446,6 +446,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if !e.config.AllowAA {
 		minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 		if uint64(len(req.Transactions)) > gasLimit/minTxBlockGas {
+			if status, err := e.rejectStoredBlockWithInvalidGasLimit(ctx, req, parent); status != nil || err != nil {
+				return status, err
+			}
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
@@ -550,9 +553,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	// Answered after the block hash check and the other payload checks, as by the block validation,
-	// so that the block can be reported as bad. A block that is already stored takes the normal path,
-	// where a block validation that rejects it also removes it.
+	// Answered after the block hash check and the other payload checks, so that their answers come
+	// first and only a verified block hash is reported as bad. A block that is already stored takes
+	// the normal path, where a block validation that rejects it also removes it.
 	if headerErr != nil && e.chainRW.GetHeader(ctx, blockHash, header.Number.Uint64()) == nil {
 		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
 		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)
@@ -601,6 +604,34 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	return payloadStatus, nil
+}
+
+// rejectStoredBlockWithInvalidGasLimit handles a payload above the capped transaction bound whose
+// hash names a stored block with an invalid gas limit. Such a block was stored without the capped
+// bound, for example by a download while its parent was unknown, so it goes through the block
+// validation, which rejects and removes it. Only the stored header decides, as the payload's block
+// hash is not verified yet.
+func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) (*engine_types.PayloadStatus, error) {
+	if parent == nil {
+		return nil, nil
+	}
+	number := req.BlockNumber.Uint64()
+	stored := e.chainRW.GetHeader(ctx, req.BlockHash, number)
+	if stored == nil || stored.ParentHash != req.ParentHash || misc.VerifyParentGasLimit(e.config, parent, stored) == nil {
+		return nil, nil
+	}
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, req.BlockHash, number)
+	if err != nil || status != execmodule.ExecutionStatusBadBlock {
+		return nil, err
+	}
+	e.blockDownloader.ReportBadHeader(req.BlockHash, latestValidHash, common.Deref(validationErr))
+	return &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedErrorFromString(common.Deref(validationErr)),
+		LatestValidHash: &latestValidHash,
+	}, nil
 }
 
 // defaultReadinessWait is how long a request waits for a busy execution module before answering
@@ -659,7 +690,6 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		header = e.chainRW.GetHeaderByHash(ctx, blockHash)
 	}
 
-	// Retrieve total difficulty.
 	var td *uint256.Int
 	if newPayload {
 		td = e.chainRW.GetTd(ctx, parentHash, blockNumber-1)
