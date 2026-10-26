@@ -724,7 +724,7 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 // single-block fork-validation step runs, so the exec loop executes nothing
 // and produces no blockResult. Treating that as pending work returns a
 // spurious ErrLoopExhausted, which the stage loop reports as
-// "unexpected state step has more work".
+// "state step has more work".
 func TestApplyLoopCloseIsClean(t *testing.T) {
 	cases := []struct {
 		name         string
