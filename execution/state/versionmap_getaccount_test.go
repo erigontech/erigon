@@ -44,6 +44,33 @@ func TestGetAccount_NewCodelessAccountHasEmptyCodeHash(t *testing.T) {
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "a codeless new account projects EmptyCodeHash, not zero")
 }
 
+// TestGetAccount_EIP161EmptyResolvedByRules pins the BAL-seed resolution: a touched
+// account left EIP-161 empty (zero balance/nonce/code) with cells in the map but no
+// self-destruct marker — exactly the shape a BAL seed produces, since EIP-7928 carries
+// no removal field — projects absent once the block's rules are set, and stays present
+// (a live zero account) when EIP-161 removal does not apply (e.g. genesis).
+func TestGetAccount_EIP161EmptyResolvedByRules(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(3)
+	build := func() *VersionMap {
+		vm := NewVersionMap(nil)
+		vm.SetBaseTxNum(0)
+		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0}, uint256.Int{}, true)
+		return vm
+	}
+
+	withRules := build()
+	withRules.SetRules(true, false)
+	_, ok := withRules.GetAccount(addr, 1, nil)
+	require.False(t, ok, "a touched EIP-161-empty account projects absent when removal applies")
+
+	noRules := build() // EIP-161 removal disabled (rules unset) — genesis-like
+	acc, ok := noRules.GetAccount(addr, 1, nil)
+	require.True(t, ok, "without EIP-161 removal the empty account is retained")
+	require.True(t, acc.Balance.IsZero())
+}
+
 // TestVersionMap_GetAccountProjection pins the post-seal projection: GetAccount reads
 // the account composed at a global txNum (txNum = baseTxNum + TxIndex + 1, so it
 // includes that tx's own writes) and returns comma-ok false once the account is

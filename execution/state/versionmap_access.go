@@ -160,7 +160,35 @@ func (vm *VersionMap) blockTxIndex(txNum uint64) int {
 // TxIndex + 1) includes that tx's own writes.
 func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base StateReader) (accounts.Account, bool) {
 	txIdx := int(txNum - vm.baseTxNum.Load())
-	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
+	acc, ok := NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
+	if !ok {
+		return acc, false
+	}
+	// The version map resolves existence: a touched account (one with cells here) left
+	// EIP-161 empty at this txNum reads as absent — the same verdict the exec write path
+	// records via encodeExistingEmptyRemovals, computed once at read time. This covers
+	// the BAL-seeded path, whose seed carries the empty fields but no removal marker
+	// (EIP-7928 has no removal field); on the raw-view path the account is already
+	// resolved absent by its self-destruct cell before reaching here.
+	if vm.load(addr) != nil &&
+		isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) &&
+		EIP161EmptyRemoval(vm.eip161Enabled.Load(), vm.isAura.Load(), addr) {
+		return accounts.Account{}, false
+	}
+	return acc, true
+}
+
+// SetRules records the block's empty-account rules so GetAccount can resolve a
+// touched-empty account as absent. Called once before the block executes.
+func (vm *VersionMap) SetRules(eip161Enabled, isAura bool) {
+	vm.eip161Enabled.Store(eip161Enabled)
+	vm.isAura.Store(isAura)
+}
+
+// isEmptyForEIP161 reports whether an account is empty per EIP-161: zero balance,
+// zero nonce, and empty (or nil) code hash.
+func isEmptyForEIP161(balance uint256.Int, nonce uint64, codeHash accounts.CodeHash) bool {
+	return balance.IsZero() && nonce == 0 && (codeHash == accounts.EmptyCodeHash || codeHash == accounts.CodeHash{})
 }
 
 // GetStorage returns addr's slot value composed at the given global txNum — including
