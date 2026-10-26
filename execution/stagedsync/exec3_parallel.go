@@ -2995,14 +2995,6 @@ func readersAbove(l []int, tx int) []int {
 	return l[i:]
 }
 
-// readersOf returns the reader task indices whose reads a write of header h may have
-// invalidated: every reader of the address. Over-inclusion only costs a redundant
-// re-check (the DependsOn / ValidateVersion re-check filters), while a missed reader
-// commits a stale value.
-func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
-	return be.readerByAddr[h.Address]
-}
-
 // markReadersDirty flags every successor reader (> writerTx) of a cell writerTx
 // just published as needing finalize-boundary re-validation: a value it read may
 // have changed. Only successors can be invalidated by writerTx's write. Runs only
@@ -3013,7 +3005,7 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		return
 	}
 	for h := range ws.AllHeaders() {
-		for _, tx := range readersAbove(be.readersOf(h), writerTx) {
+		for _, tx := range readersAbove(be.readerByAddr[h.Address], writerTx) {
 			if be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOn(h) {
 				be.revalidate[tx] = true
 			}
@@ -3426,7 +3418,7 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			if skipBALSeeded && h.Path.BALSeeded() {
 				continue
 			}
-			for _, tx := range readersAbove(be.readersOf(h), changedTx) {
+			for _, tx := range readersAbove(be.readerByAddr[h.Address], changedTx) {
 				set[tx] = struct{}{}
 			}
 		}
