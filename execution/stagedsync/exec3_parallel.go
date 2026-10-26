@@ -673,24 +673,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						pe.doms.AppendFlashblockReceipts(applyResult.Receipts)
 					}
 
-					// THE HIGH-WATER MARK ADVANCES WITH EVERY ROUND, NOT ONLY WITH THE BLOCK NUMBER.
-					// A flashblock round re-executes the SAME block, so the test below is false for
-					// every round after the first and the mark stayed where the first round left it —
-					// while the receipts appended just above accumulated across all of them. The
-					// committed state is bounded by the mark, so the block ended up carrying 198
-					// receipts and 198 transactions' gas against 128 applied account updates, and the
-					// sender was stranded behind the 70 that never took effect: its nonce stopped, the
-					// pool removed all 198 as mined, and nothing re-sends the difference. No root
-					// mismatch catches it, because the root is computed at that same mark.
-					//
-					// The serial path has always advanced it per transaction, unconditionally
-					// (exec3_serial.go). This is that divergence removed, not a guard added.
-					if applyResult.lastTxNum > pe.doms.TxNum() {
-						pe.doms.SetTxNum(applyResult.lastTxNum)
-					}
-
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
+						pe.doms.SetTxNum(applyResult.lastTxNum)
 						lastBlockResult = *applyResult
 					}
 
