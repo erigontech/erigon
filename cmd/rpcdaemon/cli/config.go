@@ -582,7 +582,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+			if err := remoteCE.init(db, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)
 				rootCancel()
 			}
@@ -1004,7 +1004,7 @@ func (e *remoteRulesEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockReader, remoteKV remoteproto.KVClient, logger log.Logger) error {
+func (e *remoteRulesEngine) init(db kv.RoDB, remoteKV remoteproto.KVClient, logger log.Logger) error {
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err

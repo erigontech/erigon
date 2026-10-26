@@ -241,7 +241,6 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
-	const stepSize = uint64(16)
 
 	db, tx, doms := setupStepTest(t)
 
