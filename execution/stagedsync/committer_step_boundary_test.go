@@ -241,7 +241,6 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
-	const stepSize = uint64(16)
 
 	db, tx, doms := setupStepTest(t)
 
@@ -600,7 +599,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	require.NoError(t, err)
 	t.Cleanup(func() { tx.Rollback() })
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	return db, tx, doms

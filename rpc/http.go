@@ -104,7 +104,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 	}
 
 	cfg := &clientConfig{httpClient: client}
-	return newClient(context.Background(), cfg, newClientTransportHTTP(endpoint, cfg), logger)
+	return newClient(context.Background(), newClientTransportHTTP(endpoint, cfg), logger)
 }
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
