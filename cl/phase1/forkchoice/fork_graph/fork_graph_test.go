@@ -375,6 +375,57 @@ func TestNewForkGraphDiskReturnsErrorOnDumpFailure(t *testing.T) {
 	})
 }
 
+func TestForkGraphDumpsDoNotRequireSync(t *testing.T) {
+	t.Run("beacon state", func(t *testing.T) {
+		anchorState := state.New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+		anchorRoot, err := anchorState.BlockRoot()
+		require.NoError(t, err)
+		fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "sync"}
+
+		forkGraph, err := NewForkGraphDisk(anchorState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+		require.NoError(t, err)
+		graph := forkGraph.(*forkGraphDisk)
+		persisted, err := graph.readBeaconStateFromDisk(anchorRoot)
+		require.NoError(t, err)
+		wantHash, err := anchorState.HashSSZ()
+		require.NoError(t, err)
+		gotHash, err := persisted.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+	})
+
+	t.Run("envelope", func(t *testing.T) {
+		fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "sync"}
+		f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		root := common.HexToHash("0x1234")
+		addEnvelopeTestBlock(f, root, 1)
+		envelope := testEnvelopeWithTransaction(root, []byte{1, 2, 3})
+
+		require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+		persisted, err := f.ReadEnvelopeFromDisk(root)
+		require.NoError(t, err)
+		wantHash, err := envelope.HashSSZ()
+		require.NoError(t, err)
+		gotHash, err := persisted.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+	})
+}
+
+func TestDumpBeaconStateReturnsCloseError(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	root, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	var closes atomic.Int32
+	fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "close", closes: &closes}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+
+	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, anchorState, true), errTestEnvelopeIO)
+	require.Equal(t, int32(1), closes.Load())
+}
+
 func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	fs := &partialWriteFs{Fs: baseFs, fail: true}
@@ -1507,7 +1558,7 @@ func TestDumpEnvelopeAllowsAnchorRoot(t *testing.T) {
 }
 
 func TestDumpEnvelopeFailurePreservesExistingFinal(t *testing.T) {
-	for _, stage := range []string{"open", "write", "sync", "close", "rename"} {
+	for _, stage := range []string{"open", "write", "close", "rename"} {
 		t.Run(stage, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
 			f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}

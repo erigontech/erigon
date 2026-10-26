@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -44,10 +45,10 @@ func TestSetCodeRevertRestoresCodeHash(t *testing.T) {
 		{"cleared", accounts.NewCode(nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			vmap := NewVersionMap(nil)
-			vmap.WriteCode(addr, Version{TxIndex: 0}, tc.code, true)
-			ibs := NewWithVersionMap(NewNoopReader(), vmap)
+			// A materialized object needs the non-arena state; it still carries a version map.
+			ibs := NewForSequentialCommitment(NewNoopReader())
 			defer ibs.Close()
+			ibs.VersionMap().WriteCode(addr, Version{TxIndex: 0}, tc.code, true)
 			ibs.SetTxContext(1, 1)
 
 			acc := accounts.NewAccount()
@@ -88,5 +89,30 @@ func BenchmarkCutCustomTrim(b *testing.B) {
 	value := common.HexToHash("0x01")
 	for b.Loop() {
 		common.TrimLeftZeroes(value[:])
+	}
+}
+
+var stateObjectSink *stateObject
+
+// Most state objects never write storage, so a new one allocates its storage
+// maps only on the first write.
+func TestNewStateObjectAllocatesOnlyItself(t *testing.T) {
+	allocs := testing.AllocsPerRun(100, func() {
+		stateObjectSink = stateObjectPool.New().(*stateObject)
+	})
+	if allocs != 1 {
+		t.Fatalf("a new state object made %v allocations, want 1", allocs)
+	}
+}
+
+// Close hands back everything a call collected, origin cells included, so the
+// next state takes them from the pools instead of the heap.
+func TestCloseReleasesOriginCells(t *testing.T) {
+	ibs := New(NewNoopReader())
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.recordStorageOrigin(accounts.InternAddress([20]byte{0xc0, 0xde}), accounts.InternKey([32]byte{1}), uint256.Int{})
+	ibs.Close()
+	if !ibs.versionedOrigins.IsEmpty() {
+		t.Fatal("Close kept the origin cells")
 	}
 }
