@@ -25,10 +25,8 @@ func mkDetTask(txIndex int) *execTask {
 func newDetExecutor(t *testing.T, n int) *blockExecutor {
 	t.Helper()
 	tasks := make([]*execTask, n)
-	reexec := make([]chan struct{}, n)
 	for i := range tasks {
 		tasks[i] = mkDetTask(i)
-		reexec[i] = make(chan struct{}, 1)
 	}
 	return &blockExecutor{
 		tasks:               tasks,
@@ -39,7 +37,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
-		slReexec:            reexec,
+		slIdle:              make([]atomic.Bool, n),
 		slReexecFlag:        make([]atomic.Bool, n),
 		writeChangedPrev:    map[int]*state.WriteSet{},
 	}

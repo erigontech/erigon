@@ -1793,7 +1793,7 @@ const elasticWorkerCap = 4096
 // read-dependency has not yet committed — park on the commit frontier and
 // re-validate. Only a stable-valid result is sent to the exec loop, which commits it
 // in order. The context is released while parked so dependencies can run.
-func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
+func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion, prevWrites *state.WriteSet, resume bool) {
 	pe.runWG.Go(func() {
 		// The roTx is bound to the execution slot, not the goroutine: opened on slot
 		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
@@ -1939,8 +1939,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		waitTo := func(t int) bool {
 			return be.waitDep(tv.index, t)
 		}
-		var prevWrites *state.WriteSet
+		if resume && !reExec() {
+			return
+		}
 		for {
+			be.slReexecFlag[tv.index].Store(false)
 			// Whether this run executes against fully-committed state below it. Captured
 			// BEFORE execution: the frontier is monotonic and finalized tasks never
 			// un-commit, so if every lower task is committed now it stays so for the
@@ -2041,29 +2044,12 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			}
 			if valid {
 				send(result)
-				// Stay alive rather than exit: the committed-dependent re-check signals
-				// slReexec (via a sticky flag, so a dropped wake is recovered on the next
-				// one) if a later write invalidates us. slFin closes when we finalize
-				// (never un-committed again), slDone on shutdown.
-				reexec := false
-				for {
-					if be.slReexecFlag[tv.index].Swap(false) {
-						reexec = true
-						break
-					}
-					done := false
-					select {
-					case <-be.slReexec[tv.index]:
-					case <-be.slFin[tv.index]:
-						done = true
-					case <-be.slDone:
-						done = true
-					}
-					if done {
-						break
-					}
-				}
-				if !reexec {
+				// Exit rather than park: the committed-dependent re-check resumes the run
+				// through slResume. Whichever side wins slIdle owns the re-execution.
+				written := prevWrites
+				be.slResume[tv.index] = func() { pe.dispatchRunSelfLoop(be, tv, written, true) }
+				be.slIdle[tv.index].Store(true)
+				if !be.slReexecFlag[tv.index].Load() || !be.slIdle[tv.index].CompareAndSwap(true, false) {
 					return
 				}
 				if !reExec() {
@@ -2925,15 +2911,15 @@ type blockExecutor struct {
 	slWake            []chan struct{}
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]int
-	// After committing, a self-loop worker stays parked on slReexec rather than
-	// exiting: the committed-dependent re-check signals it to re-execute in place
-	// (own monotonic incarnation, no respawn); slFin closes when the task finalizes.
-	slReexec     []chan struct{}
+	// After committing, a self-loop worker exits with slIdle set and its resume in
+	// slResume; the committed-dependent re-check sets slReexecFlag and resumes it, so
+	// one worker owns a task at a time and keeps its monotonic incarnation.
 	slReexecFlag []atomic.Bool
+	slIdle       []atomic.Bool
+	slResume     []func()
 	// runInc[i] is the highest incarnation ever RUN for task i, enforcing that each
 	// execution uses a strictly ascending incarnation. Init -1.
 	runInc     []atomic.Int64
-	slFin      []chan struct{}
 	slDone     chan struct{}
 	slDoneOnce sync.Once
 	// selfLoopDispatched guards against re-dispatching a task the self-loop worker
@@ -3325,13 +3311,12 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	}
 }
 
-// signalSelfLoopReexec wakes the parked worker of an already-sent tx to re-execute
-// in place (it owns its incarnation, so no re-dispatch).
+// signalSelfLoopReexec makes the worker of an already-sent tx re-execute: a running
+// worker sees the flag when it finishes, an exited one is resumed here.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	be.slReexecFlag[tx].Store(true)
-	select {
-	case be.slReexec[tx] <- struct{}{}:
-	default:
+	if be.slIdle[tx].CompareAndSwap(true, false) {
+		be.slResume[tx]()
 	}
 }
 
@@ -3685,12 +3670,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
 			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.publishTasks.markComplete(tx)
-			// Published: the re-check no longer considers tx, so its parked worker can
-			// never be re-signalled — release it. Closing earlier (at finalize) would
-			// let a re-check in the finalize→publish window signal an exited worker.
-			if tx >= 0 && tx < len(be.slFin) {
-				close(be.slFin[tx])
-			}
 
 			// The final task's sets are recorded again at block end, so it is left to the block result.
 			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
@@ -3938,14 +3917,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
 	if be.slWake == nil && len(be.tasks) > 0 {
 		be.slWake = make([]chan struct{}, len(be.tasks))
-		be.slReexec = make([]chan struct{}, len(be.tasks))
 		be.slReexecFlag = make([]atomic.Bool, len(be.tasks))
-		be.slFin = make([]chan struct{}, len(be.tasks))
+		be.slIdle = make([]atomic.Bool, len(be.tasks))
+		be.slResume = make([]func(), len(be.tasks))
 		be.runInc = make([]atomic.Int64, len(be.tasks))
 		for i := range be.slWake {
 			be.slWake[i] = make(chan struct{}, 1)
-			be.slReexec[i] = make(chan struct{}, 1)
-			be.slFin[i] = make(chan struct{})
 			be.runInc[i].Store(-1)
 		}
 		be.wakeAt = map[int][]int{}
@@ -3990,7 +3967,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			}
 
 			// The worker owns its own re-execution loop, so the scheduler dispatches
-			// each task exactly once; re-execution is signalled in place via slReexec.
+			// each task exactly once; re-execution is signalled through slReexecFlag.
 			if be.selfLoopDispatched[nextTx] {
 				be.cntExec++
 				dispatched++
@@ -4000,7 +3977,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			version := execTask.Version()
 			version.Incarnation = 0
 			tv.version = version
-			pe.dispatchRunSelfLoop(be, tv)
+			pe.dispatchRunSelfLoop(be, tv, nil, false)
 			budget--
 
 			if !isNextValidated {
