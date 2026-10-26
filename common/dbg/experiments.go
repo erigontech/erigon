@@ -137,12 +137,6 @@ var (
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
 	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
-	// GetAccountShadow makes the commitment calculator also build each block's
-	// commitment input from the version map via GetAccount/GetStorage and assert it
-	// matches the calcState-accumulated input key-by-key, before the accumulator is
-	// retired. Diagnostic only; on a divergence it fails the block with the offending
-	// key so the write side / projection gap is attributable.
-	GetAccountShadow = EnvBool("GETACCOUNT_SHADOW", false)
 	// CommitmentAfterExec makes the exec loop wait for the commitment
 	// calculator to handle block N's result before starting N+1. Diagnostic:
 	// it trades the block-level exec/commitment overlap for most of the
