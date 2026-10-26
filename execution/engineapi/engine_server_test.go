@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -361,10 +362,12 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 				payload.BlockHash[0] ^= 0xff
 			}
 
+			var recovered bool
 			stub := &stubExecutionModule{
-				getHeaderFunc:     getHeaderReturning(parentHash, parent),
-				currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
-				isValidatedFunc:   func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
+				getHeaderFunc:          getHeaderReturning(parentHash, parent),
+				currentHeaderFunc:      func(context.Context) (*types.Header, error) { return parent, nil },
+				isValidatedFunc:        func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
+				addSendersRecoveryFunc: func(common.Hash, *exec.SendersRecovery) { recovered = true },
 			}
 			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
@@ -387,6 +390,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			if bad {
 				require.Equal(t, parentHash, latestValidAncestor)
 			}
+			require.Equal(t, test.wantStatus == engine_types.AcceptedStatus, recovered, "senders are recovered only for a payload that goes to the block validation")
 		})
 	}
 }
