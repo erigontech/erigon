@@ -194,7 +194,15 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	acc.Balance = v.GetBalance()
 	acc.Nonce = v.GetNonce()
 	acc.Incarnation = v.GetIncarnation()
-	acc.CodeHash = v.GetCodeHash()
+	// Apply a code-hash write only when the version map holds one; otherwise keep the
+	// base account's hash, or NewAccount's EmptyCodeHash for a freshly-created codeless
+	// account. GetCodeHash reports a base-absent account as NilCodeHash (its zero
+	// value), which would wrongly serialise a new EOA's leaf with a zero code hash.
+	if v.vm != nil {
+		if ch, ok := versionedUpdateCodeHash(v.vm, v.addr, v.txIdx); ok {
+			acc.CodeHash = ch
+		}
+	}
 	return &acc
 }
 

@@ -25,6 +25,25 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// TestGetAccount_NewCodelessAccountHasEmptyCodeHash pins that a freshly-created
+// codeless account (balance written, no code-hash cell, no base) projects with
+// EmptyCodeHash, not the zero NilCodeHash. GetCodeHash reports a base-absent account
+// as NilCodeHash, so Account must keep NewAccount's EmptyCodeHash unless the version
+// map actually holds a code-hash write — otherwise the new EOA's trie leaf diverges.
+func TestGetAccount_NewCodelessAccountHasEmptyCodeHash(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(2)
+	vm := NewVersionMap(nil)
+	vm.SetBaseTxNum(0)
+	// A value transfer to a new address: a balance cell, no code-hash cell, no base.
+	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+
+	acc, ok := vm.GetAccount(addr, 1, nil)
+	require.True(t, ok, "a funded new account exists")
+	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "a codeless new account projects EmptyCodeHash, not zero")
+}
+
 // TestVersionMap_GetAccountProjection pins the post-seal projection: GetAccount reads
 // the account composed at a global txNum (txNum = baseTxNum + TxIndex + 1, so it
 // includes that tx's own writes) and returns comma-ok false once the account is
