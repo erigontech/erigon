@@ -2163,3 +2163,18 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
 	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
 }
+
+func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	_, debugApi := newCallManyApisForTest(m)
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, 500} {
+		stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams, "debug_traceCallMany %d", txIndex)
+	}
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
+	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
+	require.ErrorAs(t, err, &invalidParams)
+}
