@@ -1351,7 +1351,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
 		if traceConfig != nil && traceConfig.StateOverrides != nil {
 			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
@@ -1642,7 +1641,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		var sd *StateDiff
 		if traceTypeStateDiff {
 			ibs.Reset()
-			transactions.VersionedCallState(ibs)
+			transactions.VersionedBlockState(ibs)
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 			sdMap := make(map[accounts.Address]*StateDiffAccount)
@@ -1824,7 +1823,6 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	}
 	initialIbs := state.New(cloneReader)
 	defer initialIbs.Close()
-	transactions.VersionedCallState(initialIbs)
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
@@ -2044,7 +2042,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		}
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}

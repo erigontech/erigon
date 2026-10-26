@@ -505,7 +505,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	isPos := false
 
 	traceFilterTxn := func(blockNum, txNum uint64, txIndex int, txn types.Transaction, msg *types.Message) (*TraceCallResult, error) {
-
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
 		oeConfig, err := parseOeTracerConfig(traceConfig)
