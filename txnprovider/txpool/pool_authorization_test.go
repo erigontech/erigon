@@ -487,7 +487,7 @@ func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {
 	slots.Append(txn, sender[:], false)
 	peer := PeerID(gointerfaces.ConvertHashToH512([64]byte{1}))
 	sentry := sentryproto.NewMockSentryClient(gomock.NewController(t))
-	pool.AddRemoteTxns(ctx, slots, peer, sentry)
+	_, submission := pool.AddRemoteTxns(ctx, slots, peer, sentry)
 
 	require.ErrorIs(t, pool.processRemoteTxns(ctx), readErr)
 	require.Equal(t, []AuthAndNonce{{crypto.PubkeyToAddress(key.PublicKey), 0}}, txn.AuthAndNonces,
@@ -496,7 +496,7 @@ func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {
 	require.Empty(t, pool.auths)
 	require.Equal(t, slots, *pool.unprocessedRemoteTxns)
 	require.Equal(t, map[string]*TxnSlot{string(txn.IDHash[:]): txn}, pool.unprocessedRemoteByHash)
-	require.Equal(t, []remoteSource{{peerID: peer, sentry: sentry}}, pool.unprocessedRemotePeers)
+	require.Equal(t, []remoteSource{{peerID: peer, sentry: sentry, result: submission}}, pool.unprocessedRemotePeers)
 	require.True(t, pool.hasUnprocessedRemoteTxns.Load())
 
 	require.NoError(t, pool.processRemoteTxns(ctx))

@@ -179,7 +179,7 @@ func TestIdHashKnownDiscardReasons(t *testing.T) {
 		{txpoolcfg.IntrinsicGas, true},
 	} {
 		t.Run(tc.reason.String(), func(t *testing.T) {
-			pool.discardReasonsLRU.Add(string(hash[:]), tc.reason)
+			pool.discardReasonsLRU.Add(string(hash[:]), discardRecord{reason: tc.reason})
 			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
 				known, err := pool.IdHashKnown(tx, hash[:])
 				require.NoError(t, err)

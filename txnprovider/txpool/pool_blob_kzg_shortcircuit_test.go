@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -95,51 +94,6 @@ func makeBlobSlot(idHashByte byte, breakKZG bool) TxnSlot {
 		s.BlobBundles[0].Blob[31] ^= 0x01
 	}
 	return s
-}
-
-func TestBlobProofVerdictUsesSidecar(t *testing.T) {
-	for _, badFirst := range []bool{false, true} {
-		t.Run(fmt.Sprint("bad first ", badFirst), func(t *testing.T) {
-			pool := seedBlobKZGTestPool(t, t.Context())
-			pool.lock.Lock()
-			defer pool.lock.Unlock()
-			good := makeBlobSlot(0x10, false)
-			bad := makeBlobSlot(0x10, true)
-			if badFirst {
-				require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, pool.validateBlobTxn(&bad, false))
-			}
-			require.Equal(t, txpoolcfg.Success, pool.validateBlobTxn(&good, false))
-			require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, pool.validateBlobTxn(&bad, false))
-			require.Equal(t, txpoolcfg.Success, pool.validateBlobTxn(&good, false))
-			good.BlobBundles[0].Proofs[0][0] ^= 0xff
-			require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, pool.validateBlobTxn(&good, false))
-		})
-	}
-}
-
-func TestBlobProofVerdictIsReused(t *testing.T) {
-	for _, bad := range []bool{false, true} {
-		t.Run(fmt.Sprint("bad proof ", bad), func(t *testing.T) {
-			pool := seedBlobKZGTestPool(t, t.Context())
-			pool.lock.Lock()
-			defer pool.lock.Unlock()
-			slot := makeBlobSlot(0x10, bad)
-			want := txpoolcfg.Success
-			if bad {
-				want = txpoolcfg.UnmatchedBlobTxExt
-			}
-			require.Equal(t, want, pool.validateBlobTxn(&slot, false))
-			keys := pool.blobProofsLRU.Keys()
-			require.Len(t, keys, 1)
-			// An opposite cached verdict exposes a repeated verification without timing it.
-			pool.blobProofsLRU.Add(keys[0], bad)
-			want = txpoolcfg.UnmatchedBlobTxExt
-			if bad {
-				want = txpoolcfg.Success
-			}
-			require.Equal(t, want, pool.validateBlobTxn(&slot, false))
-		})
-	}
 }
 
 // validateTxns must stop validating subsequent remote (IsLocal=false) txns

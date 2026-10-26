@@ -449,7 +449,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 
 			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
-			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+			_, err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 				Id:     tt.id,
 				Data:   tt.data,
 				PeerId: peerID,
@@ -520,7 +520,7 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 
 			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
-			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+			_, err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 				Id:     tt.id,
 				Data:   tt.data,
 				PeerId: peerID,
@@ -702,7 +702,7 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
-	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+	_, err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 		Id:     sentryproto.MessageId_TRANSACTIONS_66,
 		Data:   validPayload,
 		PeerId: peerID,

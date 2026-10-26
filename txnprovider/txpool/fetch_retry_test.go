@@ -47,6 +47,31 @@ type fetchTestStream struct {
 
 func (s *fetchTestStream) Recv() (*sentryproto.InboundMessage, error) { return s.recv() }
 
+func newFetchTestClient(t *testing.T) (*sentryproto.MockSentryClient, <-chan *sentryproto.SendMessageByIdRequest, <-chan *sentryproto.PenalizePeerRequest) {
+	t.Helper()
+	// One extra slot preserves duplicate calls without blocking the fetcher.
+	sent := make(chan *sentryproto.SendMessageByIdRequest, 2)
+	penalties := make(chan *sentryproto.PenalizePeerRequest, 2)
+	client := sentryproto.NewMockSentryClient(gomock.NewController(t))
+	client.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+			select {
+			case sent <- request:
+			default:
+			}
+			return &sentryproto.SentPeers{}, nil
+		}).AnyTimes()
+	client.EXPECT().PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, request *sentryproto.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			select {
+			case penalties <- request:
+			default:
+			}
+			return &emptypb.Empty{}, nil
+		}).AnyTimes()
+	return client, sent, penalties
+}
+
 func receiveFetchTestMessages(t *testing.T, fetch *Fetch, client *sentryproto.MockSentryClient, steps ...func() *sentryproto.InboundMessage) {
 	t.Helper()
 	i := 0
@@ -68,16 +93,26 @@ func receiveFetchTestMessages(t *testing.T, fetch *Fetch, client *sentryproto.Mo
 
 func newFetchTestTransaction(t *testing.T, nonce uint64) (*TxPool, kv.RwDB, types.Transaction, *remoteproto.StateChangeBatch) {
 	t.Helper()
+	pool, db, signed, change := newFetchTestTransactions(t, nonce)
+	return pool, db, signed[0], change
+}
+
+func newFetchTestTransactions(t *testing.T, nonces ...uint64) (*TxPool, kv.RwDB, []types.Transaction, *remoteproto.StateChangeBatch) {
+	t.Helper()
 	ctx, pool, db, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	require.NoError(t, pool.start(ctx))
 	pool.cfg.MaxNonceGap = 64
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	txn := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000).Txn.(*types.DynamicFeeTransaction)
-	txn.ChainID = pool.chainID
-	signed, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), key)
-	require.NoError(t, err)
+	signed := make([]types.Transaction, 0, len(nonces))
+	for _, nonce := range nonces {
+		txn := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000).Txn.(*types.DynamicFeeTransaction)
+		txn.ChainID = pool.chainID
+		signedTxn, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), key)
+		require.NoError(t, err)
+		signed = append(signed, signedTxn)
+	}
 	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
 	change := &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee: 1, BlockGasLimit: 1_000_000,
@@ -112,16 +147,7 @@ func TestFetchRetriesIdenticalTransactionAfterNonceGap(t *testing.T) {
 				body = EncodeTransactions([][]byte{encoded.Bytes()}, nil)
 			}
 			hash := signed.Hash()
-			client := sentryproto.NewMockSentryClient(gomock.NewController(t))
-			client.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-				func(_ context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
-					require.Equal(t, sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, request.Data.Id)
-					id, hashes, _, err := ParseGetPooledTransactions66(request.Data.Data, 0, nil)
-					require.NoError(t, err)
-					require.Equal(t, uint64(1), id)
-					require.Equal(t, hash[:], hashes)
-					return &sentryproto.SentPeers{}, nil
-				})
+			client, sent, penalties := newFetchTestClient(t)
 			var wg sync.WaitGroup
 			fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
 			reply := &sentryproto.InboundMessage{Id: tc.messageID, Data: body, PeerId: peerID}
@@ -129,9 +155,9 @@ func TestFetchRetriesIdenticalTransactionAfterNonceGap(t *testing.T) {
 				func() *sentryproto.InboundMessage { return reply },
 				func() *sentryproto.InboundMessage {
 					require.NoError(t, pool.processRemoteTxns(ctx))
-					reason, found := pool.discardReasonsLRU.Get(string(hash[:]))
+					record, found := pool.discardReasonsLRU.Get(string(hash[:]))
 					require.True(t, found)
-					require.Equal(t, txpoolcfg.NonceTooDistant, reason)
+					require.Equal(t, txpoolcfg.NonceTooDistant, record.reason)
 					require.Empty(t, pool.byHash)
 					change.ChangeBatch[0].BlockHeight = 2
 					change.ChangeBatch[0].Changes[0].Data = accounts.SerialiseV3(&accounts.Account{
@@ -162,6 +188,16 @@ func TestFetchRetriesIdenticalTransactionAfterNonceGap(t *testing.T) {
 					return nil
 				},
 			)
+			require.Len(t, sent, 1)
+			require.Empty(t, penalties)
+			request := <-sent
+			require.NotNil(t, request)
+			require.NotNil(t, request.Data)
+			require.Equal(t, sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, request.Data.Id)
+			id, hashes, _, err := ParseGetPooledTransactions66(request.Data.Data, 0, nil)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1), id)
+			require.Equal(t, hash[:], hashes)
 		})
 	}
 }
@@ -173,13 +209,7 @@ func TestFetchIdenticalReplyFromHonestPeer(t *testing.T) {
 	require.NoError(t, signed.MarshalBinary(&encoded))
 	hash := signed.Hash()
 	body := EncodePooledTransactions66([][]byte{encoded.Bytes()}, 1, nil)
-	client := sentryproto.NewMockSentryClient(gomock.NewController(t))
-	client.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, request *sentryproto.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
-			require.Equal(t, peerID, PeerID(request.PeerId))
-			require.Equal(t, sentryproto.PenaltyKind_Kick, request.Penalty)
-			return &emptypb.Empty{}, nil
-		})
+	client, sent, penalties := newFetchTestClient(t)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
 	fetch.recordAnnouncement(peerID, []byte{types.LegacyTxType}, []uint32{uint32(encoded.Len())}, hash[:], nil)
@@ -197,4 +227,10 @@ func TestFetchIdenticalReplyFromHonestPeer(t *testing.T) {
 			return nil
 		},
 	)
+	require.Empty(t, sent)
+	require.Len(t, penalties, 1)
+	request := <-penalties
+	require.NotNil(t, request)
+	require.Equal(t, peerID, PeerID(request.PeerId))
+	require.Equal(t, sentryproto.PenaltyKind_Kick, request.Penalty)
 }
