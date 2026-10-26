@@ -312,3 +312,34 @@ func TestDumpTxsReturnsWhenCollectFails(t *testing.T) {
 		t.Fatal("DumpTxs did not return after collect failed")
 	}
 }
+
+func TestDumpTxsCollectsNothingAfterFailedTx(t *testing.T) {
+	m := createDumpTestKV(t, chain.AllProtocolChanges, 1, 64)
+	errFirst := errors.New("first collect failed")
+	errLater := errors.New("later collect failed")
+
+	var txs, afterFailure int
+	done := make(chan error, 1)
+	go func() {
+		_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 2, nil, func(v []byte) error {
+			if v == nil {
+				return nil
+			}
+			txs++
+			if txs == 1 {
+				return errFirst
+			}
+			afterFailure++
+			return errLater
+		}, 1, log.LvlInfo, log.New())
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, errFirst)
+		require.Zero(t, afterFailure)
+	case <-time.After(30 * time.Second):
+		t.Fatal("DumpTxs did not return after collect failed")
+	}
+}
