@@ -1798,3 +1798,45 @@ func TestWriteFlushedToMatchesFinalizeTxAcrossTxs(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(90), got.originals[a].Balance, "the original carries tx 0's debit")
 	require.Nil(t, got.accounts[c], "the destroyed account is deleted")
 }
+
+// A balance-preserving SELFDESTRUCT (EIP-8246) leaves a balance-only account on both paths.
+func TestWriteFlushedToMatchesFinalizeTxPreservedBalance(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
+	withCode := acctBal(50)
+	withCode.Nonce = 2
+	withCode.CodeHash = accounts.InternCodeHash(common.Hash{9})
+	reader := &fakeBaseReader{
+		accts:   map[accounts.Address]*accounts.Account{c: withCode},
+		storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{c: {slot: *uint256.NewInt(7)}},
+	}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsAmsterdam: true}
+	run := func(ibs *IntraBlockState) {
+		_, err := ibs.Selfdestruct(c, true)
+		require.NoError(t, err)
+	}
+
+	materialized := New(reader)
+	defer materialized.Close()
+	materialized.SetTxContext(1, 0)
+	run(materialized)
+	want := newFinalStateWriter()
+	require.NoError(t, materialized.FinalizeTx(rules, want))
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	versioned.SetTxContext(1, 0)
+	run(versioned)
+	writes, err := versioned.FinalizedWrites(rules)
+	require.NoError(t, err)
+	versioned.FlushWritesToVersionMap(writes)
+	got := newFinalStateWriter()
+	require.NoError(t, versioned.WriteFlushedTo(writes, got))
+
+	require.Equal(t, want.accounts, got.accounts)
+	require.Equal(t, want.code, got.code)
+	require.Equal(t, want.storage, got.storage)
+	require.NotNil(t, got.accounts[c], "the balance survives")
+	require.Equal(t, *uint256.NewInt(50), got.accounts[c].Balance)
+}
