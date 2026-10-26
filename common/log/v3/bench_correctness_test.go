@@ -3,65 +3,67 @@ package log
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestStreamHandlerNoContention(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping wall-clock contention test in short mode")
-	}
-
-	const (
-		goroutines = 100
-		writeDelay = 2 * time.Millisecond
-	)
-
-	run := func(handler Handler, wr *slowWriter) (time.Duration, int64) {
+	logAll := func(h Handler, goroutines int) {
 		lg := New()
-		lg.SetHandler(handler)
-
-		start := time.Now()
+		lg.SetHandler(h)
 		var wg sync.WaitGroup
 		for range goroutines {
-			wg.Go(func() {
-				lg.Info("msg")
-			})
+			wg.Go(func() { lg.Info("msg") })
 		}
 		wg.Wait()
-
-		return time.Since(start), wr.lines.Load()
 	}
 
-	parallelWr := &slowWriter{delay: writeDelay}
-	parallelElapsed, parallelLines := run(
-		StreamHandler(parallelWr, TerminalFormatNoColor()),
-		parallelWr,
-	)
-	if parallelLines != goroutines {
-		t.Fatalf("parallel StreamHandler run: expected %d log lines, got %d", goroutines, parallelLines)
+	ow := &overlapWriter{both: make(chan struct{})}
+	logAll(StreamHandler(ow, TerminalFormatNoColor()), 2)
+	if ow.timedOut.Load() {
+		t.Fatal("StreamHandler serializes writes: two concurrent Writes never overlapped")
 	}
 
-	serialWr := &slowWriter{delay: writeDelay}
-	serialElapsed, serialLines := run(
-		SyncHandler(StreamHandler(serialWr, TerminalFormatNoColor())),
-		serialWr,
-	)
-	if serialLines != goroutines {
-		t.Fatalf("sync-wrapped StreamHandler run: expected %d log lines, got %d", goroutines, serialLines)
+	fw := &inFlightWriter{}
+	logAll(SyncHandler(StreamHandler(fw, TerminalFormatNoColor())), 100)
+	if fw.overlapped.Load() {
+		t.Fatal("SyncHandler let two Writes run at once")
 	}
+}
 
-	// Compare relative behavior within the same test run instead of asserting a
-	// fixed wall-clock threshold. The sync-wrapped handler should be
-	// meaningfully slower because it serializes all writes through one mutex.
-	if serialElapsed <= parallelElapsed {
-		t.Fatalf("expected SyncHandler(StreamHandler(...)) to be slower than StreamHandler(...): parallel=%v serial=%v", parallelElapsed, serialElapsed)
-	}
-	if serialElapsed < 2*parallelElapsed {
-		t.Fatalf("expected SyncHandler(StreamHandler(...)) to be at least 2x slower: parallel=%v serial=%v", parallelElapsed, serialElapsed)
-	}
+// overlapWriter holds each Write until two Writes are in flight, so it returns promptly only if writes overlap.
+type overlapWriter struct {
+	entered  atomic.Int32
+	both     chan struct{}
+	timedOut atomic.Bool
+}
 
-	t.Logf("parallel=%v serial=%v lines=%d", parallelElapsed, serialElapsed, parallelLines)
+func (w *overlapWriter) Write(p []byte) (int, error) {
+	if w.entered.Add(1) == 2 {
+		close(w.both)
+	}
+	select {
+	case <-w.both:
+	case <-time.After(10 * time.Second):
+		w.timedOut.Store(true)
+	}
+	return len(p), nil
+}
+
+// inFlightWriter records whether two Writes were ever in flight at once.
+type inFlightWriter struct {
+	inFlight   atomic.Int32
+	overlapped atomic.Bool
+}
+
+func (w *inFlightWriter) Write(p []byte) (int, error) {
+	if w.inFlight.Add(1) > 1 {
+		w.overlapped.Store(true)
+	}
+	time.Sleep(time.Millisecond)
+	w.inFlight.Add(-1)
+	return len(p), nil
 }
 
 func TestStreamHandlerAllocsUpperBound(t *testing.T) {
