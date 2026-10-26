@@ -400,7 +400,10 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
-	if err := p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
+	if err := p.senders.registerNewSenders(&unwindTxns, p.logger); err != nil {
+		return err
+	}
+	if err := p.senders.registerNewSenders(&minedTxns, p.logger); err != nil {
 		return err
 	}
 
@@ -436,6 +439,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
+	p.forgetUnusedSenders(senderIDsOf(&minedTxns))
 
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
