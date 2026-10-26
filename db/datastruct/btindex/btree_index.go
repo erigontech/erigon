@@ -19,6 +19,7 @@ package btindex
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path"
@@ -478,7 +479,16 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	return nil
 }
 
-func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt *BtIndex, err error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (*BtIndex, error) {
+	return openBtreeIndex(indexPath, kvGetter, false)
+}
+
+// OpenBtreeIndexInMem reads the whole index into memory instead of mapping it, so lookups never wait for page cache misses.
+func OpenBtreeIndexInMem(indexPath string, kvGetter *seg.Reader) (*BtIndex, error) {
+	return openBtreeIndex(indexPath, kvGetter, true)
+}
+
+func openBtreeIndex(indexPath string, kvGetter *seg.Reader, inMem bool) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
 	}
@@ -511,15 +521,22 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		return idx, nil
 	}
 
-	idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
-	if err != nil {
-		return nil, err
+	if inMem {
+		idx.data = make([]byte, idx.size)
+		if _, err = io.ReadFull(idx.file, idx.data); err != nil {
+			return nil, err
+		}
+	} else {
+		idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
+		if err != nil {
+			return nil, err
+		}
+		// Decoding below walks the whole node blob, so readahead pays off once. Lookups
+		// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
+		_ = mmap.MadviseSequential(idx.m)
+		defer func() { _ = mmap.MadviseRandom(idx.m) }()
+		idx.data = idx.m[:idx.size]
 	}
-	// Decoding below walks the whole node blob, so readahead pays off once. Lookups
-	// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
-	_ = mmap.MadviseSequential(idx.m)
-	defer func() { _ = mmap.MadviseRandom(idx.m) }()
-	idx.data = idx.m[:idx.size]
 
 	var nd pivots
 	var keysBlob []byte
@@ -638,6 +655,9 @@ func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
 func (b *BtIndex) M() uint64 { return b.indexM }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
+
+// InMem reports whether the index was read into memory by OpenBtreeIndexInMem.
+func (b *BtIndex) InMem() bool { return b.m == nil && b.data != nil }
 
 func (b *BtIndex) KeyCount() uint64 {
 	if b.Empty() {

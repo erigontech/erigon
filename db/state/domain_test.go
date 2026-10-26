@@ -870,7 +870,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	// Recreate domain and re-scan the files
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	d.closeWhatNotInList([]string{})
+	d.Close()
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
 	_, err = d.openFolder(t.Context(), scanDirsRes)
@@ -3982,4 +3982,61 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 		dc.ht.iit.files = nil
 		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
 	})
+}
+
+func TestDomain_BtIndexInMem(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	db, d, txs := filledDomain(t, log.New())
+	d.btIndexInMem = true
+	requireBtIndexesInMem := func() {
+		t.Helper()
+		dc := d.beginForTests()
+		defer dc.Close()
+		require.NotEmpty(t, dc.files)
+		for _, f := range dc.files {
+			require.Truef(t, f.src.bindex.InMem(), "%s", f.src.decompressor.FileName())
+		}
+	}
+
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
+	requireBtIndexesInMem()
+	checkHistory(t, db, d, txs)
+
+	d.Close()
+	scanDirsRes, err := scanDirs(d.dirs)
+	require.NoError(t, err)
+	_, err = d.openFolder(t.Context(), scanDirsRes)
+	require.NoError(t, err)
+	requireBtIndexesInMem()
+	checkHistory(t, db, d, txs)
+}
+
+func TestBtIndexInMemByMemoryAndOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		total        uint64
+		inMem, mmap  []string
+		wantInMemory bool
+	}{
+		{name: "storage", total: 64 << 30, wantInMemory: true},
+		{name: "storage", total: 20 << 30, wantInMemory: true},
+		{name: "storage", total: 20<<30 - 1, wantInMemory: false},
+		{name: "storage", total: 16 << 30, wantInMemory: false},
+		{name: "storage", total: 0, wantInMemory: true},
+		{name: "storage", total: 64 << 30, mmap: []string{"storage"}, wantInMemory: false},
+		{name: "accounts", total: 64 << 30, mmap: []string{"storage"}, wantInMemory: true},
+		{name: "storage", total: 16 << 30, inMem: []string{"storage"}, wantInMemory: true},
+		{name: "storage", total: 64 << 30, inMem: []string{"storage"}, mmap: []string{"storage"}, wantInMemory: false},
+	} {
+		require.Equal(t, tc.wantInMemory, btIndexInMem(tc.name, tc.total, tc.inMem, tc.mmap), "%+v", tc)
+	}
 }

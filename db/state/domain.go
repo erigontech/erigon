@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -99,6 +100,8 @@ type Domain struct {
 	// _testBuildAccessorHook - test-only: called with the recsplit and decompressor
 	// before the build loop in buildHashMapAccessor.
 	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
+
+	btIndexInMem bool // read .bt files into memory instead of mapping them, see btIndexInMem
 }
 
 type domainVisible struct {
@@ -116,8 +119,9 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	}
 
 	d := &Domain{
-		DomainCfg:  cfg,
-		dirtyFiles: newDirtyFiles(),
+		DomainCfg:    cfg,
+		dirtyFiles:   newDirtyFiles(),
+		btIndexInMem: btIndexInMem(cfg.Name.String(), estimate.TotalMemory(), domainBtForceInMem, domainBtForceMmap),
 	}
 
 	var err error
@@ -216,7 +220,42 @@ var (
 	domainExistenceForceWillNeed = dbg.EnvStrings("DOMAIN_EXISTENCE_WILLNEED", ",", nil)
 	domainExistenceForceNormal   = dbg.EnvStrings("DOMAIN_EXISTENCE_NORMAL", ",", nil)
 	domainExistenceForceRandom   = dbg.EnvStrings("DOMAIN_EXISTENCE_RANDOM", ",", nil)
+
+	domainBtForceInMem = dbg.EnvStrings("DOMAIN_BT_MEM", ",", nil)
+	domainBtForceMmap  = dbg.EnvStrings("DOMAIN_BT_MMAP", ",", nil)
 )
+
+// btInMemMinTotalMemory is the memory below which .bt files stay memory-mapped, the same bound
+// below which existence filters leave the heap.
+const btInMemMinTotalMemory = 20 << 30
+
+// btIndexInMem reports whether a domain reads its .bt files into memory, so state reads at the chain tip
+// do not wait for index pages the page cache dropped. It costs heap equal to the size of those files.
+// DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override the default; DOMAIN_BT_MMAP wins.
+func btIndexInMem(name string, total uint64, forceInMem, forceMmap []string) bool {
+	switch {
+	case slices.Contains(forceMmap, name):
+		return false
+	case slices.Contains(forceInMem, name):
+		return true
+	default:
+		return total == 0 || total >= btInMemMinTotalMemory
+	}
+}
+
+func (d *Domain) openBtIndex(fPath string, r *seg.Reader) (*btindex.BtIndex, error) {
+	if d.btIndexInMem {
+		return btindex.OpenBtreeIndexInMem(fPath, r)
+	}
+	return btindex.OpenBtreeIndexWithDecompressor(fPath, r)
+}
+
+func (d *Domain) buildBtIndex(btPath, kveiPath string, r *seg.Reader, salt uint32, ps *background.ProgressSet) (*btindex.BtIndex, error) {
+	if err := btindex.BuildBtreeIndexWithDecompressor(btPath, kveiPath, r, ps, d.dirs.Tmp, salt, d.logger, d.noFsync, d.Accessors); err != nil {
+		return nil, err
+	}
+	return d.openBtIndex(btPath, r)
+}
 
 func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	name := d.Name.String()
@@ -1058,7 +1097,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
 		kveiPath := d.kvExistenceIdxNewFilePathIn(dstDir, stepFrom, stepTo)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1161,7 +1200,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
