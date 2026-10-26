@@ -131,7 +131,7 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 	}
 	if v.vm != nil {
 		if code, ok := versionedUpdateCode(v.vm, v.addr, v.txIdx); ok {
-			return code, nil
+			return code.Bytes, nil
 		}
 	}
 	if v.base != nil {

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strconv"
 	"testing"
@@ -158,6 +159,25 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 
 	require.Equal(t, byNumber, byHash)
 	require.NotContains(t, byNumber[0][0], "error")
+}
+
+func TestCapEVMTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		server   time.Duration
+		clientMs int64
+		want     time.Duration
+	}{
+		{5 * time.Minute, 0, 5 * time.Minute},
+		{5 * time.Minute, -1, 5 * time.Minute},
+		{5 * time.Minute, (24 * time.Hour).Milliseconds(), 5 * time.Minute},
+		{5 * time.Minute, 1000, time.Second},
+		{0, 1000, time.Second},
+		{0, 0, 0},
+		{1500 * time.Microsecond, 1, time.Millisecond},
+		{0, math.MaxInt64, time.Duration(math.MaxInt64/int64(time.Millisecond)) * time.Millisecond},
+	} {
+		require.Equal(t, tc.want, capEVMTimeout(tc.server, tc.clientMs), "server %v, client %d ms", tc.server, tc.clientMs)
+	}
 }
 
 func TestCallManyEmptyBundles(t *testing.T) {

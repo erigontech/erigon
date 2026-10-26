@@ -403,8 +403,9 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	if rw.background && rw.chainTx == nil {
 		return &TxResult{
-			Task: txTask,
-			Err:  fmt.Errorf("worker run without a bound roTx: the dispatch goroutine must bind a roTx before RunTxTask"),
+			Task:        txTask,
+			Err:         fmt.Errorf("worker run without a bound roTx: the dispatch goroutine must bind a roTx before RunTxTask"),
+			Operational: true,
 		}
 	}
 

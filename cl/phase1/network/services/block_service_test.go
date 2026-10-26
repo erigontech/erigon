@@ -2099,6 +2099,28 @@ func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
 	}
 }
 
+type attestationCountingStore struct {
+	forkchoice.ForkChoiceStorage
+	attestations int
+}
+
+func (s *attestationCountingStore) OnAttestation(*solid.Attestation, bool, bool) error {
+	s.attestations++
+	return nil
+}
+
+// OnBlock already applies body attestations, so the gossip path must not apply them again.
+func TestImportBlockOperationsLeavesAttestationsToOnBlock(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Body.Attestations.Append(&solid.Attestation{})
+	store := &attestationCountingStore{}
+	service := blockService{forkchoiceStore: store}
+
+	service.importBlockOperations(block)
+
+	require.Zero(t, store.attestations)
+}
+
 func TestValidateGloasBlockBodyLimitsRejectsOversizedOperationAndRequests(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxProposerSlashings = 1
