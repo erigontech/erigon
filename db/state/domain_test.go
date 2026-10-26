@@ -4036,6 +4036,11 @@ func TestBtIndexInMemByMemoryAndOverrides(t *testing.T) {
 		{name: "accounts", total: 64 << 30, mmap: []string{"storage"}, wantInMemory: true},
 		{name: "storage", total: 16 << 30, inMem: []string{"storage"}, wantInMemory: true},
 		{name: "storage", total: 64 << 30, inMem: []string{"storage"}, mmap: []string{"storage"}, wantInMemory: false},
+		{name: "accounts", total: 64 << 30, wantInMemory: true},
+		{name: "code", total: 64 << 30, wantInMemory: true},
+		{name: "receipt", total: 64 << 30, wantInMemory: false},
+		{name: "commitment", total: 64 << 30, wantInMemory: false},
+		{name: "receipt", total: 64 << 30, inMem: []string{"receipt"}, wantInMemory: true},
 	} {
 		require.Equal(t, tc.wantInMemory, btIndexInMem(tc.name, tc.total, tc.inMem, tc.mmap), "%+v", tc)
 	}

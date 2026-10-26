@@ -879,4 +879,7 @@ func TestOpenBtreeIndexInMem(t *testing.T) {
 		want.Close()
 		got.Close()
 	}
+
+	inMem.Close()
+	require.False(t, inMem.InMem(), "Close must release the in-memory buffer")
 }

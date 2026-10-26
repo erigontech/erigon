@@ -686,6 +686,7 @@ func (b *BtIndex) Close() {
 		b.bplus.Close()
 		b.bplus = nil
 	}
+	b.data, b.ef = nil, nil
 }
 
 // Get - exact match of key. `k == nil` - means not found

@@ -229,6 +229,10 @@ var (
 // below which existence filters leave the heap.
 const btInMemMinTotalMemory = 20 << 30
 
+// btInMemDefaultDomains are the domains whose .bt files are read into memory by default:
+// the state that block execution reads at the chain tip.
+var btInMemDefaultDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String()}
+
 // btIndexInMem reports whether a domain reads its .bt files into memory, so state reads at the chain tip
 // do not wait for index pages the page cache dropped. It costs heap equal to the size of those files.
 // DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override the default; DOMAIN_BT_MMAP wins.
@@ -239,7 +243,7 @@ func btIndexInMem(name string, total uint64, forceInMem, forceMmap []string) boo
 	case slices.Contains(forceInMem, name):
 		return true
 	default:
-		return total == 0 || total >= btInMemMinTotalMemory
+		return slices.Contains(btInMemDefaultDomains, name) && (total == 0 || total >= btInMemMinTotalMemory)
 	}
 }
 
