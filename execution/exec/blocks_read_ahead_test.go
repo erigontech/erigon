@@ -255,7 +255,7 @@ func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
 			}
 			getter := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16}
 			reader := state.NewReaderV3(getter)
-			require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{}, test.mode, destinations))
+			require.NoError(t, warmBALStateTask(reader, accountChanges, make([]accounts.StorageKey, len(accountChanges.StorageReads)), balWarmupTask{}, test.mode, destinations))
 			require.Equal(t, 1, source.accountReads)
 			require.Equal(t, test.wantCodeReads, source.codeReads)
 		})
@@ -270,7 +270,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	address := accounts.InternAddress(common.Address{19: 1})
 	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]common.Hash, 65)}
 	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
-	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
+	require.NoError(t, warmBALStateTask(reader, accountChanges, make([]accounts.StorageKey, len(accountChanges.StorageReads)), balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
 	require.Zero(t, source.codeReads)
 }

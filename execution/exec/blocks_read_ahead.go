@@ -36,6 +36,8 @@ type BlockReadAheader struct {
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 
+	balReadKeys atomic.Pointer[[][]accounts.StorageKey]
+
 	recoveries *lru.Cache[common.Hash, *SendersRecovery]
 
 	// The single permit belongs either to one warmup or to the code suspending
@@ -341,7 +343,7 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 	return destinations
 }
 
-func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
+func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, readKeys []accounts.StorageKey, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
 	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
@@ -358,6 +360,7 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 			slot = account.StorageChanges[slotIndex].Slot
 		} else {
 			slot = accounts.InternKey(account.StorageReads[slotIndex-storageChanges])
+			readKeys[slotIndex-storageChanges] = slot
 		}
 		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
 			return err
@@ -409,9 +412,16 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
+	// Interned read slots are weak; holding them until the next block's warmup lets
+	// execution hit them instead of interning each slot a second time.
+	readKeys := make([][]accounts.StorageKey, len(bal))
+	for i := range bal {
+		readKeys[i] = make([]accounts.StorageKey, len(bal[i].StorageReads))
+	}
+	bra.balReadKeys.Store(&readKeys)
 	var group errgroup.Group
 	group.Go(func() error {
-		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+		return bra.warmBALState(ctx, db, bal, readKeys, tasks, codeMode, txCodeDestinations, balWorkers)
 	})
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
@@ -421,7 +431,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	return group.Wait()
 }
 
-func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
+func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, readKeys [][]accounts.StorageKey, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
 	var nextTask atomic.Uint64
 	wg, workerCtx := errgroup.WithContext(ctx)
 	for w := range workers {
@@ -450,7 +460,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 				}
 				task := tasks[taskIndex]
 				account := &bal[task.accountIndex]
-				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
+				if err := warmBALStateTask(stateReader, account, readKeys[task.accountIndex], task, codeMode, txCodeDestinations); err != nil {
 					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
 				tasksProcessed++
