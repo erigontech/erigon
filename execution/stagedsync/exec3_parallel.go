@@ -3004,9 +3004,14 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	if ws == nil {
 		return
 	}
+	seen := map[accounts.Address]struct{}{}
 	for h := range ws.AllHeaders() {
+		if _, ok := seen[h.Address]; ok {
+			continue
+		}
+		seen[h.Address] = struct{}{}
 		for _, tx := range readersAbove(be.readerByAddr[h.Address], writerTx) {
-			if be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOn(h) {
+			if !be.revalidate[tx] && be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOnAt(ws, h.Address) {
 				be.revalidate[tx] = true
 			}
 		}
@@ -3410,6 +3415,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // ascending so the cascade order matches the scan.
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
 	set := map[int]struct{}{}
+	seen := map[accounts.Address]struct{}{}
 	add := func(ws *state.WriteSet, skipBALSeeded bool) {
 		if ws == nil {
 			return
@@ -3418,6 +3424,10 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			if skipBALSeeded && h.Path.BALSeeded() {
 				continue
 			}
+			if _, ok := seen[h.Address]; ok {
+				continue
+			}
+			seen[h.Address] = struct{}{}
 			for _, tx := range readersAbove(be.readerByAddr[h.Address], changedTx) {
 				set[tx] = struct{}{}
 			}
