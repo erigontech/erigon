@@ -328,7 +328,7 @@ func (cs *calcState) ApplyEIP161Removal(emptyRemoval, isAura bool) {
 		if cs.fieldMask[addr] == 0 {
 			continue
 		}
-		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash && acc.Incarnation == 0 &&
+		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
 			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
 			acc.Deleted = true
 			acc.Incarnation = 0
