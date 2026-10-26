@@ -21,6 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -161,6 +162,62 @@ func (vm *VersionMap) blockTxIndex(txNum uint64) int {
 func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base StateReader) (accounts.Account, bool) {
 	txIdx := int(txNum - vm.baseTxNum.Load())
 	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
+}
+
+// SeedEmptyRemovals encodes the EIP-161 empty-account removal as a write-side data
+// artifact in the BAL-seeded map, so GetAccount reads the deletion deterministically
+// with no read-side rules. The BAL carries no removal field (EIP-7928), so for each
+// touched account whose block-end state — its seeded cells composed with the committed
+// base for untouched fields — is empty and removable, it stamps a self-destruct removal
+// cell at the account's last-changed index. Mirrors exec's encodeExistingEmptyRemovals.
+func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base StateReader) {
+	ws := &WriteSet{}
+	for i := range bal {
+		ac := &bal[i]
+		addr := accounts.InternAddress(ac.Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
+		}
+		maxIdx := balMaxChangeIndex(ac)
+		if maxIdx == 0 {
+			continue // only reads, no field change — not a removal candidate
+		}
+		acc, ok := NewVersionedAccountView(addr, int(maxIdx), vm, base).GetAccount()
+		if !ok || !isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) {
+			continue
+		}
+		ws.SetEmptyRemoval(addr, Version{TxIndex: int(maxIdx) - 1})
+	}
+	if !ws.IsEmpty() {
+		vm.FlushVersionedWrites(ws, true, "")
+	}
+}
+
+// balMaxChangeIndex is the highest 1-based change index across an account's BAL
+// entries, i.e. the index of its last touch this block.
+func balMaxChangeIndex(ac *types.AccountChanges) uint32 {
+	var m uint32
+	for _, c := range ac.BalanceChanges {
+		m = max(m, c.Index)
+	}
+	for _, c := range ac.NonceChanges {
+		m = max(m, c.Index)
+	}
+	for _, c := range ac.CodeChanges {
+		m = max(m, c.Index)
+	}
+	for _, sc := range ac.StorageChanges {
+		for _, c := range sc.Changes {
+			m = max(m, c.Index)
+		}
+	}
+	return m
+}
+
+// isEmptyForEIP161 reports whether an account is empty per EIP-161: zero balance,
+// zero nonce, and empty (or nil) code hash.
+func isEmptyForEIP161(balance uint256.Int, nonce uint64, codeHash accounts.CodeHash) bool {
+	return balance.IsZero() && nonce == 0 && (codeHash == accounts.EmptyCodeHash || codeHash == accounts.CodeHash{})
 }
 
 // GetStorage returns addr's slot value composed at the given global txNum — including

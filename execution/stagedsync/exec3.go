@@ -811,6 +811,16 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// also lets the calculator's reads see the BAL without a second derivation.
 			blockVersionMap := state.NewVersionMap(dbBAL)
 			blockVersionMap.SetBaseTxNum(blockStartTxNum)
+			// Stamp the EIP-161 empty-account removals into the seed as data (the BAL
+			// carries no removal field), so the calculator reads the deletion via
+			// GetAccount with no EIP knowledge. Blocks are sequential, so the shared
+			// domain already holds the prior block's state as the base for untouched fields.
+			if len(dbBAL) > 0 {
+				blockVersionMap.SeedEmptyRemovals(dbBAL,
+					b.NumberU64() != 0 && te.cfg.chainConfig.IsEIP161Enabled(b.NumberU64()),
+					te.cfg.chainConfig.Aura != nil,
+					state.NewReaderV3(te.doms.AsGetter(execRoTx)))
+			}
 
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
