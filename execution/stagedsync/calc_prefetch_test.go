@@ -35,9 +35,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
+func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 	var got [][]byte
-	cc := &commitmentCalculator{prefetchFn: func(plainKey []byte) { got = append(got, plainKey) }}
+	cs := newTestCalcState()
+	cs.prefetch = func(plainKey []byte) { got = append(got, plainKey) }
 	payer, contract := common.Address{19: 1}, common.Address{19: 2}
 	slot := accounts.InternKey(common.Hash{31: 9})
 	writes := func(v uint64) *state.WriteSet {
@@ -51,13 +52,13 @@ func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 	slotValue := slot.Value()
 	want := [][]byte{payer[:], contract[:], append(contract[:], slotValue[:]...)}
 
-	cc.accumulateTouched(writes(1))
-	cc.accumulateTouched(writes(2))
-	require.ElementsMatch(t, want, got, "a key touched twice in one block is prefetched once")
+	cs.ApplyWrites(writes(1))
+	cs.ApplyWrites(writes(2))
+	require.ElementsMatch(t, want, got, "a key written twice in one block is prefetched once")
 
 	got = nil
-	cc.clearTouched()
-	cc.accumulateTouched(writes(3))
+	cs.ResetBlockFlags()
+	cs.ApplyWrites(writes(3))
 	require.ElementsMatch(t, want, got, "the next block prefetches the key again")
 }
 

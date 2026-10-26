@@ -139,8 +139,15 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 // would leave txNum at its prior value and fail this test directly.
 func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	asOfReader := &asOfStateReader{txNum: 0}
+	cs := newCalcState(asOfReader, nil, "test")
+	// Disable lazy-load — without a real SharedDomains the asOfReader's
+	// Read would NPE on r.sd.GetAsOf. The fix's contract is independent
+	// of whether the read succeeds: txNum must be pinned before the
+	// load is even attempted.
+	cs.domainReader = nil
 	cc := &commitmentCalculator{
 		asOfReader: asOfReader,
+		state:      cs,
 		// Non-nil doms with stepSize 0 so the step-boundary hook short-circuits;
 		// this test pins asOfReader.txNum, not the checkpoint path.
 		doms: &execctx.SharedDomains{},

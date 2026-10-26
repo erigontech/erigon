@@ -17,34 +17,14 @@
 package stagedsync
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// committedAccountReader serves the committed base account for emitTouched's GetAccount
-// composition, reading the accounts domain through the calculator's as-of reader. It is
-// the AccountBaseReader the BAL path hands GetAccount for fields the version map has no
-// cell for (the raw-view path needs none — the origin layer seeds the base).
-type committedAccountReader struct{ reader *asOfStateReader }
-
-func (r *committedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
-	addrVal := addr.Value()
-	enc, _, err := r.reader.Read(kv.AccountsDomain, addrVal[:], 0)
-	if err != nil {
-		return nil, err
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	acc := new(accounts.Account)
-	if err := accounts.DeserialiseV3(acc, enc); err != nil {
-		return nil, err
-	}
-	return acc, nil
-}
 
 // The GetAccount commitment path folds a block's updates straight from the version
 // map instead of accumulating per-field values in calcState. accumulateTouched
@@ -53,6 +33,68 @@ func (r *committedAccountReader) ReadAccountData(addr accounts.Address) (*accoun
 // version map via GetAccount/GetStorage and writes one Update per key. The version map
 // already carries the EIP-161 / self-destruct existence verdict, so this path has no
 // EIP knowledge and no re-derivation.
+
+// shadowCompareEmit (dbg.GetAccountShadow) folds this block's updates both ways —
+// calcState's flushToUpdates and the GetAccount emitTouched — into scratch buffers and
+// asserts they match key-by-key, returning the offending key on divergence so the write
+// side / projection gap is attributable. calcState stays authoritative (the real
+// flushToUpdates runs after), so the shadow adds a check without consensus risk.
+func (cc *commitmentCalculator) shadowCompareEmit(ctx context.Context, t commitTarget) error {
+	if cc.curVersionMap == nil {
+		return nil
+	}
+	calcScratch := cc.newScratchUpdates()
+	cc.state.flushToUpdates(calcScratch)
+	getScratch := cc.newScratchUpdates()
+	cc.emitTouched(cc.curVersionMap, t.lastTxNum, nil, getScratch)
+	return cc.compareUpdates(ctx, "raw-view", t.blockNum, calcScratch, getScratch)
+}
+
+// compareUpdates asserts the authoritative (calcState) and candidate (emitTouched)
+// update buffers hold the same key→Update set, returning the offending key on the
+// first divergence so a write-side / projection gap is attributable.
+func (cc *commitmentCalculator) compareUpdates(ctx context.Context, label string, blockNum uint64, authoritative, candidate *commitment.Updates) error {
+	calc, err := collectUpdatesMap(ctx, authoritative)
+	if err != nil {
+		return fmt.Errorf("getaccount shadow: collect calcState: %w", err)
+	}
+	got, err := collectUpdatesMap(ctx, candidate)
+	if err != nil {
+		return fmt.Errorf("getaccount shadow: collect emitTouched: %w", err)
+	}
+	for k, ua := range calc {
+		ub, ok := got[k]
+		if !ok {
+			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x in calcState but not emitTouched (%+v)", ErrWrongTrieRoot, label, blockNum, []byte(k), ua)
+		}
+		if ua != ub {
+			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x diverges calcState=%+v emitTouched=%+v", ErrWrongTrieRoot, label, blockNum, []byte(k), ua, ub)
+		}
+	}
+	for k, ub := range got {
+		if _, ok := calc[k]; !ok {
+			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x in emitTouched but not calcState (%+v)", ErrWrongTrieRoot, label, blockNum, []byte(k), ub)
+		}
+	}
+	return nil
+}
+
+func (cc *commitmentCalculator) newScratchUpdates() *commitment.Updates {
+	u := cc.updates.NewEmpty()
+	if u.Mode() != commitment.ModeParallel {
+		u.SetMode(commitment.ModeUpdate)
+	}
+	return u
+}
+
+func collectUpdatesMap(ctx context.Context, u *commitment.Updates) (map[string]commitment.Update, error) {
+	out := map[string]commitment.Update{}
+	err := u.HashSort(ctx, nil, func(_, k []byte, upd *commitment.Update) error {
+		out[string(k)] = *upd
+		return nil
+	})
+	return out, err
+}
 
 func (cc *commitmentCalculator) ensureTouched() {
 	if cc.touchedAccounts == nil {
@@ -77,42 +119,32 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 		return
 	}
 	cc.ensureTouched()
-	addAccount := func(a accounts.Address) {
-		if _, seen := cc.touchedAccounts[a]; seen {
-			return
-		}
-		cc.touchedAccounts[a] = struct{}{}
-		if cc.prefetchFn != nil {
-			address := a.Value()
-			cc.prefetchFn(address[:])
-		}
-	}
 	for a := range writes.Balances() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a := range writes.Nonces() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a := range writes.Incarnations() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a := range writes.CodeHashes() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a := range writes.Codes() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a := range writes.CreateContracts() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a, vw := range writes.SelfDestructs() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 		if vw.Val {
 			cc.destructed[a] = struct{}{}
 		}
 	}
 	for a := range writes.Storages() {
-		addAccount(a)
+		cc.touchedAccounts[a] = struct{}{}
 	}
 	for a, slots := range writes.StoragesChanged() {
 		m := cc.touchedStorage[a]
@@ -121,14 +153,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 			cc.touchedStorage[a] = m
 		}
 		for k := range slots {
-			if _, seen := m[k]; seen {
-				continue
-			}
 			m[k] = struct{}{}
-			if cc.prefetchFn != nil {
-				address, slot := a.Value(), k.Value()
-				cc.prefetchFn(append(address[:], slot[:]...))
-			}
 		}
 	}
 }
