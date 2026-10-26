@@ -945,9 +945,8 @@ func (s *BaseRoSnapshots) reclaimRetiredLocked() (toDelete retiredSegments) {
 
 func (s *BaseRoSnapshots) reclaimRetired() {
 	s.dirtyLock.Lock()
-	toDelete := s.reclaimRetiredLocked()
-	s.dirtyLock.Unlock()
-	reclaimSegments(toDelete)
+	defer s.dirtyLock.Unlock()
+	reclaimSegments(s.reclaimRetiredLocked())
 }
 
 // retiredSegments were removed from the dirty set and handed to the outgoing visible
