@@ -111,14 +111,17 @@ func TestNewPayloadGapExceedsLimit(t *testing.T) {
 // ahead of its TxNums index.
 type domainAheadExecStub struct {
 	execmodule.ExecutionModule
+	fcuStatus execmodule.ExecutionStatus
+	fcuCalls  int
 }
 
-func (domainAheadExecStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+func (*domainAheadExecStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
 	return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusTooFarAway}, nil
 }
 
-func (domainAheadExecStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
-	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusTooFarAway, ValidationError: "domain ahead of blocks"}, nil
+func (s *domainAheadExecStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+	s.fcuCalls++
+	return execmodule.ForkChoiceResult{Status: s.fcuStatus, ValidationError: "domain ahead of blocks"}, nil
 }
 
 // A domain-ahead fork choice has already stored the batch's canonical markers
@@ -126,7 +129,23 @@ func (domainAheadExecStub) UpdateForkChoice(context.Context, common.Hash, common
 func TestExecDownloadedBatch_DomainAheadOfBlocksKeepsDownloading(t *testing.T) {
 	e := newTestBadHeadersDownloader(t)
 	e.logger = testlog.Logger(t, log.LvlCrit)
-	e.chainRW = chainreader.NewChainReaderEth1(nil, domainAheadExecStub{}, 0)
+	exec := &domainAheadExecStub{fcuStatus: execmodule.ExecutionStatusTooFarAway}
+	e.chainRW = chainreader.NewChainReaderEth1(nil, exec, 0)
 	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
 	require.NoError(t, e.execDownloadedBatch(t.Context(), block, block.Hash()))
+	require.Equal(t, 1, exec.fcuCalls)
+}
+
+func TestExecDownloadedBatch_RejectedForkChoiceFails(t *testing.T) {
+	for _, status := range []execmodule.ExecutionStatus{execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusBadBlock} {
+		t.Run(status.String(), func(t *testing.T) {
+			e := newTestBadHeadersDownloader(t)
+			e.logger = testlog.Logger(t, log.LvlCrit)
+			exec := &domainAheadExecStub{fcuStatus: status}
+			e.chainRW = chainreader.NewChainReaderEth1(nil, exec, 0)
+			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
+			require.Error(t, e.execDownloadedBatch(t.Context(), block, block.Hash()))
+			require.Equal(t, 1, exec.fcuCalls)
+		})
+	}
 }
