@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package state
 
 import (
 	"testing"
@@ -25,26 +25,26 @@ import (
 // BenchmarkInternAddressHit measures the path every repeat word takes — the one
 // the table exists to keep off unique.Make.
 func BenchmarkInternAddressHit(b *testing.B) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	words := make([]uint256.Int, 64)
 	for i := range words {
 		words[i] = uint256.Int{uint64(i+1) * 0x9e3779b97f4a7c15, uint64(i+1) * 0xc2b2ae3d27d4eb4f, uint64(i+1) & 0xffffffff, 0}
 	}
 	requireDistinctBuckets(b, words, addrIndex)
 	for range addressCacheMinOps + 1 {
-		evm.internAddress(&words[0])
+		ibs.InternAddress(&words[0])
 	}
 	for i := range words {
-		evm.internAddress(&words[i])
+		ibs.InternAddress(&words[i])
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		internSink = evm.internAddress(&words[i&63])
+		internSink = ibs.InternAddress(&words[i&63])
 	}
 }
 
 func BenchmarkInternStorageKeyHit(b *testing.B) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	words := make([]uint256.Int, 64)
 	for i := range words {
 		w := uint256.Int{uint64(i+1) * 0x9e3779b97f4a7c15, uint64(i+1) * 0xc2b2ae3d27d4eb4f, uint64(i+1) * 0x165667b19e3779f9, 0}
@@ -54,14 +54,14 @@ func BenchmarkInternStorageKeyHit(b *testing.B) {
 	}
 	requireDistinctBuckets(b, words, slotIndex)
 	for range storageKeyCacheMinOps + 1 {
-		evm.internStorageKey(&words[0])
+		ibs.InternStorageKey(&words[0])
 	}
 	for i := range words {
-		evm.internStorageKey(&words[i])
+		ibs.InternStorageKey(&words[i])
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		keySink = evm.internStorageKey(&words[i&63])
+		keySink = ibs.InternStorageKey(&words[i&63])
 	}
 }
 

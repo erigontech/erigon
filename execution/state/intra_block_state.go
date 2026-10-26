@@ -228,6 +228,11 @@ type IntraBlockState struct {
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
+	// Intern tables survive Reset and the pool: interning is pure, so they never go stale.
+	internCache *storageKeyCache
+	addrCache   *addressCache
+	internOps   uint32
+	addrOps     uint32
 }
 
 type sdProbeEntry struct {
