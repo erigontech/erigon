@@ -224,10 +224,10 @@ func TestCheckBinaryShadowRunningRefusesScheduledFork(t *testing.T) {
 	unscheduled := chain.AllProtocolChanges.Copy()
 	unscheduled.BinaryTrieTime = nil
 
-	require.NoError(t, CheckBinaryShadowRunning(tx, scheduled))
+	require.NoError(t, CheckBinaryShadowRunning(tx, scheduled, log.New()))
 	require.NoError(t, rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain))
-	require.ErrorContains(t, CheckBinaryShadowRunning(tx, scheduled), "attach-pbt")
-	require.NoError(t, CheckBinaryShadowRunning(tx, unscheduled))
+	require.ErrorContains(t, CheckBinaryShadowRunning(tx, scheduled, log.New()), "attach-pbt")
+	require.NoError(t, CheckBinaryShadowRunning(tx, unscheduled, log.New()))
 }
 
 func TestRecordStoppedCommitmentDomainsPersistsStop(t *testing.T) {
