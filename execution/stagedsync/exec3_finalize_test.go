@@ -754,6 +754,38 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 		reExecutedPostBal, tip, expectedFinal, abandonedPostBal, abandonedPostBal+tip)
 }
 
+// calcFees credits the coinbase and the burnt-fee recipient after a tx is validated, so a later
+// reader of their balance must wait for the credit, not continue on the validated write.
+func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
+	t.Parallel()
+
+	s := londonTransferScenario()
+	sender := fAddr("sender")
+	for _, addr := range []accounts.Address{s.coinbase, s.burntAddr, sender} {
+		s.txOut.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 0}},
+			Val:         *uint256.NewInt(1_000),
+		})
+	}
+	r := s.buildExecResult()
+	r.TxOut = copyWrites(s.txOut)
+
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(r.TxOut, false, "")
+	be := &blockExecutor{coinbase: s.coinbase}
+	vm.MarkWritesValidated(r.TxOut, be.feeRecipient(r))
+
+	for addr, want := range map[accounts.Address]int{
+		s.coinbase:  state.MVReadResultDependency,
+		s.burntAddr: state.MVReadResultDependency,
+		sender:      state.MVReadResultValidated,
+	} {
+		_, res, ok := vm.ReadBalance(addr, 1)
+		require.True(t, ok)
+		require.Equal(t, want, res.Status(), "balance of %x", addr.Value())
+	}
+}
+
 // TestFinalizeTx_BurntRecipient_HeldEstimateUntilSeal pins the single-Done-writer
 // invariant under the unified flow: the worker flushes every write (including a
 // sender==burnt gas-debit) as an Estimate, calcFees flushes the fee tip as an
