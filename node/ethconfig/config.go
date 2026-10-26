@@ -259,8 +259,6 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
-	// Account Abstraction
-
 	// fork choice update timeout
 	FcuTimeout         time.Duration
 	FcuBackgroundPrune bool
