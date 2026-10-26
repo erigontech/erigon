@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -99,6 +100,14 @@ type commitmentCalculator struct {
 	// flushes them to updates at the block boundary. Values are lazy-loaded from
 	// the domain on first touch via asOfReader.
 	state *calcState
+
+	// touched* are the per-block key-only union the GetAccount commitment path folds
+	// over (dbg.GetAccountShadow): no values are retained — emitTouched reads each
+	// value from the version map. destructed carries the self-destruct subtree-reset
+	// signal. Cleared after each block's emit.
+	touchedAccounts map[accounts.Address]struct{}
+	touchedStorage  map[accounts.Address]map[accounts.StorageKey]struct{}
+	destructed      map[accounts.Address]struct{}
 
 	// asOfReader is shared between calcState (lazy-load) and compute methods
 	// (fold/unfold sibling reads); its txNum advances at each block boundary.

@@ -163,6 +163,20 @@ func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base State
 	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
 }
 
+// GetStorage returns addr's slot value composed at the given global txNum — including
+// the writes of the tx at that txNum — and whether a cell is materialized there, in
+// comma-ok form. It is the storage counterpart to GetAccount for the post-seal
+// commitment projection: a true ok with a zero value is a slot cleared to zero
+// (a leaf-removing delete), false ok means no write materialized at or below txNum.
+func (vm *VersionMap) GetStorage(addr accounts.Address, key accounts.StorageKey, txNum uint64) (uint256.Int, bool) {
+	txIdx := int(txNum - vm.baseTxNum.Load())
+	val, res, ok := vm.ReadStorage(addr, key, txIdx)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return uint256.Int{}, false
+}
+
 // txAccessKey addresses the per-tx access list. The block-end task's execution
 // writes and its engine.Finalize writes share one txNum but are consumed as two
 // separate apply units, so finalize distinguishes their slots.
