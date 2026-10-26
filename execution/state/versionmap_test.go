@@ -1383,7 +1383,13 @@ func TestValidateRead_WipedSlotReadInvalidatedWhenLaterDestructGoes(t *testing.T
 	io := NewVersionedIO(31)
 	io.RecordReads(Version{TxIndex: 30, Incarnation: 0}, reads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(30, io, validateEqualVersion, false, ""))
-	require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, io, validateEqualVersion, false, ""),
+
+	readA, _ := reads.GetStorage(addr, keyA)
+	onlyA := ReadSet{}
+	onlyA.SetStorage(addr, keyA, readA)
+	ioA := NewVersionedIO(31)
+	ioA.RecordReads(Version{TxIndex: 30, Incarnation: 0}, onlyA)
+	require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, ioA, validateEqualVersion, false, ""),
 		"slot A reads 7 once the tx20 destruct is gone")
 }
 

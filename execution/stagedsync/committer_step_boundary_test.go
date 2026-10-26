@@ -953,6 +953,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 		published = append(published, <-out)
 	}
 
+	pending := doms.GetCommitmentContext().HasPendingUpdate()
 	var branches int
 	require.NoError(t, doms.Flush(ctx, tx))
 	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
@@ -961,7 +962,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 		}
 		return true, nil
 	}))
-	return branches, published, doms.GetCommitmentContext().HasPendingUpdate()
+	return branches, published, pending
 }
 
 func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {

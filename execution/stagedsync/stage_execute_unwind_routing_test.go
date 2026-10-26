@@ -155,8 +155,7 @@ func TestRenderExecOutcome(t *testing.T) {
 		cfg := ExecuteBlockCfg{badBlockHalt: true}
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 20, blockHash: common.HexToHash("0xbad20"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, cfg, s, u, logger)
-		require.ErrorIs(t, got, rules.ErrInvalidBlock)
-		require.ErrorIs(t, got, ErrWrongTrieRoot)
+		require.Same(t, wrongRoot, got)
 		require.Empty(t, u.calls)
 	})
 
