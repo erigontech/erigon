@@ -68,7 +68,8 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardRea
 	}
 	validation, err := p.simulateFrame(txn)
 	if err != nil {
-		return txpoolcfg.InvalidFrame, err
+		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
+		return txpoolcfg.ErrFrameValidation, nil
 	}
 	if validation == nil {
 		return txpoolcfg.InvalidFrame, nil
@@ -160,7 +161,7 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	}
 }
 
-func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) error {
+func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) {
 	touched := make(map[common.Address]struct{})
 	nonceSlots := make(map[common.Hash]struct{})
 	var nonceManagerAccountChanged bool
@@ -207,23 +208,19 @@ func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) error {
 			continue
 		}
 		validation, err := p.simulateFrame(mt.TxnSlot)
+		reason := txpoolcfg.FrameStateChanged
 		if err != nil {
-			return err
-		}
-		reason := txpoolcfg.InvalidFrame
-		if validation != nil {
-			reason = p.checkFrameReservation(validation, previous)
-		}
-		if reason != txpoolcfg.NotSet {
-			p.removeFromSubPool(mt, "frame revalidation")
-			p.discardLocked(mt, reason)
+			p.logger.Debug("[txpool] Frame validation unavailable", "hash", mt.TxnSlot.IDHash, "err", err)
+			reason = txpoolcfg.ErrFrameValidation
+		} else if validation != nil && p.checkFrameReservation(validation, previous) == txpoolcfg.NotSet {
+			p.releaseFrame(previous)
+			mt.TxnSlot.frameValidation = validation
+			p.reserveFrame(validation)
 			continue
 		}
-		p.releaseFrame(previous)
-		mt.TxnSlot.frameValidation = validation
-		p.reserveFrame(validation)
+		p.removeFromSubPool(mt, "frame revalidation")
+		p.discardLocked(mt, reason)
 	}
-	return nil
 }
 
 func frameReplacementFee(previous, replacement *uint256.Int, bump uint64) bool {

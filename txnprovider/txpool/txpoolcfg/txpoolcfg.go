@@ -132,6 +132,8 @@ const (
 	TipAboveFeeCap       DiscardReason = 40 // EIP-1559: max priority fee per gas cannot exceed max fee per gas
 	DelegatedNonceGap    DiscardReason = 41 // Delegated account transaction nonce is not currently executable
 	DelegatedTxnLimit    DiscardReason = 42 // Delegated account already has an executable transaction
+	ErrFrameValidation   DiscardReason = 43
+	FrameStateChanged    DiscardReason = 44
 )
 
 func (r DiscardReason) String() string {
@@ -222,6 +224,10 @@ func (r DiscardReason) String() string {
 		return "gapped-nonce transaction from delegated account"
 	case DelegatedTxnLimit:
 		return "in-flight transaction limit reached for delegated account"
+	case ErrFrameValidation:
+		return "frame transaction validation unavailable"
+	case FrameStateChanged:
+		return "frame transaction no longer valid against current state"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

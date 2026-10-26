@@ -215,6 +215,7 @@ func New(
 		search:            &metaTxn{TxnSlot: &TxnSlot{}},
 		senderIDTxnCount:  map[uint64]int{},
 		senderIDBlobCount: map[uint64]uint64{},
+		senderIDFrameTxn:  map[uint64]*metaTxn{},
 	}
 	tracedSenders := make(map[common.Address]struct{})
 	for _, sender := range cfg.TracedSenders {
@@ -428,9 +429,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	if err := p.revalidateFrames(stateChanges); err != nil {
-		return err
-	}
+	p.revalidateFrames(stateChanges)
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
 		pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
@@ -617,8 +616,13 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 		return true, nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
-		// A nonce gap can close before the discarded pool row is removed.
-		return reason != txpoolcfg.NonceTooDistant, nil
+		// Retryable failures may clear before the discarded pool row is removed.
+		switch reason {
+		case txpoolcfg.NonceTooDistant, txpoolcfg.ErrFrameValidation, txpoolcfg.FrameStateChanged:
+			return false, nil
+		default:
+			return true, nil
+		}
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
@@ -1805,11 +1809,13 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 }
 
 func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.DiscardReason {
-	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
-	found := p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce)
+	// Find a replacement candidate within the sender's nonce domain.
+	// Account nonces and keyed sequences can have equal values without conflicting.
+	found, _ := p.all.tree.Get(mt)
 	if mt.TxnSlot.TxType() == types.FrameTxType {
 		v := mt.TxnSlot.frameValidation
-		if v == nil || found == nil && p.all.hasTxns(mt.TxnSlot.SenderID) {
+		pendingFrame := p.all.senderIDFrameTxn[mt.TxnSlot.SenderID]
+		if v == nil || pendingFrame != nil && pendingFrame != found {
 			return txpoolcfg.InvalidFrame
 		}
 		var previous *protocol.FrameValidation
@@ -1898,7 +1904,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if owner, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok && owner != found {
+	if owner, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; !mt.keyedNonce && ok && owner != found {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
