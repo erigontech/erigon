@@ -170,6 +170,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb := state.New(stateReader)
 	defer statedb.Close()
+	transactions.VersionedCallState(statedb)
 
 	header := block.HeaderNoCopy()
 
@@ -202,8 +203,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
-		_ = statedb.FinalizeTx(rules, state.NewNoopWriter())
-
+		if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
+			return nil, err
+		}
 	}
 
 	creationTx := block.Transactions()[transactionIndex]
@@ -254,7 +256,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 	}
 
-	_ = statedb.FinalizeTx(rules, state.NewNoopWriter())
+	_ = ethapi.FinalizeCallTx(statedb, rules)
 
 	return nil, nil
 }
@@ -330,6 +332,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					continue
 				}
 				statedb := state.New(stateReader)
+				transactions.VersionedCallState(statedb)
 				func() {
 					defer statedb.Close()
 					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)
@@ -500,6 +503,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
+				statedb.SetTxContext(blockNum, idx)
 				nonce, err := statedb.GetNonce(sender.Address())
 				if err != nil {
 					log.Error(err.Error())
@@ -508,6 +512,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
 				if err != nil {
 					log.Error(err.Error())
+					return nil, err
+				}
+				if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
 					return nil, err
 				}
 				continue
@@ -525,7 +532,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, err
 		}
 
-		err = statedb.FinalizeTx(rules, state.NewNoopWriter())
+		err = ethapi.FinalizeCallTx(statedb, rules)
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
