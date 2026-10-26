@@ -93,6 +93,10 @@ func TestPBinReviewR19ReleasedTaskRowsUnreachable(t *testing.T) {
 }
 
 func TestPBinReviewR19LiveRowsDuringLoad(t *testing.T) {
+	const (
+		holdChunkBytes = 1 << 20
+		rowValueBytes  = 1 << 16
+	)
 	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
 	base := &trieTestContext{records: corpus.snapshot}
 	verifier := NewTrie(base).newVerifier()
@@ -104,10 +108,10 @@ func TestPBinReviewR19LiveRowsDuringLoad(t *testing.T) {
 	stats := new(VerifyStats)
 	verifier.SetVerifyStats(stats)
 	records := make(map[string][]byte)
-	for key, value := range corpus.snapshot {
+	for key := range corpus.snapshot {
 		path, err := eip8297.DecodeBitPath([]byte(key))
 		if err == nil && path.BitLen >= paths[0].BitLen && path.HasPrefix(&paths[0]) {
-			records[key] = value
+			records[key] = bytes.Repeat([]byte{0}, rowValueBytes)
 		}
 	}
 	var actualRows, actualBytes, liveRows, liveBytes uint64
@@ -118,7 +122,10 @@ func TestPBinReviewR19LiveRowsDuringLoad(t *testing.T) {
 	require.NoError(t, verifier.loadVerifyRows(paths[0]))
 	defer verifier.releaseVerifyRows()
 	require.Positive(t, actualRows)
+	require.Greater(t, actualBytes, uint64(holdChunkBytes))
 	require.Equal(t, actualRows, verifier.verifyTaskRows)
-	require.Equal(t, actualRows, liveRows, "during range load: rows_live=%d, retained_rows=%d; bytes_live=%d, retained_bytes=%d", liveRows, actualRows, liveBytes, actualBytes)
-	require.Equal(t, actualBytes, liveBytes)
+	require.Less(t, actualRows-liveRows, uint64(holdChunkBytes/rowValueBytes), "during range load: rows_live=%d, retained_rows=%d; bytes_live=%d, retained_bytes=%d", liveRows, actualRows, liveBytes, actualBytes)
+	require.Less(t, actualBytes-liveBytes, uint64(holdChunkBytes), "during range load: rows_live=%d, retained_rows=%d; bytes_live=%d, retained_bytes=%d", liveRows, actualRows, liveBytes, actualBytes)
+	require.Equal(t, verifier.verifyTaskRows, stats.LiveRows.Load())
+	require.Equal(t, verifier.verifyTaskBytes, stats.LiveBytes.Load())
 }

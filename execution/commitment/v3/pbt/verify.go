@@ -269,7 +269,13 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 	}
 	from, to := verifyRangeBounds(&path)
 	rows := make(map[string][]byte)
-	var taskRows, taskBytes uint64
+	var taskRows, taskBytes, heldRows, heldBytes uint64
+	hold := func() {
+		if t.verifyStats != nil && taskRows != heldRows {
+			t.verifyStats.holdRows(taskRows-heldRows, taskBytes-heldBytes)
+		}
+		heldRows, heldBytes = taskRows, taskBytes
+	}
 	count, err := reader.ReadVerifyRange(from, to, func(key, value []byte) error {
 		rowPath, decodeErr := eip8297.DecodeBitPath(key)
 		if decodeErr != nil || rowPath.BitLen < path.BitLen || !rowPath.HasPrefix(&path) {
@@ -279,11 +285,12 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 		rows[string(key)] = copied
 		taskRows++
 		taskBytes += uint64(len(key) + len(copied))
-		if t.verifyStats != nil {
-			t.verifyStats.holdRows(1, uint64(len(key)+len(copied)))
+		if taskBytes-heldBytes >= 1<<20 {
+			hold()
 		}
 		return nil
 	})
+	hold()
 	if t.verifyStats != nil {
 		t.verifyStats.RangeReads.Add(1)
 		t.verifyStats.RangeRows.Add(count)
