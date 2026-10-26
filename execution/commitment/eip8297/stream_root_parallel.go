@@ -83,27 +83,36 @@ type ParallelStreamRoot struct {
 }
 
 func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error) {
+	return newParallelStreamRoot(sum, workers, parallelStreamRootQueueBytes)
+}
+
+func newParallelStreamRoot(sum HashFn, workers int, queueBytes uint64) (*ParallelStreamRoot, error) {
 	if sum == nil {
 		return nil, ErrStreamRootHash
 	}
 	if workers <= 0 {
 		return nil, ErrParallelStreamRootWorkers
 	}
+	queueTokenCount := int(queueBytes / parallelStreamRootQueueTokenBytes)
+	if queueTokenCount == 0 {
+		return nil, errors.New("eip8297: parallel stream root queue budget is too small")
+	}
+	queueBytes = uint64(queueTokenCount) * parallelStreamRootQueueTokenBytes
 	b := &ParallelStreamRoot{
 		sum:           sum,
 		workers:       workers,
 		inputs:        make([]chan *parallelStreamRootBatch, workers),
-		queueTokens:   make(chan struct{}, parallelStreamRootQueueBytes/parallelStreamRootQueueTokenBytes),
+		queueTokens:   make(chan struct{}, queueTokenCount),
 		stopped:       make(chan struct{}),
 		parts:         make([]map[int]streamRootSubtree, workers),
 		workerErrs:    make([]error, workers),
-		residentLimit: parallelStreamRootQueueBytes + uint64(workers+1)*parallelStreamRootBatchResidentBytes,
+		residentLimit: queueBytes + uint64(workers+1)*parallelStreamRootBatchResidentBytes,
 	}
 	for range cap(b.queueTokens) {
 		b.queueTokens <- struct{}{}
 	}
 	for worker := range workers {
-		b.inputs[worker] = make(chan *parallelStreamRootBatch)
+		b.inputs[worker] = make(chan *parallelStreamRootBatch, parallelStreamRootChannelBatches)
 		b.parts[worker] = make(map[int]streamRootSubtree)
 		b.wg.Add(1)
 		go b.run(worker)
@@ -161,6 +170,11 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 	valueStart := len(b.current.arena)
 	b.current.arena = append(b.current.arena, value...)
 	b.current.leaves = append(b.current.leaves, parallelStreamRootLeaf{keyStart: keyStart, keyLength: len(key), valueStart: valueStart, valueLength: len(value)})
+	residentBytes := b.current.capacityBytes()
+	if residentBytes > b.current.residentBytes {
+		b.adjustResident(int64(residentBytes - b.current.residentBytes))
+		b.current.residentBytes = residentBytes
+	}
 	b.prevKey = append(b.prevKey[:0], key...)
 	b.prevBits = append(b.prevBits[:0], bits...)
 	b.lastShard = shard
@@ -356,6 +370,9 @@ func (b *parallelStreamRootBatch) canAppend(key, value []byte) bool {
 
 func (b *ParallelStreamRoot) acquireQueueTokens(ctx context.Context, bytes uint64) (int, error) {
 	tokens := int((bytes + parallelStreamRootQueueTokenBytes - 1) / parallelStreamRootQueueTokenBytes)
+	if tokens > cap(b.queueTokens) {
+		return 0, errors.New("eip8297: parallel stream root batch exceeds queue budget")
+	}
 	acquired := 0
 	for acquired < tokens {
 		select {
@@ -388,15 +405,15 @@ func (b *ParallelStreamRoot) workerError() error {
 }
 
 func streamRootShard(key []byte) int {
-	shard := int(key[0]) << 8
+	shard := int(key[0]) << 4
 	if len(key) > 1 {
-		shard |= int(key[1])
+		shard |= int(key[1] >> 4)
 	}
 	return shard
 }
 
 func streamRootWorker(shard, workers int) int {
-	return (shard >> 4) % workers
+	return shard % workers
 }
 
 func combineStreamRootSubtrees(sum HashFn, level int, left, right streamRootSubtree) streamRootSubtree {
@@ -449,7 +466,8 @@ func hashStreamRootBranch(sum HashFn, prefix []byte, left, right common.Hash) co
 const (
 	parallelStreamRootBatchBytes         = 512 * 1024
 	parallelStreamRootBatchResidentBytes = parallelStreamRootBatchBytes + parallelStreamRootBatchBytes
-	parallelStreamRootQueueBytes         = 2 * 1024 * 1024
-	parallelStreamRootQueueTokenBytes    = 64 * 1024
-	pbinStreamRootPartitionBits          = 16
+	parallelStreamRootChannelBatches     = 8
+	parallelStreamRootQueueBytes         = 64 * 1024 * 1024
+	parallelStreamRootQueueTokenBytes    = parallelStreamRootBatchResidentBytes
+	pbinStreamRootPartitionBits          = 12
 )

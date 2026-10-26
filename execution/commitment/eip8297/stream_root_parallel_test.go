@@ -116,7 +116,7 @@ func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
 	}
 	want, err := serial.RootHash()
 	require.NoError(t, err)
-	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 4)
+	parallel, err := newParallelStreamRoot(streamRootHash(HashKeccak), 4, 2*parallelStreamRootBatchResidentBytes)
 	require.NoError(t, err)
 	for _, entry := range entries {
 		require.NoError(t, parallel.Add(entry.Key, entry.Value))
@@ -125,6 +125,50 @@ func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 	require.LessOrEqual(t, parallel.peakResident.Load(), parallel.residentLimit)
+}
+
+func TestParallelStreamRootBuildsStorageShardsConcurrently(t *testing.T) {
+	sum := streamRootHash(HashKeccak)
+	parallel, err := NewParallelStreamRoot(sum, 4)
+	require.NoError(t, err)
+	var active, maxActive atomic.Int32
+	parallel.SetBuildConcurrencyCounters(&active, &maxActive)
+	release := make(chan struct{})
+	var first atomic.Bool
+	parallel.SetBuildStartHook(func() {
+		if first.CompareAndSwap(false, true) {
+			<-release
+		}
+	})
+	entries := make([]Entry, 0, 48)
+	for shard := range 16 {
+		for leaf := range 3 {
+			position := make([]byte, 64)
+			position[0] = byte(shard << 4)
+			position[63] = byte(leaf + 1)
+			entries = append(entries, Entry{Key: TreeKey(StorageZone, position, byte(leaf)), Value: streamRootValue(byte(leaf + 1))})
+		}
+	}
+	slices.SortFunc(entries, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
+	done := make(chan error, 1)
+	go func() {
+		for _, entry := range entries {
+			if err := parallel.Add(entry.Key, entry.Value); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	deadline := time.Now().Add(time.Second)
+	for maxActive.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	require.NoError(t, <-done)
+	_, err = parallel.RootHash()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, maxActive.Load(), int32(2), "sorted storage stream must build at least two shards concurrently")
 }
 
 func parallelStreamRootSkewedEntries(count int) []Entry {

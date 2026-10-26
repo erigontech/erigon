@@ -17,6 +17,7 @@
 package eip8297
 
 import (
+	"encoding/binary"
 	"fmt"
 	"testing"
 )
@@ -47,4 +48,50 @@ func BenchmarkParallelStreamRootSkewed(b *testing.B) {
 			b.ReportMetric(float64(residentTotal)/float64(b.N), "resident-bytes/op")
 		})
 	}
+}
+
+func BenchmarkParallelStreamRootHoodiMix(b *testing.B) {
+	entries := parallelStreamRootHoodiEntries(100_000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 16)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, entry := range entries {
+			if err := parallel.Add(entry.Key, entry.Value); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if _, err := parallel.RootHash(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func parallelStreamRootHoodiEntries(count int) []Entry {
+	entries := make([]Entry, count)
+	for i := range entries {
+		stem := uint64(i / 256)
+		subIndex := byte(i)
+		var zone byte
+		positionLength := 32
+		switch i % 10 {
+		case 0, 1:
+			zone = AccountZone
+		case 2:
+			zone = CodeZone
+		default:
+			zone = StorageZone
+			positionLength = 64
+		}
+		position := make([]byte, positionLength)
+		position[0] = byte(stem)
+		binary.BigEndian.PutUint64(position[positionLength-8:], stem)
+		value := streamRootValue(byte(i))
+		value[0] = 1
+		entries[i] = Entry{Key: TreeKey(zone, position, subIndex), Value: value}
+	}
+	return sortStreamEntries(entries)
 }
