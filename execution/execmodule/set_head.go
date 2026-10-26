@@ -82,38 +82,40 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// holds the semaphore it needs. With the wait-then-acquire order,
 	// an in-flight newPayload+FCU cycle completes naturally and we
 	// acquire cleanly.
-	if err := e.waitForQuiescence(ctx); err != nil {
-		return err
-	}
-
-	// Acquire the semaphore. A new newPayload may slip in during the
-	// gap between quiescence detection and acquire — re-check under
-	// the semaphore. With it held, no new payloads/FCUs can start; we
-	// only need to wait for any one in flight to drain.
+	// Acquiring the semaphore is the wait for in-flight work: whoever holds
+	// it finishes first. There is no separate quiescence wait beforehand —
+	// what it waited on cannot clear while this call is in progress.
 	//
-	// The caller's ctx bounds how long we're allowed to wait — the
-	// RPC handler carries its own deadline from the client. A slow
-	// forkchoice-commit under memory pressure (observed 10s under
-	// 88 GB sys) legitimately holds the semaphore for longer than a
-	// short arbitrary cap would allow; using ctx directly keeps
-	// caller control without introducing a shorter false-fail cap.
-	for {
-		if err := e.semaphore.Acquire(ctx, 1); err != nil {
-			return fmt.Errorf("execution module is busy: %w", err)
-		}
-		e.lock.RLock()
-		quiescent := e.currentContext == nil
-		e.lock.RUnlock()
-		if quiescent {
-			break
-		}
-		// Lost the race — release so FCU can clear, then wait again.
-		e.semaphore.Release(1)
-		if err := e.waitForQuiescence(ctx); err != nil {
-			return err
-		}
+	// Acquire the semaphore. The caller's ctx bounds the wait — the RPC
+	// handler carries its own deadline from the client. A slow
+	// forkchoice-commit under memory pressure (observed 10s under 88 GB sys)
+	// legitimately holds the semaphore longer than a short arbitrary cap
+	// would allow; using ctx directly keeps caller control.
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("execution module is busy: %w", err)
 	}
 	defer e.semaphore.Release(1)
+
+	// InsertBlocks sets the module's cached context and only a later
+	// forkchoice clears it, so between the two it is simply set — and both
+	// paths need this semaphore. Waiting for it here would wait on a
+	// forkchoice this call is preventing from running; releasing to wait
+	// hands the gap to the next block, which on a live chain arrives every
+	// slot and wins every time.
+	//
+	// Holding the semaphore is what makes the leftover safe to drop: nothing
+	// new can start, so it is the previous insert's cache with no live
+	// committer holding it. A forkchoice detaches the field the same way
+	// before committing through its own reference.
+	e.lock.RLock()
+	stale := e.currentContext != nil
+	e.lock.RUnlock()
+	if stale {
+		if e.logger != nil {
+			e.logger.Info("[setHead] dropping the cached execution context left by the last insert")
+		}
+		e.closeModuleContext()
+	}
 
 	resumeReadAhead, err := e.suspendReadAhead(ctx)
 	if err != nil {
