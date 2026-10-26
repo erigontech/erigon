@@ -364,11 +364,11 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 	}
 	tx.Rollback()
-	if err := sn.Compress(); err != nil {
-		return fmt.Errorf("compress: %w", err)
-	}
 	if err := removeBlobIndexAndTorrents(snapDir, fromSlot, toSlot); err != nil {
 		return err
+	}
+	if err := sn.Compress(); err != nil {
+		return fmt.Errorf("compress: %w", err)
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
