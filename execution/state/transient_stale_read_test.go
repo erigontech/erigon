@@ -84,7 +84,6 @@ func TestTransientStale_FieldGettersPreferCells(t *testing.T) {
 	vm.WriteIncarnation(addr, v1, uint64(3), true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 
@@ -143,7 +142,6 @@ func TestTransientStale_GetDelegatedDesignation(t *testing.T) {
 	vm.WriteCodeSize(authority, v1, len(delegationCode), true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 
@@ -172,7 +170,6 @@ func TestCrossTxSelfDestruct_CodeReadsEmpty(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1, Incarnation: 0}, true, true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 
@@ -211,7 +208,6 @@ func TestCrossTxIncarnationBump_CodeReadsEmpty(t *testing.T) {
 	vm.WriteCodeHash(addr, v1, accounts.EmptyCodeHash, true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 

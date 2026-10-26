@@ -26,8 +26,8 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
+//	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
+func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, _, cleanup, err := openWriters(recordFileName, errorFileName)
@@ -41,7 +41,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"ots_getBlockTransactions"}, resultsCh)
+		go writePattern(true, []string{"ots_getBlockTransactions"}, resultsCh)
 	}
 
 	var res CallResult

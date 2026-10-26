@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester/txpoolwait"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -364,7 +365,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}
-	err = ethBackend.Init(ethNode, &ethConfig, genesis.Config)
+	err = ethBackend.Init(ethNode, &ethConfig)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
 	}
@@ -406,6 +407,12 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
 		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config)
+	}
+	if pool := ethBackend.TxPool(); pool != nil {
+		blockReader, _ := ethBackend.BlockIO()
+		mockCl.waitForTxPool = func(ctx context.Context, parentHash common.Hash) error {
+			return txpoolwait.WaitForParent(ctx, ethBackend.ChainDB(), blockReader, pool, parentHash)
+		}
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything

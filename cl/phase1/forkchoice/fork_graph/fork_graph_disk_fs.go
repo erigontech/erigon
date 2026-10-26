@@ -132,7 +132,9 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	if err != nil {
 		return err
 	}
-	defer dumpedFile.Close()
+	defer func() {
+		err = errors.Join(err, dumpedFile.Close())
+	}()
 
 	sw := snappypool.Writer(dumpedFile)
 	defer snappypool.PutWriter(sw)
@@ -171,11 +173,6 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	if err = sw.Flush(); err != nil {
 		log.Error("failed to flush snappy writer", "err", err)
 		return err
-	}
-
-	if err = dumpedFile.Sync(); err != nil {
-		log.Error("failed to sync dumped file", "err", err)
-		return
 	}
 
 	return
@@ -419,10 +416,6 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return err
 	}
 
-	if err = dumpedFile.Sync(); err != nil {
-		log.Error("failed to sync dumped file", "err", err)
-		return
-	}
 	if err = dumpedFile.Close(); err != nil {
 		closed = true
 		return
