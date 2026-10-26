@@ -130,3 +130,22 @@ func TestByteListSSZHashSSZZeroLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, crypto.Sha256(make([]byte, 64)), common.Hash(root))
 }
+
+func TestRawUint64ListHashSSZRejectsOverLimitWithCachedHash(t *testing.T) {
+	values := []uint64{1, 2, 3}
+
+	shrunk := solid.NewRawUint64List(4, values)
+	_, err := shrunk.HashSSZ()
+	require.NoError(t, err)
+	shrunk.SetCap(2)
+	_, err = shrunk.HashSSZ()
+	require.Error(t, err, "SetCap")
+
+	source := solid.NewRawUint64List(4, values)
+	_, err = source.HashSSZ()
+	require.NoError(t, err)
+	target := solid.NewRawUint64List(2, nil)
+	source.CopyTo(target)
+	_, err = target.HashSSZ()
+	require.Error(t, err, "CopyTo")
+}
