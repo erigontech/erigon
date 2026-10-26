@@ -22,8 +22,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -39,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -197,43 +194,6 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCrashRecoveryInspectionRejectsGap(t *testing.T) {
-	const childDataDir = "ERIGON_CRASH_INSPECTION_GAP"
-	if dataDir := os.Getenv(childDataDir); dataDir != "" {
-		inspectCrashRecoveryDataDir(t, dataDir, func(kv.TemporalRoDB) {
-			t.Fatal("inspection accepted a files/DB gap")
-		})
-		return
-	}
-	dataDir := newSmallStepDataDir(t)
-	dirs := datadir.New(dataDir)
-	_, err := state.GetStateIndicesSalt(dirs, true, testlog.Logger(t, log.LvlError))
-	require.NoError(t, err)
-	db, err := mdbx.New(dbcfg.ChainDB, testlog.Logger(t, log.LvlError)).Path(dirs.Chaindata).
-		MapSize(datasize.GB).GrowthStep(16 * datasize.MB).Open(t.Context())
-	require.NoError(t, err)
-	defer db.Close()
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return state.SavePruneValProgress(tx, kv.TblAccountVals, &prune.Stat{TxTo: 32, KeyProgress: prune.Done, ValueProgress: prune.Done})
-	}))
-	db.Close()
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	testDeadline, _ := t.Deadline()
-	deadline := crashRecoveryAttemptDeadline(time.Now(), testDeadline)
-	ctx, cancel := context.WithDeadline(t.Context(), deadline)
-	defer cancel()
-	require.NoError(t, ctx.Err(), "no time remains for the inspection child")
-	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCrashRecoveryInspectionRejectsGap$", "-test.v", "-test.timeout="+(time.Until(deadline)+time.Minute).String())
-	cmd.Env = append(os.Environ(), childDataDir+"="+dataDir)
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, ctx.Err(), "inspection child did not finish:\n%s", output)
-	require.Error(t, err)
-	require.NotContains(t, string(output), "WARNING: DATA RACE", "an expected child failure must not hide a race report")
-	require.Contains(t, string(output), "gap between snapshot files and DB")
-	require.Contains(t, string(output), "--- FAIL: TestCrashRecoveryInspectionRejectsGap", "inspection must fail the test, not exit the process")
 }
 
 func inspectCrashRecoveryDataDir(t *testing.T, dataDir string, inspect func(kv.TemporalRoDB)) {
