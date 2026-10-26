@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -9,7 +10,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
 
@@ -77,6 +81,30 @@ func TestRenderExecOutcome(t *testing.T) {
 		require.Empty(t, u.calls)
 	})
 
+	t.Run("operational error wins over a resumable boundary", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		boom := errors.New("worker failed")
+		out := execV3Outcome{exhausted: &ErrLoopExhausted{From: 1, To: 2}}
+		got := renderExecOutcome(boom, out, ExecuteBlockCfg{}, s, u, logger)
+		require.Same(t, boom, got,
+			"a real failure must fail the stage, or the sync loop retries it as a clean partial batch forever")
+		require.Empty(t, u.calls)
+	})
+
+	t.Run("verdict wins over a resumable boundary", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		out := execV3Outcome{
+			verdict:   &blockVerdict{blockNum: 12, blockHash: common.HexToHash("0xbad12"), err: plainInvalid},
+			exhausted: &ErrLoopExhausted{From: 1, To: 2},
+		}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.NotErrorIs(t, got, &ErrLoopExhausted{})
+		require.Empty(t, u.calls)
+	})
+
 	t.Run("operational error outranks a recorded verdict", func(t *testing.T) {
 		// The fix: a joined operational+invalid can no longer read as a verdict. An
 		// operational failure present alongside a recorded verdict surfaces the
@@ -121,6 +149,25 @@ func TestRenderExecOutcome(t *testing.T) {
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
 	})
 
+	t.Run("badBlockHalt suppresses the wrong-root unwind and propagates the verdict", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		cfg := ExecuteBlockCfg{badBlockHalt: true}
+		out := execV3Outcome{verdict: &blockVerdict{blockNum: 20, blockHash: common.HexToHash("0xbad20"), err: wrongRoot}}
+		got := renderExecOutcome(nil, out, cfg, s, u, logger)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.ErrorIs(t, got, ErrWrongTrieRoot)
+		require.Empty(t, u.calls)
+	})
+
+	t.Run("nil unwinder suppresses the wrong-root unwind and propagates the verdict", func(t *testing.T) {
+		s := &StageState{}
+		out := execV3Outcome{verdict: &blockVerdict{blockNum: 20, blockHash: common.HexToHash("0xbad20"), err: wrongRoot}}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, nil, logger)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.ErrorIs(t, got, ErrWrongTrieRoot)
+	})
+
 	t.Run("wrong root on non-initial cycle takes the binary-search path from the implicated block", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		// blockNum (5) <= s.BlockNumber (10) makes handleIncorrectRootHashError
@@ -146,5 +193,26 @@ func TestRenderExecOutcome(t *testing.T) {
 		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, ErrWrongTrieRoot)
 		require.Empty(t, u.calls, "must not schedule an unwind on the initial cycle")
+	})
+
+	t.Run("wrong root on non-initial cycle schedules the binary-search unwind", func(t *testing.T) {
+		// Implicated block 15 > s.BlockNumber 5 takes the scheduled-unwind branch:
+		// UnwindTo(15 - (15-5)/2). The ChangeSets3 key at block 4 keeps the target
+		// unwindable, so it is not clamped.
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
+		tx, err := db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(4, common.Hash{0x01}), []byte{0x01}))
+
+		u := &recordingUnwinder{}
+		s := &StageState{BlockNumber: 5}
+		s.CurrentSyncCycle.IsInitialCycle = false
+		out := execV3Outcome{verdict: &blockVerdict{blockNum: 15, blockHash: common.HexToHash("0xf00d"), err: wrongRoot}, applyTx: tx}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
+		require.NoError(t, got)
+		require.Len(t, u.calls, 1)
+		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = implicated - (implicated-s.BlockNumber)/2")
 	})
 }
