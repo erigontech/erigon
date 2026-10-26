@@ -421,3 +421,55 @@ func TestBackwardBlockDownloader_LastPeerKeepsPerPageRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
 }
+
+type bodyTimeoutFetcher struct {
+	chainServingBbdFetcher
+	timesOut func(peerId PeerId, fromNum uint64) bool
+}
+
+func (s *bodyTimeoutFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+	res, err := fetchWithRetry(defaultFetcherConfig.CopyWithOptions(opts...), func() (*FetcherResponse[[]*types.Body], error) {
+		if s.timesOut(*peerId, headers[0].Number.Uint64()) {
+			return nil, context.DeadlineExceeded
+		}
+		res, err := s.chainServingBbdFetcher.FetchBodies(ctx, headers, peerId)
+		return &res, err
+	})
+	if err != nil {
+		return FetcherResponse[[]*types.Body]{}, err
+	}
+	return *res, nil
+}
+
+// A single body timeout keeps a peer out of the windows that follow, so when
+// the remaining peers fail, the last-resort round must try every connected peer.
+func TestBackwardBlockDownloader_LastResortRoundTriesPeersMarkedByOldTimeout(t *testing.T) {
+	headers := newTestHeaderChain(31, nil)
+	timedOutOnce := make(map[PeerId]*atomic.Bool, 4)
+	for i := uint64(1); i <= 4; i++ {
+		timedOutOnce[*PeerIdFromUint64(i)] = &atomic.Bool{}
+	}
+	fetcher := &bodyTimeoutFetcher{
+		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
+		timesOut: func(peerId PeerId, fromNum uint64) bool {
+			if peerId == *PeerIdFromUint64(5) {
+				return fromNum >= 21
+			}
+			return fromNum >= 11 && fromNum <= 20 && timedOutOnce[peerId].CompareAndSwap(false, true)
+		},
+	}
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	for i := uint64(1); i <= 5; i++ {
+		peerTracker.PeerConnected(PeerIdFromUint64(i))
+	}
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+	for peerId, timedOut := range timedOutOnce {
+		require.True(t, timedOut.Load(), peerId.String())
+	}
+}

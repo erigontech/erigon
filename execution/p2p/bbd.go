@@ -644,6 +644,11 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			if err != nil && !exhaustedPeersCleared {
 				exhaustedPeersCleared = true
 				clear(peers.exhaustedPeers)
+				if config.peerId == nil {
+					if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
+						peers = newPeersContext(connected)
+					}
+				}
 				fetcherOpts = append(fetcherOpts, WithMaxRetries(config.bodiesBatchFetchRetries))
 				availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
 			}
