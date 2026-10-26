@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -2851,29 +2850,18 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 // stateWriter the way FinalizeTx hands a materialized tx's: each account as it reads
 // before and after the tx, each storage slot with its value at tx start.
 func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWriter) error {
-	before, after := ibs.viewAt(ibs.txIndex), ibs.viewAt(ibs.txIndex+1)
-	defer before.Close()
-	defer after.Close()
-	touched := map[accounts.Address]struct{}{}
-	for h := range writes.AllHeaders() {
-		touched[h.Address] = struct{}{}
-	}
-	addrs := slices.Collect(maps.Keys(touched))
-	slices.SortFunc(addrs, func(a, b accounts.Address) int {
-		av, bv := a.Value(), b.Value()
-		return bytes.Compare(av[:], bv[:])
-	})
-	storage := maps.Collect(writes.StoragesChanged())
-	for _, addr := range addrs {
-		original, err := before.readAccount(addr)
-		if err != nil {
+	for addr := range writes.addrs() {
+		before := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
+		original := before.Account()
+		if err := before.Err(); err != nil {
 			return err
 		}
 		if original == nil {
 			original = &accounts.Account{}
 		}
-		account, err := after.readAccount(addr)
-		if err != nil {
+		after := NewVersionedAccountView(addr, ibs.txIndex+1, ibs.versionMap, ibs.stateReader)
+		account := after.Account()
+		if err := after.Err(); err != nil {
 			return err
 		}
 		if account == nil {
@@ -2892,7 +2880,7 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 				return err
 			}
 		}
-		for key, vw := range storage[addr] {
+		for key, vw := range writes.storage[addr] {
 			if err := stateWriter.WriteAccountStorage(addr, account.Incarnation, key, vw.orig, vw.Val); err != nil {
 				return err
 			}
@@ -2902,35 +2890,6 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 		}
 	}
 	return nil
-}
-
-// viewAt is a read-only state over ibs's versionMap as transaction txIndex sees it.
-func (ibs *IntraBlockState) viewAt(txIndex int) *IntraBlockState {
-	v := NewWithVersionMap(ibs.stateReader, ibs.versionMap)
-	v.SetTxContext(ibs.blockNum, txIndex)
-	return v
-}
-
-// readAccount is the account as the state reads it, nil when it does not exist.
-func (ibs *IntraBlockState) readAccount(addr accounts.Address) (*accounts.Account, error) {
-	exists, err := ibs.Exist(addr)
-	if err != nil || !exists {
-		return nil, err
-	}
-	account := accounts.NewAccount()
-	if account.Balance, err = ibs.GetBalance(addr); err != nil {
-		return nil, err
-	}
-	if account.Nonce, err = ibs.GetNonce(addr); err != nil {
-		return nil, err
-	}
-	if account.CodeHash, err = ibs.GetCodeHash(addr); err != nil {
-		return nil, err
-	}
-	if account.Incarnation, err = ibs.GetIncarnation(addr); err != nil {
-		return nil, err
-	}
-	return &account, nil
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
