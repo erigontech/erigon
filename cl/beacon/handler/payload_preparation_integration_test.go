@@ -561,6 +561,7 @@ func newPreparationCollectionFixture(t *testing.T, path preparationCollectionPat
 	if path.canonicalFull {
 		canonical = full.Hash()
 	}
+	module.ExecModule.WaitIdle(t.Context())
 	_, err = client.ForkChoiceUpdate(t.Context(), parent.Hash(), parent.Hash(), canonical, nil, version)
 	require.NoError(t, err)
 	module.ExecModule.WaitIdle(t.Context())
