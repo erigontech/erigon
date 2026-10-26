@@ -94,6 +94,11 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 }
 
 func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	return so.OverrideTo(ibs, precompiles, rules, nil)
+}
+
+// OverrideTo is Override that also hands the overridden accounts to stateWriter.
+func (so *StateOverrides) OverrideTo(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if precompiles == nil {
 		precompiles = make(vm.PrecompiledContracts)
 	}
@@ -143,7 +148,7 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
+	if err := FinalizeCallTxTo(ibs, &overrideRules, stateWriter); err != nil {
 		return err
 	}
 	if ibs.IsVersioned() {

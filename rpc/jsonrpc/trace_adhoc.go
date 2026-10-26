@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -1593,20 +1592,20 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	var precompiles vm.PrecompiledContracts
 	if overrides != nil {
 		rules := blockCtx.Rules(chainConfig)
-		if precompiles, err = applyStateOverrides(ibs, overrides, rules); err != nil {
-			return nil, nil, err
-		}
 		// Committed to the cache because a stateDiff call resets ibs. The reset
 		// here drops the fake storage, whose committed value tracks every write.
 		if ibs.IsVersioned() {
-			// Overrides skip EIP-161 removal, as CommitOverrideDirtyAccounts does.
-			overrideRules := *rules
-			overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-			if err := ethapi.FinalizeCallTxTo(ibs, &overrideRules, cachedWriter); err != nil {
+			precompiles = vm.ActivePrecompiledContracts(rules)
+			if err := overrides.OverrideTo(ibs, precompiles, rules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
-		} else if err := ibs.CommitOverrideDirtyAccounts(rules, cachedWriter, ibs.ExtractAndClearDirty()); err != nil {
-			return nil, nil, err
+		} else {
+			if precompiles, err = applyStateOverrides(ibs, overrides, rules); err != nil {
+				return nil, nil, err
+			}
+			if err := ibs.CommitOverrideDirtyAccounts(rules, cachedWriter, ibs.ExtractAndClearDirty()); err != nil {
+				return nil, nil, err
+			}
 		}
 		ibs.Reset()
 		transactions.VersionedCallState(ibs)
@@ -1831,6 +1830,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 
 // finalizeTraceTx hands the tx's changes to the state cache and, for a stateDiff, to sd,
 // then fills the diff from the state before the tx (cloneReader) and after it (ibs).
+// The cache takes the changes only after the diff: cloneReader shares its entries.
 func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader state.StateReader, sd *StateDiff, cachedWriter state.StateWriter) error {
 	if sd == nil {
 		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
@@ -1838,52 +1838,64 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	initialIbs := state.New(cloneReader)
 	defer initialIbs.Close()
 	transactions.VersionedCallState(initialIbs)
-	if err := ethapi.FinalizeCallTxTo(ibs, rules, teeWriter{sd, cachedWriter}); err != nil {
+	var changes bufferedWriter
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, &changes); err != nil {
+		return err
+	}
+	if err := changes.writeTo(sd); err != nil {
 		return err
 	}
 	if ibs.IsVersioned() {
 		// The versioned state reads the tx's writes back from the next tx index.
 		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
 	}
-	return sd.CompareStates(initialIbs, ibs)
-}
-
-// teeWriter hands every write to a, then to b.
-type teeWriter struct{ a, b state.StateWriter }
-
-func (t teeWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	if err := t.a.UpdateAccountData(address, original, account); err != nil {
+	if err := sd.CompareStates(initialIbs, ibs); err != nil {
 		return err
 	}
-	return t.b.UpdateAccountData(address, original, account)
+	return changes.writeTo(cachedWriter)
 }
 
-func (t teeWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	if err := t.a.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
-		return err
-	}
-	return t.b.UpdateAccountCode(address, incarnation, codeHash, code)
+// bufferedWriter keeps state writes to hand them to other writers later.
+type bufferedWriter struct {
+	writes []func(state.StateWriter) error
 }
 
-func (t teeWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	if err := t.a.DeleteAccount(address, original); err != nil {
-		return err
+func (b *bufferedWriter) writeTo(w state.StateWriter) error {
+	for _, write := range b.writes {
+		if err := write(w); err != nil {
+			return err
+		}
 	}
-	return t.b.DeleteAccount(address, original)
+	return nil
 }
 
-func (t teeWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if err := t.a.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
-		return err
-	}
-	return t.b.WriteAccountStorage(address, incarnation, key, original, value)
+func (b *bufferedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	o, a := *original, *account
+	b.writes = append(b.writes, func(w state.StateWriter) error { return w.UpdateAccountData(address, &o, &a) })
+	return nil
 }
 
-func (t teeWriter) CreateContract(address accounts.Address) error {
-	if err := t.a.CreateContract(address); err != nil {
-		return err
-	}
-	return t.b.CreateContract(address)
+func (b *bufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	b.writes = append(b.writes, func(w state.StateWriter) error { return w.UpdateAccountCode(address, incarnation, codeHash, code) })
+	return nil
+}
+
+func (b *bufferedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	o := *original
+	b.writes = append(b.writes, func(w state.StateWriter) error { return w.DeleteAccount(address, &o) })
+	return nil
+}
+
+func (b *bufferedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	b.writes = append(b.writes, func(w state.StateWriter) error {
+		return w.WriteAccountStorage(address, incarnation, key, original, value)
+	})
+	return nil
+}
+
+func (b *bufferedWriter) CreateContract(address accounts.Address) error {
+	b.writes = append(b.writes, func(w state.StateWriter) error { return w.CreateContract(address) })
+	return nil
 }
 
 // RawTransaction implements trace_rawTransaction.

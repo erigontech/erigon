@@ -483,6 +483,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return nil, err
 	}
 
+	// On the versioned state the overrides took tx index 0; the block's txs follow them.
+	firstTxIndex := statedb.TxnIndex()
 	// try to replay all transactions in this block
 	for idx, txn := range replayTransactions {
 		log.Debug("[replayBlock] replaying transaction", "idx", idx, "transactionHash", txn.Hash())
@@ -503,7 +505,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
-				statedb.SetTxContext(blockNum, idx)
+				statedb.SetTxContext(blockNum, firstTxIndex+idx)
 				nonce, err := statedb.GetNonce(sender.Address())
 				if err != nil {
 					log.Error(err.Error())
@@ -521,7 +523,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			}
 		}
 
-		statedb.SetTxContext(blockNum, idx)
+		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
@@ -549,6 +551,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		} else {
 			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
+			for _, l := range txLogs {
+				l.TxIndex = hexutil.Uint(idx)
+			}
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
 		}
