@@ -37,6 +37,7 @@ type PBinResumeOptions struct {
 	BaseTxNum       uint64
 	BaseState       []byte
 	BaseStateEnd    uint64
+	SourceRanges    [][2]uint64
 	SourceTxNum     uint64
 	Workers         int
 	PostCancun      bool

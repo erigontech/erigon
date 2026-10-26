@@ -70,19 +70,20 @@ type sd interface {
 }
 
 type SharedDomainsCommitmentContext struct {
-	sharedDomains    sd
-	commitmentDomain kv.Domain
-	updates          *commitment.Updates
-	codeKeys         map[string]struct{}
-	feed             *commitment.Feed
-	pbinFeed         *commitment.PBinFeed
-	pbinOps          []pbt.Op
-	patriciaTrie     commitment.Trie
-	variant          commitment.TrieVariant
-	justRestored     atomic.Bool
-	traceW           io.Writer
-	stateReader      StateReader
-	paraTrieDB       kv.TemporalRoDB
+	sharedDomains      sd
+	commitmentDomain   kv.Domain
+	updates            *commitment.Updates
+	codeKeys           map[string]struct{}
+	feed               *commitment.Feed
+	pbinFeed           *commitment.PBinFeed
+	pbinOps            []pbt.Op
+	patriciaTrie       commitment.Trie
+	variant            commitment.TrieVariant
+	justRestored       atomic.Bool
+	traceW             io.Writer
+	stateReader        StateReader
+	paraTrieDB         kv.TemporalRoDB
+	verifyPointLookups *atomic.Uint64
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
 	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
 	warmupBase commitment.WarmupConfig
@@ -385,14 +386,14 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		putter = sdc.sharedDomains.AsPutDel(tx)
 	}
 	mainTtx := &TrieContext{
-		putter:           putter,
-		commitmentDomain: sdc.CommitmentDomain(),
-		stepSize:         sdc.sharedDomains.StepSize(),
-		txNum:            txNum,
-		blockNum:         blockNum,
-		traceW:           sdc.traceW,
-		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
-		verifyRange:      verifyRangeReader(tx, sdc.CommitmentDomain()),
+		putter:             putter,
+		commitmentDomain:   sdc.CommitmentDomain(),
+		stepSize:           sdc.sharedDomains.StepSize(),
+		txNum:              txNum,
+		blockNum:           blockNum,
+		traceW:             sdc.traceW,
+		readCodeSize:       sdc.variant == commitment.VariantBinPatriciaTrie,
+		verifyPointLookups: sdc.verifyPointLookups,
 	}
 	if directPutter, ok := putter.(interface {
 		PutCommitmentBranchDirect([]byte, []byte, []byte, uint64) error
@@ -432,8 +433,13 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 	return sdc.patriciaTrie
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetVerifyPointLookupCounter(counter *atomic.Uint64) {
+	sdc.verifyPointLookups = counter
+}
+
 func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) {
-	sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
+	ctx := sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
+	ctx.verifyRange = verifyRangeReader(tx, sdc.CommitmentDomain())
 }
 
 var errVerificationViewDrifted = errors.New("verification worker view drifted from the caller's snapshot")
@@ -458,11 +464,12 @@ func (sdc *SharedDomainsCommitmentContext) VerificationContextFactory(tx kv.Temp
 			return &errorTrieContext{err: errVerificationViewDrifted}, func() {}
 		}
 		return &TrieContext{
-			putter:           sdc.sharedDomains.AsPutDel(roTx),
-			stateReader:      NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
-			commitmentDomain: sdc.CommitmentDomain(),
-			stepSize:         sdc.sharedDomains.StepSize(),
-			verifyRange:      verifyRangeReader(roTx, sdc.CommitmentDomain()),
+			putter:             sdc.sharedDomains.AsPutDel(roTx),
+			stateReader:        NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
+			commitmentDomain:   sdc.CommitmentDomain(),
+			stepSize:           sdc.sharedDomains.StepSize(),
+			verifyRange:        verifyRangeReader(roTx, sdc.CommitmentDomain()),
+			verifyPointLookups: sdc.verifyPointLookups,
 		}, roTx.Rollback
 	}
 	return factory, pin.Close
@@ -1524,10 +1531,11 @@ type TrieContext struct {
 	txNum            uint64
 	blockNum         uint64
 
-	stepSize       uint64
-	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
-	stateReader    StateReader
-	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+	stepSize           uint64
+	traceW             io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
+	stateReader        StateReader
+	localCollector     *etl.Collector // per-goroutine collector for concurrent PutBranch
+	verifyPointLookups *atomic.Uint64
 	// readCodeSize makes Account resolve the account's code length. Only the
 	// binary trie hashes code_size, and the extra CodeDomain read is not free.
 	readCodeSize bool
@@ -1581,6 +1589,9 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	if sdc.verifyPointLookups != nil {
+		sdc.verifyPointLookups.Add(1)
+	}
 	enc, step, err := sdc.readDomain(sdc.commitmentDomainValue(), pref)
 	if err != nil {
 		return nil, 0, err

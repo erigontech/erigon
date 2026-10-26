@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -131,21 +132,49 @@ func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
 }
 
 func TestConvertPBTResumeFromStoppedHexBinSource(t *testing.T) {
-	runPBTResumeFromStoppedHexBinSource(t, 1, false)
+	runPBTResumeFromStoppedHexBinSource(t, 1, false, 2, 4, false)
 }
 
 func TestConvertPBTResumeFromMergedHexBinSource(t *testing.T) {
-	runPBTResumeFromStoppedHexBinSource(t, 2, true)
+	runPBTResumeFromStoppedHexBinSource(t, 2, true, 2, 4, false)
 }
 
-func runPBTResumeFromStoppedHexBinSource(t *testing.T, stepsInFrozenFile uint64, merge bool) {
+func TestConvertPBTResumeAcrossMergedSourceFile(t *testing.T) {
+	runPBTResumeFromStoppedHexBinSource(t, 2, true, 3, 4, true)
+}
+
+func TestConvertPBTResumeAcrossMergedSourceFileWithLaterFiles(t *testing.T) {
+	runPBTResumeFromStoppedHexBinSource(t, 2, true, 3, 6, true)
+}
+
+func TestConvertPBTResumeFromSourceRangeAcrossBase(t *testing.T) {
+	runPBTResumeFromStoppedHexBinSourceWithMerges(t, 1, false, true)
+}
+
+func TestPBTResumeRejectsBaseFileAcrossSourceRange(t *testing.T) {
+	err := pbtResumeValidateBaseFileRanges(
+		[]pbtAttachFile{{path: "v1.0-commitment-bin.0-12.kv", from: 0, to: 12}},
+		[][2]uint64{{0, 8}, {8, 16}}, 1, 7,
+	)
+	require.ErrorContains(t, err, "base bin file range 0-12 straddles source commitment ranges 0-8 and 8-16")
+}
+
+func runPBTResumeFromStoppedHexBinSource(t *testing.T, stepsInFrozenFile uint64, merge bool, baseBlocks, sourceBlocks int, spansBase bool) {
+	runPBTResumeFromStoppedHexBinSourceWithConfig(t, stepsInFrozenFile, merge, merge, baseBlocks, sourceBlocks, spansBase)
+}
+
+func runPBTResumeFromStoppedHexBinSourceWithMerges(t *testing.T, stepsInFrozenFile uint64, baseMerge, sourceMerge bool) {
+	runPBTResumeFromStoppedHexBinSourceWithConfig(t, stepsInFrozenFile, baseMerge, sourceMerge, 2, 4, false)
+}
+
+func runPBTResumeFromStoppedHexBinSourceWithConfig(t *testing.T, stepsInFrozenFile uint64, baseMerge, sourceMerge bool, baseBlocks, sourceBlocks int, spansBase bool) {
 	selectPBTCommandSuite(t)
-	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, stepsInFrozenFile, 4)
+	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, stepsInFrozenFile, sourceBlocks)
 	require.NoError(t, err)
 	source.Tester.Close()
 	sourceSalt, err := os.ReadFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"))
 	require.NoError(t, err)
-	base, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, stepsInFrozenFile, 2)
+	base, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, stepsInFrozenFile, baseBlocks)
 	require.NoError(t, err)
 	base.Tester.Close()
 	require.NoError(t, os.WriteFile(filepath.Join(base.Tester.Dirs.Snap, "salt-state.txt"), sourceSalt, 0o644))
@@ -160,7 +189,7 @@ func runPBTResumeFromStoppedHexBinSource(t *testing.T, stepsInFrozenFile uint64,
 	require.NoError(t, base.Tester.InsertChain(base.Chain))
 	base.Tester.Close()
 	baseEnd := pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata)
-	buildPBTResumeFiles(t, base, baseEnd, merge)
+	buildPBTResumeFiles(t, base, baseEnd, baseMerge)
 	source.Tester = execmoduletester.New(t,
 		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
 		execmoduletester.WithGenesisSpec(source.Genesis),
@@ -174,7 +203,7 @@ func runPBTResumeFromStoppedHexBinSource(t *testing.T, stepsInFrozenFile uint64,
 	sourceSettings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
 	require.NoError(t, err)
 	sourceEnd := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
-	buildPBTResumeFiles(t, source, sourceEnd, merge)
+	buildPBTResumeFiles(t, source, sourceEnd, sourceMerge)
 	freshOutput := filepath.Join(t.TempDir(), "fresh-output")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New()))
 	baseSettings, err := dbstate.ReadErigonDBSettings(base.Tester.Dirs)
@@ -222,12 +251,23 @@ func runPBTResumeFromStoppedHexBinSource(t *testing.T, stepsInFrozenFile uint64,
 	fileEnd, err := pbtResumeSourceFilesEnd(source.Tester.Dirs, sourceSettings.StepSize)
 	require.NoError(t, err)
 	require.Greater(t, fileEnd, stoppedPoint.TxNum)
+	hexFiles, err := pbtResumeCommitmentFiles(source.Tester.Dirs, kv.CommitmentDomain)
+	require.NoError(t, err)
+	spanning := slices.ContainsFunc(hexFiles, func(file pbtAttachFile) bool {
+		return file.from > 0 && file.from*sourceSettings.StepSize <= stoppedPoint.TxNum && file.to*sourceSettings.StepSize > stoppedPoint.TxNum+1
+	})
+	require.Equal(t, spansBase, spanning, "a source commitment file spans the base point %d", stoppedPoint.TxNum)
 	output := filepath.Join(t.TempDir(), "resumed-output")
 	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
 	require.Equal(t, pbtSortedBinFileNames(pbtCommitmentBinKVBytes(t, freshOutput)), pbtSortedBinFileNames(pbtCommitmentBinKVBytes(t, output)))
 	require.Equal(t, readPBTBinLeaves(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinLeaves(t, output, source.Tester.Dirs.Chaindata))
 	require.Equal(t, readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, output, source.Tester.Dirs.Chaindata))
 	require.Equal(t, readPBTBinRoot(t, freshOutput, source.Tester.Dirs.Chaindata), readPBTBinRoot(t, output, source.Tester.Dirs.Chaindata))
+	resumeSettings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	sourceDomain, err := pbtResumeLayoutSourceDomain(resumeSettings)
+	require.NoError(t, err)
+	require.Equal(t, pbtResumeRangeKeys(t, source.Tester.Dirs, sourceDomain), pbtResumeRangeKeys(t, datadir.Open(output), kv.CommitmentBinDomain))
 	setExecutionProgress(t, source.Tester.Dirs.Chaindata, 1)
 	require.NoError(t, attachPBTWithHooks(t.Context(), source.Tester.Dirs.DataDir, output, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 }
@@ -2071,6 +2111,27 @@ func pbtSortedBinFileNames(files map[string][]byte) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func pbtResumeRangeKeys(t *testing.T, dirs datadir.Dirs, domain kv.Domain) []string {
+	t.Helper()
+	files, err := pbtResumeCommitmentFiles(dirs, domain)
+	require.NoError(t, err)
+	keys := make([]string, 0, len(files))
+	seen := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if filepath.Ext(file.path) != ".kv" {
+			continue
+		}
+		key := pbtResumeLayoutKey(file)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func readPBTBinLeaves(t *testing.T, output, rawPath string) map[string][]byte {

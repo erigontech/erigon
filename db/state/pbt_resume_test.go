@@ -68,7 +68,7 @@ func TestPBinResumeMatchesFreshConversion(t *testing.T) {
 	require.Equal(t, uint64(16), end)
 	require.NotEmpty(t, value)
 	at.Close()
-	resumeRoot := resumePBinAt(t, resumeDB, resumeAgg, targetDB, targetAgg, 16)
+	resumeRoot := resumePBinAtWithRanges(t, resumeDB, resumeAgg, targetDB, targetAgg, 16, [][2]uint64{{0, 8}, {8, 16}, {16, 24}})
 	freshRoot := convertPBinAt(t, freshDB, freshAgg, 16)
 	resumeRows := pbinCommitmentRows(t, targetAgg)
 	freshRows := pbinCommitmentRows(t, freshAgg)
@@ -76,6 +76,9 @@ func TestPBinResumeMatchesFreshConversion(t *testing.T) {
 	delete(freshRows, string(commitment.KeyCommitmentState))
 	require.Equal(t, freshRoot, resumeRoot)
 	require.Equal(t, freshRows, resumeRows)
+	deltaRows := pbinRangeRows(t, targetAgg, 8, 16)
+	delete(deltaRows, string(commitment.KeyCommitmentState))
+	require.NotEmpty(t, deltaRows, "gap rows must be placed in the source range containing their stamps")
 	requireResumeStateFile(t, targetAgg, 16, 24)
 }
 
@@ -193,6 +196,10 @@ func convertPBinAt(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, endT
 }
 
 func resumePBinAt(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64) common.Hash {
+	return resumePBinAtWithRanges(t, sourceDB, sourceAgg, targetDB, targetAgg, endTxNum, nil)
+}
+
+func resumePBinAtWithRanges(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, sourceRanges [][2]uint64) common.Hash {
 	t.Helper()
 	sourceTx, err := sourceDB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -210,7 +217,7 @@ func resumePBinAt(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggre
 		EndTxNum:         endTxNum,
 		Hash:             eip8297.HashBytes,
 		Workers:          4,
-		Resume:           &state.PBinResumeOptions{BaseTxNum: 8, SourceTxNum: endTxNum, Workers: 4, PostCancun: true},
+		Resume:           &state.PBinResumeOptions{BaseTxNum: 8, SourceRanges: sourceRanges, SourceTxNum: endTxNum, Workers: 4, PostCancun: true},
 	})
 	require.NoError(t, err)
 	return root

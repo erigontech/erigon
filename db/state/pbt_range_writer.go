@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,22 +47,23 @@ import (
 )
 
 type PBinRangeWriter struct {
-	aggregator   *Aggregator
-	domain       kv.Domain
-	endTxNum     uint64
-	baseTxNum    uint64
-	leafStamp    uint64
-	ranges       []pbinRange
-	maxOps       int
-	maxBytes     int
-	workers      int
-	state        []byte
-	stateInFiles bool
-	resume       bool
-	workerViews  atomic.Int32
-	stampTracker func() pbinStampTracker
-	pipelineHook func(string, int) error
-	absentProbe  PBinAbsentProbeFunc
+	aggregator         *Aggregator
+	domain             kv.Domain
+	endTxNum           uint64
+	baseTxNum          uint64
+	leafStamp          uint64
+	ranges             []pbinRange
+	maxOps             int
+	maxBytes           int
+	workers            int
+	state              []byte
+	stateInFiles       bool
+	resume             bool
+	resumeSourceLayout bool
+	workerViews        atomic.Int32
+	stampTracker       func() pbinStampTracker
+	pipelineHook       func(string, int) error
+	absentProbe        PBinAbsentProbeFunc
 }
 
 type PBinRangeWriterLimits struct {
@@ -533,10 +533,10 @@ func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, end
 }
 
 func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64) (*PBinRangeWriter, error) {
-	return newPBinRangeWriterForResume(aggregator, domain, baseTxNum, endTxNum, nil, 0)
+	return newPBinRangeWriterForResume(aggregator, domain, baseTxNum, endTxNum, nil, 0, nil)
 }
 
-func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64, baseState []byte, baseStateEnd uint64) (*PBinRangeWriter, error) {
+func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64, baseState []byte, baseStateEnd uint64, sourceRanges [][2]uint64) (*PBinRangeWriter, error) {
 	if aggregator == nil {
 		return nil, fmt.Errorf("pbin resume range writer: nil aggregator")
 	}
@@ -556,25 +556,10 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 	if len(baseFiles) == 0 {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no files", domain)
 	}
-	frontier := baseTxNum
-	fileInfos := make([]os.FileInfo, 0, len(baseFiles))
 	for _, file := range baseFiles {
-		info, infoErr := os.Stat(file.Fullpath())
-		if infoErr != nil {
-			return nil, fmt.Errorf("pbin resume range writer: inspect target %s file range %d-%d: %w", domain, file.StartRootNum(), file.EndRootNum(), infoErr)
-		}
-		duplicate := false
-		for _, previous := range fileInfos {
-			if os.SameFile(previous, info) {
-				duplicate = true
-				break
-			}
-		}
-		if file.StartRootNum() > baseTxNum && (file.StartRootNum() > frontier || duplicate) {
+		if file.StartRootNum() > baseTxNum && visibleFileHasRows(file) {
 			return nil, fmt.Errorf("pbin resume range writer: target %s file range %d-%d is past selected base txNum %d", domain, file.StartRootNum(), file.EndRootNum(), baseTxNum)
 		}
-		fileInfos = append(fileInfos, info)
-		frontier = max(frontier, file.EndRootNum())
 	}
 	if len(baseState) == 0 {
 		state, found, _, stateEnd, err := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
@@ -590,6 +575,29 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 		stateTx, _ := commitmentdb.DecodeTxBlockNums(state)
 		if stateTx > baseTxNum {
 			return nil, fmt.Errorf("pbin resume range writer: target %s state is past selected base txNum %d at %d", domain, baseTxNum, stateTx)
+		}
+		if len(sourceRanges) != 0 {
+			if rangeErr := pbinValidateResumeBaseRanges(baseFiles, sourceRanges, baseTxNum); rangeErr != nil {
+				return nil, rangeErr
+			}
+			ranges, rangeErr := pbinResumeOutputRanges(aggregator, sourceRanges, baseTxNum)
+			if rangeErr != nil {
+				return nil, rangeErr
+			}
+			return &PBinRangeWriter{
+				aggregator:         aggregator,
+				domain:             domain,
+				endTxNum:           endTxNum,
+				baseTxNum:          baseTxNum,
+				leafStamp:          endTxNum,
+				maxOps:             pbinRangeWriterMaxOps,
+				maxBytes:           pbinRangeWriterMaxBytes,
+				workers:            dbg.PBTWorkers,
+				stateInFiles:       true,
+				resume:             true,
+				resumeSourceLayout: true,
+				ranges:             ranges,
+			}, nil
 		}
 		start := max(stateEnd, baseTxNum)
 		end := max(endTxNum+1, start+stepSize)
@@ -630,6 +638,29 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 	}
 	if stateEnd <= baseTxNum {
 		return nil, fmt.Errorf("pbin resume range writer: base domain %s has no state at txNum %d", domain, baseTxNum)
+	}
+	if len(sourceRanges) != 0 {
+		if err := pbinValidateResumeBaseRanges(baseFiles, sourceRanges, baseTxNum); err != nil {
+			return nil, err
+		}
+		ranges, err := pbinResumeOutputRanges(aggregator, sourceRanges, baseTxNum)
+		if err != nil {
+			return nil, err
+		}
+		return &PBinRangeWriter{
+			aggregator:         aggregator,
+			domain:             domain,
+			endTxNum:           endTxNum,
+			baseTxNum:          baseTxNum,
+			leafStamp:          endTxNum,
+			maxOps:             pbinRangeWriterMaxOps,
+			maxBytes:           pbinRangeWriterMaxBytes,
+			workers:            dbg.PBTWorkers,
+			stateInFiles:       true,
+			resume:             true,
+			resumeSourceLayout: true,
+			ranges:             ranges,
+		}, nil
 	}
 	start := max(stateEnd, baseTxNum)
 	ranges := make([]pbinRange, 0, len(files))
@@ -689,6 +720,67 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 		resume:       true,
 		ranges:       ranges,
 	}, nil
+}
+
+func pbinValidateResumeBaseRanges(baseFiles kv.VisibleFiles, sourceRanges [][2]uint64, baseTxNum uint64) error {
+	for i, sourceRange := range sourceRanges {
+		if sourceRange[0] >= sourceRange[1] {
+			return fmt.Errorf("pbin resume range writer: invalid source commitment range %d-%d", sourceRange[0], sourceRange[1])
+		}
+		if i != 0 && sourceRange[0] < sourceRanges[i-1][1] {
+			return fmt.Errorf("pbin resume range writer: overlapping source commitment ranges %d-%d and %d-%d", sourceRanges[i-1][0], sourceRanges[i-1][1], sourceRange[0], sourceRange[1])
+		}
+	}
+	for _, file := range baseFiles {
+		if file.StartRootNum() > baseTxNum || !visibleFileHasRows(file) {
+			continue
+		}
+		fileStart, fileEnd := file.StartRootNum(), file.EndRootNum()
+		contained := false
+		for i, sourceRange := range sourceRanges {
+			if fileStart >= sourceRange[0] && fileEnd <= sourceRange[1] {
+				contained = true
+				break
+			}
+			if fileStart < sourceRange[1] && fileEnd > sourceRange[0] {
+				if i+1 < len(sourceRanges) && fileEnd > sourceRanges[i+1][0] {
+					return fmt.Errorf("pbin resume range writer: base bin file range %d-%d straddles source commitment ranges %d-%d and %d-%d", fileStart, fileEnd, sourceRange[0], sourceRange[1], sourceRanges[i+1][0], sourceRanges[i+1][1])
+				}
+				return fmt.Errorf("pbin resume range writer: base bin file range %d-%d is outside source commitment range %d-%d", fileStart, fileEnd, sourceRange[0], sourceRange[1])
+			}
+		}
+		if contained {
+			continue
+		}
+		return fmt.Errorf("pbin resume range writer: base bin file range %d-%d is outside source commitment layout", fileStart, fileEnd)
+	}
+	return nil
+}
+
+func pbinResumeOutputRanges(aggregator *Aggregator, sourceRanges [][2]uint64, baseTxNum uint64) ([]pbinRange, error) {
+	ranges := make([]pbinRange, 0, len(sourceRanges))
+	for _, sourceRange := range sourceRanges {
+		if sourceRange[1] <= baseTxNum {
+			continue
+		}
+		rows, err := newPBinRowLanes(aggregator.Dirs().Tmp, fmt.Sprintf("%d-%d", sourceRange[0], sourceRange[1]))
+		if err != nil {
+			for i := range ranges {
+				ranges[i].rows.close()
+			}
+			return nil, err
+		}
+		ranges = append(ranges, pbinRange{start: sourceRange[0], end: sourceRange[1], rows: rows})
+	}
+	if len(ranges) == 0 {
+		return nil, fmt.Errorf("pbin resume range writer: source commitment ranges end at or before selected base txNum %d", baseTxNum)
+	}
+	return ranges, nil
+}
+
+func visibleFileHasRows(file kv.VisibleFile) bool {
+	visible, ok := file.(visibleFile)
+	return ok && visible.src != nil && visible.src.decompressor != nil && visible.src.decompressor.Count() != 0
 }
 
 func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
@@ -845,7 +937,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 	}
 	var tracker pbinStampTracker
-	if !w.resume {
+	if !w.resume || w.resumeSourceLayout {
 		tracker = newPBinRowStampTracker()
 		if w.stampTracker != nil {
 			tracker = w.stampTracker()
@@ -873,7 +965,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return nil
 		}
 		rangeIndex := len(w.ranges) - 1
-		if !w.resume {
+		if rowTracker != nil {
 			stamp, stampErr := rowTracker.stamp(key)
 			if stampErr != nil {
 				return stampErr
@@ -1043,6 +1135,16 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	if err := w.buildFiles(ctx, state); err != nil {
 		return common.Hash{}, err
 	}
+	if w.resumeSourceLayout {
+		for _, outputRange := range w.ranges {
+			if err := w.aggregator.MergePBinRange(ctx, w.domain, outputRange.start, outputRange.end); err != nil {
+				return common.Hash{}, err
+			}
+		}
+		if err := w.aggregator.RemoveOverlapsAfterMerge(); err != nil {
+			return common.Hash{}, err
+		}
+	}
 	return common.BytesToHash(root), nil
 }
 
@@ -1180,14 +1282,21 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 	for i := range plans {
 		stepFrom := kv.Step(w.ranges[i].start / stepSize)
 		stepTo := kv.Step(w.ranges[i].end / stepSize)
-		valuesPath := domain.kvNewFilePath(stepFrom, stepTo)
+		dstDir := ""
+		if w.resumeSourceLayout {
+			dstDir = domain.dirs.Tmp
+		}
+		valuesPath := domain.kvNewFilePathIn(dstDir, stepFrom, stepTo)
+		if w.resumeSourceLayout {
+			valuesPath = filepath.Join(domain.dirs.Tmp, fmt.Sprintf("pbin-resume-delta-%d-%d-%d.kv", stepFrom, stepTo, i))
+		}
 		plans[i] = pbinRangeBuildPlan{
 			index:           i,
 			stepFrom:        stepFrom,
 			stepTo:          stepTo,
 			valuesPath:      valuesPath,
 			idtPath:         filepath.Join(domain.dirs.Tmp, filepath.Base(valuesPath)+".idt"),
-			kviPath:         domain.kviAccessorNewFilePath(stepFrom, stepTo),
+			kviPath:         domain.kviAccessorNewFilePathIn(dstDir, stepFrom, stepTo),
 			rows:            rowCounts[i],
 			accessorWorkers: accessorWorkers[i],
 		}
@@ -1279,6 +1388,14 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 	}
 	w.aggregator.dirtyFilesLock.Lock()
 	for i := range plans {
+		if w.resumeSourceLayout {
+			merged, err := w.mergeResumeRange(ctx, domain, plans[i].static, w.ranges[i].start, w.ranges[i].end)
+			if err != nil {
+				cleanup()
+				return err
+			}
+			plans[i].static = merged
+		}
 		domain.integrateDirtyFiles(plans[i].static, w.ranges[i].start, w.ranges[i].end)
 	}
 	w.aggregator.recalcVisibleFiles(nil)
@@ -1329,7 +1446,11 @@ func (w *PBinRangeWriter) buildRange(buildCtx context.Context, domain *Domain, s
 		return err
 	}
 	collation.valuesCount = valuesComp.Count() / 2
-	static, err := domain.buildFileRangeWithWorkers(buildCtx, plan.stepFrom, plan.stepTo, collation, background.NewProgressSet(), "", rangeProgress, plan.accessorWorkers)
+	dstDir := ""
+	if w.resumeSourceLayout {
+		dstDir = domain.dirs.Tmp
+	}
+	static, err := domain.buildFileRangeWithWorkers(buildCtx, plan.stepFrom, plan.stepTo, collation, background.NewProgressSet(), dstDir, rangeProgress, plan.accessorWorkers)
 	if err != nil {
 		return err
 	}
@@ -1339,6 +1460,32 @@ func (w *PBinRangeWriter) buildRange(buildCtx context.Context, domain *Domain, s
 	}
 	plan.static = static
 	return nil
+}
+
+func (w *PBinRangeWriter) mergeResumeRange(ctx context.Context, domain *Domain, delta StaticFiles, start, end uint64) (StaticFiles, error) {
+	deltaItem := newFilesItem(start, end+1)
+	deltaItem.decompressor = delta.valuesDecomp
+	deltaItem.index = delta.valuesIdx
+	deltaItem.bindex = delta.valuesBt
+	deltaItem.existence = delta.existenceFilter
+	ranges := &Ranges{}
+	ranges.domain[w.domain] = NewDomainRanges(w.domain, *NewMergeRange(w.domain.String(), true, start, end), HistoryRanges{}, w.aggregator.StepSize())
+	at := w.aggregator.BeginFilesRo()
+	defer at.Close()
+	visible, err := at.filesInRange(ranges)
+	if err != nil {
+		delta.CleanupOnError()
+		return StaticFiles{}, err
+	}
+	defer visible.Close()
+	inputs := append(visible.DomainFiles(w.domain), deltaItem)
+	merged, _, _, err := at.d[w.domain].mergeFiles(ctx, inputs, nil, nil, ranges.domain[w.domain], nil, true, background.NewProgressSet())
+	if err != nil {
+		delta.CleanupOnError()
+		return StaticFiles{}, err
+	}
+	delta.CleanupOnError()
+	return StaticFiles{valuesDecomp: merged.decompressor, valuesIdx: merged.index, valuesBt: merged.bindex, existenceFilter: merged.existence}, nil
 }
 
 func (t *pbinRowStampTracker) partition(path *eip8297.Bitpath) *pbinPartitionStamps {

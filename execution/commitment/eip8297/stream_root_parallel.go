@@ -51,25 +51,29 @@ type parallelStreamRootBatch struct {
 }
 
 type ParallelStreamRoot struct {
-	sum         HashFn
-	workers     int
-	inputs      chan *parallelStreamRootBatch
-	parts       []map[int]streamRootSubtree
-	workerErrs  []error
-	wg          sync.WaitGroup
-	closed      bool
-	lastShard   int
-	hasShard    bool
-	prevKey     []byte
-	prevBits    []byte
-	err         error
-	root        common.Hash
-	rootReady   bool
-	current     *parallelStreamRootBatch
-	primed      bool
-	buildActive *atomic.Int32
-	buildMax    *atomic.Int32
-	buildStart  func()
+	sum          HashFn
+	workers      int
+	inputs       chan *parallelStreamRootBatch
+	stopped      chan struct{}
+	stopOnce     sync.Once
+	parts        []map[int]streamRootSubtree
+	workerErrs   []error
+	workerErrMu  sync.Mutex
+	workerFailed atomic.Bool
+	wg           sync.WaitGroup
+	closed       bool
+	lastShard    int
+	hasShard     bool
+	prevKey      []byte
+	prevBits     []byte
+	err          error
+	root         common.Hash
+	rootReady    bool
+	current      *parallelStreamRootBatch
+	primed       bool
+	buildActive  *atomic.Int32
+	buildMax     *atomic.Int32
+	buildStart   func()
 }
 
 func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error) {
@@ -83,6 +87,7 @@ func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error)
 		sum:        sum,
 		workers:    workers,
 		inputs:     make(chan *parallelStreamRootBatch, workers+2),
+		stopped:    make(chan struct{}),
 		parts:      make([]map[int]streamRootSubtree, workers),
 		workerErrs: make([]error, workers),
 	}
@@ -102,6 +107,11 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 	if b.err != nil {
 		return b.err
 	}
+	if b.workerFailed.Load() {
+		err := b.workerError()
+		b.err = err
+		return err
+	}
 	if b.closed {
 		return errors.New("eip8297: parallel stream root is closed")
 	}
@@ -110,11 +120,11 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 		return err
 	}
 	bits := bytesToBits(key)
-	if b.hasShard && bytes.Compare(key, b.prevKey) <= 0 {
+	if b.hasShard && bytes.Compare(key, b.prevKey) < 0 {
 		b.err = errors.New("eip8297: stream keys are not strictly ascending")
 		return b.err
 	}
-	if b.hasShard {
+	if b.hasShard && !bytes.Equal(key, b.prevKey) {
 		commonBits := streamRootCommonPrefix(b.prevBits, bits)
 		if commonBits == len(b.prevBits) || commonBits == len(bits) {
 			b.err = errors.New("eip8297: stream keys are not prefix-free")
@@ -172,6 +182,10 @@ func (b *ParallelStreamRoot) flush(ctx context.Context) error {
 	select {
 	case b.inputs <- batch:
 		return nil
+	case <-b.stopped:
+		err := b.workerError()
+		b.err = err
+		return err
 	case <-ctx.Done():
 		b.err = ctx.Err()
 		return b.err
@@ -194,11 +208,9 @@ func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
 	if b.err != nil {
 		return common.Hash{}, b.err
 	}
-	for _, err := range b.workerErrs {
-		if err != nil {
-			b.err = err
-			return common.Hash{}, err
-		}
+	if err := b.workerError(); err != nil {
+		b.err = err
+		return common.Hash{}, err
 	}
 	var nodes [1 << pbinStreamRootPartitionBits]streamRootSubtree
 	for worker := range b.parts {
@@ -225,7 +237,17 @@ func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
 
 func (b *ParallelStreamRoot) run(worker int) {
 	defer b.wg.Done()
-	for batch := range b.inputs {
+	for {
+		var batch *parallelStreamRootBatch
+		var ok bool
+		select {
+		case batch, ok = <-b.inputs:
+			if !ok {
+				return
+			}
+		case <-b.stopped:
+			return
+		}
 		if b.workerErrs[worker] != nil {
 			return
 		}
@@ -254,7 +276,11 @@ func (b *ParallelStreamRoot) run(worker int) {
 			if b.buildActive != nil {
 				b.buildActive.Add(-1)
 			}
+			b.workerErrMu.Lock()
 			b.workerErrs[worker] = err
+			b.workerErrMu.Unlock()
+			b.workerFailed.Store(true)
+			b.stopOnce.Do(func() { close(b.stopped) })
 			return
 		}
 		if b.buildActive != nil {
@@ -262,6 +288,17 @@ func (b *ParallelStreamRoot) run(worker int) {
 		}
 		b.parts[worker][batch.shard] = builder.subtree()
 	}
+}
+
+func (b *ParallelStreamRoot) workerError() error {
+	b.workerErrMu.Lock()
+	defer b.workerErrMu.Unlock()
+	for _, err := range b.workerErrs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func streamRootShard(key []byte) int {

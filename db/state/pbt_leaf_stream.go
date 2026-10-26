@@ -224,6 +224,58 @@ type pbinLeafAddressRange struct {
 	to   []byte
 }
 
+type pbinLeafProgressPublisher struct {
+	mu        sync.Mutex
+	allocated []uint64
+	progress  *PBTProgress
+	workers   int
+	budget    uint64
+	published atomic.Uint64
+}
+
+func (p *pbinLeafProgressPublisher) publish(worker int, current, done uint64) {
+	p.publishWithHook(worker, current, done, nil)
+}
+
+func (p *pbinLeafProgressPublisher) publishWithHook(worker int, current, done uint64, before func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if before != nil {
+		before()
+	}
+	if current != 0 && p.allocated[worker] < current {
+		p.allocated[worker] = current
+	}
+	var total uint64
+	for _, allocated := range p.allocated {
+		total += allocated
+	}
+	p.published.Store(total)
+	if p.progress != nil {
+		p.progress.SetFields("workers", p.workers, "etl_a_buffer_budget_bytes", p.budget, "etl_a_buffer_bytes", total)
+		p.progress.Add(done)
+	}
+}
+
+func (p *pbinLeafProgressPublisher) finish(collectors []*etl.Collector) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, collector := range collectors {
+		current := uint64(collector.InMemoryCapacity())
+		if p.allocated[i] < current {
+			p.allocated[i] = current
+		}
+	}
+	var total uint64
+	for _, allocated := range p.allocated {
+		total += allocated
+	}
+	p.published.Store(total)
+	if p.progress != nil {
+		p.progress.SetFields("workers", p.workers, "etl_a_buffer_budget_bytes", p.budget, "etl_a_buffer_bytes", total)
+	}
+}
+
 func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, workerRuns *atomic.Int32, emit func(PBinLeaf) error) error {
 	ranges := pbinLeafAddressRanges(workers)
 	const totalBufferBytes = 2 * datasize.GB
@@ -247,7 +299,7 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 	})
 	errs := make(chan error, workers)
 	var wg sync.WaitGroup
-	allocated := make([]atomic.Uint64, workers)
+	publisher := &pbinLeafProgressPublisher{allocated: make([]uint64, workers), progress: progress, workers: workers, budget: uint64(totalBufferBytes)}
 	for worker := range workers {
 		wg.Add(1)
 		go func(worker int) {
@@ -259,13 +311,11 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 			}
 			collector := collectors[worker]
 			report := func(n uint64) {
-				allocated[worker].Store(uint64(collector.InMemoryCapacity()))
-				var total uint64
-				for i := range allocated {
-					total += allocated[i].Load()
+				current := uint64(collector.InMemoryCapacity())
+				if current == 0 && n != 0 {
+					current = 1
 				}
-				progress.SetFields("workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", total)
-				progress.Add(n)
+				publisher.publish(worker, current, n)
 			}
 			for rangeIndex := worker; rangeIndex < len(ranges); rangeIndex += workers {
 				r := ranges[rangeIndex]
@@ -305,12 +355,7 @@ func pbinForEachLeafParallel(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, wor
 		}(worker)
 	}
 	wg.Wait()
-	var totalAllocated uint64
-	for i, collector := range collectors {
-		allocated[i].Store(uint64(collector.InMemoryCapacity()))
-		totalAllocated += allocated[i].Load()
-	}
-	progress.SetFields("workers", workers, "etl_a_buffer_budget_bytes", uint64(totalBufferBytes), "etl_a_buffer_bytes", totalAllocated)
+	publisher.finish(collectors)
 	progress.Done()
 	select {
 	case err := <-errs:

@@ -220,7 +220,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		if resume.SourceTxNum == 0 {
 			resume.SourceTxNum = opts.EndTxNum
 		}
-		writer, err = newPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum, resume.BaseState, resume.BaseStateEnd)
+		writer, err = newPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum, resume.BaseState, resume.BaseStateEnd, resume.SourceRanges)
 		if writer != nil {
 			writer.workers = workers
 		}
@@ -282,6 +282,8 @@ func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	if commitmentCtx == nil {
 		return common.Hash{}, fmt.Errorf("pbin verification: commitment domain %s is unavailable", domain)
 	}
+	commitmentCtx.SetVerifyPointLookupCounter(&verifyStats.PointLookups)
+	defer commitmentCtx.SetVerifyPointLookupCounter(nil)
 	commitmentCtx.PrepareForVerification(tx)
 	trie := commitmentCtx.Trie()
 	verifier, ok := trie.(interface {

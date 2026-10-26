@@ -191,11 +191,15 @@ flowchart LR
     - a removed account becomes per-leaf deletions, because the writer takes no Drop.
   - Fold: the ops go through the one leaf sort and fold on the base trie. Every written row and tombstone goes to the
     newest range, so no stamp tracker is needed and the latest view is exact.
-  - Output layout: the bin layout copies the source's commitment layout, which attach requires.
+  - Output layout: every source commitment range is produced. Each range merges its nested base bin files with its
+      delta rows, newest wins, so the bin layout copies the source's commitment layout, which attach requires.
   - Refused:
     - a zero-start source file that spans X, because its deletions are gone;
+    - a base bin file that straddles a source commitment range boundary;
     - a gap that is not post-Cancun, or that holds a bytecode rewrite.
   - Facts: log F13–F18.
+- **D10 — partition-parallel fold (Tasks 15–18; owner's call, 2026-10-25).** Superseded: Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+- **D11 — one fold, two wirings (Task 17 here, exec in a follow-up; owner's call, 2026-10-25).** Superseded: Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
 
 ## Technical Details
 - **Partition file writer** (replaces ETL B in `pbinForEachRebuildOpStream`):
@@ -472,17 +476,28 @@ flowchart LR
       convert's, with C-d and C-e passing on both.
 - [ ] Drop `BenchmarkPBinConvert`.
 
-### Task 15: Verify acceptance criteria
+### Task 15: Engine — fold an owned subtree across batches
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+
+### Task 16: Partition ops cursors and a single row sink
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+
+### Task 17: Partition-parallel fold, fresh and resume
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+
+### Task 18: C-d in adaptive structural tasks with an admission limit
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+
+### Task 19: Verify acceptance criteria
 - [ ] every Overview item is implemented and reached from `convert-pbt` or `attach-pbt`.
+- [ ] exec's fold path is unchanged: `ProcessParallelContext` → `processParallelPhaseA`, with the exec-side
+      binary-trie packages green in the gate.
 - [ ] Hoodi real data on the Mac (`/Volumes/dev/chains/hoodi-pbt/`, offline clone):
   - bin files identical to the pre-change converter's;
   - attach on a clone, then dual re-execution over ≥ 1000 blocks with no shadow stop;
   - per-phase wall time recorded.
-- [ ] Hoodi resume:
-  - remove the newest unmerged steps from a hard-linked clone to get a point X, and convert there;
-  - resume against the full source to Y;
-  - the latest row view and root equal a fresh convert at Y;
-  - attach the result to a clone; time both.
+- [ ] Hoodi resume: impossible on `src4` (see Task 14). Resume acceptance rests on the Task 11–13 tests, plus a
+      resume of a stopped hex+bin datadir if one becomes available.
 - [ ] full gate, `go test -race` on the touched packages, and `make lint`.
 
 ## Post-Completion
@@ -498,6 +513,8 @@ flowchart LR
 **Next lever, if the totals stay above ~2 h**: the fold stays serial in its batch cutter, and the stream root is one
 goroutine. A partitioned bulk build is research-log idea I1: the engine per partition, one spill, and rows straight
 into the range files. It replaces both, and needs its own plan.
+
+The partition scheduler is kept on `awskii/pbt-convert-pipeline` at `3f6f54a37c0`, unmerged.
 
 **Rollout**: outputs without a manifest are refused, and convert must be rerun.
 

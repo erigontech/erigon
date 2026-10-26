@@ -69,7 +69,14 @@ func (t *Trie) VerifyContext(ctx context.Context, workers int, factory commitmen
 			return err
 		}
 	}
-	return verifier.verify()
+	if err := verifier.verify(); err != nil {
+		return err
+	}
+	t.root = verifier.root
+	t.rootLoaded = verifier.rootLoaded
+	t.foldedRoot = verifier.foldedRoot
+	t.foldedRootReady = verifier.foldedRootReady
+	return nil
 }
 
 const verifyChainBits = 12
@@ -110,10 +117,13 @@ func (s *VerifyStats) holdRows(rows, bytes uint64) {
 	}
 	for peak := s.PeakBytes.Load(); liveBytes > peak && !s.PeakBytes.CompareAndSwap(peak, liveBytes); peak = s.PeakBytes.Load() {
 	}
-	for maximum := s.MaxTaskRows.Load(); rows > maximum && !s.MaxTaskRows.CompareAndSwap(maximum, rows); maximum = s.MaxTaskRows.Load() {
-	}
 	if s.liveProgress != nil {
 		s.liveProgress(liveRows, liveBytes)
+	}
+}
+
+func (s *VerifyStats) recordTaskRows(rows uint64) {
+	for maximum := s.MaxTaskRows.Load(); rows > maximum && !s.MaxTaskRows.CompareAndSwap(maximum, rows); maximum = s.MaxTaskRows.Load() {
 	}
 }
 
@@ -259,12 +269,19 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 	}
 	from, to := verifyRangeBounds(&path)
 	rows := make(map[string][]byte)
+	var taskRows, taskBytes uint64
 	count, err := reader.ReadVerifyRange(from, to, func(key, value []byte) error {
 		rowPath, decodeErr := eip8297.DecodeBitPath(key)
 		if decodeErr != nil || rowPath.BitLen < path.BitLen || !rowPath.HasPrefix(&path) {
 			return nil
 		}
-		rows[string(key)] = value
+		copied := bytes.Clone(value)
+		rows[string(key)] = copied
+		taskRows++
+		taskBytes += uint64(len(key) + len(copied))
+		if t.verifyStats != nil {
+			t.verifyStats.holdRows(1, uint64(len(key)+len(copied)))
+		}
 		return nil
 	})
 	if t.verifyStats != nil {
@@ -272,19 +289,20 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 		t.verifyStats.RangeRows.Add(count)
 	}
 	if err != nil {
+		if t.verifyStats != nil {
+			t.verifyStats.releaseRows(taskRows, taskBytes)
+		}
 		return err
 	}
 	t.verifyRows = rows
 	t.verifyRowsUsed = make(map[string]struct{}, len(rows))
 	t.verifyRowsExact = false
-	t.verifyTaskRows = uint64(len(rows))
-	for key, value := range rows {
-		t.verifyTaskBytes += uint64(len(key) + len(value))
-	}
+	t.verifyTaskRows = taskRows
+	t.verifyTaskBytes = taskBytes
 	t.verifyTaskLoaded = true
 	if t.verifyStats != nil {
 		t.verifyStats.TaskRowsLoaded.Add(1)
-		t.verifyStats.holdRows(t.verifyTaskRows, t.verifyTaskBytes)
+		t.verifyStats.recordTaskRows(t.verifyTaskRows)
 	}
 	return nil
 }
@@ -318,7 +336,7 @@ func (t *Trie) loadVerifyExact(key []byte) error {
 	rows := make(map[string][]byte, 1)
 	count, err := reader.ReadVerifyRange(from, to, func(rowKey, value []byte) error {
 		if bytes.Equal(rowKey, key) {
-			rows[string(rowKey)] = value
+			rows[string(rowKey)] = bytes.Clone(value)
 		}
 		return nil
 	})
