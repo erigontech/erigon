@@ -20,32 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"github.com/erigontech/erigon/node/app/util/random"
 )
-
-type integer interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
-}
-
-func SequentialGenerator[T integer](initialId T) IdGenerator[T] {
-	return &sequentialGenerator[T]{initialId, sync.Mutex{}}
-}
-
-type sequentialGenerator[T integer] struct {
-	nextId T
-	mutex  sync.Mutex
-}
-
-func (generator *sequentialGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
-	generator.mutex.Lock()
-	id := generator.nextId
-	generator.nextId++
-	generator.mutex.Unlock()
-	return id, nil
-}
 
 func FixedValueGenerator[T comparable](value T) IdGenerator[T] {
 	return &fixedValueGenerator[T]{value}
