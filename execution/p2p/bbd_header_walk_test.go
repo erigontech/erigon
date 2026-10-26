@@ -28,6 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -305,4 +308,35 @@ func TestBackwardBlockDownloader_HeaderWalkRequestsNothingPastChainLengthLimit(t
 	_, err = feed.Next(ctx)
 	require.ErrorIs(t, err, ErrChainLengthExceedsLimit)
 	require.EqualValues(t, 10, fetcher.calls.Load())
+}
+
+// onePeerRangeFailingFetcher serves the chain but fails every by-number range from peer 1.
+type onePeerRangeFailingFetcher struct {
+	chainServingBbdFetcher
+	mu         sync.Mutex
+	rangeCalls map[PeerId]int
+}
+
+func (s *onePeerRangeFailingFetcher) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	s.mu.Lock()
+	s.rangeCalls[*peerId]++
+	s.mu.Unlock()
+	if *peerId == *PeerIdFromUint64(1) {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.chainServingBbdFetcher.FetchHeaders(ctx, start, end, peerId, opts...)
+}
+
+func TestBackwardBlockDownloader_HeaderWalkKeepsRangesOnPeersThatServeThem(t *testing.T) {
+	headers := headerWalkChain(5001)
+	fetcher := &onePeerRangeFailingFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}, rangeCalls: map[PeerId]int{}}
+	bbd := newTestBbd(t, fetcher)
+	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
+	defer collector.Close()
+	peers := newPeersContext([]*PeerId{PeerIdFromUint64(2), PeerIdFromUint64(1)})
+
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, peers, defaultBbdRequestConfig)
+	require.NoError(t, err)
+	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
+	require.Positive(t, fetcher.rangeCalls[*PeerIdFromUint64(2)])
 }

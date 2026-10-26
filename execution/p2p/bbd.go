@@ -336,8 +336,8 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			nextRangeTop = parentNum
 		}
 		for len(inFlight) < window && nextRangeTop > 0 && initialNum-nextRangeTop <= config.chainLengthLimit {
-			rangePeer, err := peers.nextAvailablePeer()
-			if err != nil || rangeFailed[rangePeer] {
+			rangePeer, ok := peers.nextAvailablePeerNotIn(rangeFailed)
+			if !ok {
 				break
 			}
 			top := nextRangeTop
@@ -781,6 +781,19 @@ func (pc *peersContext) nextAvailablePeer() (PeerId, error) {
 	peer := pc.peerIndexToId[pc.currentPeerIndex]
 	pc.incrementCurrentPeerIndex()
 	return peer, nil
+}
+
+func (pc *peersContext) nextAvailablePeerNotIn(skip map[PeerId]bool) (PeerId, bool) {
+	for range pc.all {
+		peer, err := pc.nextAvailablePeer()
+		if err != nil {
+			return PeerId{}, false
+		}
+		if !skip[peer] {
+			return peer, true
+		}
+	}
+	return PeerId{}, false
 }
 
 func (pc *peersContext) nextAvailablePeers(n int) ([]PeerId, error) {
