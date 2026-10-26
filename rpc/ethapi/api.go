@@ -588,11 +588,6 @@ type ExecutionResult struct {
 // transaction in debug mode
 type StructLogRes = logger.StructLogRes
 
-// FormatLogs formats EVM returned structured logs for json output
-func FormatLogs(logs []logger.StructLog) []StructLogRes {
-	return logger.FormatLogs(logs)
-}
-
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go
 
 // RPCHeader is the RPC representation of a block header. Quantities, byte slices

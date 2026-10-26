@@ -122,10 +122,6 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
-	return g.receiptCache.Get(txNum)
-}
-
 // TryGetCachedReceipt is a fast path that avoids calling TxnByIdxInBlock.
 // TxnByIdxInBlock opens snapshot segments (Bodies + Transactions) or reads MDBX just to obtain
 // the txnHash, which is then used only to key the execution mutex in GetReceipt. When the receipt
