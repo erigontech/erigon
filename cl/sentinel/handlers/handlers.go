@@ -27,6 +27,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -60,6 +62,11 @@ type ConsensusHandlers struct {
 	dataColumnStorage  blob_storage.DataColumnStorage
 	peerdasStateReader peerdasstate.PeerDasStateReader
 	enableBlocks       bool
+	envelopeRebuilder  EnvelopeRebuilder
+}
+
+type EnvelopeRebuilder interface {
+	Rebuild(context.Context, kv.Tx, uint64, common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 const (
@@ -67,6 +74,7 @@ const (
 	InvalidRequestPrefix      = 0x01
 	ServerErrorPrefix         = 0x02
 	ResourceUnavailablePrefix = 0x03
+	streamDeadline            = 5 * time.Second
 )
 
 func NewConsensusHandlers(
@@ -84,6 +92,7 @@ func NewConsensusHandlers(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	enabledBlocks bool,
+	rebuilder EnvelopeRebuilder,
 ) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
@@ -101,6 +110,7 @@ func NewConsensusHandlers(
 		blobsStorage:       blobsStorage,
 		dataColumnStorage:  dataColumnStorage,
 		peerdasStateReader: peerDasStateReader,
+		envelopeRebuilder:  rebuilder,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -188,7 +198,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		// SetDeadline covers both directions.
-		if err := s.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if err := s.SetDeadline(time.Now().Add(streamDeadline)); err != nil {
 			log.Trace("failed to set stream deadline", "err", err)
 			_ = s.Reset()
 			_ = s.Close()

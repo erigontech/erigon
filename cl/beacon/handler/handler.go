@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sync"
@@ -207,6 +208,7 @@ type ApiHandler struct {
 	mux *chi.Mux
 
 	blockReader          freezeblocks.BeaconSnapshotReader
+	envelopeRebuilder    envelopeRebuilder
 	indiciesDB           kv.RwDB
 	netConfig            *clparams.NetworkConfig
 	ethClock             eth_clock.EthereumClock
@@ -290,6 +292,10 @@ type ApiHandler struct {
 	builderRoutes                           *builderRouteStore
 }
 
+type envelopeRebuilder interface {
+	Rebuild(context.Context, kv.Tx, uint64, common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+}
+
 func NewApiHandler(
 	logger log.Logger,
 	netConfig *clparams.NetworkConfig,
@@ -331,6 +337,7 @@ func NewApiHandler(
 	executionPayloadBidService services.ExecutionPayloadBidService,
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
+	rebuilder envelopeRebuilder,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
@@ -370,6 +377,7 @@ func NewApiHandler(
 		forkchoiceStore:       forkchoiceStore,
 		operationsPool:        operationsPool,
 		blockReader:           rcsn,
+		envelopeRebuilder:     rebuilder,
 		syncedData:            syncedData,
 		stateReader:           stateReader,
 		caplinStateSnapshots:  caplinStateSnapshots,

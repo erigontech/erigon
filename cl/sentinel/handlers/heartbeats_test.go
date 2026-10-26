@@ -115,7 +115,7 @@ func newHeartbeatTestStream(t *testing.T, protocolID protocol.ID) (network.Strea
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -291,7 +291,7 @@ func TestMetadataV2(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -348,7 +348,7 @@ func TestMetadataV1(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -422,7 +422,7 @@ func newStatusTestStream(t *testing.T, protocolID protocol.ID) (network.Stream, 
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		hs, f, nil, nil, peerDasStateReader, true,
+		hs, f, nil, nil, peerDasStateReader, true, nil,
 	)
 	c.Start()
 

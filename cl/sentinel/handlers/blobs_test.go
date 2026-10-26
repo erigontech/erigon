@@ -109,7 +109,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, nil, true, nil,
 	)
 	c.Start()
 	req := &cltypes.BlobsByRangeRequest{
@@ -234,7 +234,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, nil, true, nil,
 	)
 	c.Start()
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)

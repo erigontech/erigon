@@ -17,6 +17,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"math"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
@@ -35,6 +37,9 @@ import (
 // executionPayloadEnvelopesByRangeHandler handles the ExecutionPayloadEnvelopesByRange v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.Stream) error {
+	requestCtx, cancel := context.WithTimeout(c.ctx, streamDeadline)
+	defer cancel()
+
 	curEpoch := c.ethClock.GetCurrentEpoch()
 	if curEpoch < c.beaconConfig.GloasForkEpoch {
 		return nil
@@ -72,9 +77,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if startSlot >= endSlot {
 		return nil
 	}
-	if startSlot < c.forkChoiceReader.LowestAvailableSlot() {
+	lowestAvailableSlot := c.forkChoiceReader.LowestAvailableSlot()
+	if c.envelopeRebuilder == nil && startSlot < lowestAvailableSlot {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
+	needsCanonicalParent := c.envelopeRebuilder != nil && startSlot < lowestAvailableSlot
 
 	head, headSlot, err := c.forkChoiceReader.GetHeadNode()
 	if err != nil {
@@ -86,7 +93,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if lastSlot < startSlot {
 		return nil
 	}
-	tx, err := c.indiciesDB.BeginRo(c.ctx)
+	tx, err := c.indiciesDB.BeginRo(requestCtx)
 	if err != nil {
 		return err
 	}
@@ -97,8 +104,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 	headIndexMatches := canonicalHeadSlot == headSlot && canonicalHeadRoot == head.Root
 	type responseCandidate struct {
-		root  common.Hash
-		epoch uint64
+		root        common.Hash
+		slot        uint64
+		epoch       uint64
+		rebuildable bool
 	}
 	responseCandidates := make([]responseCandidate, 0, maxPayloads)
 	type canonicalBlock struct {
@@ -116,13 +125,37 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	canonicalReadCount := uint64(0)
 	scanLimitReached := false
 	err = beacon_indicies.RangeBlockRoots(tx, startSlot, headSlot, func(slot uint64, root common.Hash) bool {
-		if pending == nil && slot > lastSlot {
+		if !needsCanonicalParent && pending == nil && slot > lastSlot {
 			return false
 		}
 		block, ok := c.forkChoiceReader.GetBlock(root)
+		if (!ok || block == nil) && c.envelopeRebuilder != nil {
+			block, err = c.beaconDB.ReadBlockByRoot(requestCtx, tx, root)
+			ok = err == nil && block != nil
+		}
+		if err != nil {
+			canonicalUnavailable = true
+			return false
+		}
 		if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
 			canonicalUnavailable = true
 			return false
+		}
+		if needsCanonicalParent {
+			needsCanonicalParent = false
+			if slot > startSlot {
+				parentRoot := block.Block.ParentRoot
+				parentSlot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, parentRoot)
+				if readErr != nil || parentSlot == nil || *parentSlot >= startSlot {
+					canonicalUnavailable = true
+					return false
+				}
+				canonicalParent, readErr := beacon_indicies.ReadCanonicalBlockRoot(tx, *parentSlot)
+				if readErr != nil || canonicalParent != parentRoot {
+					canonicalUnavailable = true
+					return false
+				}
+			}
 		}
 		current := &canonicalBlock{root: root, slot: slot, block: block}
 		lastCanonical = current
@@ -134,7 +167,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
 			if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion &&
 				forkchoice.ParentPayloadStatusFromBids(pending.block, current.block.Block) == cltypes.PayloadStatusFull {
-				responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, epoch: epoch})
+				responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, slot: pending.slot, epoch: epoch, rebuildable: true})
 				pending = nil
 				if uint64(len(responseCandidates)) == maxPayloads {
 					return false
@@ -155,6 +188,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	})
 	if err != nil {
 		return err
+	}
+	if needsCanonicalParent {
+		canonicalUnavailable = true
 	}
 	if canonicalUnavailable {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
@@ -181,28 +217,25 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if pending != nil {
 		epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
 		if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion && head.PayloadStatus == cltypes.PayloadStatusFull {
-			responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, epoch: epoch})
+			responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, slot: pending.slot, epoch: epoch})
 		}
 	}
 
 	wroteResponse := false
+	rebuilds := 0
 	for _, candidate := range responseCandidates {
-		if !c.forkChoiceReader.HasEnvelope(candidate.root) {
-			if wroteResponse {
-				break
+		var envelope *cltypes.SignedExecutionPayloadEnvelope
+		if c.forkChoiceReader.HasEnvelope(candidate.root) {
+			envelope, err = c.forkChoiceReader.ReadEnvelopeFromDisk(candidate.root)
+			if err != nil {
+				log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
 			}
-			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 		}
-
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(candidate.root)
-		if err != nil {
-			log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
-			if wroteResponse {
-				break
-			}
-			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+		if envelope == nil && err == nil && candidate.rebuildable && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
+			rebuilds++
+			envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, tx, candidate.slot, candidate.root)
 		}
-		if envelope == nil {
+		if err != nil || envelope == nil {
 			if wroteResponse {
 				break
 			}
@@ -233,6 +266,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 // executionPayloadEnvelopesByRootHandler handles the ExecutionPayloadEnvelopesByRoot v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Stream) error {
+	requestCtx, cancel := context.WithTimeout(c.ctx, streamDeadline)
+	defer cancel()
+
 	curEpoch := c.ethClock.GetCurrentEpoch()
 	if curEpoch < c.beaconConfig.GloasForkEpoch {
 		return nil
@@ -259,7 +295,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
-	tx, err := c.indiciesDB.BeginRo(c.ctx)
+	tx, err := c.indiciesDB.BeginRo(requestCtx)
 	if err != nil {
 		return err
 	}
@@ -268,6 +304,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	minServeEpoch := minExecutionPayloadServeEpoch(c.beaconConfig, curEpoch, c.forkChoiceReader.FinalizedCheckpoint().Epoch)
 
 	count := 0
+	rebuilds := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if count >= int(maxPayloads) {
 			return false
@@ -291,14 +328,22 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			return true
 		}
 
-		if !c.forkChoiceReader.HasEnvelope(blockRoot) {
-			return true
+		var envelope *cltypes.SignedExecutionPayloadEnvelope
+		if c.forkChoiceReader.HasEnvelope(blockRoot) {
+			envelope, err = c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
+			if err != nil {
+				log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
+				return true
+			}
 		}
-
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
-		if err != nil {
-			log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
-			return true
+		if envelope == nil && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
+			rebuilds++
+			envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, tx, *slot, blockRoot)
+			if err != nil {
+				log.Debug("failed to rebuild execution payload envelope", "blockRoot", blockRoot, "error", err)
+				rebuilds = envelope_history.MaxRebuildsPerRequest
+				return true
+			}
 		}
 		if envelope == nil {
 			return true
