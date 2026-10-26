@@ -805,6 +805,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, te.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
+			// The block's version map is constructed once here and shared by both
+			// consumers that run in parallel: the executor populates it, the commitment
+			// calculator reads it post-seal via GetAccount. Seeding it from the BAL here
+			// also lets the calculator's reads see the BAL without a second derivation.
+			blockVersionMap := state.NewVersionMap(dbBAL)
+			blockVersionMap.SetBaseTxNum(blockStartTxNum)
+
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
 			// has been advanced past this block's tasks by the loop above,
@@ -819,6 +826,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
 					bal:        dbBAL,
+					versionMap: blockVersionMap,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
@@ -828,7 +836,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, consumers, false, exhausted,
+				dbBAL, txTasks, consumers, false, exhausted, blockVersionMap,
 			}:
 			case <-ctx.Done():
 				return ctx.Err()

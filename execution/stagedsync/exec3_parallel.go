@@ -1315,7 +1315,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted, execRequest.versionMap)
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -1739,6 +1739,11 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+
+	// VersionMap is the block's shared version map (also the calculator's GetAccount
+	// source). Carried on the result so the block-end commitment fold reads it while
+	// it is still alive in prevBlocks.
+	VersionMap *state.VersionMap
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
@@ -2193,6 +2198,9 @@ type blockRequest struct {
 	lastTxNum  uint64
 	blockTime  uint64
 	bal        types.BlockAccessList
+	// versionMap is the block's shared version map, constructed once by the dispatcher
+	// and read post-seal by the commitment calculator via GetAccount.
+	versionMap *state.VersionMap
 }
 
 // calcMode is the commitment calculator's per-block strategy.
@@ -2823,6 +2831,9 @@ type execRequest struct {
 	consumers  *resultStream
 	profile    bool
 	exhausted  *ErrLoopExhausted
+	// versionMap is the same shared instance handed to the commitment calculator on
+	// the block request; nil on paths that let the executor build its own.
+	versionMap *state.VersionMap
 }
 
 type blockExecutor struct {
@@ -2961,7 +2972,13 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 	return be.consumers.publish(ctx, r, mustDeliver)
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted, versionMap *state.VersionMap) *blockExecutor {
+	// Prefer the shared version map the dispatcher built (also handed to the commitment
+	// calculator); build one internally only when a caller supplies none. Either way
+	// baseTxNum is set when the first task is appended.
+	if versionMap == nil {
+		versionMap = state.NewVersionMap(accessList)
+	}
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2969,7 +2986,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		stats:               map[int]ExecutionStat{},
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
-		versionMap:          state.NewVersionMap(accessList),
+		versionMap:          versionMap,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
@@ -3923,6 +3940,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			complete:         true,
 			isPartial:        isPartial,
 			ApplyCount:       be.applyCount,
+			VersionMap:       be.versionMap,
 			TxIO:             be.blockIO,
 			Receipts:         blockReceipts,
 			receiptsComplete: receiptsComplete,
