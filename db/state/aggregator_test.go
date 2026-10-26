@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -873,4 +874,27 @@ func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
 	saltBytes, err := os.ReadFile(fpath)
 	require.NoError(t, err)
 	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
+}
+
+func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
+	if len(domainBtForceInMem) > 0 || len(domainBtForceMmap) > 0 {
+		t.Skip("DOMAIN_BT_MEM or DOMAIN_BT_MMAP overrides the option")
+	}
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		opts := NewTest(datadir.New(t.TempDir())).StepSize(1)
+		if enabled {
+			opts = opts.BtIndexInMem()
+		}
+		agg := opts.MustOpen(t.Context())
+		agg.configureBtIndexInMem(64 << 30)
+		for _, d := range agg.d {
+			if d == nil {
+				continue
+			}
+			want := enabled && slices.Contains(btInMemDefaultDomains, d.Name.String())
+			require.Equal(t, want, d.btIndexInMem.Load(), "enabled=%v domain=%s", enabled, d.Name)
+		}
+		agg.Close()
+	}
 }

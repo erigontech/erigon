@@ -31,6 +31,7 @@ type AggOpts struct { //nolint:gocritic
 	disableFsync        bool // for tests speed
 	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
 	skipFilesDBGapCheck bool
+	btIndexInMem        bool // see BtIndexInMem
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -72,6 +73,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
+	a.btIndexInMem = opts.btIndexInMem
 
 	a.savedSalt = salt
 
@@ -118,6 +120,14 @@ func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; re
 func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
+	return opts
+}
+
+// BtIndexInMem lets the domains read state .bt files into memory when the node has room for them (see
+// readBtIndexInMem). Only the process that executes blocks gains from it; other processes on the same
+// datadir would hold their own copies.
+func (opts AggOpts) BtIndexInMem() AggOpts { //nolint:gocritic
+	opts.btIndexInMem = true
 	return opts
 }
 

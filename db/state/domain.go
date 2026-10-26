@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -101,7 +101,7 @@ type Domain struct {
 	// before the build loop in buildHashMapAccessor.
 	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 
-	btIndexInMem bool // read .bt files into memory instead of mapping them, see btIndexInMem
+	btIndexInMem atomic.Bool // read .bt files into memory instead of mapping them, see readBtIndexInMem
 }
 
 type domainVisible struct {
@@ -119,9 +119,8 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	}
 
 	d := &Domain{
-		DomainCfg:    cfg,
-		dirtyFiles:   newDirtyFiles(),
-		btIndexInMem: btIndexInMem(cfg.Name.String(), estimate.TotalMemory(), domainBtForceInMem, domainBtForceMmap),
+		DomainCfg:  cfg,
+		dirtyFiles: newDirtyFiles(),
 	}
 
 	var err error
@@ -229,26 +228,35 @@ var (
 // below which existence filters leave the heap.
 const btInMemMinTotalMemory = 20 << 30
 
-// btInMemDefaultDomains are the domains whose .bt files are read into memory by default:
+// btInMemMaxShare caps the .bt files read into memory at this fraction of the total memory.
+const btInMemMaxShare = 10
+
+// btInMemDefaultDomains are the domains whose .bt files the node reads into memory by default:
 // the state that block execution reads at the chain tip.
 var btInMemDefaultDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String()}
 
-// btIndexInMem reports whether a domain reads its .bt files into memory, so state reads at the chain tip
-// do not wait for index pages the page cache dropped. It costs heap equal to the size of those files.
-// DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override the default; DOMAIN_BT_MMAP wins.
-func btIndexInMem(name string, total uint64, forceInMem, forceMmap []string) bool {
+// btIndexFitsInMem reports whether btSize bytes of .bt files may be read into memory on a node with total bytes of memory.
+func btIndexFitsInMem(btSize, total uint64) bool {
+	return total >= btInMemMinTotalMemory && btSize <= total/btInMemMaxShare
+}
+
+// readBtIndexInMem reports whether a domain reads its .bt files into memory instead of mapping them, so state reads at the
+// chain tip do not wait for index pages the page cache dropped. It costs heap equal to the size of those files.
+// enabled turns it on for btInMemDefaultDomains. DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override it;
+// DOMAIN_BT_MMAP wins.
+func readBtIndexInMem(name string, enabled bool, forceInMem, forceMmap []string) bool {
 	switch {
 	case slices.Contains(forceMmap, name):
 		return false
 	case slices.Contains(forceInMem, name):
 		return true
 	default:
-		return slices.Contains(btInMemDefaultDomains, name) && (total == 0 || total >= btInMemMinTotalMemory)
+		return enabled && slices.Contains(btInMemDefaultDomains, name)
 	}
 }
 
 func (d *Domain) openBtIndex(fPath string, r *seg.Reader) (*btindex.BtIndex, error) {
-	if d.btIndexInMem {
+	if d.btIndexInMem.Load() {
 		return btindex.OpenBtreeIndexInMem(fPath, r)
 	}
 	return btindex.OpenBtreeIndexWithDecompressor(fPath, r)

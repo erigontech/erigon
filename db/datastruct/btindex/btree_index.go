@@ -384,15 +384,6 @@ type BtIndex struct {
 	pool     sync.Pool
 }
 
-// CreateBtreeIndexWithDecompressor Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
-	if err != nil {
-		return nil, err
-	}
-	return OpenBtreeIndexWithDecompressor(indexPath, decompressor)
-}
-
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
 func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression) (_ *seg.Decompressor, _ *BtIndex, err error) {
@@ -657,7 +648,7 @@ func (b *BtIndex) M() uint64 { return b.indexM }
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 
 // InMem reports whether the index was read into memory by OpenBtreeIndexInMem.
-func (b *BtIndex) InMem() bool { return b.m == nil && b.data != nil }
+func (b *BtIndex) InMem() bool { return b != nil && b.m == nil && b.data != nil }
 
 func (b *BtIndex) KeyCount() uint64 {
 	if b.Empty() {

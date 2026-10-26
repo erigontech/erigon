@@ -97,6 +97,7 @@ type Aggregator struct {
 
 	branchCacheDisabled bool
 	skipFilesDBGapCheck bool
+	btIndexInMem        bool // AggOpts.BtIndexInMem
 	workers             workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
@@ -591,6 +592,32 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	return a.checkFilesDBGap(db)
 }
 
+// configureBtIndexInMem decides, before the domains open their files, which of them read their .bt files into
+// memory. It runs on every OpenFolder, so a node that downloaded its files after start decides on their real size.
+func (a *Aggregator) configureBtIndexInMem(total uint64) {
+	var btSize uint64
+	for _, d := range a.d {
+		if !a.btIndexInMem || d == nil || !slices.Contains(btInMemDefaultDomains, d.Name.String()) {
+			continue
+		}
+		files, _ := filepath.Glob(filepath.Join(a.dirs.SnapDomain, "*-"+d.FilenameBase+".*.bt"))
+		for _, f := range files {
+			if st, err := os.Stat(f); err == nil {
+				btSize += uint64(st.Size())
+			}
+		}
+	}
+	enabled := a.btIndexInMem && btIndexFitsInMem(btSize, total)
+	for _, d := range a.d {
+		if d != nil {
+			d.btIndexInMem.Store(readBtIndexInMem(d.Name.String(), enabled, domainBtForceInMem, domainBtForceMmap))
+		}
+	}
+	if a.btIndexInMem {
+		a.logger.Debug("[agg] state .bt files in memory", "enabled", enabled, "size", common.ByteCount(btSize), "total", common.ByteCount(total))
+	}
+}
+
 // checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
 // snapshot files end (the hole `rm-state --latest` leaves without a reset — reads
 // below it silently return stale data). Skipped when SkipFilesDBGapCheck is set so
@@ -645,6 +672,7 @@ func (a *Aggregator) openFolder() error {
 	if err != nil {
 		return err
 	}
+	a.configureBtIndexInMem(estimate.TotalMemory())
 
 	standaloneIIs := a.standaloneIIs()
 	retiredByDomain := make([]retiredFiles, len(a.d))

@@ -870,7 +870,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	// Recreate domain and re-scan the files
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	d.Close()
+	d.closeWhatNotInList([]string{})
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
 	_, err = d.openFolder(t.Context(), scanDirsRes)
@@ -3992,7 +3992,7 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 	t.Parallel()
 
 	db, d, txs := filledDomain(t, log.New())
-	d.btIndexInMem = true
+	d.btIndexInMem.Store(true)
 	requireBtIndexesInMem := func() {
 		t.Helper()
 		dc := d.beginForTests()
@@ -4020,28 +4020,43 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
-func TestBtIndexInMemByMemoryAndOverrides(t *testing.T) {
+func TestReadBtIndexInMem(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		total        uint64
-		inMem, mmap  []string
-		wantInMemory bool
+		name        string
+		enabled     bool
+		inMem, mmap []string
+		want        bool
 	}{
-		{name: "storage", total: 64 << 30, wantInMemory: true},
-		{name: "storage", total: 20 << 30, wantInMemory: true},
-		{name: "storage", total: 20<<30 - 1, wantInMemory: false},
-		{name: "storage", total: 16 << 30, wantInMemory: false},
-		{name: "storage", total: 0, wantInMemory: true},
-		{name: "storage", total: 64 << 30, mmap: []string{"storage"}, wantInMemory: false},
-		{name: "accounts", total: 64 << 30, mmap: []string{"storage"}, wantInMemory: true},
-		{name: "storage", total: 16 << 30, inMem: []string{"storage"}, wantInMemory: true},
-		{name: "storage", total: 64 << 30, inMem: []string{"storage"}, mmap: []string{"storage"}, wantInMemory: false},
-		{name: "accounts", total: 64 << 30, wantInMemory: true},
-		{name: "code", total: 64 << 30, wantInMemory: true},
-		{name: "receipt", total: 64 << 30, wantInMemory: false},
-		{name: "commitment", total: 64 << 30, wantInMemory: false},
-		{name: "receipt", total: 64 << 30, inMem: []string{"receipt"}, wantInMemory: true},
+		{name: "accounts", enabled: true, want: true},
+		{name: "storage", enabled: true, want: true},
+		{name: "code", enabled: true, want: true},
+		{name: "receipt", enabled: true, want: false},
+		{name: "commitment", enabled: true, want: false},
+		{name: "storage", enabled: false, want: false},
+		{name: "storage", enabled: true, mmap: []string{"storage"}, want: false},
+		{name: "accounts", enabled: true, mmap: []string{"storage"}, want: true},
+		{name: "storage", enabled: false, inMem: []string{"storage"}, want: true},
+		{name: "receipt", enabled: false, inMem: []string{"receipt"}, want: true},
+		{name: "storage", enabled: true, inMem: []string{"storage"}, mmap: []string{"storage"}, want: false},
 	} {
-		require.Equal(t, tc.wantInMemory, btIndexInMem(tc.name, tc.total, tc.inMem, tc.mmap), "%+v", tc)
+		require.Equal(t, tc.want, readBtIndexInMem(tc.name, tc.enabled, tc.inMem, tc.mmap), "%+v", tc)
+	}
+}
+
+func TestBtIndexFitsInMem(t *testing.T) {
+	for _, tc := range []struct {
+		btSize, total uint64
+		want          bool
+	}{
+		{btSize: 3 << 30, total: 64 << 30, want: true},
+		{btSize: 3 << 30, total: 32 << 30, want: true},
+		{btSize: 3 << 30, total: 24 << 30, want: false},
+		{btSize: 1 << 30, total: 20 << 30, want: true},
+		{btSize: 1 << 30, total: 20<<30 - 1, want: false},
+		{btSize: 100 << 20, total: 16 << 30, want: false},
+		{btSize: 7 << 30, total: 64 << 30, want: false},
+		{btSize: 0, total: 0, want: false},
+	} {
+		require.Equal(t, tc.want, btIndexFitsInMem(tc.btSize, tc.total), "%+v", tc)
 	}
 }
