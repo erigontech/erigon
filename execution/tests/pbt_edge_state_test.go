@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -55,6 +56,7 @@ type pbtEdgeCase struct {
 	name  string
 	alloc func() types.GenesisAlloc
 	block func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen)
+	check func(t *testing.T, allocs []types.GenesisAlloc)
 }
 
 type pbtEdgeRun struct {
@@ -103,14 +105,13 @@ var (
 	edgeFactory          = edgeAddr(0xa0, 0)
 	edgeLiveHolder       = edgeAddr(0xa1, 0)
 	edgeStorageContract  = edgeAddr(0xc0, 0)
+	edgeStorageCode      = common.FromHex("0x600060005560003560005500")
 )
 
 func pbtEdgeCases(t *testing.T) []pbtEdgeCase {
 	factoryCode := common.FromHex("0x6a" + "6133ff6000526002601ef3" + "600052600b60156000f0" + "6000600060006000" + "6001" + "855af100")
-	storageCode := common.FromHex("0x600060005560003560005500")
 	maxCode := 15_000
 	maxInit := 2 * maxCode
-	big3 := func(n int) []byte { return []byte{0x62, byte(n >> 16), byte(n >> 8), byte(n)} }
 	return []pbtEdgeCase{
 		{
 			name: "a_selfdestruct_shared_code",
@@ -145,7 +146,7 @@ func pbtEdgeCases(t *testing.T) []pbtEdgeCase {
 			name: "c_slot_zero_and_reset",
 			alloc: func() types.GenesisAlloc {
 				return types.GenesisAlloc{edgeStorageContract: {
-					Balance: big.NewInt(0), Nonce: 1, Code: storageCode,
+					Balance: big.NewInt(0), Nonce: 1, Code: edgeStorageCode,
 					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(1))},
 				}}
 			},
@@ -217,12 +218,7 @@ func pbtEdgeCases(t *testing.T) []pbtEdgeCase {
 				for j := range runtime {
 					runtime[j] = byte(j%251 + 1)
 				}
-				initcode := append([]byte(nil), big3(maxCode)...)
-				initcode = append(initcode, 0x60, 14, 0x5f, 0x39)
-				initcode = append(initcode, big3(maxCode)...)
-				initcode = append(initcode, 0x5f, 0xf3)
-				require.Len(t, initcode, 14)
-				initcode = append(initcode, runtime...)
+				initcode := edgeInitcode(runtime)
 				initcode = append(initcode, make([]byte, maxInit-len(initcode))...)
 				e.send(t, b, nil, 0, 29_000_000, initcode)
 			},
@@ -435,7 +431,7 @@ func TestPBTEdgeStateBinaryRootMatchesFullStateRebuild(t *testing.T) {
 	config.AmsterdamTime = &amsterdam
 	config.BinaryTrieTime = &activation
 	env := &pbtEdgeEnv{config: config, key: key, from: crypto.PubkeyToAddress(key.PublicKey)}
-	for _, tc := range pbtEdgeCases(t) {
+	for _, tc := range append(pbtEdgeCases(t), pbtEdgeVectorCases(t)...) {
 		t.Run(tc.name, func(t *testing.T) {
 			var oracle, on, off *pbtEdgeRun
 			t.Run("oracle", func(t *testing.T) { oracle = edgeOracle(t, tc, env) })
@@ -455,7 +451,289 @@ func TestPBTEdgeStateBinaryRootMatchesFullStateRebuild(t *testing.T) {
 					t.Errorf("block %d: BAL-driven bin root differs from the serial one", i+1)
 				}
 			}
+			if tc.check != nil {
+				for _, run := range []*pbtEdgeRun{on, off} {
+					require.Len(t, run.allocs, pbtEdgeBlocks)
+					tc.check(t, run.allocs)
+				}
+			}
 			t.Logf("%s | %s", tc.name, strings.Join(lines, " | "))
 		})
+	}
+}
+
+var (
+	edgeSlotWriter  = edgeAddr(0xc1, 0)
+	edgeSameTxZero  = edgeAddr(0xc2, 0)
+	edgeFanout      = edgeAddr(0xc3, 0)
+	edgeCreateFails = edgeAddr(0xc4, 0)
+	edgeToucher     = edgeAddr(0xc5, 0)
+)
+
+func edgeInitcode(runtime []byte) []byte {
+	n := len(runtime)
+	big3 := []byte{0x62, byte(n >> 16), byte(n >> 8), byte(n)}
+	initcode := append([]byte(nil), big3...)
+	initcode = append(initcode, 0x60, 14, 0x5f, 0x39)
+	initcode = append(initcode, big3...)
+	initcode = append(initcode, 0x5f, 0xf3)
+	return append(initcode, runtime...)
+}
+
+func edgeSlotData(slot, value *big.Int) []byte {
+	s, v := common.BigToHash(slot), common.BigToHash(value)
+	return append(s[:], v[:]...)
+}
+
+func edgeAuthority(t *testing.T, idx byte) (*ecdsa.PrivateKey, common.Address) {
+	t.Helper()
+	key, err := crypto.ToECDSA(crypto.Keccak256([]byte{0x77, 0x03, idx}))
+	require.NoError(t, err)
+	return key, crypto.PubkeyToAddress(key.PublicKey)
+}
+
+func edgeCountCode(alloc types.GenesisAlloc, code []byte) (n int) {
+	for _, a := range alloc {
+		if bytes.Equal(a.Code, code) {
+			n++
+		}
+	}
+	return n
+}
+
+func edgeDelegation(target common.Address) []byte {
+	return append([]byte{0xef, 0x01, 0x00}, target[:]...)
+}
+
+func pbtEdgeVectorCases(t *testing.T) []pbtEdgeCase {
+	slotWriterCode := common.FromHex("0x6020356000355500")
+	sameTxZeroCode := common.FromHex("0x60016000355560006000355500")
+	fanoutCode := common.FromHex("0x6020355f35" + "6103e8" + "5b" + "8181" + "6005" + "02" + "55" + "82" + "90" + "03" + "80" + "6008" + "57" + "00")
+	one := big.NewInt(1)
+	pow := func(n uint) *big.Int { return new(big.Int).Lsh(one, n) }
+	slotsG := []*big.Int{big.NewInt(63), big.NewInt(64), big.NewInt(255), big.NewInt(256), pow(255), new(big.Int).Sub(pow(256), one)}
+
+	fill := func(n int) []byte { return bytes.Repeat([]byte{0x5b}, n) }
+	pushSpan := append(append(fill(30), 0x7f), bytes.Repeat([]byte{0xaa}, 32)...)
+	pushSpan = append(pushSpan, 0x5b)
+	data7f := bytes.Repeat([]byte{0xbb}, 32)
+	data7f[10] = 0x7f
+	push7f := append(append([]byte{0x7f}, data7f...), 0x5b)
+	codesI := [][]byte{fill(30), fill(31), fill(32), fill(62), fill(7936), fill(7937), append(fill(39), 0x7f), pushSpan, push7f}
+	gasI := func(code []byte) uint64 { return 300_000 + 1_750*uint64(len(code)) }
+
+	zeroChunk := append([]byte{0x5b}, make([]byte, 61)...)
+	zeroChunkChunks := eip8297.ChunkifyCode(zeroChunk)
+	require.Len(t, zeroChunkChunks, 2)
+	require.Equal(t, [eip8297.ValueLength]byte{}, zeroChunkChunks[1])
+	pushZero := append([]byte{0x7f}, make([]byte, 61)...)
+	pushZeroChunks := eip8297.ChunkifyCode(pushZero)
+	require.Len(t, pushZeroChunks, 2)
+	require.Equal(t, byte(2), pushZeroChunks[1][0])
+	require.Equal(t, [eip8297.ValueLength - 1]byte{}, [eip8297.ValueLength - 1]byte(pushZeroChunks[1][1:]))
+
+	_, a1 := edgeAuthority(t, 1)
+	_, a2 := edgeAuthority(t, 2)
+	_, a3 := edgeAuthority(t, 3)
+	_, a4 := edgeAuthority(t, 4)
+	precompile := common.Address{19: 1}
+
+	revertInit := common.FromHex("0x6001600055" + "60006000fd")
+	oogInit := common.FromHex("0x61e0005ff3")
+	require.Len(t, revertInit, 10)
+	require.Len(t, oogInit, 5)
+	createFailsCode := common.FromHex("0x69" + common.Bytes2Hex(revertInit) + "600052" + "600a60166000f050" + "64" + common.Bytes2Hex(oogInit) + "600052" + "6005601b6000f050" + "00")
+
+	var touchCode []byte
+	for i := range 200 {
+		addr := edgeAddr(0xee, byte(i))
+		for _, op := range []byte{0x31, 0x3f, 0x3b} {
+			touchCode = append(append(append(touchCode, 0x73), addr[:]...), op, 0x50)
+		}
+		if i < 20 {
+			touchCode = append(touchCode, 0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x73)
+			touchCode = append(append(touchCode, addr[:]...), 0x5a, 0xf1, 0x50)
+		}
+	}
+	touchCode = append(touchCode, 0x00)
+
+	return []pbtEdgeCase{
+		{
+			name: "g_storage_slot_boundaries",
+			alloc: func() types.GenesisAlloc {
+				return types.GenesisAlloc{edgeSlotWriter: {Balance: big.NewInt(0), Nonce: 1, Code: slotWriterCode}}
+			},
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				writer := edgeSlotWriter
+				for _, slot := range slotsG {
+					e.send(t, b, &writer, 0, 2_000_000, edgeSlotData(slot, big.NewInt(int64(i+1))))
+				}
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				storage := allocs[pbtEdgeBlocks-1][edgeSlotWriter].Storage
+				require.Len(t, storage, len(slotsG))
+				for _, slot := range slotsG {
+					require.Equal(t, common.BigToHash(big.NewInt(pbtEdgeBlocks)), storage[common.BigToHash(slot)])
+				}
+			},
+		},
+		{
+			name: "h_zero_writes_to_empty_slots",
+			alloc: func() types.GenesisAlloc {
+				return types.GenesisAlloc{
+					edgeSlotWriter: {Balance: big.NewInt(0), Nonce: 1, Code: slotWriterCode},
+					edgeSameTxZero: {Balance: big.NewInt(0), Nonce: 1, Code: sameTxZeroCode},
+				}
+			},
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				writer, sameTx := edgeSlotWriter, edgeSameTxZero
+				for _, slot := range []int64{5, 100} {
+					e.send(t, b, &writer, 0, 500_000, edgeSlotData(big.NewInt(slot), new(big.Int)))
+				}
+				for _, slot := range []int64{7, 200} {
+					data := common.BigToHash(big.NewInt(slot))
+					e.send(t, b, &sameTx, 0, 500_000, data[:])
+				}
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				require.Empty(t, allocs[pbtEdgeBlocks-1][edgeSlotWriter].Storage)
+				require.Empty(t, allocs[pbtEdgeBlocks-1][edgeSameTxZero].Storage)
+			},
+		},
+		{
+			name: "i_code_chunk_boundaries",
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				for _, code := range codesI {
+					if len(code) == 7936 && i%2 == 1 || len(code) == 7937 && i%2 == 0 {
+						continue
+					}
+					e.send(t, b, nil, 0, gasI(code), edgeInitcode(code))
+				}
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				final := allocs[pbtEdgeBlocks-1]
+				for _, code := range codesI {
+					want := pbtEdgeBlocks
+					if len(code) >= 7936 {
+						want /= 2
+					}
+					require.Equal(t, want, edgeCountCode(final, code), "deployed code length %d", len(code))
+				}
+			},
+		},
+		{
+			name: "j_all_zero_chunk",
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				e.send(t, b, nil, 0, 1_000_000, edgeInitcode(zeroChunk))
+				e.send(t, b, nil, 0, 1_000_000, edgeInitcode(pushZero))
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				require.Equal(t, pbtEdgeBlocks, edgeCountCode(allocs[pbtEdgeBlocks-1], zeroChunk))
+				require.Equal(t, pbtEdgeBlocks, edgeCountCode(allocs[pbtEdgeBlocks-1], pushZero))
+			},
+		},
+		{
+			name: "k_shared_delegation_clear",
+			alloc: func() types.GenesisAlloc {
+				return types.GenesisAlloc{edgeStorageContract: {Balance: big.NewInt(0), Nonce: 1, Code: edgeStorageCode}}
+			},
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				auth := func(idx byte, target common.Address, nonce uint64) {
+					key, _ := edgeAuthority(t, idx)
+					a, err := types.SignAuthorization(key, *e.config.ChainID, target, nonce)
+					require.NoError(t, err)
+					e.sendSetCode(t, b, a)
+				}
+				switch i {
+				case 0:
+					auth(1, edgeStorageContract, 0)
+					auth(2, edgeStorageContract, 0)
+					auth(3, precompile, 0)
+					auth(4, a4, 0)
+				case 1:
+					auth(1, common.Address{}, 1)
+				case 2:
+					auth(2, common.Address{}, 1)
+				}
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				shared := edgeDelegation(edgeStorageContract)
+				require.Equal(t, shared, allocs[0][a1].Code)
+				require.Equal(t, shared, allocs[0][a2].Code)
+				require.Empty(t, allocs[1][a1].Code)
+				require.Equal(t, shared, allocs[1][a2].Code)
+				require.Empty(t, allocs[2][a2].Code)
+				require.Equal(t, edgeDelegation(precompile), allocs[3][a3].Code)
+				require.Equal(t, edgeDelegation(a4), allocs[3][a4].Code)
+			},
+		},
+		{
+			name: "l_reverted_creation",
+			alloc: func() types.GenesisAlloc {
+				return types.GenesisAlloc{edgeCreateFails: {Balance: big.NewInt(0), Nonce: 1, Code: createFailsCode}}
+			},
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				factory := edgeCreateFails
+				e.send(t, b, &factory, 0, 3_000_000, nil)
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				final := allocs[pbtEdgeBlocks-1]
+				require.Equal(t, uint64(1+2*pbtEdgeBlocks), final[edgeCreateFails].Nonce)
+				for n := uint64(1); n < 1+2*pbtEdgeBlocks; n++ {
+					_, ok := final[types.CreateAddress(edgeCreateFails, n)]
+					require.False(t, ok, "created address for nonce %d exists", n)
+				}
+			},
+		},
+		{
+			name: "m_readonly_touches",
+			alloc: func() types.GenesisAlloc {
+				return types.GenesisAlloc{edgeToucher: {Balance: big.NewInt(0), Nonce: 1, Code: touchCode}}
+			},
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				toucher := edgeToucher
+				e.send(t, b, &toucher, 0, 5_000_000, nil)
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				for i := range 200 {
+					_, ok := allocs[pbtEdgeBlocks-1][edgeAddr(0xee, byte(i))]
+					require.False(t, ok, "touched address %d was created", i)
+				}
+			},
+		},
+		{
+			name: "n_storage_fanout",
+			alloc: func() types.GenesisAlloc {
+				seeded := map[common.Hash]common.Hash{}
+				for n := 1; n <= 1000; n++ {
+					seeded[common.BigToHash(big.NewInt(int64(5*n)))] = common.BigToHash(one)
+				}
+				return types.GenesisAlloc{edgeFanout: {Balance: big.NewInt(0), Nonce: 1, Code: fanoutCode, Storage: seeded}}
+			},
+			block: func(e *pbtEdgeEnv, i int, b *blockgen.BlockGen) {
+				fanout := edgeFanout
+				call := func(value, step int64) []byte {
+					v, st := common.BigToHash(big.NewInt(value)), common.BigToHash(big.NewInt(step))
+					return append(v[:], st[:]...)
+				}
+				if i > 0 {
+					return
+				}
+				e.send(t, b, &fanout, 0, 20_000_000, call(2, 1))
+				e.send(t, b, &fanout, 0, 9_000_000, call(0, 2))
+			},
+			check: func(t *testing.T, allocs []types.GenesisAlloc) {
+				storage := allocs[pbtEdgeBlocks-1][edgeFanout].Storage
+				groups := map[uint64]bool{}
+				for slot := range storage {
+					if n := new(big.Int).SetBytes(slot[:]).Uint64(); n >= 64 {
+						groups[n>>8] = true
+					}
+				}
+				require.Len(t, storage, 500)
+				require.GreaterOrEqual(t, len(groups), 5)
+				t.Logf("n_storage_fanout: %d slots in %d storage groups", len(storage), len(groups))
+			},
+		},
 	}
 }
