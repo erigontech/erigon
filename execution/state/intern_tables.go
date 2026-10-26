@@ -27,8 +27,8 @@ import (
 const storageKeyCacheSize = 1024
 
 // storageKeyCacheMinOps delays the table until interning has cost more than
-// zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
-// cannot win the allocation back however well the keys repeat.
+// zeroing 40KB: a hit saves ~16ns, so a state resolving fewer keys than this
+// over its lifetime cannot win the allocation back however well the keys repeat.
 const storageKeyCacheMinOps = 128
 
 // slotIndex masks rather than divides, so the size has to be a power of two.
@@ -117,7 +117,7 @@ func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
 }
 
 // InternAddress returns the low 20 bytes of word interned as an Address,
-// skipping unique.Make for addresses seen before. Short-lived EVMs intern
+// skipping unique.Make for addresses seen before. Short-lived states intern
 // uncached: the table only earns back its allocation over a few dozen ops.
 func (ibs *IntraBlockState) InternAddress(word *uint256.Int) accounts.Address {
 	c := ibs.addrCache

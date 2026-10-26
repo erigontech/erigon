@@ -238,7 +238,7 @@ func BenchmarkStorageDiversity(b *testing.B) {
 
 // BenchmarkAddressDiversity measures repeated BALANCE over n distinct warm
 // accounts, the way an airdrop or batch contract walks a holder list. The sweep
-// assumes the EVM interns addresses through a 256-entry direct-mapped table and
+// assumes IntraBlockState interns addresses through a 256-entry direct-mapped table and
 // covers the miss side the call benchmarks never reach — they touch a handful of
 // addresses and hit every time.
 //
