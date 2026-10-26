@@ -431,10 +431,12 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	// The transaction bound uses at most the gas limit the parent allows. The header checks assume a
-	// valid parent, so they run here only against a validated one.
+	// valid parent, so they run here only against a validated one. An L2 rules engine has its own
+	// header rules.
 	gasLimit := header.GasLimit
 	var headerErr error
-	if parent := e.chainRW.GetHeaderByHash(ctx, req.ParentHash); parent != nil {
+	parent := e.chainRW.GetHeaderByHash(ctx, req.ParentHash)
+	if parent != nil && e.config.L2 == nil {
 		gasLimit = min(gasLimit, misc.MaxGasLimit(e.config, parent, &header))
 		if e.chainRW.IsValidated(req.ParentHash) {
 			headerErr = merge.VerifyHeaderWithParent(e.config, &header, parent)
@@ -549,8 +551,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	// Answered after the block hash check and the other payload checks, as by the block validation,
-	// so that the block can be reported as bad.
-	if headerErr != nil {
+	// so that the block can be reported as bad. A stored block goes to the block validation, which
+	// also removes it.
+	if headerErr != nil && e.chainRW.GetHeader(ctx, blockHash, header.Number.Uint64()) == nil {
 		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
 		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)
 		e.blockDownloader.ReportBadHeader(blockHash, req.ParentHash, err.Error())
@@ -562,7 +565,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}, nil
 	}
 
-	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
+	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
@@ -618,8 +621,9 @@ func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
 	return min(time.Duration(secondsPerSlot)*time.Second, maxAttributesReadinessWait)
 }
 
-// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
+// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated. For a
+// newPayload, parent is the stored parent header, or nil.
+func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, parent *types.Header, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -655,11 +659,9 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		header = e.chainRW.GetHeaderByHash(ctx, blockHash)
 	}
 
-	// Retrieve parent and total difficulty.
-	var parent *types.Header
+	// Retrieve total difficulty.
 	var td *uint256.Int
 	if newPayload {
-		parent = e.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = e.chainRW.GetTd(ctx, parentHash, blockNumber-1)
 	} else {
 		td = e.chainRW.GetTd(ctx, blockHash, blockNumber)
@@ -884,7 +886,7 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
 		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
 	}
-	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false, readinessWait)
+	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, nil, forkchoiceState, false, readinessWait)
 	if err != nil {
 		return nil, err
 	}

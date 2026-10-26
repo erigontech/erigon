@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -310,6 +311,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		parentValidated     bool
 		wrongBlockHash      bool
 		blobHashes          []common.Hash
+		l2                  bool
 		wantStatus          engine_types.EngineStatus
 		wantErr             string
 		wantLatestValidHash *common.Hash
@@ -321,6 +323,9 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		{name: "gas limit above an unvalidated parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.AcceptedStatus},
 		{name: "gas limit above the parent's with a wrong block hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wrongBlockHash: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block hash"},
 		{name: "gas limit above the parent's with a wrong blob hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{{0x01}}, wantStatus: engine_types.InvalidStatus, wantErr: "mismatch blob hashes"},
+		{name: "5 txs above an unvalidated parent's gas limit", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "valid header on a validated parent", txCount: 4, gasLimit: parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.AcceptedStatus},
+		{name: "L2 chain, 5 txs and gas limit above the parent's", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, l2: true, wantStatus: engine_types.AcceptedStatus},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -334,7 +339,6 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			header.ParentHash = parentHash
 			header.UncleHash = empty.UncleHash
 			header.GasLimit = test.gasLimit
-			header.BaseFee.SetUint64(875_000_000) // the parent used no gas
 			header.TxHash = types.DeriveSha(txs)
 			withdrawals := types.Withdrawals{}
 			withdrawalsHash := types.DeriveSha(withdrawals)
@@ -346,6 +350,10 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 				header.ExcessBlobGas = new(uint64)
 				header.ParentBeaconBlockRoot = &common.Hash{}
 			}
+			if test.l2 {
+				cfg.L2 = testL2Config{}
+			}
+			header.BaseFee = misc.CalcBaseFee(cfg, parent)
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
@@ -381,6 +389,98 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			}
 		})
 	}
+}
+
+type testL2Config struct{}
+
+func (testL2Config) Name() string                                { return "test" }
+func (testL2Config) ResolveRules(_, _, _ uint64, _ *chain.Rules) {}
+
+// The parent header of a new payload is looked up by hash, which on a miss searches every header
+// snapshot file, so it is looked up once.
+func TestNewPayloadLooksUpTheParentOnce(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	parentHash := parent.Hash()
+	header := makeParentHeader(1001)
+	header.ParentHash = parentHash
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	cfg := preCancunChainConfig()
+	header.BaseFee = misc.CalcBaseFee(cfg, parent)
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	var lookups int
+	stub := &stubExecutionModule{
+		getHeaderFunc: func(ctx context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
+			if hash != nil && *hash == parentHash && number == nil {
+				lookups++
+			}
+			return getHeaderReturning(parentHash, parent)(ctx, hash, number)
+		},
+		currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
+		isValidatedFunc:   func(hash common.Hash) bool { return hash == parentHash },
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	status, err := srv.NewPayloadV2(t.Context(), payload)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.AcceptedStatus, status.Status)
+	require.Equal(t, 1, lookups)
+}
+
+// A side-chain payload is stored after an ACCEPTED answer, while its parent is not validated yet,
+// and is sent again once the parent is validated. The INVALID answer must also remove the stored
+// block, so its body is not served any more.
+func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	canonical, err := m.GenerateChain(4, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(canonical))
+	side, err := m.GenerateChain(2, func(_ int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
+	require.NoError(t, err)
+	block1 := side.Blocks[0]
+	header2 := types.CopyHeader(side.Blocks[1].HeaderNoCopy())
+	header2.GasLimit *= 2
+	block2 := types.NewBlockFromStorage(header2.Hash(), header2, nil, nil, side.Blocks[1].Withdrawals(), nil)
+
+	ctx := t.Context()
+	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, m.Log, m.ExecModule, nil, nil, m.ChainConfig, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, 2)
+	srv.test = true
+	newPayload := func(block *types.Block) engine_types.EngineStatus {
+		payload, err := engine_types.ExecutionPayloadFromBlock(block)
+		require.NoError(t, err)
+		status, err := srv.NewPayloadV2(ctx, payload)
+		require.NoError(t, err)
+		return status.Status
+	}
+	forkchoice := func(head common.Hash) {
+		_, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: head}, nil)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1))
+	require.Equal(t, engine_types.AcceptedStatus, newPayload(block2))
+	forkchoice(m.Genesis.Hash())
+	require.Equal(t, engine_types.ValidStatus, newPayload(block1))
+	forkchoice(block1.Hash())
+	require.True(t, m.ExecModule.IsValidated(block1.Hash()))
+
+	require.Equal(t, engine_types.InvalidStatus, newPayload(block2))
+	bodies, err := srv.GetPayloadBodiesByHashV1(ctx, []common.Hash{block2.Hash()})
+	require.NoError(t, err)
+	require.Len(t, bodies, 1)
+	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
 }
 
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
@@ -1050,7 +1150,11 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
 
-			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, test.forkchoice, test.newPayload, defaultReadinessWait)
+			var knownParent *types.Header
+			if test.newPayload {
+				knownParent = parent
+			}
+			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, knownParent, test.forkchoice, test.newPayload, defaultReadinessWait)
 			require.NoError(t, err)
 			require.Equal(t, 1, lookups)
 		})
