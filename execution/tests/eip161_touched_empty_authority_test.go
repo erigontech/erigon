@@ -317,3 +317,39 @@ func TestEmptiedContractIsKept(t *testing.T) {
 		})
 	}
 }
+
+func TestTouchedStorageOnlyAccountIsAbsentForLaterTx(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	keys, senders := eip161TouchKeys(t, 1)
+	storageOnly := common.HexToAddress("0x7610")
+	gasPrice := uint256.NewInt(10_000_000_000)
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			config := fork.config
+			gspec := &types.Genesis{
+				Config:   config,
+				GasLimit: 30_000_000,
+				Alloc: types.GenesisAlloc{
+					senders[0]:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					storageOnly: {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
+				},
+			}
+			fill := func(b *blockgen.BlockGen) {
+				for _, value := range []uint64{0, 1} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), storageOnly, uint256.NewInt(value), 300_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			}
+			serial := generateEIP161TouchBlock(t, gspec, keys[0], false, fill)
+			for _, receipt := range serial.Receipts[0] {
+				require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+			}
+			versioned := generateEIP161TouchBlock(t, gspec, keys[0], true, fill)
+			require.Equal(t, serial.TopBlock.Root(), versioned.TopBlock.Root())
+			importEIP161TouchBlock(t, gspec, keys[0], serial)
+		})
+	}
+}

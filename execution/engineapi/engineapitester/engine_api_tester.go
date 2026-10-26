@@ -375,7 +375,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		}
 		stateAgg.SetMaintenanceObserver(args.MaintenanceObserver)
 	}
-	err = ethBackend.Init(ethNode, &ethConfig, genesis.Config)
+	err = ethBackend.Init(ethNode, &ethConfig)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
 	}
