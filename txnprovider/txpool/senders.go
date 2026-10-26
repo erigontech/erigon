@@ -28,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -239,29 +237,11 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
-	var processedTxns bool
-	for _, diff := range stateChanges.ChangeBatch {
-		for _, change := range diff.Changes { // merge state changes
-			addrB := gointerfaces.ConvertH160toAddress(change.Address)
-			sc.getOrCreateID(addrB, logger)
-		}
-
-		// unwindTxns/minedTxns do not depend on individual diffs inside the batch.
-		// Processing them for every diff only repeats the same work.
-		if processedTxns {
-			continue
-		}
-		processedTxns = true
-
-		if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
-			return err
-		}
-		if err := sc.registerNewSenders(&minedTxns, logger); err != nil {
-			return err
-		}
+func (sc *sendersBatch) onNewBlock(unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+	if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
+		return err
 	}
-	return nil
+	return sc.registerNewSenders(&minedTxns, logger)
 }
 
 func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {

@@ -87,8 +87,8 @@ func (v *versionMapWriteView) Codes() iter.Seq2[accounts.Address, *VersionedWrit
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.Code]) bool) {
 		for addr, kw := range v.keys.Codes() {
 			code := kw.Val
-			if b, ok := versionedUpdateCode(v.vm, addr, v.txIdx+1); ok {
-				code = accounts.NewCode(b)
+			if val, ok := versionedUpdateCode(v.vm, addr, v.txIdx+1); ok {
+				code = val
 			}
 			if !yield(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code}) {
 				return
