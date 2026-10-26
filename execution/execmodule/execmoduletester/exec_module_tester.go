@@ -389,6 +389,12 @@ func WithMaxReorgDepth(d uint64) Option {
 	}
 }
 
+func WithLoopBlockLimit(n uint) Option {
+	return func(opts *options) {
+		opts.loopBlockLimit = n
+	}
+}
+
 func WithSlowBlockThreshold(d time.Duration) Option {
 	return func(opts *options) {
 		opts.slowBlockThreshold = &d
@@ -429,6 +435,7 @@ type options struct {
 	parallelStateFlushing    bool
 	alwaysGenerateChangesets *bool
 	maxReorgDepth            *uint64
+	loopBlockLimit           uint
 	slowBlockThreshold       *time.Duration
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
@@ -542,6 +549,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
+	}
+	if opt.loopBlockLimit > 0 {
+		cfg.Sync.LoopBlockLimit = opt.loopBlockLimit
 	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
