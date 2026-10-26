@@ -565,6 +565,9 @@ func newPreparationCollectionFixture(t *testing.T, path preparationCollectionPat
 	_, err = client.ForkChoiceUpdate(t.Context(), parent.Hash(), parent.Hash(), canonical, nil, version)
 	require.NoError(t, err)
 	module.ExecModule.WaitIdle(t.Context())
+	forkChoice, err := module.ExecModule.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, canonical, forkChoice.HeadHash)
 	engine := &preparationCollectionClient{ExecutionClientDirect: client}
 	handler.engine = engine
 	baseRoot := common.Hash{0x41}
