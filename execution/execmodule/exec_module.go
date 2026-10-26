@@ -428,7 +428,6 @@ func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
 	if e.readAheader == nil {
 		return func() {}, nil
 	}
-	e.readAheader.CancelWarmup()
 	return e.readAheader.SuspendWarmup(ctx)
 }
 

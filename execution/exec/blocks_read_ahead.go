@@ -213,11 +213,12 @@ func (bra *BlockReadAheader) startWarmup(warm func()) bool {
 	return true
 }
 
-// SuspendWarmup waits for active state-cache warmup and prevents another
-// warmup from starting until the returned function is called. Keep it
-// suspended while staged unwind state is being read or published. If ctx is
-// cancelled first, no suspension remains pending.
+// SuspendWarmup cancels active warmup, waits for it to finish, and prevents
+// new warmups until the returned function is called. Keep it suspended while
+// staged unwind state is being read or published. If ctx is cancelled first,
+// no suspension remains pending.
 func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) {
+	bra.CancelWarmup()
 	if err := bra.warmupGate.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}

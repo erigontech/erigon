@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -161,55 +160,6 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)
-}
-
-type blockedWarmupDB struct {
-	kv.RoDB
-	started chan context.Context
-}
-
-func (db *blockedWarmupDB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	select {
-	case db.started <- ctx:
-	default:
-	}
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-func TestSuspendReadAheadCancelsActiveWarmup(t *testing.T) {
-	oldReadAhead := dbg.ReadAhead
-	dbg.SetReadAhead(true)
-	defer dbg.SetReadAhead(oldReadAhead)
-	readAheader := exec.NewBlockReadAheader()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer func() {
-		cancel()
-		waitCtx, stopWaiting := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stopWaiting()
-		readAheader.WaitForWarmup(waitCtx)
-		require.NoError(t, waitCtx.Err(), "warmup did not stop after cancellation")
-	}()
-	db := &blockedWarmupDB{started: make(chan context.Context, 1)}
-	header := &types.Header{Number: *uint256.NewInt(1)}
-	body := &types.Body{Transactions: []types.Transaction{&types.AccessListTx{}}}
-	readAheader.AddHeaderAndBody(ctx, db, emptyStageProgressTx{}, header, body)
-	var warmupCtx context.Context
-	select {
-	case warmupCtx = <-db.started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("warmup did not start")
-	}
-	module := &ExecModule{readAheader: readAheader}
-	waitCtx, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
-	defer stopWaiting()
-
-	resume, err := module.suspendReadAhead(waitCtx)
-	if resume != nil {
-		defer resume()
-	}
-	require.NoError(t, err, "suspension must cancel active warmup before waiting for it")
-	require.ErrorIs(t, warmupCtx.Err(), context.Canceled)
 }
 
 func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {

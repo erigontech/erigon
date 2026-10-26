@@ -560,6 +560,29 @@ func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
 	<-warmupDone
 }
 
+func TestBlockReadAheaderSuspendWarmupCancelsActiveWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupCtx, cancel := context.WithCancel(t.Context())
+	bra.cancelWarmup = cancel
+	defer func() {
+		cancel()
+		waitCtx, stopWaiting := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopWaiting()
+		bra.WaitForWarmup(waitCtx)
+		require.NoError(t, waitCtx.Err(), "warmup did not stop after cancellation")
+	}()
+	require.True(t, bra.startWarmup(func() { <-warmupCtx.Done() }))
+	waitCtx, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+
+	resume, err := bra.SuspendWarmup(waitCtx)
+	if resume != nil {
+		defer resume()
+	}
+	require.NoError(t, err, "suspension must cancel active warmup before waiting for it")
+	require.ErrorIs(t, warmupCtx.Err(), context.Canceled)
+}
+
 func TestBlockReadAheaderSuspendWarmupSkipsNewWarmup(t *testing.T) {
 	bra := NewBlockReadAheader()
 	resume, err := bra.SuspendWarmup(t.Context())
