@@ -731,27 +731,19 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 			parsers.Go(func() error {
 				valueBuf, err := parse(tv, valueBufs[tx%workers], senders, tx)
-				if err != nil {
-					collectorLock.Lock()
-					defer collectorLock.Unlock()
-					collected = tx
-					collections.Broadcast() // to fail fast on it.
-					return fmt.Errorf("%w, block: %d", err, blockNum)
-				}
 				collectorLock.Lock()
 				defer collectorLock.Unlock()
 				for collected < tx-1 {
 					collections.Wait()
 				}
+				collected = tx
+				defer collections.Broadcast()
+				if err != nil {
+					return fmt.Errorf("%w, block: %d", err, blockNum)
+				}
 
 				// first tx byte => sender address => tx rlp
-				if err := collect(valueBuf); err != nil {
-					return err
-				}
-				collected = tx
-				collections.Broadcast()
-
-				return nil
+				return collect(valueBuf)
 			})
 
 			return nil
