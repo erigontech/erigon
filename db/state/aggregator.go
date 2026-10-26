@@ -3035,6 +3035,14 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
 }
 
+func (at *AggregatorRoTx) DebugRangeLatestWithOffsets(tx kv.Tx, domain kv.Domain, from, to []byte, limit int, fileOffsets []uint64) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestWithOffsets(tx, from, to, limit, fileOffsets)
+}
+
+func (at *AggregatorRoTx) DebugRangeLatestOffsets(domain kv.Domain, starts [][]byte) ([][]uint64, error) {
+	return at.d[domain].DebugRangeLatestOffsets(starts)
+}
+
 // DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
 // ignoring keys in MDBX database.
 func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {

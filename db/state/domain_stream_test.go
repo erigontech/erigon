@@ -45,6 +45,70 @@ func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
 	assert.Equal(t, FILE_CURSOR, top.t, "FILE cursor must have lowest priority")
 }
 
+func TestCommitmentDomain_DebugRangeLatestOffsetsSkipPrefix(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+		var key, value [8]byte
+		binary.BigEndian.PutUint64(key[:], keyNum)
+		binary.BigEndian.PutUint64(value[:], keyNum+100)
+		require.NoError(t, writer.PutWithPrev(key[:], value[:], keyNum, nil))
+	}
+	require.NoError(t, writer.Flush(ctx, tx))
+	writer.Close()
+	domainRoTx.Close()
+	collateAndMerge(t, tx, d, 160)
+	require.NoError(t, tx.Commit())
+
+	readTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer readTx.Rollback()
+	domainRoTx = d.beginForTests()
+	defer domainRoTx.Close()
+	all, err := domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	var keys [][]byte
+	for all.HasNext() {
+		key, _, nextErr := all.Next()
+		require.NoError(t, nextErr)
+		keys = append(keys, key)
+	}
+	all.Close()
+	require.Greater(t, len(keys), 1)
+	starts := [][]byte{keys[0], keys[len(keys)-1]}
+	offsets, err := domainRoTx.DebugRangeLatestOffsets(starts)
+	require.NoError(t, err)
+	require.Len(t, offsets, len(starts))
+	var skipped bool
+	for fileIndex := range offsets[0] {
+		if offsets[1][fileIndex] > offsets[0][fileIndex] {
+			skipped = true
+			break
+		}
+	}
+	require.True(t, skipped, "later task must start after the earlier task: offsets=%v", offsets)
+	it, err := domainRoTx.DebugRangeLatestWithOffsets(readTx, starts[1], nil, kv.Unlim, offsets[1])
+	require.NoError(t, err)
+	defer it.Close()
+	require.True(t, it.HasNext())
+	first, _, err := it.Next()
+	require.NoError(t, err)
+	require.Equal(t, starts[1], first)
+	endOffsets := make([]uint64, len(offsets[0]))
+	for fileIndex := range endOffsets {
+		endOffsets[fileIndex] = uint64(domainRoTx.reusableReader(fileIndex).DataLen())
+	}
+	empty, err := domainRoTx.DebugRangeLatestWithOffsets(readTx, starts[0], nil, kv.Unlim, endOffsets)
+	require.NoError(t, err)
+	defer empty.Close()
+	require.False(t, empty.HasNext(), "range reader rescanned a file after its end offset")
+}
+
 func TestCursorHeapPriority_MaxUint64TieBreak(t *testing.T) {
 	t.Parallel()
 	// Reproduces the exact scenario from #20246: RAM and DB both use

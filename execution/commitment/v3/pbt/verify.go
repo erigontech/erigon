@@ -79,10 +79,14 @@ func (t *Trie) VerifyContext(ctx context.Context, workers int, factory commitmen
 	return nil
 }
 
-const verifyChainBits = 12
+const verifyChainBits = 16
 
 type VerifyRangeReader interface {
 	ReadVerifyRange(from, to []byte, emit func([]byte, []byte) error) (uint64, error)
+}
+
+type verifyRangeTaskPreparer interface {
+	PrepareVerifyRanges(starts [][]byte) error
 }
 
 type VerifyStats struct {
@@ -183,12 +187,19 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 		}
 	}
 	keys := make([]string, len(paths))
+	starts := make([][]byte, len(paths))
 	for i := range paths {
 		key, err := rowKeyForPath(&paths[i])
 		if err != nil {
 			return nil
 		}
+		starts[i] = key
 		keys[i] = string(key)
+	}
+	if preparer, ok := t.ctx.(verifyRangeTaskPreparer); ok {
+		if err := preparer.PrepareVerifyRanges(starts); err != nil {
+			return err
+		}
 	}
 	chains := make([]verifiedChain, len(paths))
 	bucketKeys := make([]map[string]struct{}, len(paths))

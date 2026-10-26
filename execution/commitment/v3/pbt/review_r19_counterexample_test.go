@@ -95,7 +95,7 @@ func TestPBinReviewR19ReleasedTaskRowsUnreachable(t *testing.T) {
 func TestPBinReviewR19LiveRowsDuringLoad(t *testing.T) {
 	const (
 		holdChunkBytes = 1 << 20
-		rowValueBytes  = 1 << 16
+		rowValueBytes  = 1 << 19
 	)
 	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
 	base := &trieTestContext{records: corpus.snapshot}

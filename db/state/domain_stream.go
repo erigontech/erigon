@@ -116,6 +116,7 @@ type DomainLatestIterFile struct {
 	minFileEndTxNum uint64
 	from, to        []byte
 	orderAscend     order.By
+	fileOffsets     []uint64
 
 	h *CursorHeap
 
@@ -205,20 +206,36 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 				btCursor.Close()
 			}
 		} else if domainRoTx.d.Accessors.Has(statecfg.AccessorHashMap) {
-			// For domains without BTree (e.g., commitment with HashMap accessor),
-			// iterate the data file directly using linear scan.
-			// RecSplit indices don't support OrdinalLookup (no enums), so we can't binary search.
 			reader := domainRoTx.reusableReader(i)
-			reader.Reset(0)
-
-			// Linear scan to find first key >= hi.from
-			for reader.HasNext() {
-				key, _ = reader.Next(nil)
-				if hi.from == nil || bytes.Compare(key, hi.from) >= 0 {
+			if len(hi.fileOffsets) == len(domainRoTx.files) {
+				reader.Reset(hi.fileOffsets[i])
+				if reader.HasNext() {
+					key, _ = reader.Next(nil)
 					value, _ = reader.Next(nil)
-					break
 				}
-				reader.Skip() // skip value
+			} else {
+				reader.Reset(0)
+				if hi.from == nil {
+					if reader.HasNext() {
+						key, _ = reader.Next(nil)
+						value, _ = reader.Next(nil)
+					}
+				} else {
+					for reader.HasNext() {
+						cmp := reader.MatchCmp(hi.from)
+						if cmp <= 0 {
+							if cmp < 0 {
+								key, _ = reader.Next(nil)
+							} else {
+								key = hi.from
+							}
+							value, _ = reader.Next(nil)
+							break
+						}
+						reader.Skip()
+						reader.Skip()
+					}
+				}
 			}
 
 			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {

@@ -84,6 +84,7 @@ type SharedDomainsCommitmentContext struct {
 	stateReader        StateReader
 	paraTrieDB         kv.TemporalRoDB
 	verifyPointLookups *atomic.Uint64
+	verifyRangePlan    *verifyRangePlan
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
 	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
 	warmupBase commitment.WarmupConfig
@@ -438,8 +439,13 @@ func (sdc *SharedDomainsCommitmentContext) SetVerifyPointLookupCounter(counter *
 }
 
 func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) {
+	sdc.verifyRangePlan = nil
+	if planner, ok := tx.AggTx().(verifyRangePlanner); ok {
+		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain()}
+	}
 	ctx := sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
-	ctx.verifyRange = verifyRangeReader(tx, sdc.CommitmentDomain())
+	ctx.verifyRange = verifyRangeReader(tx, sdc.CommitmentDomain(), sdc.verifyRangePlan)
+	ctx.verifyRangePlan = sdc.verifyRangePlan
 }
 
 var errVerificationViewDrifted = errors.New("verification worker view drifted from the caller's snapshot")
@@ -468,7 +474,8 @@ func (sdc *SharedDomainsCommitmentContext) VerificationContextFactory(tx kv.Temp
 			stateReader:        NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
 			commitmentDomain:   sdc.CommitmentDomain(),
 			stepSize:           sdc.sharedDomains.StepSize(),
-			verifyRange:        verifyRangeReader(roTx, sdc.CommitmentDomain()),
+			verifyRange:        verifyRangeReader(roTx, sdc.CommitmentDomain(), sdc.verifyRangePlan),
+			verifyRangePlan:    sdc.verifyRangePlan,
 			verifyPointLookups: sdc.verifyPointLookups,
 		}, roTx.Rollback
 	}
@@ -1540,11 +1547,54 @@ type TrieContext struct {
 	// binary trie hashes code_size, and the extra CodeDomain read is not free.
 	readCodeSize bool
 
-	branchBuf   []byte // reused across Branch calls; see the ownership note on Branch
-	verifyRange func([]byte, []byte, func([]byte, []byte) error) (uint64, error)
+	branchBuf       []byte // reused across Branch calls; see the ownership note on Branch
+	verifyRange     func([]byte, []byte, func([]byte, []byte) error) (uint64, error)
+	verifyRangePlan *verifyRangePlan
 }
 
-func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain) func([]byte, []byte, func([]byte, []byte) error) (uint64, error) {
+type verifyRangePlanner interface {
+	DebugRangeLatestOffsets(kv.Domain, [][]byte) ([][]uint64, error)
+}
+
+type verifyRangeAt interface {
+	DebugRangeLatestWithOffsets(kv.Tx, kv.Domain, []byte, []byte, int, []uint64) (stream.KV, error)
+}
+
+type verifyRangePlan struct {
+	planner verifyRangePlanner
+	domain  kv.Domain
+	offsets map[string][]uint64
+}
+
+func (p *verifyRangePlan) prepare(starts [][]byte) error {
+	offsets, err := p.planner.DebugRangeLatestOffsets(p.domain, starts)
+	if err != nil {
+		return err
+	}
+	p.offsets = make(map[string][]uint64, len(starts))
+	for i, start := range starts {
+		if i < len(offsets) && len(offsets[i]) != 0 {
+			p.offsets[string(start)] = offsets[i]
+		}
+	}
+	return nil
+}
+
+func (p *verifyRangePlan) forStart(start []byte) []uint64 {
+	if p == nil || p.offsets == nil {
+		return nil
+	}
+	return p.offsets[string(start)]
+}
+
+func (sdc *TrieContext) PrepareVerifyRanges(starts [][]byte) error {
+	if sdc.verifyRangePlan == nil {
+		return nil
+	}
+	return sdc.verifyRangePlan.prepare(starts)
+}
+
+func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan) func([]byte, []byte, func([]byte, []byte) error) (uint64, error) {
 	agg, ok := tx.AggTx().(interface {
 		DebugRangeLatest(kv.Tx, kv.Domain, []byte, []byte, int) (stream.KV, error)
 	})
@@ -1553,7 +1603,16 @@ func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain) func([]byte, []byte, 
 		return nil
 	}
 	return func(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
-		it, err := agg.DebugRangeLatest(roTx, domain, from, to, -1)
+		var it stream.KV
+		var err error
+		if rangeAt, ok := agg.(verifyRangeAt); ok {
+			if offsets := plan.forStart(from); offsets != nil {
+				it, err = rangeAt.DebugRangeLatestWithOffsets(roTx, domain, from, to, -1, offsets)
+			}
+		}
+		if it == nil {
+			it, err = agg.DebugRangeLatest(roTx, domain, from, to, -1)
+		}
 		if err != nil {
 			return 0, err
 		}
