@@ -144,8 +144,10 @@ type TxPool struct {
 	// nonceGapEvictions counts transactions dropped because their sender's sequence has a hole; see the
 	// [nonce-gap] log. A contiguous stream should never produce one.
 	nonceGapEvictions int
-	// aboveChainRemovals counts removals of a nonce at or above the sender's chain nonce — each one
-	// strands that sender behind a hole. See the [above-chain] log.
+	// removedAsMined is the highest nonce removed as Mined per sender, and the block it happened on.
+	// checkStrandedSenders later asks whether the chain actually reached it. See [above-chain].
+	removedAsMined map[uint64]minedWatch
+	// aboveChainRemovals counts senders found stranded above the chain. See the [above-chain] log.
 	aboveChainRemovals uint64
 	// frontHoles counts senders whose NEXT nonce the pool does not hold; see the [nonce-front] log.
 	frontHoles int
@@ -472,6 +474,10 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
+
+	// Judge EARLIER removals now that this block's state is in: a nonce removed as mined that the
+	// chain never reached leaves its sender stranded behind a hole nothing can close.
+	p.checkStrandedSenders(cacheView, block)
 
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
@@ -2231,30 +2237,16 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot, ca
 	discarded := 0
 
 	for senderID, nonce := range noncesToRemove {
-		// ⚠ REMOVING ABOVE THE CHAIN'S NONCE STRANDS THE SENDER FOR EVER, AND IT MUST SAY SO WHEN IT
-		// HAPPENS. This deletes every transaction at or below `nonce`, which is sound only if the
-		// chain really did include them. A nonce removed but never mined is gone from the pool and
-		// absent from the chain; nothing re-sends it, and every later nonce from that sender sits
-		// behind a hole that cannot close.
-		//
-		// Measured on live451: the pool had removed the sponsor to nonce 23500 while the chain stood
-		// at 23466, and that account landed NOTHING for seven hours and 14,537 blocks while every
-		// other sender kept flowing. [sender-exits] reported it as ABOVE-CHAIN, but only for the
-		// busiest sender and only at census time — hours after the removal that caused it. Said here,
-		// it names the moment.
-		//
-		// Guarded on the sender being mapped: an unmapped id leaves the chain nonce at zero, against
-		// which every removal reads as above-chain, and a probe that cries wolf is worse than none.
-		if _, mapped := p.senders.senderID2Addr[senderID]; mapped {
-			if chainNonce, _, infErr := p.senders.info(cacheView, senderID); infErr == nil && nonce >= chainNonce {
-				p.aboveChainRemovals++
-				if p.aboveChainRemovals == 1 || p.aboveChainRemovals%100 == 0 {
-					p.logger.Warn("[above-chain] removing as mined a nonce the chain has NOT reached — the sender is stranded behind the gap",
-						"sender", p.senders.senderID2Addr[senderID].String(),
-						"removingTo", nonce, "chainNext", chainNonce,
-						"gap", int64(nonce)-int64(chainNonce)+1, "seenSoFar", p.aboveChainRemovals)
-				}
-			}
+		// RECORD IT, DO NOT JUDGE IT YET. Whether the chain really included these can only be answered
+		// AFTER the chain has had the chance — removeMined runs before this block's state change is
+		// applied, so the view here is the PRE-block state and every healthy removal reads as "above
+		// chain". Measured the moment that check went in: it fired on the very first removal, nonce 0
+		// against chainNext 0. checkStrandedSenders does the judging, later.
+		if p.removedAsMined == nil {
+			p.removedAsMined = map[uint64]minedWatch{}
+		}
+		if w, ok := p.removedAsMined[senderID]; !ok || nonce > w.nonce {
+			p.removedAsMined[senderID] = minedWatch{nonce: nonce, atBlock: p.lastSeenBlock.Load()}
 		}
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
 			if mt.TxnSlot.Nonce > nonce {
@@ -3526,4 +3518,63 @@ func (p *TxPool) residueBySender(topN int) string {
 			name, a.n, a.low, a.high, span, int64(span)-int64(a.n)))
 	}
 	return strings.Join(out, " | ")
+}
+
+// minedWatch is a removal awaiting confirmation: the highest nonce taken out of the pool as Mined
+// for one sender, and the block it was taken on.
+type minedWatch struct {
+	nonce   uint64
+	atBlock uint64
+}
+
+// strandedGrace is how many blocks the chain is given to actually reach a nonce the pool removed as
+// mined, before that sender is reported stranded.
+//
+// It is not a timeout on anything: a removal is normally confirmed by the very next block, because
+// the block that caused it IS the block that included them. The grace exists so a slow commit or a
+// one-block reorganisation does not read as a loss.
+const strandedGrace = 32
+
+// checkStrandedSenders asks, of removals made earlier, whether the chain ever reached them.
+//
+// ⚠ THIS CANNOT BE ASKED AT THE MOMENT OF REMOVAL. removeMined runs before the block's state change
+// is applied, so the view there is the PRE-block state and every healthy removal reads as being
+// above the chain — measured, it fired on the first removal in the run, nonce 0 against chainNext 0.
+//
+// Why it matters: removeMined deletes every transaction at or below the nonce it is told was mined.
+// A nonce removed but never mined is gone from the pool and absent from the chain, nothing re-sends
+// it, and every later nonce from that sender sits behind a hole that cannot close. Measured on
+// live451: the pool had removed the sponsor to 23500 while the chain stood at 23466, and that
+// account landed nothing for seven hours and 14,537 blocks while every other sender kept flowing.
+// Nothing panicked, nothing unwound, and the pool's own accounting was consistent.
+func (p *TxPool) checkStrandedSenders(cacheView kvcache.CacheView, blockNum uint64) {
+	for senderID, w := range p.removedAsMined {
+		// Grace first, so an entry that is simply young costs no state read at all.
+		if blockNum < w.atBlock+strandedGrace {
+			continue
+		}
+		addr, mapped := p.senders.senderID2Addr[senderID]
+		if !mapped {
+			// An unmapped id reads a chain nonce of zero, against which everything looks stranded.
+			delete(p.removedAsMined, senderID)
+			continue
+		}
+		chainNonce, _, err := p.senders.info(cacheView, senderID)
+		if err != nil {
+			continue
+		}
+		if chainNonce > w.nonce {
+			// The chain reached it: the removal was sound.
+			delete(p.removedAsMined, senderID)
+			continue
+		}
+		p.aboveChainRemovals++
+		if p.aboveChainRemovals == 1 || p.aboveChainRemovals%100 == 0 {
+			p.logger.Warn("[above-chain] a nonce removed as mined was never reached by the chain — this sender is stranded behind the gap",
+				"sender", addr.String(), "removedTo", w.nonce, "chainNext", chainNonce,
+				"gap", int64(w.nonce)-int64(chainNonce)+1,
+				"blocksSince", blockNum-w.atBlock, "seenSoFar", p.aboveChainRemovals)
+		}
+		delete(p.removedAsMined, senderID) // reported once; re-recorded if it happens again
+	}
 }
