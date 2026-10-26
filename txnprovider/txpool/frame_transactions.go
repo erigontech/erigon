@@ -38,6 +38,15 @@ type frameReservation struct {
 	paymasters uint64
 }
 
+type frameValidationResult struct {
+	validation *protocol.FrameValidation
+	reason     txpoolcfg.DiscardReason
+}
+
+var errFrameStateChanged = errors.New("frame validation state changed")
+
+const frameValidationTimeout = 5 * time.Second
+
 func (tx *TxnSlot) hasKeyedNonce() bool {
 	frame, ok := tx.Txn.(*types.FrameTransaction)
 	return ok && !frame.UsesLegacyNonce()
@@ -61,34 +70,64 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardRea
 	if err != nil || limits.Execution > p.blockGasLimit.Load() || limits.State > p.blockGasLimit.Load() {
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
-	if frame.GetBlobGas() != 0 {
-		if reason := p.validateBlobTxn(txn, isLocal); reason != txpoolcfg.Success {
-			return reason, nil
-		}
-	}
-	validation, err := p.simulateFrame(txn)
-	if err != nil {
-		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
-		return txpoolcfg.ErrFrameValidation, nil
-	}
-	if validation == nil {
-		return txpoolcfg.InvalidFrame, nil
-	}
-	txn.frameValidation = validation
 	return txpoolcfg.Success, nil
 }
 
-func (p *TxPool) simulateFrame(txn *TxnSlot) (*protocol.FrameValidation, error) {
+func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) (uint64, map[*TxnSlot]frameValidationResult) {
+	results := make(map[*TxnSlot]frameValidationResult)
+	p.lock.Lock()
+	generation := p.stateGeneration
+	stateBlockHash := p.stateBlockHash
+	for i, txn := range txns.Txns {
+		if txn.TxType() != FrameTxnType {
+			continue
+		}
+		reason, _ := p.validateFrame(txn, txns.IsLocal[i])
+		results[txn] = frameValidationResult{reason: reason}
+	}
+	p.lock.Unlock()
+	for _, txn := range txns.Txns {
+		if result, ok := results[txn]; ok && result.reason == txpoolcfg.Success {
+			results[txn] = p.simulateFrameResult(ctx, txn, stateBlockHash)
+		}
+	}
+	return generation, results
+}
+
+func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, stateBlockHash common.Hash) frameValidationResult {
+	validation, err := p.simulateFrame(ctx, txn, stateBlockHash)
+	if err != nil {
+		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
+		return frameValidationResult{reason: txpoolcfg.ErrFrameValidation}
+	}
+	if validation == nil {
+		return frameValidationResult{reason: txpoolcfg.InvalidFrame}
+	}
+	return frameValidationResult{validation: validation, reason: txpoolcfg.Success}
+}
+
+func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash common.Hash) (*protocol.FrameValidation, error) {
 	if p.ethBackend == nil {
 		return nil, errors.New("frame validation backend is unavailable")
+	}
+	select {
+	case p.frameValidationGate <- struct{}{}:
+		defer func() { <-p.frameValidationGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	var data bytes.Buffer
 	if err := txn.Txn.MarshalBinary(&data); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	reply, err := p.ethBackend.FrameValidation(ctx, &remoteproto.FrameValidationRequest{Transaction: data.Bytes()})
+	req := &remoteproto.FrameValidationRequest{Transaction: data.Bytes()}
+	if stateBlockHash != (common.Hash{}) {
+		req.ExpectedBlockHash = gointerfaces.ConvertHashToH256(stateBlockHash)
+	}
+	reply, err := p.ethBackend.FrameValidation(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +200,7 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	}
 }
 
-func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) {
+func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
 	touched := make(map[common.Address]struct{})
 	nonceSlots := make(map[common.Hash]struct{})
 	var nonceManagerAccountChanged bool
@@ -177,6 +216,7 @@ func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) {
 			}
 		}
 	}
+	var pending []*metaTxn
 	for _, mt := range p.byHash {
 		previous := mt.TxnSlot.frameValidation
 		if previous == nil {
@@ -185,7 +225,7 @@ func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) {
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		keyedNonce := !frame.UsesLegacyNonce()
 		first := &frame.Frames[0]
-		affected := first.Target != nil && *first.Target == types.FrameExpiryVerifier || frame.GetBlobGas() != 0
+		affected := mt.currentSubPool == 0 || first.Target != nil && *first.Target == types.FrameExpiryVerifier || frame.GetBlobGas() != 0
 		for _, dependency := range previous.Dependencies {
 			// The sender's validation can read any of its own storage.
 			if dependency == types.FrameNonceManager && keyedNonce && frame.SenderAddress != types.FrameNonceManager && !nonceManagerAccountChanged {
@@ -207,19 +247,56 @@ func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) {
 		if !affected {
 			continue
 		}
-		validation, err := p.simulateFrame(mt.TxnSlot)
-		reason := txpoolcfg.FrameStateChanged
-		if err != nil {
-			p.logger.Debug("[txpool] Frame validation unavailable", "hash", mt.TxnSlot.IDHash, "err", err)
-			reason = txpoolcfg.ErrFrameValidation
-		} else if validation != nil && p.checkFrameReservation(validation, previous) == txpoolcfg.NotSet {
+		// Keep the reservation and nonce index, but prevent selection or promotion
+		// until validation against the new state completes.
+		p.removeFromSubPool(mt, "frame validation pending")
+		pending = append(pending, mt)
+	}
+	return pending
+}
+
+func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, generation uint64, stateBlockHash common.Hash) {
+	if len(pending) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, frameValidationTimeout)
+	defer cancel()
+	for _, mt := range pending {
+		result := p.simulateFrameResult(ctx, mt.TxnSlot, stateBlockHash)
+		p.lock.Lock()
+		if generation != p.stateGeneration {
+			p.lock.Unlock()
+			return
+		}
+		if p.byHash[string(mt.TxnSlot.IDHash[:])] != mt || mt.currentSubPool != 0 {
+			p.lock.Unlock()
+			continue
+		}
+		previous, validation := mt.TxnSlot.frameValidation, result.validation
+		if validation != nil && p.checkFrameReservation(validation, previous) == txpoolcfg.NotSet {
 			p.releaseFrame(previous)
 			mt.TxnSlot.frameValidation = validation
 			p.reserveFrame(validation)
-			continue
+			p.queued.Add(mt, "frame revalidated", p.logger)
+		} else {
+			reason := txpoolcfg.FrameStateChanged
+			if result.reason == txpoolcfg.ErrFrameValidation {
+				reason = result.reason
+			}
+			p.discardLocked(mt, reason)
 		}
-		p.removeFromSubPool(mt, "frame revalidation")
-		p.discardLocked(mt, reason)
+		p.lock.Unlock()
+	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	var announcements Announcements
+	p.promote(p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger)
+	p.pending.EnforceBestInvariants()
+	if announcements.Len() > 0 {
+		select {
+		case p.newPendingTxns <- announcements.Copy():
+		default:
+		}
 	}
 }
 

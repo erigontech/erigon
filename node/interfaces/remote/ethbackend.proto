@@ -288,6 +288,7 @@ message EngineGetPayloadBodiesByRangeV1Request {
 
 message FrameValidationRequest {
   bytes transaction = 1;
+  types.H256 expected_block_hash = 2;
 }
 
 message FrameValidationReply {

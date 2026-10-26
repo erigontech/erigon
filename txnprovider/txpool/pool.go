@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -139,6 +140,8 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	stateBlockHash          common.Hash
+	frameValidationGate     chan struct{}
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -251,6 +254,7 @@ func New(
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
+		frameValidationGate:     make(chan struct{}, 1),
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
@@ -344,6 +348,14 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	p.lock.Lock()
 	p.stateGeneration++
+	generation := p.stateGeneration
+	p.stateBlockHash = common.Hash{}
+	if hash := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHash; hash != nil {
+		p.stateBlockHash = gointerfaces.ConvertH256ToHash(hash)
+	}
+	stateBlockHash := p.stateBlockHash
+	var pendingFrames []*metaTxn
+	var unwindFrames TxnSlots
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
@@ -351,6 +363,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 
 		p.lock.Unlock()
+		if err == nil {
+			p.revalidateFrames(ctx, pendingFrames, generation, stateBlockHash)
+			if len(unwindFrames.Txns) > 0 {
+				_, err = p.addNewTxns(ctx, unwindFrames, false)
+			}
+		}
 	}()
 
 	pendingPre := p.pending.Len()
@@ -399,6 +417,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
+	var ordinaryUnwind TxnSlots
+	for i, txn := range unwindTxns.Txns {
+		if txn.TxType() == FrameTxnType {
+			unwindFrames.Append(txn, unwindTxns.Senders.At(i), unwindTxns.IsLocal[i])
+		} else {
+			ordinaryUnwind.Append(txn, unwindTxns.Senders.At(i), unwindTxns.IsLocal[i])
+		}
+	}
+	unwindTxns = ordinaryUnwind
 	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
 		return err
 	}
@@ -429,7 +456,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	p.revalidateFrames(stateChanges)
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
 		stateChanges.BlockGasLimit, p.logger)
@@ -437,6 +463,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 	p.forgetUnusedSenders(senderIDsOf(&minedTxns))
+	pendingFrames = p.invalidateFrames(stateChanges)
 
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
@@ -1011,7 +1038,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	if txn.TxType() == types.FrameTxType {
-		return p.validateFrame(txn, isLocal)
+		reason, err := p.validateFrame(txn, isLocal)
+		if reason == txpoolcfg.Success && txn.HasBlobs() {
+			return p.validateBlobTxn(txn, isLocal), nil
+		}
+		return reason, err
 	}
 
 	// Use the on-tx authorization list length, not len(AuthAndNonces): per
@@ -1549,53 +1580,89 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 	if err != nil {
 		return nil, err
 	}
-	err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
-		var sources []remoteSource
-		if fromRemoteQueue {
-			sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
-		}
-		validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
-		if err != nil {
-			return err
-		}
-		reasons = validatedReasons
-		if fromRemoteQueue {
-			p.kickKZGOffenders(ctx, reasons)
-		}
-
-		announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
-			p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
-		if err != nil {
-			return err
-		}
-		// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
-		// Walk reasons and advance j only on slots that survived validation.
-		for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
-			if reasons[i] != txpoolcfg.NotSet || newTxns.Txns[i] != goodTxns.Txns[j] {
-				continue
-			}
-			reasons[i] = addReasons[j]
-			j++
-		}
-		p.promoted.Reset()
-		p.promoted.AppendOther(announcements)
-
-		reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
-		if p.promoted.Len() > 0 {
-			select {
-			case p.newPendingTxns <- p.promoted.Copy():
-			default:
-			}
-		}
-		if fromRemoteQueue {
-			p.removeProcessedRemoteTxns(len(newTxns.Txns))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	precheckReasons := reasons
+	simulationCtx := ctx
+	if slices.ContainsFunc(newTxns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
+		var cancel context.CancelFunc
+		simulationCtx, cancel = context.WithTimeout(ctx, frameValidationTimeout)
+		defer cancel()
 	}
-	return reasons, nil
+	for {
+		generation, frames := p.prepareFrames(simulationCtx, newTxns)
+		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+			if len(frames) > 0 && generation != p.stateGeneration {
+				if simulationCtx.Err() == nil {
+					return errFrameStateChanged
+				}
+				for txn := range frames {
+					frames[txn] = frameValidationResult{reason: txpoolcfg.ErrFrameValidation}
+				}
+			}
+			reasons = slices.Clone(precheckReasons)
+			if reasons == nil {
+				reasons = make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
+			}
+			for i, txn := range newTxns.Txns {
+				if result, ok := frames[txn]; ok {
+					if result.reason != txpoolcfg.Success {
+						reasons[i] = result.reason
+						if result.reason == txpoolcfg.ErrFrameValidation {
+							p.discardReasonsLRU.Add(string(txn.IDHash[:]), result.reason)
+						}
+					} else {
+						txn.frameValidation = result.validation
+					}
+				}
+			}
+			var sources []remoteSource
+			if fromRemoteQueue {
+				sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
+			}
+			validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
+			if err != nil {
+				return err
+			}
+			reasons = validatedReasons
+			if fromRemoteQueue {
+				p.kickKZGOffenders(ctx, reasons)
+			}
+
+			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
+			if err != nil {
+				return err
+			}
+			// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
+			// Walk reasons and advance j only on slots that survived validation.
+			for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
+				if reasons[i] != txpoolcfg.NotSet || newTxns.Txns[i] != goodTxns.Txns[j] {
+					continue
+				}
+				reasons[i] = addReasons[j]
+				j++
+			}
+			p.promoted.Reset()
+			p.promoted.AppendOther(announcements)
+
+			reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+			if p.promoted.Len() > 0 {
+				select {
+				case p.newPendingTxns <- p.promoted.Copy():
+				default:
+				}
+			}
+			if fromRemoteQueue {
+				p.removeProcessedRemoteTxns(len(newTxns.Txns))
+			}
+			return nil
+		})
+		if !errors.Is(err, errFrameStateChanged) {
+			return reasons, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 }
 
 func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
@@ -2815,12 +2882,20 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 }
 
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
-	return p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
-		return p.fromDBLocked(tx, coreTx, cacheView)
+	var frames TxnSlots
+	err := p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+		return p.fromDBLocked(tx, coreTx, cacheView, &frames)
 	})
+	if err == nil && len(frames.Txns) > 0 {
+		_, err = p.addNewTxns(ctx, frames, false)
+	}
+	return err
 }
 
-func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, frames *TxnSlots) error {
+	if p.stateBlockHash == (common.Hash{}) {
+		p.stateBlockHash = rawdb.ReadHeadHeaderHash(coreTx)
+	}
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {
@@ -2884,8 +2959,12 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		}
 		txn.Rlp = nil // means that we don't need store it in db anymore
 
-		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 		isLocalTx := p.isLocalLRU.Contains(string(k))
+		if txn.TxType() == FrameTxnType {
+			frames.Append(txn, addr[:], isLocalTx)
+			continue
+		}
+		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 
 		reason, err := p.validateTx(txn, isLocalTx, cacheView)
 		if err != nil {

@@ -20,7 +20,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -38,20 +41,27 @@ import (
 
 type frameValidationBackend struct {
 	remoteproto.ETHBACKENDClient
-	payer     common.Address
-	balance   uint64
-	paymaster bool
-	valid     bool
-	err       error
-	calls     []common.Hash
+	payer      common.Address
+	balance    uint64
+	paymaster  bool
+	valid      bool
+	err        error
+	calls      []common.Hash
+	deadlines  []time.Time
+	onValidate func()
 }
 
 func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
+	if b.onValidate != nil {
+		b.onValidate()
+	}
 	tx, err := types.DecodeTransaction(req.Transaction)
 	if err != nil {
 		return nil, err
 	}
 	b.calls = append(b.calls, tx.Hash())
+	deadline, _ := ctx.Deadline()
+	b.deadlines = append(b.deadlines, deadline)
 	if b.err != nil {
 		return nil, b.err
 	}
@@ -192,6 +202,212 @@ func TestFramePoolValidationErrorIsolated(t *testing.T) {
 	}
 }
 
+func TestFramePoolValidationReleasesLock(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		name := "remote"
+		if local {
+			name = "local"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.onValidate = func() {
+				require.True(t, pool.lock.TryLock(), "frame simulation must not hold the pool lock")
+				pool.lock.Unlock()
+			}
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(frame, sender[:], local)
+			if local {
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			} else {
+				pool.started.Store(true)
+				pool.AddRemoteTxns(ctx, txns, nil, nil)
+				require.NoError(t, pool.processRemoteTxns(ctx))
+			}
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+			require.Len(t, backend.calls, 1)
+		})
+	}
+}
+
+func TestFramePoolValidationUsesFreshState(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.onValidate = func() {
+		if len(backend.calls) == 0 {
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			backend.valid = false
+		} else {
+			backend.valid = true
+		}
+	}
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Len(t, backend.calls, 2, "a block change must invalidate both positive and negative validation results")
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+}
+
+func TestFramePoolValidationPinsHead(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	hash := common.Hash{1}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(hash, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	backend := pool.ethBackend.(*frameValidationBackend)
+	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+		require.Equal(t, gointerfaces.ConvertHashToH256(hash), req.ExpectedBlockHash)
+		return backend.FrameValidation(ctx, req)
+	}}
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+}
+
+func TestFramePoolValidationBatchDeadline(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	var txns TxnSlots
+	for _, address := range []common.Address{sender, {2}} {
+		txns.Append(framePoolSlot(t, address, 1, 2, uint256.Int{1}), address[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Len(t, backend.deadlines, 2)
+	require.Equal(t, backend.deadlines[0], backend.deadlines[1], "one slow batch must not get a new timeout for every frame")
+}
+
+type frameValidationFuncBackend struct {
+	remoteproto.ETHBACKENDClient
+	validate func(context.Context, *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error)
+}
+
+func (b *frameValidationFuncBackend) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest, _ ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
+	return b.validate(ctx, req)
+}
+
+func TestFramePoolBoundsConcurrentValidation(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	var calls atomic.Int32
+	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return backend.FrameValidation(ctx, req)
+	}}
+	var first TxnSlots
+	first.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	done := make(chan error, 1)
+	go func() {
+		_, err := pool.AddLocalTxns(ctx, first)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first validation did not start")
+	}
+	limited, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	var second TxnSlots
+	other := common.Address{2}
+	second.Append(framePoolSlot(t, other, 1, 2, uint256.Int{1}), other[:], true)
+	_, err := pool.AddLocalTxns(limited, second)
+	unblock()
+	require.NoError(t, <-done)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.EqualValues(t, 1, calls.Load(), "concurrent admission must not multiply backend simulation work")
+}
+
+func TestFramePoolRevalidationReleasesLock(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.onValidate = func() {
+		require.True(t, pool.lock.TryLock(), "frame revalidation must not hold the pool lock")
+		pool.lock.Unlock()
+		pending, _, _ := pool.CountContent()
+		require.Zero(t, pending, "a frame awaiting revalidation must not be selected")
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Len(t, backend.calls, 2)
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Equal(t, 1, pool.pending.Len())
+}
+
+func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
+	for _, mode := range []string{"unwind", "reload"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.chainID.SetUint64(1)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.onValidate = func() {
+				require.True(t, pool.lock.TryLock(), "restored frame simulation must not hold the pool lock")
+				pool.lock.Unlock()
+			}
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(frame, sender[:], true)
+			if mode == "unwind" {
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), txns, TxnSlots{}, TxnSlots{}))
+			} else {
+				require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+					return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+				}))
+				require.NoError(t, pool.start(ctx))
+			}
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+			require.Len(t, backend.calls, 1)
+		})
+	}
+}
+
+func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+	}))
+	backend.err = errors.New("validation backend unavailable")
+	require.NoError(t, pool.start(ctx))
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		known, err := pool.IdHashKnown(tx, frame.IDHash[:])
+		require.NoError(t, err)
+		require.False(t, known, "a failed reload must allow the transaction to be fetched again")
+		return nil
+	}))
+	backend.err = nil
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+}
+
 func TestFramePoolRevalidationErrorAdvancesHead(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
@@ -247,10 +463,12 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 				backend.balance = 1
 			}
 			pool.lock.Lock()
-			pool.revalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
 				Address: gointerfaces.ConvertAddressToH160(sender), Action: remoteproto.Action_STORAGE,
 			}}}}})
+			generation := pool.stateGeneration
 			pool.lock.Unlock()
+			pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash)
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 			require.Empty(t, pool.frameReservations)
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
@@ -332,8 +550,10 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 				change.StorageChanges = []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(location)}}
 			}
 			pool.lock.Lock()
-			pool.revalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
+			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
+			generation := pool.stateGeneration
 			pool.lock.Unlock()
+			pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash)
 			if tc.revalidate {
 				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))

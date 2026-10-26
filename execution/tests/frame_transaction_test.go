@@ -27,6 +27,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/holiman/uint256"
@@ -101,7 +105,7 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 	cfg := chain.TestChainOsakaConfig.Copy()
 	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
 	sender, withdrawn, recipient := common.HexToAddress("0x1000"), common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
-	genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+	genesis := &types.Genesis{Config: cfg, Timestamp: uint64(time.Now().Unix()) + 60, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
 		sender:                    {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
 		withdrawn:                 {Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
 		recipient:                 {Balance: big.NewInt(1)},
@@ -131,7 +135,7 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 	}
 	expiring := frame(sender, 2, 0, 10_000_000_000)
 	expiring.Frames = append([]types.Frame{{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: make([]byte, 8), Limits: mdgas.MdGas{Execution: 5_000}}}, expiring.Frames...)
-	binary.BigEndian.PutUint64(expiring.Frames[0].Data, m.Genesis.Time())
+	binary.BigEndian.PutUint64(expiring.Frames[0].Data, m.Genesis.Time()+cfg.SecondsPerSlot())
 	tests := []struct {
 		name                     string
 		tx                       *types.FrameTransaction
@@ -202,6 +206,105 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 	server = privateapi.NewEthBackendServer(t.Context(), nil, db, m.Notifications, m.BlockReader, log.New(), nil, cfg)
 	check("commit during validation", true)
 	check("after commit", true)
+}
+
+func TestFrameValidationPendingFees(t *testing.T) {
+	for _, fee := range []uint64{90, 10} {
+		t.Run(fmt.Sprint(fee), func(t *testing.T) {
+			cfg := chain.TestChainOsakaConfig.Copy()
+			cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+			sender := common.HexToAddress("0x1000")
+			genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(100), Alloc: types.GenesisAlloc{
+				sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+			}}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(fee)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+			result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+			require.NoError(t, err)
+			require.True(t, result.Valid, "pool fee queues must decide when a validated transaction can be included")
+		})
+	}
+}
+
+func TestFrameValidationAtBogotaActivation(t *testing.T) {
+	cfg := chain.TestChainOsakaConfig.Copy()
+	now := uint64(time.Now().Unix())
+	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(now-1)
+	sender := common.HexToAddress("0x1000")
+	genesis := &types.Genesis{Config: cfg, Timestamp: now - 2*cfg.SecondsPerSlot(), GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+		sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frame := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+		Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+	require.NoError(t, err)
+	require.True(t, result.Valid, "admission must use active fork rules before the first post-fork block")
+}
+
+func TestFrameValidationExpectedHead(t *testing.T) {
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+		sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frame := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+		Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	for _, hash := range []common.Hash{m.Genesis.Hash(), {1}} {
+		result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{
+			Transaction: encoded.Bytes(), ExpectedBlockHash: gointerfaces.ConvertHashToH256(hash),
+		})
+		if hash != m.Genesis.Hash() {
+			require.Equal(t, codes.Aborted, status.Code(err), "head disagreement must be retryable")
+			continue
+		}
+		require.NoError(t, err)
+		require.True(t, result.Valid)
+	}
+}
+
+func TestFrameValidationPendingBlobFee(t *testing.T) {
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	genesis := &types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(100), ExcessBlobGas: common.NewUint64(100_000_000),
+		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frame := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+		Fees:                types.FrameFees{FeeCap: *uint256.NewInt(100), BlobFeeCap: *uint256.NewInt(1)},
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+	require.NoError(t, err)
+	require.True(t, result.Valid, "a low blob fee cap must not invalidate the prefix")
 }
 
 type frameValidationCommitDB struct {

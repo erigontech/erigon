@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -501,12 +503,19 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 	if !ok {
 		return &remoteproto.FrameValidationReply{}, nil
 	}
+	var expectedHash common.Hash
+	if req.ExpectedBlockHash != nil {
+		if req.ExpectedBlockHash.Hi == nil || req.ExpectedBlockHash.Lo == nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid expected block hash")
+		}
+		expectedHash = gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		sd, seq := s.notifications.Events.OverlaySnapshot()
-		result, err := s.validateFrameTransaction(ctx, frame, sd)
+		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash)
 		// Notifications precede commit. Retry if the published head changes while
 		// we open the database snapshot or validate against its overlay.
 		if _, current := s.notifications.Events.OverlaySnapshot(); current == seq {
@@ -515,7 +524,7 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 	}
 }
 
-func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains) (*remoteproto.FrameValidationReply, error) {
+func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash) (*remoteproto.FrameValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -535,6 +544,9 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	if block == nil {
 		return nil, errors.New("frame validation: no current block")
 	}
+	if expectedHash != (common.Hash{}) && expectedHash != block.Hash() {
+		return nil, status.Error(codes.Aborted, "frame validation head changed")
+	}
 	header := block.HeaderNoCopy()
 	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
@@ -551,6 +563,26 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	ibs := state.New(reader)
 	defer ibs.Close()
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
+	blockContext.BlockNumber++
+	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
+	if header.BaseFee != nil {
+		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)
+	}
+	if frame.GetBlobGas() != 0 {
+		excess := misc.CalcExcessBlobGas(s.chainConfig, header, blockContext.Time)
+		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(s.chainConfig, excess, blockContext.Time)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Fee caps determine queue placement. Prefix validation must also accept
+	// transactions waiting for execution or blob fees to fall.
+	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
+		blockContext.BaseFee.Set(frame.GetFeeCap())
+	}
+	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
+		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
+	}
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
 	defer context.AfterFunc(ctx, evm.Cancel)()
 	result, err := protocol.ValidateFrameTransaction(evm, frame)
