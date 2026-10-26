@@ -279,6 +279,7 @@ func (p *ParallelPatriciaHashed) Process(
 		return nil, mErr
 	}
 
+	pu.foldTombstones()
 	if p.cfg.LeaveDeferredForCaller {
 		pu.deferredMu.Lock()
 		p.deferredForCaller = pu.deferredCombined

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -61,7 +62,7 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	recordAll(io, readSets, writeSets)
 
-	bal := balpkg.Create(0, io, "", log.New())
+	bal := balpkg.Create(0, nil, io, "", log.New())
 
 	if len(bal) != 2 {
 		t.Fatalf("expected two accounts in BAL, got %d", len(bal))
@@ -166,6 +167,35 @@ func recordAll(io *state.VersionedIO, reads map[int]state.ReadSet, writes map[in
 //     EIP-7251 consolidation request dequeue (4 SLOADs + 4 SSTOREs, all net-zero)
 //
 // The system address (0xff..fe) is filtered out per EIP-7928.
+// A list built from a prefix of the txs while they are published, then finished
+// from the block's VersionedIO, equals one built at block end.
+func TestCreateBALFromPublishedPrefix(t *testing.T) {
+	addrA := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001"))
+	addrB := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000002"))
+	slot1 := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+
+	io := state.NewVersionedIO(4)
+	readSets := map[int]state.ReadSet{}
+	writeSets := map[int]*state.WriteSet{}
+	addBalanceRead(readSets, -1, addrA, uint64(5))
+	addStorageRead(readSets, 0, addrB, slot1)
+	addStorageWrite(writeSets, 0, addrB, slot1, 10)
+	addStorageWrite(writeSets, 1, addrB, slot1, 5)
+	addBalanceWrite(writeSets, 2, addrA, 99)
+	recordAll(io, readSets, writeSets)
+
+	want := balpkg.Create(0, nil, io, "", log.New()).Hash()
+	for last := -1; last <= 2; last++ {
+		b := state.NewBlockAccessListBuilder()
+		for i := -1; i <= last; i++ {
+			b.Add(i, io.ReadSet(i), io.WriteSet(i))
+		}
+		if got := balpkg.Create(0, b, io, "", log.New()).Hash(); got != want {
+			t.Fatalf("prefix up to tx %d: hash %x, want %x", last, got, want)
+		}
+	}
+}
+
 func TestBALBlock943Direct(t *testing.T) {
 	expectedHash := common.HexToHash("0x0e9aff2d3f1c6d5083afd44ef786e54858d50004845d5ae2f0437dd61b83d00d")
 
@@ -321,7 +351,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 
 	recordAll(vio, readSets, writeSets)
 
-	bal := balpkg.Create(943, vio, "", log.New())
+	bal := balpkg.Create(943, nil, vio, "", log.New())
 
 	t.Logf("BAL accounts: %d", len(bal))
 	for i, ac := range bal {
@@ -354,4 +384,24 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	}
 
 	_ = fmt.Sprintf // suppress unused import
+}
+
+func TestProcessChecksStoredBALBytesAndComputedBAL(t *testing.T) {
+	computed := balpkg.Create(1, nil, state.NewVersionedIO(0), "", log.New())
+	computedBytes, err := types.EncodeBlockAccessListBytes(computed)
+	require.NoError(t, err)
+	other := types.BlockAccessList{{Address: common.HexToAddress("0x01")}}
+	otherBytes, err := types.EncodeBlockAccessListBytes(other)
+	require.NoError(t, err)
+
+	process := func(headerHash common.Hash, stored []byte) error {
+		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
+		_, err := balpkg.Process(stored, h, nil, state.NewVersionedIO(0), true, false, "", log.New())
+		return err
+	}
+	require.NoError(t, process(computed.Hash(), computedBytes))
+	require.NoError(t, process(computed.Hash(), nil))
+	require.ErrorContains(t, process(computed.Hash(), append(computedBytes, 0)), "hash mismatch")
+	require.ErrorContains(t, process(computed.Hash(), otherBytes), "hash mismatch")
+	require.ErrorContains(t, process(other.Hash(), otherBytes), "block access list mismatch")
 }

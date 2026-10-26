@@ -82,7 +82,7 @@ type beaconStatesCollector struct {
 	ptcWindowEpochCollector                 *etl.Collector
 	latestExecutionPayloadBidCollector      *etl.Collector
 	// gloas -- diffs data structures
-	buildersWriter                   *base_encoding.SSZQueueEncoder[*cltypes.Builder]
+	buildersWriter                   *state_accessors.BuildersDiffWriter
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
@@ -143,7 +143,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		ptcWindowEpochCollector:                 etl.NewCollectorWithAllocator(kv.PtcWindowEpochTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		latestExecutionPayloadBidCollector:      etl.NewCollectorWithAllocator(kv.LatestExecutionPayloadBidTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 
-		buildersWriter:                   base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b }),
+		buildersWriter:                   new(state_accessors.BuildersDiffWriter),
 		builderPendingWithdrawalsWriter:  base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b }),
 		payloadExpectedWithdrawalsWriter: base_encoding.NewSSZQueueEncoder[*cltypes.Withdrawal](func(a, b *cltypes.Withdrawal) bool { return *a == *b }),
 
@@ -183,6 +183,10 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 	if err := i.storeEpochData(state); err != nil {
 		return err
 	}
+	epoch := slot / i.beaconCfg.SlotsPerEpoch
+	if err := i.collectActiveIndices(epoch, state.GetActiveValidatorsIndices(epoch)); err != nil {
+		return err
+	}
 
 	if state.Version() >= clparams.AltairVersion {
 		// dump inactivity scores
@@ -213,6 +217,14 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 	}
 	if state.Version() >= clparams.GloasVersion {
 		if err := antiquateListSSZ(slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
+			return err
+		}
+		i.buildersWriter.Initialize(state.GetBuilders())
+		i.buf.Reset()
+		if err := i.buildersWriter.WriteDiff(i.buf, state.GetBuilders()); err != nil {
+			return err
+		}
+		if err := i.buildersCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
 			return err
 		}
 		if err := antiquateListSSZ(slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {

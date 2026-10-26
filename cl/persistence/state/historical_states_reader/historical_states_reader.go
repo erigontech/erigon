@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -354,7 +355,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	gloasForkSlot := r.cfg.GloasForkEpoch * r.cfg.SlotsPerEpoch
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(r.cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.BuildersDump, kv.Builders, builders); err != nil {
+	if err := ReadBuildersSSZ(kvGetter, slot, gloasForkSlot, r.cfg.BuilderRegistryLimit, builders); err != nil {
 		return nil, fmt.Errorf("failed to read builders: %w", err)
 	}
 	ret.SetBuilders(builders)
@@ -894,10 +895,36 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 		if block == nil {
 			continue
 		}
+		var parentPayloadAvailable bool
+		if block.Version() >= clparams.GloasVersion && block.Block.Body.Attestations.Len() > 0 {
+			parentSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, block.Block.ParentRoot)
+			if err != nil {
+				return nil, nil, err
+			}
+			if parentSlot == nil {
+				genesisSlot := r.genesisState.Slot()
+				genesisRoot, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(genesisSlot))
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(genesisRoot) != 32 || block.Block.ParentRoot != common.BytesToHash(genesisRoot) {
+					return nil, nil, fmt.Errorf("parent block root %x not found", block.Block.ParentRoot)
+				}
+				genesisParentSlot := r.genesisState.LatestBlockHeader().Slot
+				parentSlot = &genesisParentSlot
+			}
+
+			availability := solid.NewBitVector(int(r.cfg.SlotsPerHistoricalRoot))
+			if err := readCompressedSSZ(kvGetter, i, kv.ExecutionPayloadAvailabilityTable, availability, int(block.Version())); err != nil {
+				return nil, nil, err
+			}
+			parentPayloadAvailable = availability.GetBitAt(int(*parentSlot % r.cfg.SlotsPerHistoricalRoot))
+		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
 
 		// Read the participation flags
-		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
+		for index := 0; index < block.Block.Body.Attestations.Len(); index++ {
+			attestation := block.Block.Body.Attestations.Get(index)
 			data := attestation.Data
 			isCurrentEpoch := data.Target.Epoch == currentEpoch
 			var activeIndicies []uint64
@@ -910,7 +937,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 				}
 			} else {
 				if currentEpoch == prevEpoch {
-					return true
+					continue
 				}
 				activeIndicies = previousActiveIndicies
 			}
@@ -920,41 +947,32 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
 			mix, err := r.ReadRandaoMixBySlotAndIndex(kvGetter, data.Slot, mixPosition)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
 
-			var attestingIndicies []uint64
-			attestingIndicies, err = r.attestingIndicies(attestation, true, mix, activeIndicies)
+			attestingIndicies, err := r.attestingIndicies(attestation, true, mix, activeIndicies)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
-			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, true)
+			participationFlagsIndicies, err := r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, parentPayloadAvailable, true)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
-			prevIdxs := isCurrentEpoch && currentEpoch != prevEpoch
+			participation := previousIdxs
+			if data.Target.Epoch == epoch {
+				participation = currentIdxs
+			}
 			// apply the flags
 			for _, idx := range attestingIndicies {
 				for _, flagIndex := range participationFlagsIndicies {
-					var flagParticipation cltypes.ParticipationFlags
-					if prevIdxs {
-						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
-					} else {
-						flagParticipation = cltypes.ParticipationFlags(previousIdxs.Get(int(idx)))
-					}
+					flagParticipation := cltypes.ParticipationFlags(participation.Get(int(idx)))
 					if flagParticipation.HasFlag(int(flagIndex)) {
 						continue
 					}
-					if prevIdxs {
-						currentIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
-					} else {
-						previousIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
-					}
+					participation.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 				}
 			}
-			return true
-		})
+		}
 	}
 	return currentIdxs, previousIdxs, nil
 }
@@ -999,26 +1017,11 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_acce
 		}
 		return common.BytesToHash(intraRandaoMix), nil
 	}
-	needFromGenesis := true
-	var epochLookup uint64
-	if index <= epochSubIndex {
-		if epoch > (epochSubIndex - index) {
-			needFromGenesis = false
-			epochLookup = epoch - (epochSubIndex - index)
-		}
-	} else {
-		if epoch > (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index)) {
-			needFromGenesis = false
-			epochLookup = epoch - (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index))
-		}
+	distance := (epochSubIndex + r.cfg.EpochsPerHistoricalVector - index) % r.cfg.EpochsPerHistoricalVector
+	if distance > epoch || epoch-distance < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
+		return r.genesisState.GetRandaoMix(int(index)), nil
 	}
-	if epochLookup < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
-		needFromGenesis = true
-	}
-
-	if needFromGenesis {
-		return r.genesisState.GetRandaoMixes(epoch), nil
-	}
+	epochLookup := epoch - distance
 	mixBytes, err := kvGetter(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
 	if err != nil {
 		return common.Hash{}, err
@@ -1065,7 +1068,7 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 		}
 
 		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
-			return err
+			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
 		}
 	}
 	return nil
@@ -1076,31 +1079,9 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 // forkSlot is read as an empty list, because the first Gloas diff holds the full
 // list. The replay then starts at the dump slot, so a diff stored there is not skipped.
 func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	firstDiffSlot, err := readRequiredDump(kvGetter, slot, forkSlot, dumpTable, out)
 	if err != nil {
 		return err
-	}
-
-	firstDiffSlot := freshDumpSlot + 1
-	if len(compressed) == 0 {
-		if freshDumpSlot > forkSlot {
-			return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
-		}
-		firstDiffSlot = freshDumpSlot
-	} else {
-		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
-		if err != nil {
-			return err
-		}
-		sszEnc, err := io.ReadAll(zstdReader)
-		base_encoding.PutZstdReader(zstdReader)
-		if err != nil {
-			return err
-		}
-		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
-			return err
-		}
 	}
 
 	for currSlot := firstDiffSlot; currSlot <= slot; currSlot++ {
@@ -1113,7 +1094,75 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 			continue
 		}
 		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
+			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
+		}
+	}
+	return nil
+}
+
+func readRequiredDump[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable string, out *solid.ListSSZ[T]) (uint64, error) {
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	if err != nil {
+		return 0, err
+	}
+
+	firstDiffSlot := freshDumpSlot + 1
+	if len(compressed) == 0 {
+		if freshDumpSlot > forkSlot {
+			return 0, fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
+		}
+		firstDiffSlot = freshDumpSlot
+	} else {
+		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
+		if err != nil {
+			return 0, err
+		}
+		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
+		if err != nil {
+			return 0, err
+		}
+		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
+			return 0, err
+		}
+	}
+	return firstDiffSlot, nil
+}
+
+func ReadBuildersSSZ(kvGetter state_accessors.GetValFn, slot, forkSlot, registryLimit uint64, out *solid.ListSSZ[*cltypes.Builder]) error {
+	firstDiffSlot, err := readRequiredDump(kvGetter, slot, forkSlot, kv.BuildersDump, out)
+	if err != nil {
+		return err
+	}
+
+	for currSlot := slot - slot%clparams.SlotsPerDump; currSlot <= slot; currSlot++ {
+		key := base_encoding.Encode64ToBytes4(currSlot)
+		row, err := kvGetter(kv.Builders, key)
+		if err != nil {
 			return err
+		}
+		if len(row) != 0 {
+			// A loaded dump already includes its own slot's row; checking that row still detects legacy history at dump slots.
+			if currSlot < firstDiffSlot {
+				err = state_accessors.CheckBuildersDiffRow(row)
+			} else {
+				err = state_accessors.ApplyBuildersDiff(row, out, registryLimit)
+			}
+			if err != nil {
+				return fmt.Errorf("read builders diff from table %s at slot %d: %w", kv.Builders, currSlot, err)
+			}
+			continue
+		}
+		if currSlot < forkSlot {
+			continue
+		}
+		slotData, err := kvGetter(kv.SlotData, key)
+		if err != nil {
+			return err
+		}
+		if len(slotData) != 0 {
+			return fmt.Errorf("%w: missing row from table %s at slot %d", state_accessors.ErrHistoryRebuildRequired, kv.Builders, currSlot)
 		}
 	}
 	return nil
