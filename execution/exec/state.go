@@ -126,6 +126,9 @@ type WorkerContext struct {
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
+	// getHash serves BLOCKHASH for every block whose parent is getHashParent.
+	getHash       func(uint64) (common.Hash, error)
+	getHashParent common.Hash
 
 	dirs datadir.Dirs
 
@@ -145,15 +148,19 @@ func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	if header == nil {
 		return
 	}
-	br := rw.blockReader
-	ctx := rw.ctx
-	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := br.Header(ctx, rw.chainTx, hash, number)
-		if h == nil && err == nil {
-			h = &types.Header{}
-		}
-		return h, err
-	})
+	if rw.getHash == nil || rw.getHashParent != header.ParentHash {
+		br := rw.blockReader
+		ctx := rw.ctx
+		rw.getHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+			h, err := br.Header(ctx, rw.chainTx, hash, number)
+			if h == nil && err == nil {
+				h = &types.Header{}
+			}
+			return h, err
+		})
+		rw.getHashParent = header.ParentHash
+	}
+	rw.evm.Context.GetHash = rw.getHash
 }
 
 func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *WorkerContext {

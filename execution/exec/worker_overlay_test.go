@@ -217,3 +217,18 @@ func TestWorker_GetHashReadsTheRebound(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, rebound, br.tx)
 }
+
+// Txs of one block share the BLOCKHASH lookup; a block on another parent, such as a reorg sibling, must not.
+func TestWorker_GetHashFollowsTheParent(t *testing.T) {
+	t.Parallel()
+
+	rw := NewWorkerContext(t.Context(), true, nil, nil, &headerTxRecorder{},
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, datadir.New(t.TempDir()), log.New())
+	require.NoError(t, rw.ResetTx(&namedTx{name: "tx"}))
+	for _, parent := range []common.Hash{{1}, {1}, {2}} {
+		rw.installWorkerGetHash(&TxTask{Header: &types.Header{Number: *uint256.NewInt(10), ParentHash: parent}})
+		got, err := rw.evm.Context.GetHash(9)
+		require.NoError(t, err)
+		require.Equal(t, parent, got)
+	}
+}
