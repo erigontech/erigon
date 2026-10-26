@@ -44,7 +44,7 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	require.NoError(t, pbinCollectOp(collector, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, value), 3))
 	require.NoError(t, pbinCollectOp(collector, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, value), 7))
 	var leaves []PBinLeaf
-	require.NoError(t, pbinLoadSortedLeaves(collector, func(leaf PBinLeaf) error {
+	require.NoError(t, pbinLoadSortedLeafCollectors([]*etl.Collector{collector}, func(leaf PBinLeaf) error {
 		leaves = append(leaves, leaf)
 		return nil
 	}, nil))
@@ -57,5 +57,5 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	other[0] = 1
 	require.NoError(t, pbinCollectOp(conflicting, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, value), 1))
 	require.NoError(t, pbinCollectOp(conflicting, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, other), 2))
-	require.Error(t, pbinLoadSortedLeaves(conflicting, func(PBinLeaf) error { return nil }, nil))
+	require.Error(t, pbinLoadSortedLeafCollectors([]*etl.Collector{conflicting}, func(PBinLeaf) error { return nil }, nil))
 }

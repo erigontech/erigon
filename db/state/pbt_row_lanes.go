@@ -389,11 +389,5 @@ func (r *pbinRowLanes) cleanup() error {
 }
 
 func (r *pbinRowLanes) close() {
-	if r.cleaned {
-		return
-	}
-	for _, lane := range r.lanes {
-		_ = lane.flush()
-	}
 	_ = r.cleanup()
 }

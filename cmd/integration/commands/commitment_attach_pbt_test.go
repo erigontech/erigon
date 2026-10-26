@@ -353,10 +353,7 @@ func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
 	require.NoError(t, corruptPBTOutputRow(t.Context(), datadir.Open(published)))
 	setExecutionProgress(t, source.Chaindata, 1)
-	leafStamps := func(uint64, func(func(state.PBinLeaf) error) error) (common.Hash, error) {
-		return common.Hash{}, errors.New("leaf pass ran")
-	}
-	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, leafStamps: leafStamps, skipVerify: true}
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: true}
 	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks))
 	settings, err := state.ReadErigonDBSettings(datadir.Open(source.DataDir))
 	require.NoError(t, err)
@@ -1167,17 +1164,12 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
 	setExecutionProgress(t, source.Chaindata, 1)
+	rewritePBTAttachManifest(t, published, func(manifest *state.PBTManifest) {
+		manifest.PBTRoot = common.HexToHash("0x09").Hex()
+	})
 	before := snapshotTree(t, source.DataDir)
-	leafStamps := func(txNum uint64, forEach func(func(state.PBinLeaf) error) error) (common.Hash, error) {
-		return validatePBTAttachLeafStamps(txNum, func(emit func(state.PBinLeaf) error) error {
-			return forEach(func(leaf state.PBinLeaf) error {
-				leaf.Stamp = txNum + 1
-				return emit(leaf)
-			})
-		})
-	}
-	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, leafStamps: leafStamps})
-	require.ErrorContains(t, err, "published leaf stamp 8 is after conversion txNum 7")
+	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
+	require.ErrorContains(t, err, "published binary root record")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 

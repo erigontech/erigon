@@ -464,10 +464,10 @@ func hashStreamRootBranch(sum HashFn, prefix []byte, left, right common.Hash) co
 }
 
 const (
-	parallelStreamRootBatchBytes         = 512 * 1024
+	parallelStreamRootBatchBytes         = 4 * 1024 * 1024
 	parallelStreamRootBatchResidentBytes = parallelStreamRootBatchBytes + parallelStreamRootBatchBytes
-	parallelStreamRootChannelBatches     = 8
-	parallelStreamRootQueueBytes         = 64 * 1024 * 1024
+	parallelStreamRootChannelBatches     = 1024
+	parallelStreamRootQueueBytes         = 4 * 1024 * 1024 * 1024
 	parallelStreamRootQueueTokenBytes    = parallelStreamRootBatchResidentBytes
 	pbinStreamRootPartitionBits          = 12
 )

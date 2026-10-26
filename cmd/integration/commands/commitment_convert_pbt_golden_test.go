@@ -18,7 +18,6 @@ package commands
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -31,25 +30,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
@@ -158,46 +149,6 @@ func pbtGoldenCorpora() []pbtGoldenCorpus {
 		}},
 		{name: "shared-code-and-storage", newSource: newPBTGoldenAcceptanceSource, binOnly: true},
 	}
-}
-
-func addPBTGoldenStorageBucket(t *testing.T, source pbtConversionSource) {
-	t.Helper()
-	settings, err := dbstate.ReadErigonDBSettings(source.Dirs)
-	require.NoError(t, err)
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
-	agg := dbstate.New(source.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
-	require.NoError(t, agg.OpenFolder(rawDB))
-	files := agg.Files()
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	require.NoError(t, err)
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantCommitmentV3
-	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
-	require.NoError(t, err)
-	address := bytes.Repeat([]byte{0x11}, length.Addr)
-	for slotIndex := uint64(eip8297.HeaderStorageSlots); slotIndex < eip8297.HeaderStorageSlots+256; slotIndex++ {
-		slot := append(bytes.Clone(address), make([]byte, 32)...)
-		binary.BigEndian.PutUint64(slot[length.Addr+24:], slotIndex)
-		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{byte(slotIndex)}, 1, nil))
-	}
-	require.NoError(t, domains.Flush(t.Context(), tx))
-	require.NoError(t, tx.Commit())
-	domains.Close()
-	tx.Rollback()
-	agg.CloseFilesNoReopen()
-	for _, file := range files {
-		require.NoError(t, dir.RemoveFile(file))
-	}
-	require.NoError(t, agg.ReloadFiles())
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
-	agg.WaitForFiles()
-	db.Close()
-	agg.Close()
-	rawDB.Close()
 }
 
 func newPBTGoldenAcceptanceSource(t *testing.T, hash string) pbtConversionSource {

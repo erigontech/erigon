@@ -30,8 +30,7 @@ import (
 
 func TestPBTGoldenLargeStorageIsVisibleToConverter(t *testing.T) {
 	configurePBTGoldenSuite(t, commitment.PBinHashBlake3, true)
-	source, _ := newPBTConversionSource(t)
-	addPBTGoldenStorageBucket(t, source)
+	source, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 256, nil)
 	settings, err := dbstate.ReadErigonDBSettings(source.Dirs)
 	require.NoError(t, err)
 	agg, err := dbstate.NewPBTStateAggregator(source.Dirs, settings, log.New()).Open(t.Context())

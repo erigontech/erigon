@@ -209,7 +209,7 @@ func pbinForEachLeafSerial(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit 
 		return err
 	}
 	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: collector.Collected(), TempDir: at.Dirs().Tmp})
-	return pbinLoadSortedLeaves(collector, emit, leafProgress)
+	return pbinLoadSortedLeafCollectors([]*etl.Collector{collector}, emit, leafProgress)
 }
 
 type pbinLeafAddressRange struct {
@@ -541,21 +541,7 @@ func pbinCollectOp(collector *etl.Collector, scratch *[8 + eip8297.ValueLength]b
 	return collector.Collect(op.Key, scratch[:])
 }
 
-func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
-	return pbinLoadSortedLeafStream(func(load func([]byte, []byte) error) error {
-		return collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			return load(key, value)
-		}, etl.TransformArgs{Progress: progress})
-	}, emit)
-}
-
 func pbinLoadSortedLeafCollectors(collectors []*etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
-	return pbinLoadSortedLeafStream(func(load func([]byte, []byte) error) error {
-		return etl.MergeLoad("pbin leaf stream", collectors, load, etl.TransformArgs{Progress: progress})
-	}, emit)
-}
-
-func pbinLoadSortedLeafStream(load func(func([]byte, []byte) error) error, emit func(PBinLeaf) error) error {
 	var previousKey, previousValue []byte
 	var previousStamp uint64
 	flush := func() error {
@@ -564,7 +550,7 @@ func pbinLoadSortedLeafStream(load func(func([]byte, []byte) error) error, emit 
 		}
 		return emit(PBinLeaf{Key: previousKey, Value: previousValue, Stamp: previousStamp})
 	}
-	err := load(func(key, value []byte) error {
+	err := etl.MergeLoad("pbin leaf stream", collectors, func(key, value []byte) error {
 		if previousKey != nil && bytes.Equal(previousKey, key) {
 			if !bytes.Equal(previousValue, value[8:]) {
 				return fmt.Errorf("pbin leaf stream: conflicting values for key %x", key)
@@ -579,7 +565,7 @@ func pbinLoadSortedLeafStream(load func(func([]byte, []byte) error) error, emit 
 		previousValue = bytes.Clone(value[8:])
 		previousStamp = binary.BigEndian.Uint64(value)
 		return nil
-	})
+	}, etl.TransformArgs{Progress: progress})
 	if err != nil {
 		return err
 	}

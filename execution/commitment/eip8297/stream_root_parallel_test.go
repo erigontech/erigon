@@ -64,8 +64,62 @@ func TestParallelStreamRootMatchesSerial(t *testing.T) {
 }
 
 func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
-	sum := streamRootHash(HashKeccak)
-	parallel, err := NewParallelStreamRoot(sum, 4)
+	for _, test := range []struct {
+		name          string
+		zone          byte
+		positionBytes int
+	}{
+		{name: "account", zone: AccountZone, positionBytes: 32},
+		{name: "storage", zone: StorageZone, positionBytes: 64},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sum := streamRootHash(HashKeccak)
+			parallel, err := NewParallelStreamRoot(sum, 4)
+			require.NoError(t, err)
+			var active, maxActive atomic.Int32
+			parallel.SetBuildConcurrencyCounters(&active, &maxActive)
+			release := make(chan struct{})
+			var first atomic.Bool
+			parallel.SetBuildStartHook(func() {
+				if first.CompareAndSwap(false, true) {
+					<-release
+				}
+			})
+			entries := make([]Entry, 0, 48)
+			for shard := range 16 {
+				for leaf := range 3 {
+					position := make([]byte, test.positionBytes)
+					position[0] = byte(shard << 4)
+					position[test.positionBytes-1] = byte(leaf + 1)
+					entries = append(entries, Entry{Key: TreeKey(test.zone, position, byte(leaf)), Value: streamRootValue(byte(leaf + 1))})
+				}
+			}
+			slices.SortFunc(entries, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
+			done := make(chan error, 1)
+			go func() {
+				for _, entry := range entries {
+					if err := parallel.Add(entry.Key, entry.Value); err != nil {
+						done <- err
+						return
+					}
+				}
+				done <- nil
+			}()
+			deadline := time.Now().Add(time.Second)
+			for maxActive.Load() < 2 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			close(release)
+			require.NoError(t, <-done)
+			_, err = parallel.RootHash()
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, maxActive.Load(), int32(2), "sorted stream must build at least two shards concurrently")
+		})
+	}
+}
+
+func TestParallelStreamRootProducerReachesNextShardBeforeFirstFinishes(t *testing.T) {
+	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 2)
 	require.NoError(t, err)
 	var active, maxActive atomic.Int32
 	parallel.SetBuildConcurrencyCounters(&active, &maxActive)
@@ -76,16 +130,7 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 			<-release
 		}
 	})
-	entries := make([]Entry, 0, 48)
-	for shard := range 16 {
-		for leaf := range 3 {
-			position := make([]byte, 32)
-			position[0] = byte(shard << 4)
-			position[31] = byte(leaf + 1)
-			entries = append(entries, Entry{Key: TreeKey(AccountZone, position, byte(leaf)), Value: streamRootValue(byte(leaf + 1))})
-		}
-	}
-	slices.SortFunc(entries, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
+	entries := parallelStreamRootLongShardEntries(10)
 	done := make(chan error, 1)
 	go func() {
 		for _, entry := range entries {
@@ -94,17 +139,21 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 				return
 			}
 		}
-		done <- nil
+		_, err := parallel.RootHash()
+		done <- err
 	}()
-	deadline := time.Now().Add(time.Second)
-	for maxActive.Load() < 2 && time.Now().Before(deadline) {
+	deadline := time.Now().Add(5 * time.Second)
+	reached := false
+	for time.Now().Before(deadline) {
+		if maxActive.Load() >= 2 {
+			reached = true
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
 	close(release)
+	require.True(t, reached, "producer must reach the second shard while the first shard is still building")
 	require.NoError(t, <-done)
-	_, err = parallel.RootHash()
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, maxActive.Load(), int32(2), "sorted stream must build at least two shards concurrently")
 }
 
 func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
@@ -127,50 +176,6 @@ func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
 	require.LessOrEqual(t, parallel.peakResident.Load(), parallel.residentLimit)
 }
 
-func TestParallelStreamRootBuildsStorageShardsConcurrently(t *testing.T) {
-	sum := streamRootHash(HashKeccak)
-	parallel, err := NewParallelStreamRoot(sum, 4)
-	require.NoError(t, err)
-	var active, maxActive atomic.Int32
-	parallel.SetBuildConcurrencyCounters(&active, &maxActive)
-	release := make(chan struct{})
-	var first atomic.Bool
-	parallel.SetBuildStartHook(func() {
-		if first.CompareAndSwap(false, true) {
-			<-release
-		}
-	})
-	entries := make([]Entry, 0, 48)
-	for shard := range 16 {
-		for leaf := range 3 {
-			position := make([]byte, 64)
-			position[0] = byte(shard << 4)
-			position[63] = byte(leaf + 1)
-			entries = append(entries, Entry{Key: TreeKey(StorageZone, position, byte(leaf)), Value: streamRootValue(byte(leaf + 1))})
-		}
-	}
-	slices.SortFunc(entries, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
-	done := make(chan error, 1)
-	go func() {
-		for _, entry := range entries {
-			if err := parallel.Add(entry.Key, entry.Value); err != nil {
-				done <- err
-				return
-			}
-		}
-		done <- nil
-	}()
-	deadline := time.Now().Add(time.Second)
-	for maxActive.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	close(release)
-	require.NoError(t, <-done)
-	_, err = parallel.RootHash()
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, maxActive.Load(), int32(2), "sorted storage stream must build at least two shards concurrently")
-}
-
 func parallelStreamRootSkewedEntries(count int) []Entry {
 	entries := make([]Entry, count)
 	for i := range entries {
@@ -181,6 +186,27 @@ func parallelStreamRootSkewedEntries(count int) []Entry {
 		value[0] = 1
 		entries[i] = Entry{Key: key, Value: value}
 	}
+	return entries
+}
+
+func parallelStreamRootLongShardEntries(batches int) []Entry {
+	entryBytes := StorageKeyLength + ValueLength
+	count := batches*parallelStreamRootBatchBytes/entryBytes + 1
+	entries := make([]Entry, count+1)
+	for i := range count {
+		key := make([]byte, StorageKeyLength)
+		key[0] = StorageZone
+		binary.BigEndian.PutUint64(key[StorageKeyLength-8:], uint64(i))
+		value := streamRootValue(byte(i))
+		value[0] = 1
+		entries[i] = Entry{Key: key, Value: value}
+	}
+	key := make([]byte, StorageKeyLength)
+	key[0] = StorageZone
+	key[1] = 0x10
+	value := streamRootValue(1)
+	value[0] = 1
+	entries[count] = Entry{Key: key, Value: value}
 	return entries
 }
 

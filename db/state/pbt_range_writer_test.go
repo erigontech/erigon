@@ -759,6 +759,37 @@ type pbinRangeWriterEntry struct {
 	value []byte
 }
 
+func readPBinRangeWriterSnapshot(t testing.TB, agg *state.Aggregator, root common.Hash) pbinRangeWriterSnapshot {
+	t.Helper()
+	out := agg.BeginFilesRo()
+	defer out.Close()
+	snapshot := pbinRangeWriterSnapshot{root: root}
+	for _, visible := range out.Files(kv.CommitmentBinDomain) {
+		if !strings.HasSuffix(visible.Fullpath(), ".kv") {
+			continue
+		}
+		file := pbinRangeWriterFile{start: visible.StartRootNum(), end: visible.EndRootNum(), entries: []pbinRangeWriterEntry{}}
+		decompressor, err := seg.NewDecompressor(visible.Fullpath())
+		require.NoError(t, err)
+		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
+		for reader.HasNext() {
+			key, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
+			value, _ := reader.Next(nil)
+			if bytes.Equal(key, commitment.KeyCommitmentState) {
+				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
+				snapshot.state = bytes.Clone(value)
+			}
+			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
+		}
+		decompressor.Close()
+		snapshot.files = append(snapshot.files, file)
+	}
+	require.NotEmpty(t, snapshot.files)
+	require.NotNil(t, snapshot.state)
+	return snapshot
+}
+
 func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int) pbinRangeWriterSnapshot {
 	t.Helper()
 	return runPBinRangeWriterCorpusWith(t, leaves, maxOps, 0)
@@ -829,32 +860,7 @@ func runPBinRangeWriterCorpusWith(t *testing.T, leaves []state.PBinLeaf, maxOps,
 	require.NoError(t, err)
 	require.Positive(t, stampLookups(), "no row stamp was looked up")
 	pbinReviewRewritePersistedStateKey(t, agg)
-	out := agg.BeginFilesRo()
-	defer out.Close()
-	snapshot := pbinRangeWriterSnapshot{root: root}
-	for _, visible := range out.Files(kv.CommitmentBinDomain) {
-		if !strings.HasSuffix(visible.Fullpath(), ".kv") {
-			continue
-		}
-		file := pbinRangeWriterFile{start: visible.StartRootNum(), end: visible.EndRootNum(), entries: []pbinRangeWriterEntry{}}
-		decompressor, err := seg.NewDecompressor(visible.Fullpath())
-		require.NoError(t, err)
-		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
-		for reader.HasNext() {
-			key, _ := reader.Next(nil)
-			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
-			value, _ := reader.Next(nil)
-			if bytes.Equal(key, commitment.KeyCommitmentState) {
-				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
-				snapshot.state = bytes.Clone(value)
-			}
-			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
-		}
-		decompressor.Close()
-		snapshot.files = append(snapshot.files, file)
-	}
-	require.NotEmpty(t, snapshot.files)
-	require.NotNil(t, snapshot.state)
+	snapshot := readPBinRangeWriterSnapshot(t, agg, root)
 	if workers > 0 && maxOps > 1 {
 		require.Greater(t, phaseActivity.Load(), int32(1), "maxOps=%d: the parallel round did not run", maxOps)
 		require.Greater(t, run.writer.WorkerViewsForTest(), int32(1), "maxOps=%d: the round acquired no worker contexts from the factory", maxOps)

@@ -292,7 +292,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		if mdbxErr := pbtResumeRejectMDBXState(sourceTx, sourceAgg.StepSize(), sourceEnd); mdbxErr != nil {
 			return mdbxErr
 		}
-		blockNum, found, blockErr := blockReader.TxnumReader().FindBlockNum(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, sourceEnd-1)
+		blockNum, found, blockErr := blockReader.TxnumReader().FindBlockNum(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, sourceEnd)
 		if blockErr != nil {
 			return fmt.Errorf("commitment convert-pbt: find source block at txNum %d: %w", sourceEnd, blockErr)
 		}

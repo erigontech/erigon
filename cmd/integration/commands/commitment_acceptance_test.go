@@ -312,12 +312,12 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	hooks := pbtAttachHooks{leafStamps: func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
-		return common.Hash{0xaa}, nil
-	}}
+	rewritePBTAttachManifest(t, published, func(manifest *dbstate.PBTManifest) {
+		manifest.PBTRoot = common.Hash{0xaa}.Hex()
+	})
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
-	require.ErrorContains(t, err, "published binary rows root")
+	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "published binary root record")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 

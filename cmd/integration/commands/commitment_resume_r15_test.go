@@ -34,6 +34,10 @@ import (
 )
 
 func pbtR15ResumeFixture(t *testing.T, frozen uint64, mergeBase, mergeSource bool) (*execmoduletester.PBTAcceptanceChain, string) {
+	return pbtR15ResumeFixtureWithSource(t, frozen, []int{1, 1, 1, 1}, 0, mergeBase, mergeSource)
+}
+
+func pbtR15ResumeFixtureWithSource(t *testing.T, frozen uint64, sourceTxCounts []int, sourceEnd uint64, mergeBase, mergeSource bool) (*execmoduletester.PBTAcceptanceChain, string) {
 	t.Helper()
 	selectPBTCommandSuite(t)
 	base, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, frozen, []int{1, 1})
@@ -43,7 +47,7 @@ func pbtR15ResumeFixture(t *testing.T, frozen uint64, mergeBase, mergeSource boo
 	buildPBTResumeFiles(t, base, pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata), mergeBase)
 	output := filepath.Join(t.TempDir(), "base-output")
 	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, output, true, "", log.New()))
-	source, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, frozen, []int{1, 1, 1, 1})
+	source, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, frozen, sourceTxCounts)
 	require.NoError(t, err)
 	source.Tester.Close()
 	copyPBTStateSalt(t, base, source)
@@ -57,7 +61,10 @@ func pbtR15ResumeFixture(t *testing.T, frozen uint64, mergeBase, mergeSource boo
 	)
 	require.NoError(t, source.Tester.InsertChain(source.Chain))
 	source.Tester.Close()
-	buildPBTResumeFiles(t, source, pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata), mergeSource)
+	if sourceEnd == 0 {
+		sourceEnd = pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
+	}
+	buildPBTResumeFiles(t, source, sourceEnd, mergeSource)
 	return source, output
 }
 
@@ -74,6 +81,32 @@ func TestPBTResumeR15EqualEndPreservesOutput(t *testing.T) {
 	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
 	require.ErrorContains(t, err, "is at or past source files end")
 	require.Equal(t, len(before), len(domainFileNames(t, datadir.Open(output).SnapDomain)), "X >= Y refusal must preserve the existing output file count")
+}
+
+func TestPBTResumeR15SourceFilesEndAtBlockStart(t *testing.T) {
+	source, output := pbtR15ResumeFixtureWithSource(t, 1, []int{1, 1, 1, 1, 0}, 14, false, false)
+	settings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	sourceEnd, err := pbtResumeSourceFilesEnd(source.Tester.Dirs, settings.StepSize)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, source.Tester.Dirs.Chaindata).MustOpen()
+	reader, view, closeReader, err := openPBTBlockReader(t.Context(), source.Tester.Dirs, rawDB, log.New())
+	require.NoError(t, err)
+	tx, err := rawDB.BeginRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	readerTx := pbtBlockFilesTx{Tx: tx, view: view}
+	previousBlock, found, err := reader.TxnumReader().FindBlockNum(t.Context(), readerTx, sourceEnd-1)
+	require.NoError(t, err)
+	require.True(t, found)
+	currentBlock, found, err := reader.TxnumReader().FindBlockNum(t.Context(), readerTx, sourceEnd)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEqual(t, previousBlock, currentBlock, "source files must end at the first transaction of a block")
+	tx.Rollback()
+	closeReader()
+	rawDB.Close()
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
 }
 
 func TestPBTResumeR15SourceMergedBeforeBase(t *testing.T) {

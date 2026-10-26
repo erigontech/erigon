@@ -17,20 +17,15 @@
 package state_test
 
 import (
-	"bytes"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
@@ -54,33 +49,7 @@ func pbinPipelineSnapshot(t *testing.T, run *pbinRangeWriterRun, leaves []state.
 	root, err := run.write(t.Context(), leaves)
 	require.NoError(t, err)
 	pbinReviewRewritePersistedStateKey(t, run.agg)
-	out := run.agg.BeginFilesRo()
-	defer out.Close()
-	snapshot := pbinRangeWriterSnapshot{root: root}
-	for _, visible := range out.Files(kv.CommitmentBinDomain) {
-		if !strings.HasSuffix(visible.Fullpath(), ".kv") {
-			continue
-		}
-		file := pbinRangeWriterFile{start: visible.StartRootNum(), end: visible.EndRootNum(), entries: []pbinRangeWriterEntry{}}
-		decompressor, err := seg.NewDecompressor(visible.Fullpath())
-		require.NoError(t, err)
-		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
-		for reader.HasNext() {
-			key, _ := reader.Next(nil)
-			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
-			value, _ := reader.Next(nil)
-			if bytes.Equal(key, commitment.KeyCommitmentState) {
-				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
-				snapshot.state = bytes.Clone(value)
-			}
-			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
-		}
-		decompressor.Close()
-		snapshot.files = append(snapshot.files, file)
-	}
-	require.NotEmpty(t, snapshot.files)
-	require.NotNil(t, snapshot.state)
-	return snapshot
+	return readPBinRangeWriterSnapshot(t, run.agg, root)
 }
 
 func TestPBinRangeWriterFoldPipelineOverlapsStages(t *testing.T) {

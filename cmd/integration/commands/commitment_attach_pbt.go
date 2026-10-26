@@ -67,7 +67,6 @@ var (
 
 type pbtAttachHooks struct {
 	step       func(string) error
-	leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)
 	genesis    func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error
 	hexRoot    func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, uint64, uint64, log.Logger) (common.Hash, bool, error)
 	afterCopy  func() error
@@ -122,7 +121,6 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if hooks.step == nil {
 		hooks.step = func(string) error { return nil }
 	}
-	legacyLeafStamps := hooks.leafStamps
 	if hooks.genesis == nil {
 		hooks.genesis = validatePBTAttachGenesis
 	}
@@ -351,15 +349,6 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	if err := validatePBTAttachManifestFiles(ctx, manifest, publishedDirs, hooks.workers, hooks.skipVerify, logger, "attach published manifest digest"); err != nil {
 		return err
-	}
-	if !hooks.skipVerify && legacyLeafStamps != nil {
-		legacyRoot, err := validatePBTAttachPublishedPointWithLeafStamps(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger, legacyLeafStamps)
-		if err != nil {
-			return err
-		}
-		if legacyRoot != manifestPbtRoot {
-			return fmt.Errorf("commitment attach-pbt: published binary rows root %s differs from manifest root %s", legacyRoot, manifestPbtRoot)
-		}
 	}
 	if _, err := validatePBTAttachPublishedPointWithLeafStamps(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger, nil); err != nil {
 		return err

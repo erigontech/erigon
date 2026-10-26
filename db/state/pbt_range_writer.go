@@ -181,7 +181,6 @@ type pbinFoldBatch struct {
 type pbinFoldPipeline struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
-	done        chan struct{}
 	submit      chan *pbinFoldBatch
 	detached    chan *pbinFoldBatch
 	completed   chan int
@@ -189,7 +188,6 @@ type pbinFoldPipeline struct {
 	compute     func(context.Context, *pbinFoldBatch) error
 	process     func(*pbinFoldBatch) error
 	hook        func(string, int) error
-	stopOnce    sync.Once
 	failureLock sync.Mutex
 	failure     pbinFoldFailure
 	wg          sync.WaitGroup
@@ -209,7 +207,6 @@ func newPBinFoldPipeline(ctx context.Context, tracker pbinStampTracker, compute 
 	p := &pbinFoldPipeline{
 		ctx:       pipelineCtx,
 		cancel:    cancel,
-		done:      make(chan struct{}),
 		submit:    make(chan *pbinFoldBatch, 1),
 		detached:  make(chan *pbinFoldBatch, 1),
 		completed: make(chan int, 2),
@@ -224,13 +221,6 @@ func newPBinFoldPipeline(ctx context.Context, tracker pbinStampTracker, compute 
 	return p, true
 }
 
-func (p *pbinFoldPipeline) stop() {
-	p.stopOnce.Do(func() {
-		p.cancel()
-		close(p.done)
-	})
-}
-
 func (p *pbinFoldPipeline) fail(index int, err error) {
 	if err == nil {
 		return
@@ -240,7 +230,7 @@ func (p *pbinFoldPipeline) fail(index int, err error) {
 		p.failure = pbinFoldFailure{index: index, err: err}
 	}
 	p.failureLock.Unlock()
-	p.stop()
+	p.cancel()
 }
 
 func (p *pbinFoldPipeline) err() error {
@@ -262,7 +252,7 @@ func (p *pbinFoldPipeline) waitCompleted(index int) error {
 			return fmt.Errorf("pbin fold pipeline: completed batch %d, want %d", completed, index)
 		}
 		return p.err()
-	case <-p.done:
+	case <-p.ctx.Done():
 		return p.err()
 	}
 }
@@ -307,7 +297,7 @@ func (p *pbinFoldPipeline) submitBatch(batch []pbt.Op, stamps []uint64, lookahea
 	select {
 	case p.submit <- queued:
 		return nil
-	case <-p.done:
+	case <-p.ctx.Done():
 		return p.err()
 	}
 }
@@ -333,10 +323,10 @@ func (p *pbinFoldPipeline) computeLoop() {
 			}
 			select {
 			case p.detached <- batch:
-			case <-p.done:
+			case <-p.ctx.Done():
 				return
 			}
-		case <-p.done:
+		case <-p.ctx.Done():
 			return
 		}
 	}
@@ -363,10 +353,10 @@ func (p *pbinFoldPipeline) processLoop() {
 			batch.tracker.clearClosed()
 			select {
 			case p.completed <- batch.index:
-			case <-p.done:
+			case <-p.ctx.Done():
 				return
 			}
-		case <-p.done:
+		case <-p.ctx.Done():
 			return
 		}
 	}
@@ -1054,7 +1044,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}
 	streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream)
 	if streamErr != nil && pipeline != nil {
-		pipeline.stop()
+		pipeline.cancel()
 	}
 	var pipelineErr error
 	if pipeline != nil {
