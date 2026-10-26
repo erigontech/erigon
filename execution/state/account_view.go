@@ -6,6 +6,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// AccountBaseReader supplies the committed base account for fields the versionMap
+// has no cell for. It is the only capability the view needs from its base, so any
+// StateReader satisfies it — as does a lighter domain-only reader the commitment
+// calculator holds, which avoids forcing a full StateReader at the call site.
+type AccountBaseReader interface {
+	ReadAccountData(accounts.Address) (*accounts.Account, error)
+}
+
 // VersionedAccountView is an accounts.AccountView composing each account field on
 // demand from the versionMap at a fixed txIndex, falling back to a lazily-loaded
 // base. A consumer reading only one field pays for only that cell; the base is
@@ -14,14 +22,14 @@ type VersionedAccountView struct {
 	addr  accounts.Address
 	txIdx int
 	vm    *VersionMap
-	base  StateReader
+	base  AccountBaseReader
 
 	baseLoaded bool
 	baseAcc    *accounts.Account
 	baseErr    error
 }
 
-func NewVersionedAccountView(addr accounts.Address, txIdx int, vm *VersionMap, base StateReader) *VersionedAccountView {
+func NewVersionedAccountView(addr accounts.Address, txIdx int, vm *VersionMap, base AccountBaseReader) *VersionedAccountView {
 	return &VersionedAccountView{addr: addr, txIdx: txIdx, vm: vm, base: base}
 }
 
@@ -134,8 +142,12 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 			return code, nil
 		}
 	}
-	if v.base != nil {
-		return v.base.ReadAccountCode(v.addr)
+	// Code bytes live beyond the minimal AccountBaseReader (GetAccount never needs
+	// them); a base that can serve them implements ReadAccountCode.
+	if cr, ok := v.base.(interface {
+		ReadAccountCode(accounts.Address) ([]byte, error)
+	}); ok {
+		return cr.ReadAccountCode(v.addr)
 	}
 	return nil, nil
 }

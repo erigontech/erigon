@@ -47,27 +47,33 @@ func (cc *commitmentCalculator) shadowCompareEmit(ctx context.Context, t commitT
 	cc.state.flushToUpdates(calcScratch)
 	getScratch := cc.newScratchUpdates()
 	cc.emitTouched(cc.curVersionMap, t.lastTxNum, nil, getScratch)
+	return cc.compareUpdates(ctx, "raw-view", t.blockNum, calcScratch, getScratch)
+}
 
-	calc, err := collectUpdatesMap(ctx, calcScratch)
+// compareUpdates asserts the authoritative (calcState) and candidate (emitTouched)
+// update buffers hold the same key→Update set, returning the offending key on the
+// first divergence so a write-side / projection gap is attributable.
+func (cc *commitmentCalculator) compareUpdates(ctx context.Context, label string, blockNum uint64, authoritative, candidate *commitment.Updates) error {
+	calc, err := collectUpdatesMap(ctx, authoritative)
 	if err != nil {
 		return fmt.Errorf("getaccount shadow: collect calcState: %w", err)
 	}
-	got, err := collectUpdatesMap(ctx, getScratch)
+	got, err := collectUpdatesMap(ctx, candidate)
 	if err != nil {
 		return fmt.Errorf("getaccount shadow: collect emitTouched: %w", err)
 	}
 	for k, ua := range calc {
 		ub, ok := got[k]
 		if !ok {
-			return fmt.Errorf("%w: getaccount shadow block %d: key %x in calcState but not emitTouched (%+v)", ErrWrongTrieRoot, t.blockNum, []byte(k), ua)
+			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x in calcState but not emitTouched (%+v)", ErrWrongTrieRoot, label, blockNum, []byte(k), ua)
 		}
 		if ua != ub {
-			return fmt.Errorf("%w: getaccount shadow block %d: key %x diverges calcState=%+v emitTouched=%+v", ErrWrongTrieRoot, t.blockNum, []byte(k), ua, ub)
+			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x diverges calcState=%+v emitTouched=%+v", ErrWrongTrieRoot, label, blockNum, []byte(k), ua, ub)
 		}
 	}
 	for k, ub := range got {
 		if _, ok := calc[k]; !ok {
-			return fmt.Errorf("%w: getaccount shadow block %d: key %x in emitTouched but not calcState (%+v)", ErrWrongTrieRoot, t.blockNum, []byte(k), ub)
+			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x in emitTouched but not calcState (%+v)", ErrWrongTrieRoot, label, blockNum, []byte(k), ub)
 		}
 	}
 	return nil
@@ -156,7 +162,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 // from vm at the fold txNum T over base (the prevBlocks-aware read-through reader): an
 // account absent at T removes its leaf (and subtree), a present one writes its full
 // account; a storage slot cleared to zero removes its leaf, a non-zero one writes it.
-func (cc *commitmentCalculator) emitTouched(vm *state.VersionMap, T uint64, base state.StateReader, updates *commitment.Updates) {
+func (cc *commitmentCalculator) emitTouched(vm *state.VersionMap, T uint64, base state.AccountBaseReader, updates *commitment.Updates) {
 	for addr := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update

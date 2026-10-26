@@ -159,7 +159,7 @@ func (vm *VersionMap) blockTxIndex(txNum uint64) int {
 // cells and re-deriving existence: a false ok means the account is deleted/absent.
 // Reading one past the tx's TxIndex (txNum - baseTxNum, since txNum = baseTxNum +
 // TxIndex + 1) includes that tx's own writes.
-func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base StateReader) (accounts.Account, bool) {
+func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base AccountBaseReader) (accounts.Account, bool) {
 	txIdx := int(txNum - vm.baseTxNum.Load())
 	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
 }
@@ -170,7 +170,7 @@ func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base State
 // touched account whose block-end state — its seeded cells composed with the committed
 // base for untouched fields — is empty and removable, it stamps a self-destruct removal
 // cell at the account's last-changed index. Mirrors exec's encodeExistingEmptyRemovals.
-func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base StateReader) {
+func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base AccountBaseReader) {
 	ws := &WriteSet{}
 	for i := range bal {
 		ac := &bal[i]

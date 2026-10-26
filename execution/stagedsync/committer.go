@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -663,6 +664,16 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
+	if dbg.GetAccountShadow && req.versionMap != nil {
+		cc.clearTouched()
+		cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex))
+		getScratch := cc.newScratchUpdates()
+		cc.emitTouched(req.versionMap, t.lastTxNum, balState.domainReader, getScratch)
+		cc.clearTouched()
+		if err := cc.compareUpdates(ctx, "bal", t.blockNum, balUpdates, getScratch); err != nil {
+			return nil, nil, err
+		}
+	}
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
 
