@@ -2056,7 +2056,7 @@ func (dt *DomainRoTx) DebugRangeLatestOffsets(starts [][]byte) ([][]uint64, erro
 					}
 					break
 				}
-				offset, _ = reader.Skip()
+				reader.Skip()
 				offset, _ = reader.Skip()
 			}
 			if !found {
