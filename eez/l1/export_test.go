@@ -15,5 +15,18 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 package l1
 
+import (
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+)
+
 // MapRPCError exposes mapError to the external tests.
 var MapRPCError = mapError
+
+// NewRemoteHeads returns a Remote that only reads the head events of
+// backend, resubscribing after pause.
+func NewRemoteHeads(backend remoteproto.ETHBACKENDClient, pause time.Duration) *Remote {
+	return &Remote{backend: backend, logger: log.New(), headRetry: pause}
+}

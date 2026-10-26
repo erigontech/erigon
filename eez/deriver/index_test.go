@@ -86,6 +86,31 @@ func TestIndexPrune(t *testing.T) {
 	require.True(t, x.Contains(common.Hash{4}))
 }
 
+func TestIndexCoveringFrom(t *testing.T) {
+	var x Index
+	x.Seed(record(10, 1, 4))
+	require.True(t, x.Append(record(12, 2, 7)))
+	require.True(t, x.Append(record(15, 3, 9)))
+	_, ok := x.Covering(4)
+	require.False(t, ok, "an earlier settlement may have settled the seed's blocks")
+	r, ok := x.Covering(5)
+	require.True(t, ok)
+	require.Equal(t, common.Hash{2}, r.TxHash)
+	r, ok = x.Covering(9)
+	require.True(t, ok)
+	require.Equal(t, common.Hash{3}, r.TxHash)
+	_, ok = x.Covering(10)
+	require.False(t, ok, "not settled yet")
+
+	// Pruning moves the attributed blocks above the dropped settlements'.
+	x.Prune(15)
+	_, ok = x.Covering(7)
+	require.False(t, ok)
+	r, ok = x.Covering(8)
+	require.True(t, ok)
+	require.Equal(t, common.Hash{3}, r.TxHash)
+}
+
 func TestCheckpoint(t *testing.T) {
 	dir := t.TempDir()
 	c, err := LoadCheckpoint(dir)
@@ -178,4 +203,21 @@ func TestFindResumePoint(t *testing.T) {
 	r, err = FindResumePoint(ctx, chain, testRegistry, 1, 4, 10, local(map[common.Hash]uint64{{0xa}: 6}))
 	require.NoError(t, err)
 	require.Nil(t, r, "the match lies below the deploy block")
+}
+
+func TestIndexCovering(t *testing.T) {
+	var x Index
+	_, ok := x.Covering(1)
+	require.False(t, ok)
+	a := Record{L1Block: 1, TxHash: common.Hash{1}, LastL2Block: 4}
+	b := Record{L1Block: 2, TxHash: common.Hash{2}, LastL2Block: 9}
+	x.Append(a)
+	x.Append(b)
+	for n, want := range map[uint64]Record{0: a, 4: a, 5: b, 9: b} {
+		got, ok := x.Covering(n)
+		require.True(t, ok)
+		require.Equal(t, want, got, "block %d", n)
+	}
+	_, ok = x.Covering(10)
+	require.False(t, ok, "not settled yet")
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	"github.com/erigontech/erigon/eez"
+	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 )
@@ -57,6 +58,16 @@ func main() {
 }
 
 func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
+	eezCfg, err := eez.ConfigFromCLI(cliCtx)
+	if err != nil {
+		return err
+	}
+	if eezCfg != nil {
+		if err := eezCfg.CheckNode(); err != nil {
+			return err
+		}
+	}
+
 	logger, tracer, metricsMux, pprofMux, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return
@@ -79,16 +90,36 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
+	if eezCfg != nil {
+		if err := configureFollowerNode(nodeCfg); err != nil {
+			return err
+		}
+	}
 	if err := backup.ApplyMigrations(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}
 
 	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	var eezAPI *eezrpc.API
+	if eezCfg != nil {
+		eezAPI = eezrpc.NewAPI()
+		ethCfg.ExtraAPIs = append(ethCfg.ExtraAPIs, eezAPI.API())
+	}
+	if eezCfg != nil {
+		configureFollowerEth(ethCfg)
+	}
 
 	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err
+	}
+	var followerSvc interface{ Err() error }
+	if eezCfg != nil {
+		if followerSvc, err = startFollower(ctx, ethNode, eezCfg, eezAPI, nodeCfg.Dirs, logger); err != nil {
+			ethNode.Close()
+			return err
+		}
 	}
 
 	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
@@ -96,6 +127,9 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	err = ethNode.Serve()
 	if err != nil {
 		log.Error("error while serving an Erigon node", "err", err)
+	}
+	if followerSvc != nil && err == nil {
+		err = haltError(followerSvc.Err())
 	}
 	return err
 }

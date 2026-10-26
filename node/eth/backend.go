@@ -1113,6 +1113,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	// RPC server and MCP share the BaseApi block/receipt caches instead of
 	// each holding their own.
 	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
+	allAPIs = append(allAPIs, config.ExtraAPIs...)
 	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
 
 	if config.MCPAddress != "" {
@@ -1147,14 +1148,16 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		return err
 	})
 
-	s.bgComponentsEg.Go(func() error {
-		defer s.logger.Debug("[EngineServer] goroutine terminated")
-		err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.miningRpcClient, s.notifications.Events)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			s.logger.Error("[EngineServer] background goroutine failed", "err", err)
-		}
-		return err
-	})
+	if !config.NoEngineAPI {
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Debug("[EngineServer] goroutine terminated")
+			err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.miningRpcClient, s.notifications.Events)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[EngineServer] background goroutine failed", "err", err)
+			}
+			return err
+		})
+	}
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)

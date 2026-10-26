@@ -200,6 +200,9 @@ func NewNodeConfig(ctx *cli.Command, logger log.Logger) (*nodecfg.Config, error)
 	if ctx.IsSet(utils.DataDirFlag.Name) {
 		nodeConfig.Dirs = datadir.New(ctx.String(utils.DataDirFlag.Name))
 	}
+	if ctx.Bool(eez.EnabledFlag.Name) {
+		nodeConfig.Dirs = eez.Dirs(nodeConfig.Dirs)
+	}
 
 	return nodeConfig, nil
 }

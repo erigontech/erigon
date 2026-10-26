@@ -1,0 +1,2 @@
+# The golden files compare byte for byte; keep LF on every platform.
+*.json text eol=lf

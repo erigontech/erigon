@@ -18,6 +18,7 @@ package l1_test
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 
@@ -214,10 +215,76 @@ func TestWatcherRun(t *testing.T) {
 	ctx := t.Context()
 	out := make(chan l1.Event, 8)
 	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx, time.Millisecond, 1, out) }()
+	go func() { done <- w.Run(ctx, time.Millisecond, 1, nil, out) }()
 	require.Equal(t, l1.NewHead{Head: header(4, 0)}, <-out)
 	require.Equal(t, l1.Finalized{Head: header(0, 0)}, <-out)
 
 	fork(t, c, 0, 5, 1)
 	require.ErrorIs(t, <-done, l1.ErrReorgTooDeep)
+}
+
+// TestSeedAtFirstServedBlock seeds the ring with the ancestors the source
+// serves, as a recording that starts above genesis does.
+func TestSeedAtFirstServedBlock(t *testing.T) {
+	c, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Number: 5, Hash: hashOf(5, 0), ParentHash: hashOf(4, 0)}})
+	require.NoError(t, err)
+	for n := uint64(6); n <= 8; n++ {
+		require.NoError(t, c.Append(&recording.Block{Header: l1.Header{Number: n, Hash: hashOf(n, 0), ParentHash: hashOf(n-1, 0)}}))
+	}
+	w := l1.NewWatcher(c, l1.DefaultReorgDepth)
+	require.NoError(t, w.Seed(context.Background(), 8))
+	require.Equal(t, hashOf(8, 0), w.Tip().Hash)
+	require.NoError(t, c.Reorg(6, &recording.Block{Header: l1.Header{Number: 7, Hash: hashOf(7, 1), ParentHash: hashOf(6, 0)}}))
+	events, err := w.Poll(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(6), events[0].(l1.Reorg).Ancestor.Number)
+}
+
+// lagging serves no header for missing, as an L1 node behind a load
+// balancer that has not seen it yet.
+type lagging struct {
+	*recording.MemoryChain
+	missing common.Hash
+}
+
+func (l lagging) HeaderByHash(ctx context.Context, hash common.Hash) (*l1.Header, error) {
+	if hash == l.missing {
+		return nil, fmt.Errorf("%w: block %x", l1.ErrNotFound, hash)
+	}
+	return l.MemoryChain.HeaderByHash(ctx, hash)
+}
+
+// TestSeedMissingAncestor: an ancestor missing inside the source's history
+// fails the seed, which is retried, instead of shortening the ring.
+func TestSeedMissingAncestor(t *testing.T) {
+	c := linear(t, 8)
+	w := l1.NewWatcher(lagging{c, hashOf(5, 0)}, l1.DefaultReorgDepth)
+	require.ErrorIs(t, w.Seed(context.Background(), 8), l1.ErrNotFound)
+
+	w = l1.NewWatcher(c, l1.DefaultReorgDepth)
+	require.NoError(t, w.Seed(context.Background(), 8))
+	fork(t, c, 1, 9, 1)
+	events, err := w.Poll(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), events[0].(l1.Reorg).Ancestor.Number)
+}
+
+// TestRunOnHeads polls as soon as the source announces a head.
+func TestRunOnHeads(t *testing.T) {
+	c := linear(t, 3)
+	w := l1.NewWatcher(c, l1.DefaultReorgDepth)
+	require.NoError(t, w.Seed(context.Background(), 3))
+	heads := make(chan struct{}, 1)
+	out := make(chan l1.Event, 4)
+	go func() { _ = w.Run(t.Context(), time.Hour, 0, heads, out) }()
+
+	extend(t, c, 4, 0)
+	heads <- struct{}{}
+	select {
+	case e := <-out:
+		require.Equal(t, uint64(4), e.(l1.NewHead).Head.Number)
+	case <-time.After(10 * time.Second):
+		t.Fatal("no poll on the head announcement")
+	}
+	close(heads)
 }

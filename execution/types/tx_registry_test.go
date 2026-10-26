@@ -163,12 +163,6 @@ func unmarshalFakeRegisteredTxJSON(input []byte) (Transaction, error) {
 	return &fakeRegisteredTx{Nonce: uint64(dec.Nonce), Data: dec.Data}, nil
 }
 
-func unregisterTxType(id byte) {
-	txTypeRegistryMu.Lock()
-	defer txTypeRegistryMu.Unlock()
-	delete(txTypeRegistry, id)
-}
-
 func registerFakeTxType(t *testing.T) {
 	t.Helper()
 	if _, ok := registeredTxType(fakeRegisteredTxType); ok {
@@ -182,7 +176,7 @@ func registerFakeTxType(t *testing.T) {
 			return txn.(*fakeRegisteredTx).sender, nil
 		},
 	})
-	t.Cleanup(func() { unregisterTxType(fakeRegisteredTxType) })
+	t.Cleanup(func() { UnregisterTxTypeForTesting(fakeRegisteredTxType) })
 }
 
 func TestRegisteredTxTypeBinaryRoundTrip(t *testing.T) {
@@ -246,7 +240,7 @@ func (f *fakeSenderlessTx) Type() byte { return 0x7c }
 
 func TestRegisteredTxTypeWithoutSenderFacetUnsupported(t *testing.T) {
 	RegisterTxType(0x7c, TxTypeSpec{New: func() Transaction { return &fakeSenderlessTx{} }})
-	t.Cleanup(func() { unregisterTxType(0x7c) })
+	t.Cleanup(func() { UnregisterTxTypeForTesting(0x7c) })
 
 	tx := &fakeSenderlessTx{}
 	_, err := Signer{}.SenderWithContext(nil, tx)
@@ -315,7 +309,7 @@ func TestRegisterTxTypeNilNew(t *testing.T) {
 	require.NotPanics(t, func() {
 		RegisterTxType(nilNewType, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
 	})
-	t.Cleanup(func() { unregisterTxType(nilNewType) })
+	t.Cleanup(func() { UnregisterTxTypeForTesting(nilNewType) })
 }
 
 func TestUnregisteredTxTypeStillUnsupported(t *testing.T) {
@@ -331,7 +325,7 @@ func TestUnregisteredTxTypeStillUnsupported(t *testing.T) {
 
 func TestRegisteredTxTypeNilJSONDecoder(t *testing.T) {
 	RegisterTxType(0x7d, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
-	t.Cleanup(func() { unregisterTxType(0x7d) })
+	t.Cleanup(func() { UnregisterTxTypeForTesting(0x7d) })
 
 	_, err := UnmarshalTransactionFromJSON([]byte(`{"type":"0x7d"}`))
 	require.Error(t, err)
@@ -437,7 +431,7 @@ func TestRegisteredTxTypeWithoutStandardReceiptPayload(t *testing.T) {
 	const customReceiptType = 0x7a
 
 	RegisterTxType(customReceiptType, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
-	t.Cleanup(func() { unregisterTxType(customReceiptType) })
+	t.Cleanup(func() { UnregisterTxTypeForTesting(customReceiptType) })
 
 	r := &Receipt{Type: customReceiptType, Status: ReceiptStatusSuccessful, CumulativeGasUsed: 1}
 

@@ -18,6 +18,7 @@ package deriver
 
 import (
 	"slices"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -31,13 +32,24 @@ type Record struct {
 	LastL2Block uint64
 }
 
-// Index holds the settlements derived so far, in L1 order.
+// Index holds the settlements derived so far, in L1 order. It is safe for
+// concurrent use.
 type Index struct {
+	mu      sync.RWMutex
 	records []Record
+	// from is the lowest L2 block Covering attributes: a settlement before
+	// the records may have settled the ones below.
+	from uint64
 }
 
 // Last returns the latest settlement.
 func (x *Index) Last() (Record, bool) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.last()
+}
+
+func (x *Index) last() (Record, bool) {
 	if len(x.records) == 0 {
 		return Record{}, false
 	}
@@ -52,6 +64,12 @@ func (x *Index) Cursor() uint64 {
 
 // Contains reports whether the batch posted by txHash is indexed.
 func (x *Index) Contains(txHash common.Hash) bool {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.contains(txHash)
+}
+
+func (x *Index) contains(txHash common.Hash) bool {
 	for _, r := range x.records {
 		if r.TxHash == txHash {
 			return true
@@ -60,9 +78,19 @@ func (x *Index) Contains(txHash common.Hash) bool {
 	return false
 }
 
+// Seed indexes r as the first settlement, one that may follow others.
+func (x *Index) Seed(r Record) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.records = append(x.records, r)
+	x.from = max(x.from, r.LastL2Block+1)
+}
+
 // Append indexes r unless its batch is indexed already.
 func (x *Index) Append(r Record) bool {
-	if x.Contains(r.TxHash) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.contains(r.TxHash) {
 		return false
 	}
 	x.records = append(x.records, r)
@@ -72,6 +100,8 @@ func (x *Index) Append(r Record) bool {
 // RetreatOnReorg drops the settlements above the L1 block ancestor and
 // returns how many it dropped.
 func (x *Index) RetreatOnReorg(ancestor uint64) int {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 	kept := x.records[:0]
 	for _, r := range x.records {
 		if r.L1Block <= ancestor {
@@ -87,9 +117,14 @@ func (x *Index) RetreatOnReorg(ancestor uint64) int {
 // settlement up to l1Finalized: the scanner never returns below finality, and
 // a reorg there halts.
 func (x *Index) Prune(l1Finalized uint64) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 	for i, r := range slices.Backward(x.records) {
 		if r.L1Block <= l1Finalized {
 			first := slices.IndexFunc(x.records[:i+1], func(s Record) bool { return s.L1Block == r.L1Block })
+			for _, dropped := range x.records[:first] {
+				x.from = max(x.from, dropped.LastL2Block+1)
+			}
 			x.records = slices.Delete(x.records, 0, first)
 			return
 		}
@@ -99,10 +134,28 @@ func (x *Index) Prune(l1Finalized uint64) {
 // SettledAt returns the L2 block the latest settlement in L1 blocks up to
 // number ended at.
 func (x *Index) SettledAt(number uint64) (uint64, bool) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 	for _, r := range slices.Backward(x.records) {
 		if r.L1Block <= number {
 			return r.LastL2Block, true
 		}
 	}
 	return 0, false
+}
+
+// Covering returns the first settlement that ended at or above L2 block
+// number, the one that settled it, from the lowest block it attributes.
+func (x *Index) Covering(number uint64) (Record, bool) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	if number < x.from {
+		return Record{}, false
+	}
+	for _, r := range x.records {
+		if r.LastL2Block >= number {
+			return r, true
+		}
+	}
+	return Record{}, false
 }

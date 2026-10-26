@@ -17,11 +17,13 @@ package eez
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/eez/protocol"
 	eezrules "github.com/erigontech/erigon/eez/rules"
@@ -49,4 +51,16 @@ func TestRegister(t *testing.T) {
 	stored := chain.Config{ChainID: spec.Config.ChainID, L2JSON: l2}
 	require.NoError(t, stored.ResolveL2())
 	require.Equal(t, spec.Config.L2, stored.L2)
+}
+
+func TestDirs(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	got := Dirs(dirs)
+	require.Equal(t, filepath.Join(dirs.DataDir, "eez", "chaindata"), got.Chaindata)
+	require.Equal(t, filepath.Join(dirs.DataDir, "snapshots", "eez"), got.Snap)
+	require.Equal(t, filepath.Join(got.Snap, "domain"), got.SnapDomain)
+	require.Equal(t, dirs.Tmp, got.Tmp)
+	require.Equal(t, dirs.Log, got.Log)
+	require.DirExists(t, got.Chaindata)
+	require.DirExists(t, got.SnapAccessors)
 }

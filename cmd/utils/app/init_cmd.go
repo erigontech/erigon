@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -96,6 +97,11 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	if err := json.Unmarshal(raw, &probe); err == nil && len(probe.Config.Bor) > 0 && string(probe.Config.Bor) != "null" {
 		return fmt.Errorf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
+	}
+	if cliCtx.Bool(eez.EnabledFlag.Name) {
+		if err := eez.InitGenesis(cliCtx, genesis); err != nil {
+			return fmt.Errorf("genesis file %s: %w", genesisPath, err)
+		}
 	}
 
 	// Open and initialise both full and light databases

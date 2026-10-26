@@ -73,9 +73,13 @@ func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Derive
 // Seed starts derivation after settlement r, whose block the local chain
 // holds, before any batch is reconciled.
 func (d *Deriver) Seed(r Record) {
-	d.index.Append(r)
+	d.index.Seed(r)
 	d.safe, d.seed = r.LastL2Block, &r
 }
+
+// Settlement returns the settlement that settled L2 block number. It is
+// safe to call concurrently with derivation.
+func (d *Deriver) Settlement(number uint64) (Record, bool) { return d.index.Covering(number) }
 
 // Last returns the latest derived settlement.
 func (d *Deriver) Last() (Record, bool) { return d.index.Last() }
@@ -131,6 +135,7 @@ func (d *Deriver) Reconcile(ctx context.Context, batches []l1.ScannedBatch) (err
 	}
 	if cursor := d.index.Cursor(); cursor > d.safe {
 		d.safe = cursor
+		d.logger.Debug("[eez] safe", "event", "eez.deriver.safe.advanced", "l2Safe", cursor)
 		return d.forkChoice(ctx)
 	}
 	return nil
@@ -145,7 +150,7 @@ func (d *Deriver) OnFinalized(ctx context.Context, l1Finalized uint64) error {
 		return nil
 	}
 	d.finalized = n
-	d.logger.Debug("[eez] finalized", "l1Finalized", l1Finalized, "l2Finalized", n)
+	d.logger.Debug("[eez] finalized", "event", "eez.deriver.finalized.advanced", "l1Finalized", l1Finalized, "l2Finalized", n)
 	return d.forkChoice(ctx)
 }
 
@@ -153,6 +158,7 @@ func (d *Deriver) OnFinalized(ctx context.Context, l1Finalized uint64) error {
 // head and safe block back to the block the remaining ones settled.
 func (d *Deriver) OnReorg(ctx context.Context, ancestor uint64) error {
 	if d.index.RetreatOnReorg(ancestor) == 0 {
+		d.logger.Debug("[eez] L1 reorg above the settlements", "event", "eez.deriver.l1.reorg.noop", "ancestor", ancestor)
 		return nil
 	}
 	cursor := d.index.Cursor()
@@ -164,7 +170,7 @@ func (d *Deriver) OnReorg(ctx context.Context, ancestor uint64) error {
 		return err
 	}
 	d.safe = min(d.safe, cursor)
-	d.logger.Info("[eez] L1 reorg", "ancestor", ancestor, "cursor", cursor)
+	d.logger.Info("[eez] L1 reorg dropped settlements", "event", "eez.deriver.l1.reorg.retreated", "ancestor", ancestor, "cursor", cursor)
 	if err := d.forkChoiceTo(ctx, head); err != nil {
 		return err
 	}
@@ -178,6 +184,12 @@ func (d *Deriver) forkChoice(ctx context.Context) error {
 		return err
 	}
 	return d.forkChoiceTo(ctx, head.Hash())
+}
+
+// ForkChoiceTo makes head the head block, keeping the safe and finalized
+// blocks; they must be its ancestors.
+func (d *Deriver) ForkChoiceTo(ctx context.Context, head common.Hash) error {
+	return d.forkChoiceTo(ctx, head)
 }
 
 func (d *Deriver) forkChoiceTo(ctx context.Context, head common.Hash) error {
@@ -208,7 +220,7 @@ func (d *Deriver) reconcileBatch(ctx context.Context, b *l1.ScannedBatch, p *Pay
 		return Record{}, err
 	}
 	if !CursorAccepted(anchor, s) {
-		return Record{}, d.diverged(b, r.From, "local block %d is %x, neither the batch's entry state %x nor its settled state %x",
+		return Record{}, d.divergedAt("eez.deriver.cursor.misaligned", b, r.From, "local block %d is %x, neither the batch's entry state %x nor its settled state %x",
 			r.Anchor, anchor, s.EntryState, s.FinalState)
 	}
 	replayed, err := d.reconcileBlocks(ctx, b, p, r)
@@ -239,6 +251,12 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 	if err != nil {
 		return common.Hash{}, err
 	}
+	if len(p.Actions) > 0 {
+		d.logger.Debug("[eez] Sync block built", "event", "eez.deriver.reconcile.sync_block_built", "l2Block", r.To, "txs", len(sb.Txs), "nonce", nonce)
+		if effects := effectsApplied(&b.Settlement); effects < len(p.Actions) {
+			d.logger.Info("[eez] L1 applied part of a batch", "event", "eez.deriver.reconcile.partial_consumption", "tx", b.TxHash, "actions", len(p.Actions), "applied", effects)
+		}
+	}
 	parent, err := d.header(ctx, r.From-1)
 	if err != nil {
 		return common.Hash{}, err
@@ -258,7 +276,9 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 			return common.Hash{}, err
 		}
 		txs, replay := ResumeTxs(existing.Hash(), b.Settlement.FinalState, existingTxs, sb.Txs)
+		d.logger.Info("[eez] resumed batch appends to a Sync block", "event", "eez.deriver.resumed.placement", "l2Block", r.From, "tx", b.TxHash, "replay", replay)
 		if replay {
+			d.logger.Info("[eez] rebuilding a Sync block", "event", "eez.deriver.resumed.appended", "l2Block", r.From, "txs", len(txs), "appended", len(sb.Txs))
 			if syncBlock, err = d.extend(ctx, b, parent, DeriveInputs(d.l2, parent, p.Span, last), txs); err != nil {
 				return common.Hash{}, err
 			}
@@ -349,6 +369,7 @@ func (d *Deriver) extend(ctx context.Context, b *l1.ScannedBatch, parent *types.
 			return nil, d.diverged(b, in.Number, "rewrites a block at or below finalized block %d", d.finalized)
 		}
 		d.safe = in.Number - 1
+		d.logger.Info("[eez] safe moved below a rewritten block", "event", "eez.deriver.safe.retreated_for_resume", "l2Block", in.Number)
 	}
 	safe, finalized, err := d.anchors(ctx)
 	if err != nil {
@@ -357,6 +378,9 @@ func (d *Deriver) extend(ctx context.Context, b *l1.ScannedBatch, parent *types.
 	built, err := d.chain.Extend(ctx, parent, in, txs, safe, finalized)
 	if errors.Is(err, ErrRejected) {
 		return nil, d.diverged(b, in.Number, "%w", err)
+	}
+	if err == nil {
+		loadMetrics().blocks.Inc()
 	}
 	return built, err
 }
@@ -405,7 +429,7 @@ func (d *Deriver) settledEnd(ctx context.Context, b *l1.ScannedBatch, r Range, r
 			return 0, err
 		}
 		if pre != s.EntryState {
-			return 0, d.diverged(b, r.From-1, "local block is %x, the batch's entry state is %x", pre, s.EntryState)
+			return 0, d.divergedAt("eez.deriver.state.diverged_pre", b, r.From-1, "local block is %x, the batch's entry state is %x", pre, s.EntryState)
 		}
 	}
 	n, ok, err := d.chain.CanonicalNumber(ctx, s.FinalState)
@@ -427,7 +451,7 @@ func (d *Deriver) settledEnd(ctx context.Context, b *l1.ScannedBatch, r Range, r
 		local = h
 	}
 	if local != s.FinalState {
-		return 0, d.diverged(b, r.To, "local block is %x, L1 settled %x", local, s.FinalState)
+		return 0, d.divergedAt("eez.deriver.state.diverged_post", b, r.To, "local block is %x, L1 settled %x", local, s.FinalState)
 	}
 	return r.To, nil
 }
@@ -473,10 +497,26 @@ func (d *Deriver) canonicalHash(ctx context.Context, number uint64) (common.Hash
 }
 
 func (d *Deriver) diverged(b *l1.ScannedBatch, l2Block uint64, format string, args ...any) error {
+	return d.divergedAt("eez.deriver.diverged", b, l2Block, format, args...)
+}
+
+// divergedAt is diverged logged as event.
+func (d *Deriver) divergedAt(event string, b *l1.ScannedBatch, l2Block uint64, format string, args ...any) error {
 	cause := fmt.Errorf(format, args...)
 	err := &DivergenceError{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, TxHash: b.TxHash, L2Block: l2Block, Reason: cause.Error(), cause: cause}
-	d.logger.Error("[eez] local chain diverged from L1", "err", err)
+	d.logger.Error("[eez] local chain diverged from L1", "event", event, "err", err)
 	return err
+}
+
+// effectsApplied counts the applied entries with a cross-chain effect.
+func effectsApplied(s *protocol.Settlement) int {
+	n := 0
+	for _, a := range s.Applied {
+		if a.Role != protocol.RoleAnchor {
+			n++
+		}
+	}
+	return n
 }
 
 func encodeTxs(txs types.Transactions) ([][]byte, error) {

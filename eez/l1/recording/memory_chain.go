@@ -179,6 +179,9 @@ func (c *MemoryChain) ChainID(context.Context) (uint64, error) { return c.chainI
 func (c *MemoryChain) HeaderByNumber(_ context.Context, number uint64) (*l1.Header, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if number < c.base {
+		return nil, fmt.Errorf("%w: %w: block %d", l1.ErrNotFound, l1.ErrBeforeHistory, number)
+	}
 	hash, ok := c.canonicalAt(number)
 	if !ok {
 		return nil, fmt.Errorf("%w: block %d", l1.ErrNotFound, number)
@@ -192,6 +195,11 @@ func (c *MemoryChain) HeaderByHash(_ context.Context, hash common.Hash) (*l1.Hea
 	defer c.mu.RUnlock()
 	b, ok := c.blocks[hash]
 	if !ok {
+		for _, b := range c.blocks {
+			if b.Header.Number == c.base && b.Header.ParentHash == hash {
+				return nil, fmt.Errorf("%w: %w: block %x", l1.ErrNotFound, l1.ErrBeforeHistory, hash)
+			}
+		}
 		return nil, fmt.Errorf("%w: block %x", l1.ErrNotFound, hash)
 	}
 	h := b.Header

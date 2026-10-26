@@ -62,6 +62,8 @@ type Chain interface {
 	// inserts it and makes it the head; safe and finalized must not be above
 	// parent.
 	Extend(ctx context.Context, parent *types.Header, in HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error)
+	// Insert stores blocks for a later fork choice to execute.
+	Insert(ctx context.Context, blocks []*types.Block) error
 	// ForkChoice sets the head, safe and finalized blocks.
 	ForkChoice(ctx context.Context, head, safe, finalized common.Hash) error
 }
@@ -250,6 +252,20 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 		return nil, err
 	}
 	return built, nil
+}
+
+func (c *ExecChain) Insert(ctx context.Context, blocks []*types.Block) error {
+	status, err := retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
+		s, err := c.exec.InsertBlocks(ctx, blocks)
+		return s, s == execmodule.ExecutionStatusBusy, err
+	})
+	if err != nil {
+		return err
+	}
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("insert %d blocks: %s", len(blocks), status)
+	}
+	return nil
 }
 
 func (c *ExecChain) ForkChoice(ctx context.Context, head, safe, finalized common.Hash) error {

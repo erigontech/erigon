@@ -892,6 +892,9 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 			result.From = from.Value()
 		}
 	}
+	if render, ok := txRenderers[txn.Type()]; ok {
+		render(txn, result)
+	}
 	return result
 }
 

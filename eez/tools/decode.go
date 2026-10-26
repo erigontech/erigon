@@ -14,6 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package types
+package tools
 
-var UnregisterTxTypeForTesting = unregisterTxType
+import (
+	"encoding/json"
+
+	eezrpc "github.com/erigontech/erigon/eez/rpc"
+)
+
+// Decode renders a postAndVerifyBatch input as eez_decodeBatch does,
+// indented.
+func Decode(input []byte) ([]byte, error) {
+	b, err := eezrpc.DecodeBatch(input)
+	if err != nil {
+		return nil, err
+	}
+	out, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, '\n'), nil
+}

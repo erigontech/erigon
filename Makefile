@@ -202,6 +202,7 @@ COMMANDS += evm
 COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += mcp
+COMMANDS += eez
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
