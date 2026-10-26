@@ -3576,7 +3576,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	txVersion := res.Version()
 
 	be.blockIO.RecordReads(txVersion, res.TxIn)
-	be.indexReads(tx, res.TxIn)
+	// Below the frontier every task is final and never publishes again, so a task
+	// right above it has no writer left that could invalidate its reads.
+	if tx > be.frontier()+1 {
+		be.indexReads(tx, res.TxIn)
+	}
 	// This tx's writes just published; flag any successor that already read one of
 	// its cells for finalize-boundary re-validation.
 	be.markReadersDirty(tx, res.TxOut)
