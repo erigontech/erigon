@@ -116,14 +116,13 @@ type EVM struct {
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
 
-// evmSizeClass is the Go allocation size class EVM fills. Growing it from the
-// 448-byte class measured within workload noise: a field added here either
-// packs into existing padding or bumps this const, and bumping it is the
+// evmSizeClass is the Go allocation size class EVM fills. A field added here
+// either packs into existing padding or bumps this const, and bumping it is the
 // expected answer to growth someone meant.
 // TestEVMFitsItsSizeClass is therefore a tripwire for the growth nobody meant,
 // not a budget — a build-time assert would also fire in every package that
 // grows an embedded type such as evmtypes.BlockContext.
-const evmSizeClass = 480
+const evmSizeClass = 448
 
 // ZeroUnpricedBaseFee returns blockCtx with the base fee dropped for a call that
 // skips the fee checks and puts no price on gas, so that its fee cap is never
