@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
@@ -116,6 +117,31 @@ func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64)
 		return true
 	}
 	return false
+}
+
+func writeDownloadedBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope, inSnapshots bool) error {
+	if !inSnapshots {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+	}
+	if block.Version() < clparams.GloasVersion || envelope == nil {
+		return nil
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if !inSnapshots {
+		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
+			return err
+		}
+	}
+	found, err := tx.Has(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	if err != nil || found {
+		return err
+	}
+	return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, common.Hash(blockRoot), envelope.Signature)
 }
 
 // clampProgress derives (processed, total) for a backwards download, guarding the
@@ -207,23 +233,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
-		// Skip blocks that are already in the snapshots
-		if !isInCLSnapshots {
-			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, blk, true); err != nil {
-				return false, err
-			}
-			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks
-			// because the payload is in the envelope, not the block body. Write them here now
-			// that we have the envelope.
-			if blk.Version() >= clparams.GloasVersion && envelope != nil {
-				blockRoot, hashErr := blk.Block.HashSSZ()
-				if hashErr != nil {
-					return false, hashErr
-				}
-				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
-					return false, err
-				}
-			}
+		if err := writeDownloadedBlock(tx, blk, envelope, isInCLSnapshots); err != nil {
+			return false, err
 		}
 		// we need to backfill an equivalent number of blobs to the blocks
 		hasDownloadEnoughForImmediateBlobsBackfilling := true

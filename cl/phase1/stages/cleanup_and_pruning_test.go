@@ -29,11 +29,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
@@ -293,4 +295,56 @@ func TestCleanupAndPruningKeepsExplicitColumnSlotsUnaligned(t *testing.T) {
 	peerDas.EXPECT().PruneBelow(uint64(head - 1_000)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+}
+
+func TestCleanupAndPruningFollowsBlockArchivePolicyForEnvelopeSignatures(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		archiveBlocks bool
+		wantBefore    bool
+	}{
+		{name: "non-archive", wantBefore: false},
+		{name: "archive", archiveBlocks: true, wantBefore: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+			peerDas := das_mock_services.NewMockPeerDas(ctrl)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			rootBefore := common.Hash{1}
+			rootAt := common.Hash{2}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, 11, rootBefore, common.Bytes96{1}); err != nil {
+					return err
+				}
+				return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, 12, rootAt, common.Bytes96{2})
+			}))
+
+			clock.EXPECT().GetCurrentSlot().Return(uint64(0))
+			blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+			peerDas.EXPECT().PruneBelow(uint64(0)).Return(nil)
+			cfg := &Cfg{
+				indiciesDB: db,
+				ethClock:   clock,
+				beaconCfg:  &clparams.MainnetBeaconConfig,
+				blobStore:  blobStore,
+				peerDas:    peerDas,
+				caplinConfig: clparams.CaplinConfig{
+					ArchiveBlocks: test.archiveBlocks,
+				},
+			}
+
+			require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{seenSlot: 1_000_012}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				_, foundBefore, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 11, rootBefore)
+				require.NoError(t, err)
+				require.Equal(t, test.wantBefore, foundBefore)
+				_, foundAt, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 12, rootAt)
+				require.NoError(t, err)
+				require.True(t, foundAt)
+				return nil
+			}))
+		})
+	}
 }

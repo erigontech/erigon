@@ -118,12 +118,12 @@ func (f *ForkChoiceStore) captureEnvelopeIndexRepairValues(token envelopeIndexRe
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return token
 	}
-	return f.envelopeIndexRepairs.setValues(token, signedEnvelope.Message.Payload.BlockNumber, signedEnvelope.Message.Payload.BlockHash)
+	return f.envelopeIndexRepairs.setValues(token, signedEnvelope.Message.Payload.SlotNumber, signedEnvelope.Message.Payload.BlockNumber, signedEnvelope.Message.Payload.BlockHash, signedEnvelope.Signature)
 }
 
 func envelopeForIndexRepair(token envelopeIndexRepairToken) *cltypes.SignedExecutionPayloadEnvelope {
-	return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		Payload: &cltypes.Eth1Block{BlockNumber: token.blockNumber, BlockHash: token.blockHash},
+	return &cltypes.SignedExecutionPayloadEnvelope{Signature: token.signature, Message: &cltypes.ExecutionPayloadEnvelope{
+		Payload: &cltypes.Eth1Block{SlotNumber: token.slot, BlockNumber: token.blockNumber, BlockHash: token.blockHash},
 	}}
 }
 
@@ -1662,13 +1662,16 @@ func (f *ForkChoiceStore) runExecutionPayloadEnvelopeIndexWrite(ctx context.Cont
 
 func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied, knownPersisted bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
 	if !applied && !knownPersisted {
-		indexed, err := f.executionPayloadEnvelopeIndicesAreWellFormed(ctx, blockRoot)
-		if err != nil {
-			return nil, false, err
+		if signedEnvelope != nil && signedEnvelope.Message != nil && signedEnvelope.Message.Payload != nil {
+			indexed, err := f.executionPayloadEnvelopeIndicesAreWellFormed(ctx, blockRoot, signedEnvelope.Message.Payload.SlotNumber, signedEnvelope.Signature)
+			if err != nil {
+				return nil, false, err
+			}
+			if indexed {
+				return signedEnvelope, false, nil
+			}
 		}
-		if indexed {
-			return signedEnvelope, false, nil
-		}
+		var err error
 		signedEnvelope, err = f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
 			return signedEnvelope, false, err
@@ -1677,6 +1680,7 @@ func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Conte
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return signedEnvelope, false, errors.New("persisted execution payload envelope is incomplete")
 	}
+	beaconSlot := signedEnvelope.Message.Payload.SlotNumber
 	indexed := false
 	err := f.db.View(ctx, func(tx kv.Tx) error {
 		blockNumberBytes, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
@@ -1698,19 +1702,27 @@ func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		indexed = blockNumber != nil && *blockNumber == signedEnvelope.Message.Payload.BlockNumber && blockHash == signedEnvelope.Message.Payload.BlockHash
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, beaconSlot, blockRoot)
+		if err != nil {
+			return err
+		}
+		indexed = blockNumber != nil && *blockNumber == signedEnvelope.Message.Payload.BlockNumber &&
+			blockHash == signedEnvelope.Message.Payload.BlockHash && found && signature == signedEnvelope.Signature
 		return nil
 	})
 	if err != nil || indexed {
 		return signedEnvelope, false, err
 	}
 	err = f.db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, signedEnvelope.Message)
+		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, signedEnvelope.Message); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, beaconSlot, blockRoot, signedEnvelope.Signature)
 	})
 	return signedEnvelope, err == nil, err
 }
 
-func (f *ForkChoiceStore) executionPayloadEnvelopeIndicesAreWellFormed(ctx context.Context, blockRoot common.Hash) (bool, error) {
+func (f *ForkChoiceStore) executionPayloadEnvelopeIndicesAreWellFormed(ctx context.Context, blockRoot common.Hash, slot uint64, wantSignature common.Bytes96) (bool, error) {
 	indexed := false
 	err := f.db.View(ctx, func(tx kv.Tx) error {
 		blockNumber, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
@@ -1721,7 +1733,12 @@ func (f *ForkChoiceStore) executionPayloadEnvelopeIndicesAreWellFormed(ctx conte
 		if err != nil {
 			return err
 		}
-		indexed = len(blockNumber) == 4 && len(blockHash) == len(common.Hash{}) && common.BytesToHash(blockHash) != (common.Hash{})
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slot, blockRoot)
+		if err != nil {
+			return err
+		}
+		indexed = len(blockNumber) == 4 && len(blockHash) == len(common.Hash{}) && common.BytesToHash(blockHash) != (common.Hash{}) &&
+			found && signature == wantSignature
 		return nil
 	})
 	return indexed, err
