@@ -3325,3 +3325,25 @@ func TestRemoteBatchRespectsAccountSlots(t *testing.T) {
 	defer pool.lock.Unlock()
 	require.LessOrEqual(t, uint64(pool.all.count(pool.senders.senderIDs[sender])), pool.cfg.AccountSlots+1)
 }
+
+func TestRemoteBatchOfReplacementsIsNotSpam(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+	pending := pool.cfg.AccountSlots - 6
+	addBatch := func(tip uint64, hashTag byte) {
+		var txns TxnSlots
+		for i := range pending {
+			txn := newTestTxnSlot(i, 0, tip, 2*tip, 21_000)
+			txn.IDHash[0], txn.IDHash[1] = byte(i+1), hashTag
+			txns.Append(txn, sender[:], false)
+		}
+		pool.AddRemoteTxns(ctx, txns, nil, nil)
+		require.NoError(t, pool.processRemoteTxns(ctx))
+	}
+	addBatch(1, 1)
+	addBatch(2, 2)
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.Equal(t, int(pending), pool.all.count(pool.senders.senderIDs[sender]))
+}
