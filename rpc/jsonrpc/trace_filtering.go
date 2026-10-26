@@ -562,7 +562,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			return nil, execErr
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+			ot.Tracer().EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -1009,7 +1009,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				}
 
 				if tracer.Hooks.HasTxEndHook() {
-					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+					tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 				}
 
 				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {

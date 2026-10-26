@@ -36,6 +36,7 @@ type FrameContext struct {
 	SigningHash    common.Hash
 	NonceKeysHash  common.Hash
 	LegacyNonce    uint64 // Sender's account nonce before any frame executes, for TXPARAM.
+	GasBailout     bool
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8

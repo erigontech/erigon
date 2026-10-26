@@ -95,6 +95,14 @@ func (result *ExecutionResult) Unwrap() error {
 // Failed returns the indicator whether the execution is successful or not
 func (result *ExecutionResult) Failed() bool { return result.Err != nil }
 
+func (result *ExecutionResult) ReceiptForTracing() *types.Receipt {
+	status := uint64(types.ReceiptStatusSuccessful)
+	if result.Failed() {
+		status = types.ReceiptStatusFailed
+	}
+	return &types.Receipt{GasUsed: result.ReceiptGasUsed, Status: status, Payer: result.Payer, FrameReceipts: result.FrameReceipts}
+}
+
 // Return is a helper function to help caller distinguish between revert reason
 // and function return. Return returns the data after execution if no error occurs.
 func (result *ExecutionResult) Return() []byte {

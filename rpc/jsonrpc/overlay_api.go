@@ -216,7 +216,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
-	if creationTx.GetTo() == nil && contractAddr == address {
+	if creationTx.IsContractDeploy() && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
@@ -496,8 +496,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if receipt.Status == types.ReceiptStatusFailed && !hasStateOverrides {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
-			contractCreation := msg.To().IsNil()
-			if !contractCreation {
+			if !txn.IsContractDeploy() && txn.Type() != types.FrameTxType {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
 				nonce, err := statedb.GetNonce(sender.Address())

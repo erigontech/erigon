@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
+func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds, gasBailout bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
 	if !rules.IsBogota {
 		return nil, types.ErrTxTypeNotSupported
@@ -53,14 +53,14 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if tx.Nonce == math.MaxUint64 {
 		return nil, ErrNonceMax
 	}
-	if tx.UsesLegacyNonce() {
+	if st.msg.CheckNonce() && tx.UsesLegacyNonce() {
 		if nonce < tx.Nonce {
 			return nil, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}
 		}
 		if nonce > tx.Nonce {
 			return nil, &nonceError{ErrNonceTooLow, sender, tx.Nonce, nonce}
 		}
-	} else {
+	} else if st.msg.CheckNonce() {
 		for _, key := range tx.NonceKeys {
 			sequence, err := st.state.GetState(accounts.InternAddress(types.FrameNonceManager), accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, key)))
 			if err != nil {
@@ -74,13 +74,17 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			}
 		}
 	}
-	if err := CheckEip1559TxGasFeeCap(sender, &tx.Fees.FeeCap, &tx.Fees.TipCap, &st.evm.Context.BaseFee, false); err != nil {
-		return nil, err
+	skipFeeCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
+	if !skipFeeCheck {
+		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			return nil, err
+		}
 	}
 	if len(tx.BlobVersionedHashes) > params.MaxBlobsPerTxn {
 		return nil, ErrTooManyBlobs
 	}
-	if tx.GetBlobGas() > 0 && tx.Fees.BlobFeeCap.Lt(&st.evm.Context.BlobBaseFee) {
+	skipBlobCheck := st.evm.Config().NoBaseFee && tx.Fees.BlobFeeCap.IsZero()
+	if tx.GetBlobGas() > 0 && !skipBlobCheck && tx.Fees.BlobFeeCap.Lt(&st.evm.Context.BlobBaseFee) {
 		return nil, ErrMaxFeePerBlobGas
 	}
 	maxCost, overflow := u256.MulOverflow(u256.U64(limits.Total()), tx.Fees.FeeCap)
@@ -114,6 +118,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	defer st.state.PopSnapshot(snapshot)
 	ctx := st.state.NewFrameContext(tx, maxCost)
 	ctx.LegacyNonce = nonce
+	ctx.GasBailout = gasBailout
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil
@@ -126,6 +131,18 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}()
 	st.evm.BlobHashes = tx.BlobVersionedHashes
 	st.evm.GasPrice = *st.msg.GasPrice()
+	if tracer := st.evm.Config().Tracer; tracer.HasEnterHook() || tracer.HasExitHook() {
+		tracer.EmitEnter(0, byte(vm.CALL), sender, vm.FrameEntryPoint, false, nil, limits, uint256.Int{}, nil)
+		defer func() {
+			traceErr := err
+			var gasUsed mdgas.MdGasUsage
+			if result != nil {
+				traceErr = result.Err
+				gasUsed = mdgas.MdGasUsage{Execution: result.ReceiptGasUsed - result.BlockStateGasUsed, State: int64(result.BlockStateGasUsed)}
+			}
+			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
+		}()
+	}
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
 	for i := 0; i < len(tx.Frames); i++ {
@@ -195,6 +212,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				for tx.Frames[i].Flags&types.FrameAtomicBatch != 0 {
 					i++
 					ctx.Receipts[i].Status = types.ReceiptStatusSkipped
+					st.evm.TraceSkippedFrame(i)
 				}
 			}
 			if frameErr != nil || frame.Flags&types.FrameAtomicBatch == 0 {
@@ -213,7 +231,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		used.State += receipt.GasUsed.State
 	}
 	var refund uint64
-	if refunds {
+	if refunds && !gasBailout {
 		refund = min(st.state.GetRefund(), used.Total()/params.RefundQuotientEIP3529)
 	}
 	// Refunds reduce the payer's fee, but do not free block execution capacity.
@@ -226,8 +244,10 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	paid := paidExecution + used.State
 	fee := u256.Mul(u256.U64(paid), *st.gasPrice)
 	change := u256.Sub(maxCost, u256.Add(fee, blobCost))
-	if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
-		return nil, err
+	if !gasBailout {
+		if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
+			return nil, err
+		}
 	}
 	tip := tx.GetEffectiveGasTip(&st.evm.Context.BaseFee)
 	tipped := u256.Mul(u256.U64(paid), tip)
@@ -237,7 +257,10 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		}
 	}
 	var burned uint256.Int
-	burnAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+	var burnAddress accounts.Address
+	if !st.msg.IsFree() {
+		burnAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+	}
 	if !burnAddress.IsNil() {
 		burned = u256.Mul(u256.U64(paid), st.evm.Context.BaseFee)
 		if rules.IsAura && rules.IsPrague {

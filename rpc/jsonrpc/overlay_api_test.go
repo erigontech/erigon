@@ -32,10 +32,12 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -212,6 +214,42 @@ func TestCallConstructorReturnsOverlayError(t *testing.T) {
 	require.Nil(t, result)
 	var invalidOpcode *vm.ErrInvalidOpCode
 	require.ErrorAs(t, err, &invalidOpcode)
+}
+
+func TestFrameCallConstructor(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	verifyOffset := 4 + len(create)
+	require.Less(t, verifyOffset, 256)
+	code := append([]byte{byte(vm.CALLDATASIZE), byte(vm.PUSH1), byte(verifyOffset), byte(vm.JUMPI)}, create...)
+	code = append(code, program.New().Op(vm.JUMPDEST).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()...)
+	genesis := &types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: code}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameDefault, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	want := []byte{byte(vm.PUSH0), byte(vm.STOP)}
+	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(sender, 0), program.New().ReturnData(want).Bytes())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Code)
+	require.Equal(t, hexutil.Bytes(want), *result.Code)
 }
 
 func TestCallConstructorRejectsNonContract(t *testing.T) {

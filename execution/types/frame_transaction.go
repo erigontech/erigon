@@ -381,6 +381,9 @@ func (tx *FrameTransaction) AsMessage(_ Signer, baseFee *uint256.Int, rules *cha
 	if baseFee != nil {
 		tip := tx.GetEffectiveGasTip(baseFee)
 		msg.gasPrice.Add(baseFee, &tip)
+		if msg.gasPrice.Gt(&tx.Fees.FeeCap) {
+			msg.gasPrice.Set(&tx.Fees.FeeCap)
+		}
 	}
 	return msg, nil
 }

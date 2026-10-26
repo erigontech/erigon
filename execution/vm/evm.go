@@ -1032,6 +1032,14 @@ func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to ac
 		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, to, input)
 	}
 	tracer := evm.Config().Tracer
+	if evm.FrameContext != nil {
+		// Frame calls sit below a synthetic transaction root. Opcode depths
+		// still follow the real EVM stack.
+		if depth == 0 {
+			startGas = evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Limits
+		}
+		depth++
+	}
 	tracer.EmitEnter(depth, byte(typ), from, to, precompile, input, startGas, value, code)
 	tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
 }
@@ -1051,6 +1059,16 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, from accounts.Address, to acco
 	}
 	if !evm.chainRules.IsHomestead && errors.Is(err, ErrCodeStoreOutOfGas) {
 		reverted = false
+	}
+	if ctx := evm.FrameContext; ctx != nil {
+		if depth == 0 {
+			gasUsed.Execution = ctx.Transaction.Frames[ctx.Index].Limits.Execution - leftOverGas.Execution
+			gasUsed.State = int64(ctx.Receipts[ctx.Index].GasUsed.State)
+			if err != nil {
+				gasUsed.State = 0
+			}
+		}
+		depth++
 	}
 	tracer.EmitExit(depth, ret, gasUsed, VMErrorFromErr(err), reverted)
 }

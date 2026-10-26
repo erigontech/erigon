@@ -443,7 +443,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
-		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, nil)
+		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, gasBailout, nil)
 	}
 	coinbase := st.evm.Context.Coinbase
 	var senderInitBalance uint256.Int
