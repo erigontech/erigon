@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -1786,6 +1787,8 @@ type balTx struct {
 // base worker count when workers park mid-EVM. A backstop, not a target: CPU
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
+
+var execLoopYield = dbg.EnvBool("EXEC_LOOP_YIELD", false)
 
 // dispatchRunSelfLoop runs one task on a worker context, looping until its result
 // is stable-valid: execute, flush its writes to the versionMap so downstream workers
@@ -3709,6 +3712,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
+		}
+		if execLoopYield && len(toPublish) > 0 {
+			runtime.Gosched()
 		}
 	}
 
