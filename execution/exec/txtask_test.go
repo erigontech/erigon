@@ -285,3 +285,27 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteCarriesCoinbaseForAccountAbstraction(t *testing.T) {
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc01aba5e"))
+	config := &chain.Config{AllowAA: true}
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: 1,
+		Coinbase:    coinbase,
+	}
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
+
+	txTask := &TxTask{
+		TxIndex:         0,
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		Txs:             types.Transactions{&types.AccountAbstractionTransaction{}},
+		Config:          config,
+		EvmBlockContext: blockContext,
+	}
+	result := txTask.Execute(evm, nil, nil, ibs, nil, config, nil, datadir.Dirs{}, false)
+
+	require.ErrorContains(t, result.Err, "account is not deployed")
+	require.Equal(t, coinbase, result.Coinbase)
+}
