@@ -1839,13 +1839,46 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 }
 
 // bufferedWriter keeps state writes to hand them to other writers later.
-type bufferedWriter struct {
-	writes []func(state.StateWriter) error
+type bufferedWriter struct{ writes []bufferedWrite }
+
+type bufferedWriteKind uint8
+
+const (
+	writeAccount bufferedWriteKind = iota
+	writeCode
+	deleteAccount
+	writeStorage
+	createContract
+)
+
+type bufferedWrite struct {
+	kind                       bufferedWriteKind
+	address                    accounts.Address
+	original, account          accounts.Account
+	incarnation                uint64
+	codeHash                   accounts.CodeHash
+	code                       []byte
+	key                        accounts.StorageKey
+	originalValue, storedValue uint256.Int
 }
 
 func (b *bufferedWriter) writeTo(w state.StateWriter) error {
-	for _, write := range b.writes {
-		if err := write(w); err != nil {
+	for i := range b.writes {
+		bw := &b.writes[i]
+		var err error
+		switch bw.kind {
+		case writeAccount:
+			err = w.UpdateAccountData(bw.address, &bw.original, &bw.account)
+		case writeCode:
+			err = w.UpdateAccountCode(bw.address, bw.incarnation, bw.codeHash, bw.code)
+		case deleteAccount:
+			err = w.DeleteAccount(bw.address, &bw.original)
+		case writeStorage:
+			err = w.WriteAccountStorage(bw.address, bw.incarnation, bw.key, bw.originalValue, bw.storedValue)
+		case createContract:
+			err = w.CreateContract(bw.address)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -1853,31 +1886,27 @@ func (b *bufferedWriter) writeTo(w state.StateWriter) error {
 }
 
 func (b *bufferedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	o, a := *original, *account
-	b.writes = append(b.writes, func(w state.StateWriter) error { return w.UpdateAccountData(address, &o, &a) })
+	b.writes = append(b.writes, bufferedWrite{kind: writeAccount, address: address, original: *original, account: *account})
 	return nil
 }
 
 func (b *bufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	b.writes = append(b.writes, func(w state.StateWriter) error { return w.UpdateAccountCode(address, incarnation, codeHash, code) })
+	b.writes = append(b.writes, bufferedWrite{kind: writeCode, address: address, incarnation: incarnation, codeHash: codeHash, code: code})
 	return nil
 }
 
 func (b *bufferedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	o := *original
-	b.writes = append(b.writes, func(w state.StateWriter) error { return w.DeleteAccount(address, &o) })
+	b.writes = append(b.writes, bufferedWrite{kind: deleteAccount, address: address, original: *original})
 	return nil
 }
 
 func (b *bufferedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	b.writes = append(b.writes, func(w state.StateWriter) error {
-		return w.WriteAccountStorage(address, incarnation, key, original, value)
-	})
+	b.writes = append(b.writes, bufferedWrite{kind: writeStorage, address: address, incarnation: incarnation, key: key, originalValue: original, storedValue: value})
 	return nil
 }
 
 func (b *bufferedWriter) CreateContract(address accounts.Address) error {
-	b.writes = append(b.writes, func(w state.StateWriter) error { return w.CreateContract(address) })
+	b.writes = append(b.writes, bufferedWrite{kind: createContract, address: address})
 	return nil
 }
 

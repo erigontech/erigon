@@ -1649,22 +1649,25 @@ func finalizedWrites(t testing.TB, ibs *IntraBlockState, rules *chain.Rules) *Wr
 // finalStateWriter keeps what a StateWriter is left holding: each account's last
 // value (nil once deleted), its code and its storage.
 type finalStateWriter struct {
-	accounts map[accounts.Address]*accounts.Account
-	code     map[accounts.Address]string
-	storage  map[accounts.Address]map[accounts.StorageKey]uint256.Int
+	accounts  map[accounts.Address]*accounts.Account
+	originals map[accounts.Address]accounts.Account
+	code      map[accounts.Address]string
+	storage   map[accounts.Address]map[accounts.StorageKey]uint256.Int
 }
 
 func newFinalStateWriter() *finalStateWriter {
 	return &finalStateWriter{
-		accounts: map[accounts.Address]*accounts.Account{},
-		code:     map[accounts.Address]string{},
-		storage:  map[accounts.Address]map[accounts.StorageKey]uint256.Int{},
+		accounts:  map[accounts.Address]*accounts.Account{},
+		originals: map[accounts.Address]accounts.Account{},
+		code:      map[accounts.Address]string{},
+		storage:   map[accounts.Address]map[accounts.StorageKey]uint256.Int{},
 	}
 }
 
-func (w *finalStateWriter) UpdateAccountData(address accounts.Address, _, account *accounts.Account) error {
-	a := accounts.Account{Balance: account.Balance, Nonce: account.Nonce, CodeHash: account.CodeHash}
+func (w *finalStateWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	a := accounts.Account{Balance: account.Balance, Nonce: account.Nonce, CodeHash: account.CodeHash, Incarnation: account.Incarnation}
 	w.accounts[address] = &a
+	w.originals[address] = accounts.Account{Balance: original.Balance, Nonce: original.Nonce}
 	return nil
 }
 
@@ -1673,8 +1676,9 @@ func (w *finalStateWriter) UpdateAccountCode(address accounts.Address, _ uint64,
 	return nil
 }
 
-func (w *finalStateWriter) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
+func (w *finalStateWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	w.accounts[address] = nil
+	w.originals[address] = accounts.Account{Balance: original.Balance, Nonce: original.Nonce}
 	delete(w.storage, address)
 	return nil
 }
@@ -1737,4 +1741,60 @@ func TestWriteFlushedToMatchesFinalizeTx(t *testing.T) {
 	require.Equal(t, want, got)
 	require.Contains(t, got.accounts, empty)
 	require.Nil(t, got.accounts[empty], "the touched empty account is removed")
+}
+
+// A later tx's writer sees each account as the earlier tx left it, on both paths: the
+// original of a twice-debited account, and the delete of a destroyed account with storage.
+func TestWriteFlushedToMatchesFinalizeTxAcrossTxs(t *testing.T) {
+	t.Parallel()
+	a, c := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
+	reader := &fakeBaseReader{
+		accts:   map[accounts.Address]*accounts.Account{a: acctBal(100), c: acctBal(1)},
+		storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{c: {slot: *uint256.NewInt(7)}},
+	}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true}
+	tx0 := func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.SubBalance(a, *uint256.NewInt(10), tracing.BalanceChangeTransfer))
+		require.NoError(t, ibs.SetState(c, slot, *uint256.NewInt(9)))
+	}
+	tx1 := func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.SubBalance(a, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+		_, err := ibs.Selfdestruct(c, false)
+		require.NoError(t, err)
+	}
+
+	materialized := New(reader)
+	defer materialized.Close()
+	materialized.SetTxContext(1, 0)
+	tx0(materialized)
+	require.NoError(t, materialized.FinalizeTx(rules, newFinalStateWriter()))
+	materialized.SetTxContext(1, 1)
+	tx1(materialized)
+	want := newFinalStateWriter()
+	require.NoError(t, materialized.FinalizeTx(rules, want))
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	finalize := func(w StateWriter) {
+		writes, err := versioned.FinalizedWrites(rules)
+		require.NoError(t, err)
+		versioned.FlushWritesToVersionMap(writes)
+		require.NoError(t, versioned.WriteFlushedTo(writes, w))
+		versioned.SoftFinalise()
+		versioned.ResetVersionedIO()
+	}
+	versioned.SetTxContext(1, 0)
+	tx0(versioned)
+	finalize(newFinalStateWriter())
+	versioned.SetTxContext(1, 1)
+	tx1(versioned)
+	got := newFinalStateWriter()
+	finalize(got)
+
+	require.Equal(t, want.accounts, got.accounts)
+	require.Equal(t, want.code, got.code)
+	require.Equal(t, want.storage, got.storage)
+	require.Equal(t, *uint256.NewInt(90), got.originals[a].Balance, "the original carries tx 0's debit")
+	require.Nil(t, got.accounts[c], "the destroyed account is deleted")
 }
