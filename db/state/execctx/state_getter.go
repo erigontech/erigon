@@ -53,6 +53,15 @@ func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return code, ok, err
 }
 
+// TakeCodeBuf hands the code buffer to the getter that replaces this one.
+func (g *stateGetter) TakeCodeBuf() []byte {
+	buf := g.codeBuf
+	g.codeBuf = nil
+	return buf
+}
+
+func (g *stateGetter) LendCodeBuf(buf []byte) { g.codeBuf = buf }
+
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
 	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
 }

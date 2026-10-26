@@ -878,9 +878,22 @@ func NewReaderV3(getter execctxapi.StateGetter) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()                        {}
-func (r *ReaderV3) SetTxNum(txNum uint64)                   { r.txNum = txNum }
-func (r *ReaderV3) SetGetter(getter execctxapi.StateGetter) { r.getter = getter }
+func (r *ReaderV3) DiscardReadList()      {}
+func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderV3) SetGetter(getter execctxapi.StateGetter) {
+	// A worker rebinds its reader per tx; keep the grown code buffer instead of regrowing it.
+	if prev, ok := r.getter.(codeBufLender); ok {
+		if next, ok := getter.(codeBufLender); ok {
+			next.LendCodeBuf(prev.TakeCodeBuf())
+		}
+	}
+	r.getter = getter
+}
+
+type codeBufLender interface {
+	TakeCodeBuf() []byte
+	LendCodeBuf([]byte)
+}
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
