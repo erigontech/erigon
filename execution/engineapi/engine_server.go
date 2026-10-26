@@ -551,8 +551,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	// Answered after the block hash check and the other payload checks, as by the block validation,
-	// so that the block can be reported as bad. A stored block goes to the block validation, which
-	// also removes it.
+	// so that the block can be reported as bad. A block that is already stored takes the normal path,
+	// where a block validation that rejects it also removes it.
 	if headerErr != nil && e.chainRW.GetHeader(ctx, blockHash, header.Number.Uint64()) == nil {
 		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
 		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)

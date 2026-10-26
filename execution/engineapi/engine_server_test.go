@@ -326,6 +326,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		{name: "gas limit above the parent's with a wrong blob hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{{0x01}}, wantStatus: engine_types.InvalidStatus, wantErr: "mismatch blob hashes"},
 		{name: "5 txs above an unvalidated parent's gas limit", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "valid header on a validated parent", txCount: 4, gasLimit: parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.AcceptedStatus},
+		{name: "valid Cancun header on a validated parent", txCount: 4, gasLimit: parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{}, wantStatus: engine_types.AcceptedStatus},
 		{name: "L2 chain, 5 txs and gas limit above the parent's", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, l2: true, wantStatus: engine_types.AcceptedStatus},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -400,8 +401,8 @@ type testL2Config struct{}
 func (testL2Config) Name() string                                { return "test" }
 func (testL2Config) ResolveRules(_, _, _ uint64, _ *chain.Rules) {}
 
-// The parent header of a new payload is looked up by hash, which on a miss searches every header
-// snapshot file, so it is looked up once.
+// A new payload looks its stored parent up by hash once. A hash-only lookup of a header that is not
+// stored searches every header snapshot file.
 func TestNewPayloadLooksUpTheParentOnce(t *testing.T) {
 	t.Parallel()
 
@@ -461,26 +462,29 @@ func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
 	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, m.Log, m.ExecModule, nil, nil, m.ChainConfig, ethconfig.Sync{}, nil)
 	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, 2)
 	srv.test = true
-	newPayload := func(block *types.Block) engine_types.EngineStatus {
+	newPayload := func(block *types.Block) *engine_types.PayloadStatus {
 		payload, err := engine_types.ExecutionPayloadFromBlock(block)
 		require.NoError(t, err)
 		status, err := srv.NewPayloadV2(ctx, payload)
 		require.NoError(t, err)
-		return status.Status
+		return status
 	}
 	forkchoice := func(head common.Hash) {
 		_, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: head}, nil)
 		require.NoError(t, err)
 	}
 
-	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1))
-	require.Equal(t, engine_types.AcceptedStatus, newPayload(block2))
+	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1).Status)
+	require.Equal(t, engine_types.AcceptedStatus, newPayload(block2).Status)
 	forkchoice(m.Genesis.Hash())
-	require.Equal(t, engine_types.ValidStatus, newPayload(block1))
+	require.Equal(t, engine_types.ValidStatus, newPayload(block1).Status)
 	forkchoice(block1.Hash())
 	require.True(t, m.ExecModule.IsValidated(block1.Hash()))
 
-	require.Equal(t, engine_types.InvalidStatus, newPayload(block2))
+	status := newPayload(block2)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Equal(t, block1.Hash(), *status.LatestValidHash)
+	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
 	bodies, err := srv.GetPayloadBodiesByHashV1(ctx, []common.Hash{block2.Hash()})
 	require.NoError(t, err)
 	require.Len(t, bodies, 1)
