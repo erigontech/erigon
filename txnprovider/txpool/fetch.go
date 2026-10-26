@@ -761,7 +761,7 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}

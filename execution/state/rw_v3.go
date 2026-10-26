@@ -780,7 +780,8 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		}
 	}
 	value := accounts.SerialiseV3(account)
-	if w.accumulator != nil {
+	// Refresh an earlier notification even when the account returns to its original value.
+	if w.accumulator != nil && (!original.Equals(account) || w.accumulator.HasAccountChange(addressValue)) {
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 

@@ -162,9 +162,18 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 
 func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) error {
 	touched := make(map[common.Address]struct{})
+	nonceSlots := make(map[common.Hash]struct{})
+	var nonceManagerAccountChanged bool
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
-			touched[gointerfaces.ConvertH160toAddress(change.Address)] = struct{}{}
+			address := gointerfaces.ConvertH160toAddress(change.Address)
+			touched[address] = struct{}{}
+			if address == types.FrameNonceManager {
+				nonceManagerAccountChanged = nonceManagerAccountChanged || change.Action != remoteproto.Action_STORAGE
+				for _, storage := range change.StorageChanges {
+					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
+				}
+			}
 		}
 	}
 	for _, mt := range p.byHash {
@@ -172,12 +181,26 @@ func (p *TxPool) revalidateFrames(changes *remoteproto.StateChangeBatch) error {
 		if previous == nil {
 			continue
 		}
-		first := &mt.TxnSlot.Txn.(*types.FrameTransaction).Frames[0]
-		affected := first.Target != nil && *first.Target == types.FrameExpiryVerifier || mt.TxnSlot.Txn.GetBlobGas() != 0
+		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		keyedNonce := !frame.UsesLegacyNonce()
+		first := &frame.Frames[0]
+		affected := first.Target != nil && *first.Target == types.FrameExpiryVerifier || frame.GetBlobGas() != 0
 		for _, dependency := range previous.Dependencies {
+			// The sender's validation can read any of its own storage.
+			if dependency == types.FrameNonceManager && keyedNonce && frame.SenderAddress != types.FrameNonceManager && !nonceManagerAccountChanged {
+				continue
+			}
 			if _, ok := touched[dependency]; ok {
 				affected = true
 				break
+			}
+		}
+		if !affected && keyedNonce && len(nonceSlots) > 0 {
+			for _, key := range frame.NonceKeys {
+				if _, ok := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]; ok {
+					affected = true
+					break
+				}
 			}
 		}
 		if !affected {

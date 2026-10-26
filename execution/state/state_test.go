@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -113,6 +114,43 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.Len(t, rw2.storageWrites, 1, "tx2 must emit a storage write (A→B→A must not be skipped)")
 	require.Equal(t, valA, rw2.storageWrites[0].val, "tx2 must write A")
 	require.Equal(t, valB, rw2.storageWrites[0].orig, "tx2 origin must be B (last written value)")
+}
+
+func TestWriterAccountAndStorageNotifications(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		nonces []uint64
+		action notifications.Action
+	}{
+		{"storage only", []uint64{1}, notifications.ActionStorage},
+		{"account and storage", []uint64{2}, notifications.ActionUpsert},
+		{"account restored", []uint64{2, 1}, notifications.ActionUpsert},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			accumulator := notifications.NewAccumulator()
+			accumulator.StartChange(&types.Header{Number: *uint256.NewInt(1)}, nil, false)
+			writer := NewWriter(domains.AsPutDel(tx), accumulator, 1)
+			address := accounts.InternAddress(common.Address{1})
+			original := accounts.NewAccount()
+			original.Nonce = 1
+			account := original
+
+			require.NoError(t, writer.WriteAccountStorage(address, 0, accounts.ZeroKey, uint256.Int{}, uint256.Int{1}))
+			for _, nonce := range tc.nonces {
+				account.Nonce = nonce
+				require.NoError(t, writer.UpdateAccountData(address, &original, &account))
+			}
+			changes := accumulator.Changes()
+			require.Len(t, changes, 1)
+			require.Len(t, changes[0].Changes, 1)
+			require.Equal(t, tc.action, changes[0].Changes[0].Action)
+			require.Len(t, changes[0].Changes[0].StorageChanges, 1)
+			if tc.action == notifications.ActionUpsert {
+				require.Equal(t, accounts.SerialiseV3(&account), changes[0].Changes[0].Data)
+			}
+		})
+	}
 }
 
 func TestNull(t *testing.T) {

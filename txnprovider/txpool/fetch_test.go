@@ -283,7 +283,8 @@ func TestOnNewBlock(t *testing.T) {
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, request *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+			assert.True(t, request.WithStorage, "frame nonce revalidation needs changed storage slots")
 			return stream, nil
 		})
 

@@ -71,8 +71,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	validation.evm = evm
 	validation.dependencies = map[common.Address]struct{}{tx.SenderAddress: {}}
 	if !tx.UsesLegacyNonce() {
-		// Dependencies are tracked by address, so any nonce-manager storage change
-		// triggers revalidation, including changes to this sender's selected keys.
+		// Keyed nonces depend on the manager account as well as their selected storage slots.
 		validation.dependencies[types.FrameNonceManager] = struct{}{}
 	}
 	config.Tracer = &tracing.Hooks{OnOpcodeV2: validation.onOpcode, OnEnterV2: validation.onEnter}

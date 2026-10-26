@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -39,6 +40,7 @@ type frameValidationBackend struct {
 	balance   uint64
 	paymaster bool
 	valid     bool
+	calls     []common.Hash
 }
 
 func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
@@ -46,8 +48,13 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 	if err != nil {
 		return nil, err
 	}
+	b.calls = append(b.calls, tx.Hash())
+	var dependencies [][]byte
+	if frame, ok := tx.(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
+		dependencies = append(dependencies, types.FrameNonceManager[:])
+	}
 	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetFeeCap())
-	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster}, nil
+	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster, Dependencies: dependencies}, nil
 }
 
 func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
@@ -88,6 +95,69 @@ func TestFramePoolKeyedNonceIsNotAccountNonce(t *testing.T) {
 	require.Equal(t, txpoolcfg.Success, reasons[0])
 	_, ok := pool.NonceFromAddress(sender)
 	require.False(t, ok)
+}
+
+func TestFramePoolRevalidationNonceManager(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		action        remoteproto.Action
+		key           uint64
+		otherSender   bool
+		managerSender bool
+		direction     remoteproto.Direction
+		revalidate    bool
+	}{
+		{name: "unrelated sender", key: 1, otherSender: true},
+		{name: "unselected key", key: 3},
+		{name: "first selected key", key: 1, revalidate: true},
+		{name: "second selected key", key: 2, revalidate: true},
+		{name: "unwind selected key", key: 1, direction: remoteproto.Direction_UNWIND, revalidate: true},
+		{name: "unwind unselected key", key: 3, direction: remoteproto.Direction_UNWIND},
+		{name: "manager account", action: remoteproto.Action_UPSERT, revalidate: true},
+		{name: "manager code", action: remoteproto.Action_CODE, revalidate: true},
+		{name: "manager account and code", action: remoteproto.Action_UPSERT_CODE, revalidate: true},
+		{name: "manager removed", action: remoteproto.Action_REMOVE, revalidate: true},
+		{name: "manager is sender", key: 1, otherSender: true, managerSender: true, revalidate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			if tc.managerSender {
+				sender = types.FrameNonceManager
+			}
+			slot := framePoolSlot(t, sender, 1, 2, uint256.Int{1}, uint256.Int{2})
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, txpoolcfg.Success, reasons[0])
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.calls = nil
+			backend.valid = false
+
+			change := &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(types.FrameNonceManager), Action: tc.action}
+			if tc.key != 0 {
+				nonceSender := sender
+				if tc.otherSender {
+					nonceSender = common.Address{2}
+				}
+				location := types.FrameNonceSlot(nonceSender, *uint256.NewInt(tc.key))
+				change.StorageChanges = []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(location)}}
+			}
+			pool.lock.Lock()
+			err = pool.revalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
+			pool.lock.Unlock()
+			require.NoError(t, err)
+			if tc.revalidate {
+				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+			} else {
+				require.Empty(t, backend.calls)
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[backend.payer].cost)
+			}
+		})
+	}
 }
 
 func TestFramePoolReservationsAndReplacement(t *testing.T) {
