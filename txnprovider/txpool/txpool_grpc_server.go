@@ -183,7 +183,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	defer tx.Rollback()
 
 	var slots TxnSlots
-	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired()
+	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired().WithPoolRules()
 	parseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}

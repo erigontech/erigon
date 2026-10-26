@@ -52,6 +52,13 @@ type frameValidationTracer struct {
 
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
+// ValidateFrameTransactionPrefix checks public-pool structure and gas budgets
+// without verifying signatures or accessing state.
+func ValidateFrameTransactionPrefix(tx *types.FrameTransaction) error {
+	_, err := frameValidationPrefix(tx)
+	return err
+}
+
 // ValidateFrameTransaction applies public-mempool policy to the validation prefix,
 // stopping after payment approval and reverting all simulated state changes.
 func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameValidation, error) {

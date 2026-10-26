@@ -19,7 +19,11 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,12 +34,16 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -93,6 +101,89 @@ func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, fee
 	var data bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&data))
 	return &TxnSlot{Txn: tx, Nonce: nonce, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
+}
+
+func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		signatures int
+		limits     mdgas.MdGas
+		want       string
+	}{
+		{"signatures", 15, mdgas.MdGas{Execution: 100}, "frame signature validation exceeds gas limit"},
+		{"prefix execution", 1, mdgas.MdGas{Execution: 93_301}, "frame validation exceeds gas limit"},
+		{"prefix state", 1, mdgas.MdGas{Execution: 100, State: 500_001}, "frame validation exceeds gas limit"},
+		{"within budget", 1, mdgas.MdGas{Execution: 93_300, State: 500_000}, "invalid frame signature 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+			frame.Frames[0].Limits = tc.limits
+			frame.Signatures = make([]types.FrameSignature, tc.signatures)
+			for i := range frame.Signatures {
+				frame.Signatures[i].Scheme = types.FrameSignatureP256
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			t.Run("gossip", func(t *testing.T) {
+				fetch := NewFetch(t.Context(), nil, nil, nil, nil, frame.ChainID, log.New())
+				var slot TxnSlot
+				var sender common.Address
+				_, err := fetch.pooledTxnsParseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, sender[:], false, true, nil)
+				require.ErrorContains(t, err, tc.want)
+			})
+			t.Run("RPC", func(t *testing.T) {
+				pool := &addMockTxPool{}
+				server := NewGrpcServer(t.Context(), pool, mdbxtest.NewTestPoolDB(t), nil, frame.ChainID, log.New())
+				reply, err := server.Add(t.Context(), &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+				require.NoError(t, err)
+				require.Len(t, reply.Errors, 1)
+				require.Contains(t, reply.Errors[0], tc.want)
+				require.Zero(t, pool.addLocalSlotsLen)
+			})
+		})
+	}
+}
+
+func TestFramePoolBudgetDoesNotRestrictMinedTransactions(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	pub := make([]byte, 64)
+	key.X.FillBytes(pub[:32])
+	key.Y.FillBytes(pub[32:])
+	signer := common.BytesToAddress(crypto.Keccak256(pub)[12:])
+	message := common.Hash{1}
+	r, s, err := ecdsa.Sign(rand.Reader, key, message[:])
+	require.NoError(t, err)
+	n := key.Curve.Params().N
+	if s.Cmp(new(big.Int).Rsh(new(big.Int).Set(n), 1)) > 0 {
+		s.Sub(n, s)
+	}
+	signature := make([]byte, 128)
+	r.FillBytes(signature[:32])
+	s.FillBytes(signature[32:64])
+	copy(signature[64:], pub)
+	frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Signatures = make([]types.FrameSignature, 15)
+	for i := range frame.Signatures {
+		frame.Signatures[i] = types.FrameSignature{Scheme: types.FrameSignatureP256, Signer: signer[:], Message: message[:], Signature: signature}
+	}
+	require.NoError(t, frame.Validate())
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	fetch := NewFetch(ctx, nil, pool, nil, nil, frame.ChainID, log.New())
+	var slot TxnSlot
+	var parsedSender common.Address
+	_, err = fetch.stateChangesParseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, parsedSender[:], false, false, nil)
+	require.NoError(t, err)
+	require.Equal(t, sender, parsedSender)
+
+	var txns TxnSlots
+	txns.Append(&slot, parsedSender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
 }
 
 func TestFramePoolKeyedAndOrdinaryNoncesCoexist(t *testing.T) {

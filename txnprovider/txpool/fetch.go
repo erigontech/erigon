@@ -106,7 +106,7 @@ func NewFetch(
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
-		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,

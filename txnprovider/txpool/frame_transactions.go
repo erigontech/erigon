@@ -57,6 +57,9 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardRea
 		return txpoolcfg.TypeNotActivated, nil
 	}
 	frame := txn.Txn.(*types.FrameTransaction)
+	if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
+		return txpoolcfg.InvalidFrame, nil
+	}
 	if err := frame.Validate(); err != nil {
 		return txpoolcfg.InvalidFrame, nil
 	}

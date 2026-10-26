@@ -62,6 +62,7 @@ type TxnParseContext struct {
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
+	poolRules       bool
 }
 
 func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
@@ -95,6 +96,11 @@ func (ctx *TxnParseContext) WithAllowPreEip2s(v bool) { ctx.allowPreEip2s = v }
 // Set ChainID-Required flag in the Parse context and return it
 func (ctx *TxnParseContext) ChainIDRequired() *TxnParseContext {
 	ctx.chainIDRequired = true
+	return ctx
+}
+
+func (ctx *TxnParseContext) WithPoolRules() *TxnParseContext {
+	ctx.poolRules = true
 	return ctx
 }
 
@@ -397,6 +403,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	if frame, ok := txn.(*types.FrameTransaction); ok {
+		if ctx.poolRules {
+			if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
+				return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
+			}
+		}
 		if err := frame.Validate(); err != nil {
 			return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
 		}
