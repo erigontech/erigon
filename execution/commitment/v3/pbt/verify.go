@@ -173,6 +173,23 @@ func (t *Trie) trackBucketKeys() {
 	}
 }
 
+func (t *Trie) verifyKeyOwnedByTask(key []byte) bool {
+	if len(t.verifiedChains) == 0 {
+		return false
+	}
+	path, err := eip8297.DecodeBitPath(key)
+	if err != nil {
+		return false
+	}
+	for taskKey := range t.verifiedChains {
+		taskPath, err := eip8297.DecodeBitPath([]byte(taskKey))
+		if err == nil && path.BitLen >= taskPath.BitLen && path.HasPrefix(&taskPath) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment.TrieContextFactory) error {
 	root, err := t.loadRoot()
 	if err != nil {
@@ -309,6 +326,9 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 		heldRows, heldBytes = taskRows, taskBytes
 	}
 	count, err := reader.ReadVerifyRange(from, to, func(key, value []byte) error {
+		if commitment.IsCommitmentStateKey(key) {
+			return nil
+		}
 		rowPath, decodeErr := eip8297.DecodeBitPath(key)
 		if decodeErr != nil || rowPath.BitLen < path.BitLen || !rowPath.HasPrefix(&path) {
 			return nil
@@ -417,7 +437,7 @@ func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
 			keyString := string(key)
 			if _, used := t.verifyRowsUsed[keyString]; !used {
 				t.verifyRowsUsed[keyString] = struct{}{}
-				if t.verifyRowsExact {
+				if t.verifyRowsExact && !commitment.IsCommitmentStateKey(key) && !t.verifyKeyOwnedByTask(key) {
 					t.verifyReferencedKeys++
 				}
 			}

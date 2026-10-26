@@ -450,18 +450,9 @@ func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.Temporal
 				return errors.New("verification transaction is not a read transaction")
 			}
 			var err error
-			verifyLiveKeys, err = counter.DebugRangeLatestCount(roTx, sdc.CommitmentDomain())
+			verifyLiveKeys, verifyStateKeys, err = counter.DebugRangeLatestCount(roTx, sdc.CommitmentDomain())
 			if err != nil {
 				return err
-			}
-			for _, key := range CommitmentStateKeys {
-				value, _, err := tx.GetLatest(sdc.CommitmentDomain(), key, kv.GetLatestOptions{})
-				if err != nil {
-					return err
-				}
-				if len(value) != 0 {
-					verifyStateKeys++
-				}
 			}
 			verifyKeyCount = true
 		}
@@ -1587,7 +1578,7 @@ type verifyRangePlanner interface {
 }
 
 type verifyDomainKeyCounter interface {
-	DebugRangeLatestCount(kv.Tx, kv.Domain) (uint64, error)
+	DebugRangeLatestCount(kv.Tx, kv.Domain) (uint64, uint64, error)
 }
 
 type verifyRangeAt interface {
@@ -1645,9 +1636,8 @@ func (sdc *TrieContext) VerifyKeyCount(referenced uint64) error {
 	if !sdc.verifyKeyCount {
 		return nil
 	}
-	want := referenced + sdc.verifyStateKeys
-	if want != sdc.verifyLiveKeys {
-		return fmt.Errorf("unreferenced verification row count: referenced %d of %d live keys", want, sdc.verifyLiveKeys)
+	if referenced+sdc.verifyStateKeys != sdc.verifyLiveKeys {
+		return fmt.Errorf("unreferenced verification row count: referenced %d plus state %d of %d live keys", referenced, sdc.verifyStateKeys, sdc.verifyLiveKeys)
 	}
 	return nil
 }

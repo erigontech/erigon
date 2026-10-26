@@ -3035,7 +3035,7 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
 }
 
-func (at *AggregatorRoTx) DebugRangeLatestCount(tx kv.Tx, domain kv.Domain) (uint64, error) {
+func (at *AggregatorRoTx) DebugRangeLatestCount(tx kv.Tx, domain kv.Domain) (uint64, uint64, error) {
 	return at.d[domain].DebugRangeLatestCount(tx)
 }
 

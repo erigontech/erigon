@@ -1992,21 +1992,24 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 	return dt.debugRangeLatest(roTx, fromKey, toKey, limit, nil)
 }
 
-func (dt *DomainRoTx) DebugRangeLatestCount(roTx kv.Tx) (uint64, error) {
+func (dt *DomainRoTx) DebugRangeLatestCount(roTx kv.Tx) (uint64, uint64, error) {
 	it, err := dt.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer it.Close()
-	var count uint64
+	var count, stateKeys uint64
 	for it.HasNext() {
-		_, _, err := it.Next()
+		key, _, err := it.Next()
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		count++
+		if commitment.IsCommitmentStateKey(key) {
+			stateKeys++
+		}
 	}
-	return count, nil
+	return count, stateKeys, nil
 }
 
 func (dt *DomainRoTx) DebugRangeLatestWithOffsets(roTx kv.Tx, fromKey, toKey []byte, limit int, fileOffsets []uint64) (*DomainLatestIterFile, error) {
