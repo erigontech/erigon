@@ -1032,6 +1032,45 @@ func TestFinalizeTx_CoinbaseFlushedEstimateReadsAsDependency(t *testing.T) {
 		"a non-fee-recipient write flushed Done reads as a committed value")
 }
 
+// Finalizing a system tx over a lower tx's write that is still an estimate must
+// not panic.
+func TestFinalizeSystemTx_OverEstimateCellDoesNotPanic(t *testing.T) {
+	s := simpleTransferScenario()
+	result := s.buildExecResult()
+	task := result.Task.(*taskVersion)
+	task.version.TxIndex = 2
+	txTask := task.Task.(*exec.TxTask)
+	txTask.TxIndex = 2
+
+	addr := fAddr("syscall-target")
+	result.TxOut = &state.WriteSet{}
+	result.TxOut.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: task.version},
+		Val:         *uint256.NewInt(5),
+	})
+
+	lower := &state.WriteSet{}
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(3)
+	lowerVersion := state.Version{TxIndex: 1}
+	lower.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: lowerVersion},
+		Val:         &acc,
+	})
+	lower.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: lowerVersion},
+		Val:         *uint256.NewInt(3),
+	})
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(lower, false, "")
+
+	var err error
+	require.NotPanics(t, func() {
+		_, _, _, err = result.finalizeSystemTx(task, txTask, vm, s.makeReader())
+	})
+	require.NoError(t, err)
+}
+
 // TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation verifies the
 // burnt contract's implicit FeeBurnt write is stamped at the worker's own
 // incarnation (same as coinbase under the post-#21387 architecture).
@@ -1953,6 +1992,28 @@ func TestCalcFees_SameTxDestroyedBurntContract_StaysRemoved(t *testing.T) {
 	}
 }
 
+// coinbaseTipResult is the result of tx 1 of block 1 whose only fee is a tip of
+// tip wei to coinbase, ready for calcFees.
+func coinbaseTipResult(coinbase accounts.Address, tip uint64) (*execResult, *taskVersion) {
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+	version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+	txTask := &exec.TxTask{
+		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+		Config:          chain.TestChainBerlinConfig,
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task: task,
+		ExecutionResult: evmtypes.ExecutionResult{
+			FeeTipped:            *uint256.NewInt(tip),
+			BurntContractAddress: accounts.NilAddress,
+		},
+		Coinbase: coinbase,
+	}}
+	return result, task
+}
+
 // The worker's EIP-161 removal of an empty codeless coinbase stands only without a tip:
 // serial credits the tip before the tx's empty-account sweep, so a tip keeps the account.
 func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
@@ -1971,22 +2032,7 @@ func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
 			reader := newMapStateReader()
 			reader.accounts[coinbase] = &accounts.Account{CodeHash: accounts.EmptyCodeHash}
 
-			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
-			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
-			txTask := &exec.TxTask{
-				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
-				Config:          chain.TestChainBerlinConfig,
-				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
-			}
-			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
-			result := &execResult{TxResult: &exec.TxResult{
-				Task: task,
-				ExecutionResult: evmtypes.ExecutionResult{
-					FeeTipped:            *uint256.NewInt(tc.tip),
-					BurntContractAddress: accounts.NilAddress,
-				},
-				Coinbase: coinbase,
-			}}
+			result, task := coinbaseTipResult(coinbase, tc.tip)
 
 			vm := state.NewVersionMap(nil)
 			worker := state.NewWithVersionMap(reader, vm)
@@ -2071,6 +2117,44 @@ func TestCalcFees_BALCoinbaseAddressPath(t *testing.T) {
 			require.Equal(t, want.CodeHash, codeHash)
 		})
 	}
+}
+
+// A zero tip still touches an existing empty coinbase, which EIP-161 then
+// removes. The removal must invalidate a later tx that read the coinbase's existence.
+func TestCalcFees_ZeroTipRemovalInvalidatesExistenceRead(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	coinbase := fAddr("coinbase")
+	reader := newMapStateReader()
+	empty := accounts.NewAccount()
+	reader.accounts[coinbase] = &empty
+	vm := state.NewVersionMap(nil)
+
+	later := state.NewWithVersionMap(reader, vm)
+	t.Cleanup(later.Close)
+	later.SetTxContext(1, 2)
+	exists, err := later.Exist(coinbase)
+	require.NoError(t, err)
+	require.True(t, exists)
+	io := state.NewVersionedIO(3)
+	io.RecordReads(state.Version{TxIndex: 2}, later.VersionedReads())
+
+	result, task := coinbaseTipResult(coinbase, 0)
+	result.TxOut = &state.WriteSet{}
+
+	writes, err := result.calcFees(task, vm, reader, rules)
+	require.NoError(t, err)
+	sd, ok := writes.GetSelfDestruct(coinbase)
+	require.True(t, ok && sd.Val, "precondition: the zero-tip touch removes the empty coinbase")
+	vm.FlushVersionedWrites(writes, true, "")
+
+	equalVersion := func(readVersion, writeVersion state.Version) state.VersionValidity {
+		if readVersion != writeVersion {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	require.Equal(t, state.VersionInvalid, vm.ValidateVersion(2, io, equalVersion, false, ""))
 }
 
 // failingAccountReader fails account reads once err is set.
