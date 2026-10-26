@@ -7,8 +7,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 1,
-          "digest": "3fcbaa1067a96bd283c92fbc24e54b83e9906089ce841ae51378fc29a03f7b69",
           "rows": [
             {
               "key": "7374617465",
@@ -24,8 +22,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 1,
-          "digest": "3fcbaa1067a96bd283c92fbc24e54b83e9906089ce841ae51378fc29a03f7b69",
           "rows": [
             {
               "key": "7374617465",
@@ -41,8 +37,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 23,
-          "digest": "2bd7840e547288950e69eddac6f1233d1d27beb41c46bab8dd8f5d3ef88fe327",
           "rows": [
             {
               "key": "003be5cbeb404585affd1460c65480b7d2e5d2fa1fba9b0c3acfbf35c840c37d2c0004",
@@ -146,8 +140,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 22,
-          "digest": "6924db9e7d6d00f2696deb3f46f967508d9e6074ce53393915131e0dc716a38e",
           "rows": [
             {
               "key": "00aafae41182fdefb0af836c3b506e127c7f229f33360c66de1139f4b0316f09d80004",
@@ -247,8 +239,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 2,
-          "digest": "f54aec2a3de4958338a40c1ac2f0b01489071a33b7d49887c5687f2285b45ef5",
           "rows": [
             {
               "key": "003be5cbeb404585affd1460c65480b7d2e5d2fa1fba9b0c3acfbf35c840c37d2c0004",
@@ -262,8 +252,6 @@
         },
         {
           "name": "v2.2-commitment-bin.1-2.kv",
-          "count": 6,
-          "digest": "c2ae92b0efa44a30c32051e42fb8cdfc5f8a7c3f07ab8acab2249dae20b16144",
           "rows": [
             {
               "key": "0000",
@@ -299,8 +287,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 2,
-          "digest": "43d3c7451ec355f720970ee629f19b5857e48fe17fef9cf80b2e98fed12dc536",
           "rows": [
             {
               "key": "00aafae41182fdefb0af836c3b506e127c7f229f33360c66de1139f4b0316f09d80004",
@@ -314,8 +300,6 @@
         },
         {
           "name": "v2.2-commitment-bin.1-2.kv",
-          "count": 6,
-          "digest": "a2d74382439239d72110893bb169168cc25f35fc73ff371a3026e6fb1c2a8285",
           "rows": [
             {
               "key": "0000",
@@ -351,8 +335,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 4,
-          "digest": "829e88102cebee8ce11e71c289c3217df367ee11cbafb4da1c715a2607187a5c",
           "rows": [
             {
               "key": "003be5cbeb404585affd1460c65480b7d2e5d2fa1fba9b0c3acfbf35c840c37d2c0004",
@@ -380,8 +362,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 4,
-          "digest": "7043bb7c964ab7613c69307982d94db773e6db448c1b4f63bd1ed4e734c503d1",
           "rows": [
             {
               "key": "00aafae41182fdefb0af836c3b506e127c7f229f33360c66de1139f4b0316f09d80004",
@@ -409,8 +389,6 @@
       "files": [
         {
           "name": "v2.2-commitment.0-1.kv",
-          "count": 2,
-          "digest": "a9dad7ee89c2c496787952143d2daabf5439d8d76560f32705a6394d1c779306",
           "rows": [
             {
               "key": "003be5cbeb404585affd1460c65480b7d2e5d2fa1fba9b0c3acfbf35c840c37d2c0004",
@@ -424,8 +402,6 @@
         },
         {
           "name": "v2.2-commitment.1-2.kv",
-          "count": 25,
-          "digest": "87c438529962de92f0dfa946d1dcc4686db1e783a49115c58f631cb85075f0fd",
           "rows": [
             {
               "key": "0000",
@@ -537,8 +513,6 @@
       "files": [
         {
           "name": "v2.2-commitment.0-1.kv",
-          "count": 2,
-          "digest": "2691d904f09ae09b4d5f38b825899a314aaff29ad3fe04c25c177957d83fd192",
           "rows": [
             {
               "key": "00aafae41182fdefb0af836c3b506e127c7f229f33360c66de1139f4b0316f09d80004",
@@ -552,8 +526,6 @@
         },
         {
           "name": "v2.2-commitment.1-2.kv",
-          "count": 25,
-          "digest": "4d1fa05c136b92422654922678a8e1ec1ec4885904933c0360e2a6c5043a5859",
           "rows": [
             {
               "key": "0000",
@@ -665,8 +637,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 2,
-          "digest": "a9dad7ee89c2c496787952143d2daabf5439d8d76560f32705a6394d1c779306",
           "rows": [
             {
               "key": "003be5cbeb404585affd1460c65480b7d2e5d2fa1fba9b0c3acfbf35c840c37d2c0004",
@@ -680,8 +650,6 @@
         },
         {
           "name": "v2.2-commitment-bin.1-2.kv",
-          "count": 25,
-          "digest": "87c438529962de92f0dfa946d1dcc4686db1e783a49115c58f631cb85075f0fd",
           "rows": [
             {
               "key": "0000",
@@ -793,8 +761,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 2,
-          "digest": "2691d904f09ae09b4d5f38b825899a314aaff29ad3fe04c25c177957d83fd192",
           "rows": [
             {
               "key": "00aafae41182fdefb0af836c3b506e127c7f229f33360c66de1139f4b0316f09d80004",
@@ -808,8 +774,6 @@
         },
         {
           "name": "v2.2-commitment-bin.1-2.kv",
-          "count": 25,
-          "digest": "4d1fa05c136b92422654922678a8e1ec1ec4885904933c0360e2a6c5043a5859",
           "rows": [
             {
               "key": "0000",
@@ -921,8 +885,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 4,
-          "digest": "829e88102cebee8ce11e71c289c3217df367ee11cbafb4da1c715a2607187a5c",
           "rows": [
             {
               "key": "003be5cbeb404585affd1460c65480b7d2e5d2fa1fba9b0c3acfbf35c840c37d2c0004",
@@ -950,8 +912,6 @@
       "files": [
         {
           "name": "v2.2-commitment-bin.0-1.kv",
-          "count": 4,
-          "digest": "7043bb7c964ab7613c69307982d94db773e6db448c1b4f63bd1ed4e734c503d1",
           "rows": [
             {
               "key": "00aafae41182fdefb0af836c3b506e127c7f229f33360c66de1139f4b0316f09d80004",

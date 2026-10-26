@@ -49,18 +49,7 @@ func TestPBTR21StraddleRefusalPreservesOutput(t *testing.T) {
 	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
 	require.ErrorContains(t, err, "base bin file range 1-4 straddles source commitment ranges 1-2 and 2-3")
 	after := snapshotTreeDigest(t, output)
-	var changed int
-	for name, digest := range before {
-		if after[name] != digest {
-			changed++
-		}
-	}
-	for name := range after {
-		if _, ok := before[name]; !ok {
-			changed++
-		}
-	}
-	require.Zero(t, changed, "straddle refusal must happen before any output change")
+	require.Equal(t, before, after, "straddle refusal must happen before any output change")
 }
 
 func TestPBTR21ZeroStartSpanningRangeMatchesFresh(t *testing.T) {

@@ -367,9 +367,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, manifestPbtRoot, logger); err != nil {
 		return err
 	}
-	var publishedHexRoot common.Hash
-	var publishedHexFound bool
-	publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+	publishedHexRoot, publishedHexFound, err := hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
 	if err != nil {
 		return err
 	}
@@ -449,26 +447,12 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return err
 	}
 	if blockEnd {
-		var shadowRoot common.Hash
+		shadowRoot := manifestPbtRoot
 		if afterFork {
-			if !publishedHexFound {
-				publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
-				if err != nil {
-					return err
-				}
-			}
-			if publishedHexFound {
-				shadowRoot = publishedHexRoot
-			} else {
-				blockEnd = false
-			}
-		} else {
-			shadowRoot = manifestPbtRoot
+			shadowRoot = publishedHexRoot
 		}
-		if blockEnd {
-			if err := writePBTAttachShadowRoot(ctx, nodeDirs, blockHash, blockNum, shadowRoot); err != nil {
-				return err
-			}
+		if err := writePBTAttachShadowRoot(ctx, nodeDirs, blockHash, blockNum, shadowRoot); err != nil {
+			return err
 		}
 	}
 	if err := dbstate.WriteErigonDBSettings(nodeDirs, finalSettings); err != nil {

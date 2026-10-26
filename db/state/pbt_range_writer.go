@@ -356,7 +356,6 @@ func (p *pbinFoldPipeline) processLoop() {
 					return
 				}
 			}
-			sort.Slice(batch.rows, func(i, j int) bool { return bytes.Compare(batch.rows[i].key, batch.rows[j].key) < 0 })
 			if processErr := p.process(batch); processErr != nil {
 				p.fail(batch.index, processErr)
 				return
@@ -629,20 +628,9 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 		if err != nil {
 			return nil, err
 		}
-		return &PBinRangeWriter{
-			aggregator:         aggregator,
-			domain:             domain,
-			endTxNum:           endTxNum,
-			baseTxNum:          baseTxNum,
-			leafStamp:          endTxNum,
-			maxOps:             pbinRangeWriterMaxOps,
-			maxBytes:           pbinRangeWriterMaxBytes,
-			workers:            dbg.PBTWorkers,
-			stateInFiles:       true,
-			resume:             true,
-			resumeSourceLayout: true,
-			ranges:             ranges,
-		}, nil
+		writer.resumeSourceLayout = true
+		writer.ranges = ranges
+		return writer, nil
 	}
 	start := max(stateEnd, baseTxNum)
 	ranges := make([]pbinRange, 0, len(files))

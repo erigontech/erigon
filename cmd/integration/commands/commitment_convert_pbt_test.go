@@ -137,6 +137,53 @@ func TestConvertPBTResumeRejectsUntouchedStateDifference(t *testing.T) {
 	require.ErrorContains(t, err, "C-e stream root")
 }
 
+func TestConvertPBTResumeRejectsUntouchedStateDifferenceBeforeBinaryFork(t *testing.T) {
+	selectPBTCommandSuite(t)
+	base, err := execmoduletester.NewPBTAcceptanceChainWithSharedCodeAndStepSize(t, true, true, []byte{0x60, 0x00, 0x60, 0x00, 0x52}, 1)
+	require.NoError(t, err)
+	require.NoError(t, base.Tester.InsertChain(base.Chain))
+	base.Tester.Close()
+	buildPBTResumeFiles(t, base, pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata), false)
+	output := filepath.Join(t.TempDir(), "base-output")
+	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, output, true, "", log.New()))
+
+	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 1, 6)
+	require.NoError(t, err)
+	source.Tester.Close()
+	copyPBTStateSalt(t, base, source)
+	source.Tester = execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	source.Tester.Close()
+	buildPBTResumeFiles(t, source, pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata), false)
+
+	rawDB := dbCfg(dbcfg.ChainDB, source.Tester.Dirs.Chaindata).MustOpen()
+	updateErr := rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		config, err := rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		forkTime := uint64(100)
+		config.BinaryTrieTime = &forkTime
+		return rawdb.WriteChainConfig(tx, genesisHash, config)
+	})
+	rawDB.Close()
+	require.NoError(t, updateErr)
+
+	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
+	require.ErrorContains(t, err, "C-e stream root")
+}
+
 func TestConvertPBTResumeFromStoppedHexBinSource(t *testing.T) {
 	runPBTResumeFromStoppedHexBinSource(t, 1, false, 2, 4, false)
 }

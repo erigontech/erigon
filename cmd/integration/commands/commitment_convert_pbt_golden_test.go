@@ -18,7 +18,6 @@ package commands
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -76,10 +75,8 @@ type pbtGoldenCase struct {
 }
 
 type pbtGoldenFile struct {
-	Name   string         `json:"name"`
-	Count  int            `json:"count"`
-	Digest string         `json:"digest"`
-	Rows   []pbtGoldenRow `json:"rows"`
+	Name string         `json:"name"`
+	Rows []pbtGoldenRow `json:"rows"`
 }
 
 type pbtGoldenRow struct {
@@ -299,23 +296,7 @@ func readPBTGoldenFile(t *testing.T, path, name string) pbtGoldenFile {
 		rows = append(rows, pbtGoldenRow{Key: hex.EncodeToString(key), Value: hex.EncodeToString(value)})
 	}
 	decompressor.Close()
-	return pbtGoldenFile{Name: name, Count: len(rows), Digest: pbtGoldenDigest(rows), Rows: rows}
-}
-
-func pbtGoldenDigest(rows []pbtGoldenRow) string {
-	hasher := sha256.New()
-	var size [8]byte
-	for _, row := range rows {
-		key, _ := hex.DecodeString(row.Key)
-		value, _ := hex.DecodeString(row.Value)
-		binary.BigEndian.PutUint64(size[:], uint64(len(key)))
-		_, _ = hasher.Write(size[:])
-		_, _ = hasher.Write(key)
-		binary.BigEndian.PutUint64(size[:], uint64(len(value)))
-		_, _ = hasher.Write(size[:])
-		_, _ = hasher.Write(value)
-	}
-	return hex.EncodeToString(hasher.Sum(nil))
+	return pbtGoldenFile{Name: name, Rows: rows}
 }
 
 func comparePBTGoldenCase(t *testing.T, want, got pbtGoldenCase) {
@@ -325,14 +306,13 @@ func comparePBTGoldenCase(t *testing.T, want, got pbtGoldenCase) {
 	for i := range want.Files {
 		wantFile, gotFile := want.Files[i], got.Files[i]
 		require.Equal(t, wantFile.Name, gotFile.Name, "%s: bin file placement", got.Name)
-		require.Equal(t, wantFile.Count, gotFile.Count, "%s: bin file placement in %s", got.Name, gotFile.Name)
+		require.Equal(t, len(wantFile.Rows), len(gotFile.Rows), "%s: row count in %s", got.Name, gotFile.Name)
 		for row := range wantFile.Rows {
 			if wantFile.Rows[row].Key != gotFile.Rows[row].Key {
 				require.Equal(t, wantFile.Rows[row].Key, gotFile.Rows[row].Key, "%s: first differing key in %s at row %d", got.Name, gotFile.Name, row)
 			}
 			require.Equal(t, wantFile.Rows[row].Value, gotFile.Rows[row].Value, "%s: differing value for key %s in %s", got.Name, gotFile.Rows[row].Key, gotFile.Name)
 		}
-		require.Equal(t, wantFile.Digest, gotFile.Digest, "%s: row digest in %s", got.Name, gotFile.Name)
 	}
 }
 

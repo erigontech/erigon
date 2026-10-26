@@ -153,35 +153,28 @@ func verifyPBinSourceStampRange(ctx context.Context, pin *AggregatorFilesPin, ro
 			report(done - reported)
 		}
 	}()
-	for {
-		cursor := -1
-		for i := range cursors {
-			if !cursors[i].ok || cursor >= 0 && bytes.Compare(cursors[i].key, cursors[cursor].key) >= 0 {
-				continue
+	for i := range cursors {
+		for cursors[i].ok {
+			current := &cursors[i]
+			if current.stamp > endTxNum {
+				return fmt.Errorf("pbin stamp walk: key %x has stamp %d after conversion txNum %d", current.key, current.stamp, endTxNum)
 			}
-			cursor = i
-		}
-		if cursor < 0 {
-			return nil
-		}
-		current := &cursors[cursor]
-		if current.stamp > endTxNum {
-			return fmt.Errorf("pbin stamp walk: key %x has stamp %d after conversion txNum %d", current.key, current.stamp, endTxNum)
-		}
-		done++
-		if report != nil && done-reported >= 4096 {
-			report(done - reported)
-			reported = done
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := current.advance(); err != nil {
-			return err
+			done++
+			if report != nil && done-reported >= 4096 {
+				report(done - reported)
+				reported = done
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := current.advance(); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func pbinForEachLeafSerial(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {

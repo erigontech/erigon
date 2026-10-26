@@ -154,11 +154,8 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		baseFiles := opts.TargetAggregator.BeginFilesRo()
 		defer baseFiles.Close()
 		limitTxNum := max(baseTxNum, opts.Resume.BaseStateEnd)
-		commitmentReader := commitmentdb.StateReader(&pbinConversionResumeStateReader{at: baseFiles, baseTxNum: baseTxNum, limitTxNum: limitTxNum, stepSize: opts.TargetAggregator.StepSize()})
+		commitmentReader := commitmentdb.StateReader(&pbinConversionResumeStateReader{at: baseFiles, state: opts.Resume.BaseState, baseTxNum: baseTxNum, limitTxNum: limitTxNum, stepSize: opts.TargetAggregator.StepSize()})
 		plainReader := commitmentdb.NewLatestStateReader(opts.TargetTx, domains, commitmentdb.LatestStateReaderOptions{})
-		if len(opts.Resume.BaseState) != 0 {
-			commitmentReader = &pbinConversionResumeStateReader{at: baseFiles, state: opts.Resume.BaseState, baseTxNum: baseTxNum, limitTxNum: limitTxNum, stepSize: opts.TargetAggregator.StepSize()}
-		}
 		domains.GetCommitmentCtxForDomain(opts.TargetDomain).SetStateReader(commitmentdb.NewCommitmentSplitStateReader(
 			commitmentReader,
 			plainReader,
@@ -217,9 +214,6 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	limits.Workers = workers
 	if opts.Resume != nil {
 		resume := *opts.Resume
-		if resume.SourceTxNum == 0 {
-			resume.SourceTxNum = opts.EndTxNum
-		}
 		writer, err = newPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum, resume.BaseState, resume.BaseStateEnd, resume.SourceRanges)
 		if writer != nil {
 			writer.workers = workers

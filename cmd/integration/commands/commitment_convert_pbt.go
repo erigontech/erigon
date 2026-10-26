@@ -23,8 +23,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -1431,11 +1433,7 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, visibleRanges 
 		}
 		outputByPath[filepath.Clean(rel)] = file
 	}
-	paths := make([]string, 0, len(sourceByPath))
-	for path := range sourceByPath {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	paths := slices.Sorted(maps.Keys(sourceByPath))
 	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output identity verify", Total: uint64(len(paths))})
 	defer progress.Done()
 	var missing error
