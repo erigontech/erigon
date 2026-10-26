@@ -110,3 +110,18 @@ func TestBackwardBlockDownloader_HeaderWalkFailsWhenRefreshedPeersMakeNoProgress
 	require.ErrorContains(t, err, "all peers exhausted")
 	require.EqualValues(t, 3, fetcher.peer1Batches.Load())
 }
+
+func TestBackwardBlockDownloader_PinnedHeaderWalkKeepsItsPeer(t *testing.T) {
+	headers := headerWalkChain(1501)
+	fetcher := &lateJoinHeaderFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}, headerBatches: map[PeerId]int{}}
+	bbd := newTestBbd(t, fetcher)
+	fetcher.tracker = bbd.peerTracker
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithPeerId(PeerIdFromUint64(1)))
+	require.NoError(t, err)
+	_, err = feed.Next(ctx)
+	require.ErrorContains(t, err, "all peers exhausted")
+	require.Zero(t, fetcher.headerBatches[*PeerIdFromUint64(2)])
+}
