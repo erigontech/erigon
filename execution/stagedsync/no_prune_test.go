@@ -129,14 +129,11 @@ func (stubFreezingBlockReader) FreezingCfg() ethconfig.BlocksFreezing {
 	return ethconfig.BlocksFreezing{ProduceE2: true}
 }
 
-func (stubFreezingBlockReader) FrozenBlocks() uint64 { return 0 }
-
 type recordingBlockRetire struct {
 	dbservices.BlockRetire
 	builds         int
 	onFinishRetire func() error
 	ancientPrunes  int
-	pruneLimit     int
 }
 
 func (r *recordingBlockRetire) SetWorkers(int) {}
@@ -147,9 +144,8 @@ func (r *recordingBlockRetire) BuildFilesInBackground(_ context.Context, _ uint6
 	return true
 }
 
-func (r *recordingBlockRetire) PruneAncientBlocks(_ kv.RwTx, limit int, _ time.Duration) (int, error) {
+func (r *recordingBlockRetire) PruneAncientBlocks(kv.RwTx, int, time.Duration) (int, error) {
 	r.ancientPrunes++
-	r.pruneLimit = limit
 	return 0, nil
 }
 

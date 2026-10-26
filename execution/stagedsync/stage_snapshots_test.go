@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -482,20 +481,4 @@ func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
 	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
-}
-
-func TestSnapshotsPruneKeepsUpWithLargeCycles(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const cycleStart, cycleEnd uint64 = 1_000_000, 1_050_000
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, cycleEnd))
-
-	retire := &recordingBlockRetire{}
-	cfg := SnapshotsCfg{blockReader: stubFreezingBlockReader{}, blockRetire: retire}
-	s := &PruneState{ID: stages.Snapshots, ForwardProgress: cycleStart, CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
-	require.NoError(t, SnapshotsPrune(s, cfg, t.Context(), tx))
-	require.Equal(t, int(cycleEnd-cycleStart), retire.pruneLimit)
 }

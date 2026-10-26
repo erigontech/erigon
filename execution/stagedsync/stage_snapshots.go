@@ -597,15 +597,8 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneLimit = 10_000
+		pruneLimit = 100_000
 		pruneTimeout = time.Hour
-	}
-	sendersProgress, err := stages.GetStageProgress(tx, stages.Senders)
-	if err != nil {
-		return err
-	}
-	if sendersProgress > s.ForwardProgress {
-		pruneLimit = max(pruneLimit, int(sendersProgress-s.ForwardProgress))
 	}
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
