@@ -2506,6 +2506,10 @@ func (result *execResult) calcFees(
 			// first credit; without mirroring that, getVersionedAccount returns nil for
 			// a freshly-credited coinbase and Empty() returns true — charging a stale
 			// CallNewAccountGas for a mid-tx CALL-with-value to the coinbase.
+			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
+			// On a BAL block the record of a live coinbase already exists; re-emitting it each tx
+			// misses the pre-seeded cells and takes the coinbase's write lock on every validation.
+			skipAddress := vm.HasBAL && coinbaseAcc != nil && !coinbaseNetDestructed && !cbOverride && !coinbaseSelfdestructed && cbLifecycle == state.LifecycleLive
 			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
 			if coinbaseAcc != nil && !coinbaseNetDestructed {
 				addrAcc.Nonce = coinbaseAcc.Nonce
@@ -2518,14 +2522,16 @@ func (result *execResult) calcFees(
 					addrAcc.CodeHash = coinbaseCodeHash
 				}
 			}
-			addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
-				WriteHeader: state.WriteHeader{
-					Address: result.Coinbase,
-					Path:    state.AddressPath,
-					Version: taskVersion,
-				},
-				Val: addrAcc,
-			})
+			if !skipAddress {
+				addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
+					WriteHeader: state.WriteHeader{
+						Address: result.Coinbase,
+						Path:    state.AddressPath,
+						Version: taskVersion,
+					},
+					Val: addrAcc,
+				})
+			}
 			// When the fee credit revives a coinbase absent from the committed domain,
 			// a CodeHashPath read resolves from its own cell, not the AddressPath
 			// account — so without this sibling it reads back NilCodeHash instead of
@@ -2533,7 +2539,6 @@ func (result *execResult) calcFees(
 			// per-path revival check needs a CodeHashPath write strictly above the
 			// destruct. Gated to revival cases: an unconditional emit would add a
 			// spurious block-access-list entry for an ordinary fee credit.
-			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
 			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && !coinbaseHasCodeHashWrite && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
 			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
 				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
