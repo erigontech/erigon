@@ -213,3 +213,21 @@ func TestSyncContributionServiceCommitteeNotInHeadState(t *testing.T) {
 		})
 	}
 }
+
+func TestSyncContributionServiceSeenSetIsBounded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	s, _, _ := setupSyncContributionServiceTest(ctrl)
+	service := s.(*syncContributionService)
+	contribution := func(slot uint64) *cltypes.ContributionAndProof {
+		return &cltypes.ContributionAndProof{Contribution: &cltypes.Contribution{Slot: slot}}
+	}
+
+	slots := 100 * service.beaconCfg.SyncCommitteeSize
+	for slot := uint64(0); slot < slots; slot++ {
+		service.markContributionAsSeen(contribution(slot))
+	}
+	require.False(t, service.wasContributionSeen(contribution(0)))
+	require.True(t, service.wasContributionSeen(contribution(slots-1)))
+}
