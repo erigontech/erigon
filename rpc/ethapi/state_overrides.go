@@ -156,14 +156,28 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 // On the versioned path the writes go to the version map, where the next transaction index
 // reads them; on the materializing path FinalizeTx commits them to the state objects.
 func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	return FinalizeCallTxTo(ibs, rules, nil)
+}
+
+// FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter,
+// as FinalizeTx does for a materialized state; a nil stateWriter takes none.
+func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if !ibs.IsVersioned() {
-		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+		if stateWriter == nil {
+			stateWriter = state.NewNoopWriter()
+		}
+		return ibs.FinalizeTx(rules, stateWriter)
 	}
 	writes, err := ibs.FinalizedWrites(rules)
 	if err != nil {
 		return err
 	}
 	ibs.FlushWritesToVersionMap(writes)
+	if stateWriter != nil {
+		if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+			return err
+		}
+	}
 	ibs.SoftFinalise()
 	ibs.ResetVersionedIO()
 	return nil

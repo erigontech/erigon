@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -2844,6 +2845,62 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	}
 	writes.assertNotArena("flush")
 	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+}
+
+// WriteFlushedTo hands the current tx's writes, already flushed to the versionMap, to
+// stateWriter the way FinalizeTx hands a materialized tx's: each account as it reads
+// before and after the tx, each storage slot with its value at tx start.
+func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWriter) error {
+	before := NewVersionedStateReader(ibs.txIndex, ReadSet{}, ibs.versionMap, ibs.stateReader)
+	after := NewVersionedStateReader(ibs.txIndex+1, ReadSet{}, ibs.versionMap, ibs.stateReader)
+	touched := map[accounts.Address]struct{}{}
+	for h := range writes.AllHeaders() {
+		touched[h.Address] = struct{}{}
+	}
+	addrs := slices.Collect(maps.Keys(touched))
+	slices.SortFunc(addrs, func(a, b accounts.Address) int {
+		av, bv := a.Value(), b.Value()
+		return bytes.Compare(av[:], bv[:])
+	})
+	storage := maps.Collect(writes.StoragesChanged())
+	for _, addr := range addrs {
+		original, err := before.ReadAccountData(addr)
+		if err != nil {
+			return err
+		}
+		if original == nil {
+			original = &accounts.Account{}
+		}
+		account, err := after.ReadAccountData(addr)
+		if err != nil {
+			return err
+		}
+		if account == nil {
+			if err := stateWriter.DeleteAccount(addr, original); err != nil {
+				return err
+			}
+			continue
+		}
+		if code, ok := writes.GetCode(addr); ok {
+			if err := stateWriter.UpdateAccountCode(addr, account.Incarnation, account.CodeHash, code.Val.Bytes); err != nil {
+				return err
+			}
+		}
+		if created, ok := writes.GetCreateContract(addr); ok && created.Val {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return err
+			}
+		}
+		for key, vw := range storage[addr] {
+			if err := stateWriter.WriteAccountStorage(addr, account.Incarnation, key, vw.orig, vw.Val); err != nil {
+				return err
+			}
+		}
+		if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
