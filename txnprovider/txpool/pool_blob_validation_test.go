@@ -129,7 +129,7 @@ func TestValidateBlobTxn(t *testing.T) {
 			t.Run("sender limit before proof verification", func(t *testing.T) {
 				pool.all.senderIDBlobCount[slot.SenderID] = pool.cfg.BlobSlots
 				defer delete(pool.all.senderIDBlobCount, slot.SenderID)
-				require.Equal(t, txpoolcfg.Spammer, pool.validateBlobTxn(&badProof, false))
+				require.Equal(t, txpoolcfg.BlobSlotsOverflow, pool.validateBlobTxn(&badProof, false))
 				require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, pool.validateBlobTxn(&badProof, true))
 			})
 		})

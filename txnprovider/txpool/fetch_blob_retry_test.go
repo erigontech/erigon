@@ -85,62 +85,159 @@ func newFetchBlobRetryFixture(t *testing.T, nonce uint64) (*TxPool, *types.BlobT
 }
 
 func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
-	ctx := t.Context()
-	pool, good, badWire, goodWire, _ := newFetchBlobRetryFixture(t, 0)
-	hash := good.Hash()
-	badBody := EncodePooledTransactions66([][]byte{badWire}, 1, nil)
-	goodBody := EncodePooledTransactions66([][]byte{goodWire}, 1, nil)
-	require.NotEqual(t, badBody, goodBody)
-	client, sent, _ := newFetchTestClient(t)
-	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
-	parses := countFetchTestParses(fetch)
-	parse := NewTxnParseContext(pool.chainID).ChainIDRequired()
-	parse.ValidateRLP(ValidateSerializedTxn)
-	for _, wire := range [][]byte{badWire, goodWire} {
-		var slot TxnSlot
-		_, err := parse.ParseTransaction(wire, 0, &slot, make([]byte, 20), false, true, nil)
-		require.NoError(t, err)
-		require.Equal(t, [32]byte(hash), slot.IDHash)
-		require.NoError(t, fetch.checkBlobSidecar(&slot))
+	for _, wrongVersion := range []bool{false, true} {
+		name := "corrupted blob"
+		if wrongVersion {
+			name = "wrong wrapper version"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			pool, good, badWire, goodWire, _ := newFetchBlobRetryFixture(t, 0)
+			if wrongVersion {
+				var err error
+				badWire, err = good.ConvertToV1()
+				require.NoError(t, err)
+			}
+			hash := good.Hash()
+			badBody := EncodePooledTransactions66([][]byte{badWire}, 1, nil)
+			goodBody := EncodePooledTransactions66([][]byte{goodWire}, 1, nil)
+			require.NotEqual(t, badBody, goodBody)
+			client, sent, _ := newFetchTestClient(t)
+			var wg sync.WaitGroup
+			fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+			parses := countFetchTestParses(fetch)
+			parse := NewTxnParseContext(pool.chainID).ChainIDRequired()
+			parse.ValidateRLP(ValidateSerializedTxn)
+			for _, wire := range [][]byte{badWire, goodWire} {
+				var slot TxnSlot
+				_, err := parse.ParseTransaction(wire, 0, &slot, make([]byte, 20), false, true, nil)
+				require.NoError(t, err)
+				require.Equal(t, [32]byte(hash), slot.IDHash)
+				require.NoError(t, fetch.checkBlobSidecar(&slot))
+			}
+			badReply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: badBody, PeerId: peerID}
+			goodReply := &sentryproto.InboundMessage{
+				Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: goodBody, PeerId: gointerfaces.ConvertHashToH512([64]byte{2}),
+			}
+			receiveFetchTestMessages(t, fetch, client,
+				func() *sentryproto.InboundMessage { return badReply },
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+					return goodReply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+					require.Empty(t, pool.byHash)
+					return badReply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns, "the invalid sidecar must stay suppressed")
+					return goodReply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "the honest sidecar must be retried after the queued sidecar is rejected")
+					require.Equal(t, byte(1), pool.unprocessedRemoteTxns.Txns[0].BlobBundles[0].Blob[31])
+					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+					require.Contains(t, pool.byHash, string(hash[:]))
+					return nil
+				},
+			)
+			require.Equal(t, int64(3), parses())
+			require.Empty(t, sent)
+		})
 	}
-	badReply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: badBody, PeerId: peerID}
-	goodReply := &sentryproto.InboundMessage{
-		Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: goodBody, PeerId: gointerfaces.ConvertHashToH512([64]byte{2}),
+}
+
+func TestFetchBlobCapacityRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		badSidecar   bool
+		accountLimit bool
+		remaining    int
+	}{
+		{"blob limit with valid sidecar", false, false, 2},
+		{"blob limit with invalid sidecar", true, false, 2},
+		{"account limit", false, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			pool, template, _, _, key := newFetchBlobRetryFixture(t, 0)
+			if tc.accountLimit {
+				pool.cfg.AccountSlots = 1
+			} else {
+				pool.cfg.BlobSlots = 2
+			}
+			makeSigned := func(nonce uint64) *types.BlobTxWrapper {
+				wrapper := types.CopyTxs(types.Transactions{template})[0].(*types.BlobTxWrapper)
+				wrapper.Tx.Nonce = nonce
+				signed, err := types.SignTx(wrapper, *types.LatestSignerForChainID(&pool.chainID), key)
+				require.NoError(t, err)
+				return signed.(*types.BlobTxWrapper)
+			}
+			parse := NewTxnParseContext(pool.chainID).ChainIDRequired()
+			parse.ValidateRLP(ValidateSerializedTxn)
+			var hashes []common.Hash
+			for nonce := range uint64(2) {
+				signed := makeSigned(nonce)
+				var encoded bytes.Buffer
+				require.NoError(t, signed.MarshalBinaryWrapped(&encoded))
+				var slot TxnSlot
+				sender := make([]byte, 20)
+				_, err := parse.ParseTransaction(encoded.Bytes(), 0, &slot, sender, false, true, nil)
+				require.NoError(t, err)
+				var local TxnSlots
+				local.Append(&slot, sender, true)
+				reasons, err := pool.AddLocalTxns(ctx, local)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				hashes = append(hashes, signed.Hash())
+			}
+			require.Len(t, pool.byHash, 2)
+			signed := makeSigned(2)
+			hash := signed.Hash()
+			if tc.badSidecar {
+				signed.Blobs[0][31] ^= 1
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, signed.MarshalBinaryWrapped(&encoded))
+			client, _, penalties := newFetchTestClient(t)
+			var wg sync.WaitGroup
+			fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+			receiveFetchTestMessages(t, fetch, client,
+				func() *sentryproto.InboundMessage {
+					return &sentryproto.InboundMessage{
+						Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, PeerId: peerID,
+						Data: EncodePooledTransactions66([][]byte{encoded.Bytes()}, 1, nil),
+					}
+				},
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					require.NoError(t, err)
+					require.Len(t, reasons, 1)
+					require.NotEqual(t, txpoolcfg.Success, reasons[0])
+					require.NotContains(t, pool.byHash, string(hash[:]))
+					require.Len(t, pool.byHash, tc.remaining)
+					require.Equal(t, uint64(tc.remaining), pool.totalBlobsInPool.Load())
+					require.Contains(t, pool.byHash, string(hashes[0][:]))
+					if tc.remaining == 2 {
+						require.Contains(t, pool.byHash, string(hashes[1][:]))
+					} else {
+						require.Equal(t, txpoolcfg.Spammer, reasons[0])
+						require.NotContains(t, pool.byHash, string(hashes[1][:]))
+					}
+					return nil
+				},
+			)
+			require.Empty(t, penalties)
+		})
 	}
-	receiveFetchTestMessages(t, fetch, client,
-		func() *sentryproto.InboundMessage { return badReply },
-		func() *sentryproto.InboundMessage {
-			require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-			require.Equal(t, byte(0), pool.unprocessedRemoteTxns.Txns[0].BlobBundles[0].Blob[31])
-			return goodReply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-			require.Equal(t, byte(0), pool.unprocessedRemoteTxns.Txns[0].BlobBundles[0].Blob[31])
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
-			require.Empty(t, pool.unprocessedRemoteTxns.Txns)
-			require.Empty(t, pool.byHash)
-			return badReply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Empty(t, pool.unprocessedRemoteTxns.Txns, "the sidecar that failed KZG validation must stay suppressed")
-			return goodReply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "the honest sidecar must be retried after the queued sidecar fails KZG validation")
-			require.Equal(t, byte(1), pool.unprocessedRemoteTxns.Txns[0].BlobBundles[0].Blob[31])
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-			require.Contains(t, pool.byHash, string(hash[:]))
-			return nil
-		},
-	)
-	require.Equal(t, int64(3), parses())
-	require.Empty(t, sent)
 }
 
 func TestFetchRetriesMixedHonestPacketAfterNonceProgressAndQueuedSidecarFailure(t *testing.T) {
