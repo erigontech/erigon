@@ -34,7 +34,6 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		tasks:               tasks,
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(nil),
-		readerIdx:           map[readerKey][]int{},
 		readerByAddr:        map[accounts.Address][]int{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
