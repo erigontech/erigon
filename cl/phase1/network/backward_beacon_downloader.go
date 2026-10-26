@@ -93,7 +93,14 @@ type BackwardBeaconDownloader struct {
 	consecutiveEnvelopeFailures  int
 	gloasSuccessorSourceFailures int
 
+	prefetched []prefetchedRange
+
 	mu sync.Mutex
+}
+
+type prefetchedRange struct {
+	lo, hi uint64
+	blocks chan []*cltypes.SignedBeaconBlock
 }
 
 var (
@@ -136,6 +143,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 const (
 	defaultReqInterval      = 200 * time.Millisecond
 	maxEmptyResponseBackoff = 5 * time.Second
+	maxPrefetchedRanges     = 8
 )
 
 // NewGloasSuccessorValidator validates a direct successor from an immutable checkpoint state.
@@ -413,6 +421,18 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 	received := make(chan []*cltypes.SignedBeaconBlock, 1)
 	var requestSent atomic.Bool
 
+	slot := b.slotToDownload.Load()
+	for len(b.prefetched) > 0 && b.prefetched[0].lo > slot {
+		b.prefetched = b.prefetched[1:]
+	}
+	bottom := start
+	var prefetched chan []*cltypes.SignedBeaconBlock
+	if len(b.prefetched) > 0 && slot <= b.prefetched[0].hi {
+		prefetched, bottom = b.prefetched[0].blocks, b.prefetched[0].lo
+		b.prefetched = b.prefetched[1:]
+		requestSent.Store(true)
+	}
+
 	p2pDeadline := time.NewTimer(10 * time.Second)
 	defer p2pDeadline.Stop()
 
@@ -423,9 +443,18 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 
 		case <-b.reqInterval.C:
 			if requestSent.Swap(true) {
-				continue // request already in flight
+				b.prefetchRange(ctx, bottom)
+				continue
 			}
 			go b.sendBlockRequest(ctx, start, count, received, &requestSent)
+
+		case blocks := <-prefetched:
+			prefetched = nil
+			if hasBlockWithRoot(blocks, b.expectedRoot) {
+				return blocks, nil
+			}
+			bottom = start
+			requestSent.Store(false)
 
 		case responses := <-received:
 			return responses, nil
@@ -447,6 +476,35 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 			p2pDeadline.Reset(10 * time.Second)
 		}
 	}
+}
+
+func (b *BackwardBeaconDownloader) prefetchRange(ctx context.Context, bottom uint64) {
+	if n := len(b.prefetched); n > 0 {
+		bottom = b.prefetched[n-1].lo
+	}
+	if bottom == 0 || len(b.prefetched) >= maxPrefetchedRanges || b.requestBlocksByRange == nil {
+		return
+	}
+	hi := bottom - 1
+	lo := hi - min(hi, 63)
+	blocks := make(chan []*cltypes.SignedBeaconBlock, 1)
+	b.prefetched = append(b.prefetched, prefetchedRange{lo: lo, hi: hi, blocks: blocks})
+	go func() {
+		resp, _, err := b.requestBlocksByRange(ctx, lo, hi-lo+1)
+		if err != nil {
+			resp = nil
+		}
+		blocks <- resp
+	}()
+}
+
+func hasBlockWithRoot(blocks []*cltypes.SignedBeaconBlock, root common.Hash) bool {
+	for _, block := range slices.Backward(blocks) {
+		if blockRoot, err := block.Block.HashSSZ(); err == nil && blockRoot == root {
+			return true
+		}
+	}
+	return false
 }
 
 // sendBlockRequest sends a block range request and writes the result to the channel.
