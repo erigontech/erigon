@@ -23,14 +23,18 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/node/app/util/random"
-	"golang.org/x/exp/constraints"
 )
 
-func SequentialGenerator[T constraints.Integer](initialId T) IdGenerator[T] {
+type integer interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
+
+func SequentialGenerator[T integer](initialId T) IdGenerator[T] {
 	return &sequentialGenerator[T]{initialId, sync.Mutex{}}
 }
 
-type sequentialGenerator[T constraints.Integer] struct {
+type sequentialGenerator[T integer] struct {
 	nextId T
 	mutex  sync.Mutex
 }
