@@ -267,10 +267,12 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	fetchCtx, cancelFetches := context.WithCancel(ctx)
 	defer cancelFetches()
 	inFlight := make(map[uint64]chan headerBatchResult)
+	rangeFailed := make(map[PeerId]bool)
 	var window int
+	initialNum := initialHeader.Number.Uint64()
 	var nextRangeTop uint64
-	if num := initialHeader.Number.Uint64(); num > 0 {
-		nextRangeTop = num - 1
+	if initialNum > 0 {
+		nextRangeTop = initialNum - 1
 	}
 	lastHeader := initialHeader
 	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
@@ -333,9 +335,9 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		if nextRangeTop > parentNum {
 			nextRangeTop = parentNum
 		}
-		for len(inFlight) < window && nextRangeTop > 0 {
+		for len(inFlight) < window && nextRangeTop > 0 && initialNum-nextRangeTop <= config.chainLengthLimit {
 			rangePeer, err := peers.nextAvailablePeer()
-			if err != nil {
+			if err != nil || rangeFailed[rangePeer] {
 				break
 			}
 			top := nextRangeTop
@@ -368,9 +370,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 					"peerId", res.peerId.String(),
 					"err", res.err,
 				)
-				if peerIndex, ok := peers.peerIdToIndex[res.peerId]; ok {
-					peers.exhaustedPeers[peerIndex] = true
-				}
+				rangeFailed[res.peerId] = true
 			}
 		}
 		if headers == nil {

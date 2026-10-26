@@ -131,7 +131,7 @@ func TestBackwardBlockDownloader_HeaderWalkFailsWhenRefreshedPeersMakeNoProgress
 	require.NoError(t, err)
 	_, err = feed.Next(ctx)
 	require.ErrorContains(t, err, "all peers exhausted")
-	require.EqualValues(t, 3, fetcher.peer1Batches.Load())
+	require.EqualValues(t, 4, fetcher.peer1Batches.Load())
 }
 
 func TestBackwardBlockDownloader_PinnedHeaderWalkKeepsItsPeer(t *testing.T) {
@@ -154,11 +154,13 @@ func TestBackwardBlockDownloader_PinnedHeaderWalkKeepsItsPeer(t *testing.T) {
 type concurrencyHeaderFetcher struct {
 	chainServingBbdFetcher
 	byNumberFork map[uint64]*types.Header
+	calls        atomic.Int64
 	inFlight     atomic.Int64
 	maxInFlight  atomic.Int64
 }
 
 func (s *concurrencyHeaderFetcher) track() func() {
+	s.calls.Add(1)
 	n := s.inFlight.Add(1)
 	for {
 		m := s.maxInFlight.Load()
@@ -243,4 +245,64 @@ func TestBackwardBlockDownloader_HeaderWalkRefetchesByHashWhenRangeDoesNotLink(t
 	for i, b := range blocks {
 		require.Equal(t, headers[i+1].Hash(), b.Hash(), "block %d", b.NumberU64())
 	}
+}
+
+// rangeFailingFetcher fails every by-number range, and the by-hash batch call numbered failHashCall when set.
+type rangeFailingFetcher struct {
+	chainServingBbdFetcher
+	failHashCall int64
+	hashCalls    atomic.Int64
+	rangeCalls   atomic.Int64
+}
+
+func (s *rangeFailingFetcher) FetchHeaders(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	s.rangeCalls.Add(1)
+	return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+}
+
+func (s *rangeFailingFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	if amount > 1 && s.hashCalls.Add(1) == s.failHashCall {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func TestBackwardBlockDownloader_HeaderWalkRangeFailuresDoNotUseUpPeers(t *testing.T) {
+	headers := headerWalkChain(1501)
+	fetcher := &rangeFailingFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}, failHashCall: 2}
+	bbd := newTestBbd(t, fetcher)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+	require.NoError(t, err)
+	require.Len(t, drainHeaderWalkFeed(ctx, t, feed), len(headers)-1)
+}
+
+func TestBackwardBlockDownloader_PinnedHeaderWalkFallsBackToHashAfterRangeFailure(t *testing.T) {
+	headers := headerWalkChain(1501)
+	fetcher := &rangeFailingFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}}
+	bbd := newTestBbd(t, fetcher)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithPeerId(PeerIdFromUint64(1)))
+	require.NoError(t, err)
+	require.Len(t, drainHeaderWalkFeed(ctx, t, feed), len(headers)-1)
+	require.EqualValues(t, 1, fetcher.rangeCalls.Load())
+}
+
+func TestBackwardBlockDownloader_HeaderWalkRequestsNothingPastChainLengthLimit(t *testing.T) {
+	headers := headerWalkChain(6001)
+	fetcher := &concurrencyHeaderFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}}
+	bbd := newTestBbd(t, fetcher)
+	bbd.peerTracker.PeerConnected(PeerIdFromUint64(2))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithChainLengthLimit(5000))
+	require.NoError(t, err)
+	_, err = feed.Next(ctx)
+	require.ErrorIs(t, err, ErrChainLengthExceedsLimit)
+	require.EqualValues(t, 10, fetcher.calls.Load())
 }
