@@ -17,6 +17,7 @@
 package executiontests
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -90,6 +91,59 @@ func TestRevertedCreate2KeepsCredits(t *testing.T) {
 				require.Equal(t, uint64(1005), seen.Uint64())
 				return nil
 			}))
+		})
+	}
+}
+
+// A factory CREATE2s a contract with an endowment onto a prefunded address, and
+// a reverting frame then makes the contract SELFDESTRUCT. The contract keeps the
+// prefund plus the endowment, and a later tx of the block must see that balance.
+func TestRevertedSelfdestructKeepsCreateEndowment(t *testing.T) {
+	for _, amsterdam := range []bool{false, true} {
+		t.Run(fmt.Sprintf("amsterdam=%v", amsterdam), func(t *testing.T) {
+			const salt, prefund, endowment = 1, 7, 1000
+			beneficiary := common.HexToAddress("0xbeef")
+			runtime := program.New().Selfdestruct(beneficiary).Bytes()
+			initCode := program.New().ReturnData(runtime).Bytes()
+			factory := common.HexToAddress("0xaaaa")
+			contract := types.CreateAddress2(factory, [32]byte{31: salt}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+			reverter := common.HexToAddress("0xbbbb")
+			observer := common.HexToAddress("0xcccc")
+			config := chain.TestChainOsakaConfig.Copy()
+			config.AmsterdamTime = nil
+			if amsterdam {
+				config.AmsterdamTime = common.NewUint64(0)
+			}
+			signer := types.LatestSignerForChainID(config.ChainID)
+			create2 := program.New().Mstore(initCode, 0).
+				Push(salt).Push(len(initCode)).Push(0).Push(endowment).Op(vm.CREATE2).Op(vm.POP)
+			alloc := types.GenesisAlloc{
+				contract: {Balance: big.NewInt(prefund)},
+				factory:  {Balance: big.NewInt(endowment), Code: create2.Call(nil, reverter, 0, 0, 0, 0, 0).Op(vm.POP).Bytes()},
+				reverter: {Code: program.New().Call(nil, contract, 0, 0, 0, 0, 0).Op(vm.POP).
+					Push(0).Push(0).Op(vm.REVERT).Bytes()},
+				observer: {Code: program.New().
+					Push(contract).Op(vm.BALANCE).Push(0).Op(vm.SSTORE).
+					Push(contract).Op(vm.EXTCODESIZE).Push(1).Op(vm.SSTORE).
+					Push(beneficiary).Op(vm.BALANCE).Push(2).Op(vm.SSTORE).
+					Bytes()},
+			}
+			keys := revivalKeys(t, alloc, 1)
+			sender := crypto.PubkeyToAddress(keys[0].PublicKey)
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+			gen := func(_ int, b *blockgen.BlockGen) {
+				for _, to := range []common.Address{factory, observer} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *signer, keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			}
+			serial, parallels := importSerialThenParallel(t, gspec, keys[0], 1, []int{1, 2, 4}, gen)
+			want := storageValues(t, serial, observer, 0, 1, 2)
+			require.Equal(t, []uint64{prefund + endowment, uint64(len(runtime)), 0}, want)
+			for i, p := range parallels {
+				require.Equalf(t, want, storageValues(t, p, observer, 0, 1, 2), "parallel #%d", i)
+			}
 		})
 	}
 }
