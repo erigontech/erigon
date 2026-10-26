@@ -264,6 +264,14 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
 	var peersRefreshedAt uint64
+	fetchCtx, cancelFetches := context.WithCancel(ctx)
+	defer cancelFetches()
+	inFlight := make(map[uint64]chan headerBatchResult)
+	var window int
+	var nextRangeTop uint64
+	if num := initialHeader.Number.Uint64(); num > 0 {
+		nextRangeTop = num - 1
+	}
 	lastHeader := initialHeader
 	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
 	var connectionPoint *types.Header
@@ -303,23 +311,6 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			break
 		}
 
-		peerId, err := peers.nextAvailablePeer()
-		if err != nil && config.peerId == nil && chainLen > peersRefreshedAt {
-			if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
-				peersRefreshedAt = chainLen
-				peers = newPeersContext(connected)
-				peerId, err = peers.nextAvailablePeer()
-			}
-		}
-		if err != nil {
-			return nil, fmt.Errorf(
-				"no peers available before reaching connection point num=%d, hash=%s: %w",
-				parentNum,
-				parentHash,
-				err,
-			)
-		}
-
 		select {
 		case <-logProgressTicker.C:
 			progressLogArgs := []any{
@@ -339,23 +330,86 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			}
 		}
 
-		peerIndex := peers.peerIdToIndex[peerId]
-		resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId, fetcherOpts...)
-		if err != nil {
-			bbd.logger.Debug(
-				"[backward-block-downloader] could not fetch headers batch from peer",
-				"num", parentNum,
-				"hash", parentHash,
-				"amount", amount,
-				"peerId", peerId.String(),
-				"err", err,
-			)
-			peers.exhaustedPeers[peerIndex] = true
-			continue
+		if nextRangeTop > parentNum {
+			nextRangeTop = parentNum
+		}
+		for len(inFlight) < window && nextRangeTop > 0 {
+			rangePeer, err := peers.nextAvailablePeer()
+			if err != nil {
+				break
+			}
+			top := nextRangeTop
+			n := min(top, maxHeadersBatchLen)
+			result := make(chan headerBatchResult, 1)
+			inFlight[top] = result
+			nextRangeTop -= n
+			go func() {
+				resp, err := bbd.fetcher.FetchHeaders(fetchCtx, top-n+1, top+1, &rangePeer, fetcherOpts...)
+				result <- headerBatchResult{headers: resp.Data, peerId: rangePeer, err: err}
+			}()
 		}
 
+		var headers []*types.Header
+		if result, ok := inFlight[parentNum]; ok {
+			delete(inFlight, parentNum)
+			var res headerBatchResult
+			select {
+			case res = <-result:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			if res.err == nil && len(res.headers) > 0 && res.headers[len(res.headers)-1].Hash() == parentHash {
+				headers = res.headers
+			} else {
+				bbd.logger.Debug(
+					"[backward-block-downloader] headers range by number does not link to the walk",
+					"num", parentNum,
+					"hash", parentHash,
+					"peerId", res.peerId.String(),
+					"err", res.err,
+				)
+				if peerIndex, ok := peers.peerIdToIndex[res.peerId]; ok {
+					peers.exhaustedPeers[peerIndex] = true
+				}
+			}
+		}
+		if headers == nil {
+			peerId, err := peers.nextAvailablePeer()
+			if err != nil && config.peerId == nil && chainLen > peersRefreshedAt {
+				if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
+					peersRefreshedAt = chainLen
+					peers = newPeersContext(connected)
+					peerId, err = peers.nextAvailablePeer()
+				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf(
+					"no peers available before reaching connection point num=%d, hash=%s: %w",
+					parentNum,
+					parentHash,
+					err,
+				)
+			}
+
+			peerIndex := peers.peerIdToIndex[peerId]
+			resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId, fetcherOpts...)
+			if err != nil {
+				bbd.logger.Debug(
+					"[backward-block-downloader] could not fetch headers batch from peer",
+					"num", parentNum,
+					"hash", parentHash,
+					"amount", amount,
+					"peerId", peerId.String(),
+					"err", err,
+				)
+				peers.exhaustedPeers[peerIndex] = true
+				continue
+			}
+			headers = resp.Data
+		}
+		window = min(max(2*window, 1), config.maxParallelHeaderDownloads)
+
 		// collect the headers batch into the etl and check for a connecting point
-		headers := resp.Data
 		for _, header := range slices.Backward(headers) {
 			headerNum := header.Number.Uint64()
 			if headerNum == 0 {
@@ -699,6 +753,12 @@ func newPeersContext(peers []*PeerId) peersContext {
 		peerIndexToId:  peerIndexToId,
 		exhaustedPeers: make([]bool, len(peers)),
 	}
+}
+
+type headerBatchResult struct {
+	headers []*types.Header
+	peerId  PeerId
+	err     error
 }
 
 type peersContext struct {
