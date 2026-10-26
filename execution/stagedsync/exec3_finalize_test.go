@@ -2011,6 +2011,68 @@ func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
 	}
 }
 
+// On a BAL block a live coinbase already has its account record, so the fee credit writes only the
+// balance; a first credit still writes the record. Either way the next tx reads the credited balance
+// with the coinbase's nonce and code intact.
+func TestCalcFees_BALCoinbaseAddressPath(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	const tip = 1_000
+	for _, tc := range []struct {
+		name        string
+		pre         *accounts.Account
+		wantAddress bool
+	}{
+		{"live coinbase skips the record", &accounts.Account{Nonce: 5, Balance: *uint256.NewInt(7), CodeHash: accounts.InternCodeHash(common.Hash{0xc0})}, false},
+		{"first credit writes the record", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+			reader := newMapStateReader()
+			want := accounts.Account{CodeHash: accounts.EmptyCodeHash}
+			if tc.pre != nil {
+				reader.accounts[coinbase] = tc.pre
+				want = *tc.pre
+			}
+
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000},
+				TxNum:  version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task:            task,
+				ExecutionResult: evmtypes.ExecutionResult{FeeTipped: *uint256.NewInt(tip), BurntContractAddress: accounts.NilAddress},
+				Coinbase:        coinbase,
+				TxOut:           &state.WriteSet{},
+			}}
+
+			vm := state.NewVersionMap(nil)
+			vm.HasBAL = true
+			writes, err := result.calcFees(task, vm, reader, rules)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantAddress, findAddress(writes, coinbase) != nil)
+
+			vm.FlushVersionedWrites(writes, true, "")
+			next := state.NewWithVersionMap(reader, vm)
+			next.SetTxContext(1, 2)
+			bal, err := next.GetBalance(coinbase)
+			require.NoError(t, err)
+			require.Equal(t, *new(uint256.Int).AddUint64(&want.Balance, tip), bal)
+			nonce, err := next.GetNonce(coinbase)
+			require.NoError(t, err)
+			require.Equal(t, want.Nonce, nonce)
+			codeHash, err := next.GetCodeHash(coinbase)
+			require.NoError(t, err)
+			require.Equal(t, want.CodeHash, codeHash)
+		})
+	}
+}
+
 // failingAccountReader fails account reads once err is set.
 type failingAccountReader struct {
 	*mapStateReader
