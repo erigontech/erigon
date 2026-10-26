@@ -1320,7 +1320,8 @@ func frozenTxns(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSe
 }
 
 // txnRlpByID returns the sender and the stored encoding of a frozen transaction, or nils when it is missing.
-func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (sender, txnRlp []byte) {
+// Both alias *buf, which keeps the grown buffer.
+func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf *[]byte) (sender, txnRlp []byte) {
 	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
@@ -1329,11 +1330,12 @@ func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (send
 	if !gg.HasNext() {
 		return nil, nil
 	}
-	buf, _ = gg.Next(buf[:0])
-	if len(buf) < 1+20 { // a system transaction without data is an empty word
+	*buf, _ = gg.Next((*buf)[:0])
+	word := *buf
+	if len(word) < 1+20 { // a system transaction without data is an empty word
 		return nil, nil
 	}
-	return buf[1 : 1+20], buf[1+20:]
+	return word[1 : 1+20], word[1+20:]
 }
 
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
@@ -1402,14 +1404,21 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 
 var txnRlpBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 16*1024); return &b }}
 
+// maxPooledTxnRlp bounds what one pooled buffer keeps alive after an outlier transaction.
+const maxPooledTxnRlp = 256 * 1024
+
 // TxnHashByIdxInBlock is TxnByIdxInBlock that hashes the stored encoding instead of decoding it.
 // txNum must be the txNum of the i-th transaction: for a block in files it alone selects the transaction.
 func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
 	var txnRlp []byte
 	if seg, ok := r.frozenTxnSegment(tx, blockNum, txNum, txIdxInBlock); ok {
 		buf := txnRlpBufPool.Get().(*[]byte)
-		defer txnRlpBufPool.Put(buf)
-		_, txnRlp = txnRlpByID(txNum, seg, *buf)
+		defer func() {
+			if cap(*buf) <= maxPooledTxnRlp {
+				txnRlpBufPool.Put(buf)
+			}
+		}()
+		_, txnRlp = txnRlpByID(txNum, seg, buf)
 	} else {
 		var err error
 		if _, txnRlp, err = r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false); err != nil {
@@ -1480,7 +1489,7 @@ func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	if !ok {
 		return nil, nil, nil
 	}
-	sender, txnRlp := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
+	sender, txnRlp := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, new([]byte))
 	return sender, txnRlp, nil
 }
 
