@@ -66,9 +66,7 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 	if !n.HasLogSubscriptions() {
 		return
 	}
-	if len(r.removedLogs) > 0 {
-		n.OnLogs(r.removedLogs)
-	}
+	reply := r.removedLogs
 	for _, bn := range slices.Sorted(maps.Keys(r.receipts)) {
 		if bn+r.limit < from { // evict old
 			delete(r.receipts, bn)
@@ -79,7 +77,10 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 		if bn < from || bn >= to {
 			continue
 		}
-		n.OnLogs(logNotifications(r.receipts[bn], r.headers[bn], false))
+		reply = append(reply, logNotifications(r.receipts[bn], r.headers[bn], false)...)
+	}
+	if len(reply) > 0 {
+		n.OnLogs(reply)
 	}
 }
 

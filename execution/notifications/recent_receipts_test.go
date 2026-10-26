@@ -121,13 +121,12 @@ func TestRecentReceiptsNotifyLogsAfterUnwind(t *testing.T) {
 
 	recent.NotifyLogs(notifier, 2, 3)
 
-	require.Len(t, notifier.logBatches, 2)
-	require.Len(t, notifier.logBatches[0], 1)
+	require.Len(t, notifier.logBatches, 1)
+	require.Len(t, notifier.logBatches[0], 2)
 	require.Same(t, oldLog, notifier.logBatches[0][0].Log)
 	require.True(t, notifier.logBatches[0][0].Removed)
-	require.Len(t, notifier.logBatches[1], 1)
-	require.Same(t, newLog, notifier.logBatches[1][0].Log)
-	require.False(t, notifier.logBatches[1][0].Removed)
+	require.Same(t, newLog, notifier.logBatches[0][1].Log)
+	require.False(t, notifier.logBatches[0][1].Removed)
 }
 
 func TestRecentReceiptsNotifiesRemovedLogsBelowAddedRange(t *testing.T) {
@@ -169,9 +168,10 @@ func TestRecentReceiptsBatchesRemovedBlocksInOrder(t *testing.T) {
 }
 
 func TestRecentReceiptsNotifiesAddedBlocksInOrder(t *testing.T) {
-	recent := NewRecentReceipts(3)
+	const blockCount = 32
+	recent := NewRecentReceipts(blockCount)
 	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)
-	for _, blockNum := range []uint64{3, 1, 2} {
+	for blockNum := uint64(blockCount); blockNum > 0; blockNum-- {
 		log := &types.Log{BlockNumber: hexutil.Uint64(blockNum)}
 		recent.Add(types.Receipts{{
 			BlockNumber:      uint256.NewInt(blockNum),
@@ -181,24 +181,27 @@ func TestRecentReceiptsNotifiesAddedBlocksInOrder(t *testing.T) {
 	}
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1, 4)
-	recent.NotifyReceipts(notifier, 1, 4)
+	recent.NotifyLogs(notifier, 1, blockCount+1)
+	recent.NotifyReceipts(notifier, 1, blockCount+1)
 
-	require.Len(t, notifier.logBatches, 3)
-	require.Len(t, notifier.receiptBatches, 3)
-	for i, blockNum := range []uint64{1, 2, 3} {
-		require.Equal(t, blockNum, uint64(notifier.logBatches[i][0].Log.BlockNumber))
+	require.Len(t, notifier.logBatches, 1)
+	require.Len(t, notifier.logBatches[0], blockCount)
+	require.Len(t, notifier.receiptBatches, blockCount)
+	for i := range blockCount {
+		blockNum := uint64(i + 1)
+		require.Equal(t, blockNum, uint64(notifier.logBatches[0][i].Log.BlockNumber))
 		require.Equal(t, blockNum, notifier.receiptBatches[i][0].Header.Number.Uint64())
 	}
 }
 
-func TestRecentReceiptsDoesNotSendEmptyRemovedLogBatch(t *testing.T) {
+func TestRecentReceiptsDoesNotSendEmptyLogBatch(t *testing.T) {
 	recent := NewRecentReceipts(1)
 	recent.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, nil, nil)
 	recent.Unwind(0)
+	recent.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, nil, nil)
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1, 1)
+	recent.NotifyLogs(notifier, 1, 2)
 
 	require.Empty(t, notifier.logBatches)
 }

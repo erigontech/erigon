@@ -299,6 +299,7 @@ func (e *ExecModule) unwindIfNeeded(
 	if errLast != nil {
 		return nil, nil, errLast
 	}
+	var unwindPoint *uint64
 	if unwindTarget < lastCanonicalBlock {
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 		if err != nil {
@@ -322,6 +323,7 @@ func (e *ExecModule) unwindIfNeeded(
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return nil, nil, err
 		}
+		unwindPoint = &unwindTarget
 		e.observeStateTransition(ctx, StateTransitionUnwindComplete)
 	} else {
 		execProgress, progressErr := stages.GetStageProgress(tx, stages.Execution)
@@ -372,10 +374,7 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, nil, err
 		}
 	}
-	if unwindTarget < lastCanonicalBlock {
-		return nil, &unwindTarget, nil
-	}
-	return nil, nil, nil
+	return nil, unwindPoint, nil
 }
 
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {

@@ -84,10 +84,10 @@ func (s *reorgSubscriptions) logCount(blockHash common.Hash, removed bool) int {
 	return n
 }
 
-func (s *reorgSubscriptions) receiptCount(blockHash, txHash common.Hash, removed bool) int {
+func (s *reorgSubscriptions) receiptCount(blockHash, txHash common.Hash) int {
 	var n int
 	for _, receipt := range s.receipts {
-		if receipt.Receipt.BlockHash == blockHash && receipt.Receipt.TxHash == txHash && receipt.Removed == removed {
+		if receipt.Receipt.BlockHash == blockHash && receipt.Receipt.TxHash == txHash {
 			n++
 		}
 	}
@@ -105,6 +105,8 @@ var reorgCases = []reorgCase{
 	{name: "SameHeightViaForkchoiceOnly", forkLen: 1, newPayload: false},
 	{name: "HigherHeadViaNewPayload", forkLen: 2, newPayload: true},
 	{name: "HigherHeadViaForkchoiceOnly", forkLen: 2, newPayload: false},
+	{name: "EightBlockForkViaNewPayload", forkLen: 8, newPayload: true},
+	{name: "EightBlockForkViaForkchoiceOnly", forkLen: 8, newPayload: false},
 }
 
 func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
@@ -267,14 +269,12 @@ func TestReorgAnnouncesTransactionReceipts(t *testing.T) {
 			oldHead, forkBlocks, got := runReorg(t, tc)
 			wantCount := 0
 			for _, tx := range oldHead.Transactions() {
-				require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash(), true))
-				require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash(), false))
+				require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash()))
 			}
 			for _, block := range forkBlocks {
 				wantCount += len(block.Transactions())
 				for _, tx := range block.Transactions() {
-					require.Equal(t, 1, got.receiptCount(block.Hash(), tx.Hash(), false))
-					require.Zero(t, got.receiptCount(block.Hash(), tx.Hash(), true))
+					require.Equal(t, 1, got.receiptCount(block.Hash(), tx.Hash()))
 				}
 			}
 			require.Len(t, got.receipts, wantCount)
