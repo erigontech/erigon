@@ -874,3 +874,66 @@ func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
 }
+
+func testAggregatorWithStateFilesOnly(t *testing.T) (kv.RwDB, *Aggregator) {
+	t.Helper()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	generateAccountsFile(t, dirs, []testFileRange{{0, 5}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 5}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 5}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
+	require.NoError(t, agg.OpenFolder(db))
+	return db, agg
+}
+
+func testAggregatorPrune(t *testing.T, db kv.RwDB, agg *Aggregator) {
+	t.Helper()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		_, err := at.prune(t.Context(), tx, 0, true, nil)
+		return err
+	}))
+}
+
+func TestAggregator_PruneKeepsDomainWithoutFiles(t *testing.T) {
+	db, agg := testAggregatorWithStateFilesOnly(t)
+	tbl := agg.d[kv.ReceiptDomain].ValuesTable
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		v := make([]byte, 8, 9)
+		binary.BigEndian.PutUint64(v, ^uint64(1)) // step 1
+		return tx.Put(tbl, []byte("receiptKey"), append(v, 0x42))
+	}))
+
+	testAggregatorPrune(t, db, agg)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(tbl, []byte("receiptKey"))
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+		return nil
+	}))
+}
+
+func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
+	db, agg := testAggregatorWithStateFilesOnly(t)
+	ii := agg.searchII(kv.LogAddrIdx)
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], 15)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Put(ii.KeysTable, txKey[:], []byte("addr")); err != nil {
+			return err
+		}
+		return tx.Put(ii.ValuesTable, []byte("addr"), txKey[:])
+	}))
+
+	testAggregatorPrune(t, db, agg)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(ii.KeysTable, txKey[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+		return nil
+	}))
+}
