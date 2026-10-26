@@ -290,3 +290,21 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
 	}, reasons)
 }
+
+func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.TotalBlobPoolLimit = 0
+
+	bad := makeBlobSlot(0x80, true)
+	a0 := [20]byte{1}
+	var slots TxnSlots
+	slots.Append(&bad, a0[:], false)
+	pool.AddRemoteTxns(ctx, slots, nil, nil)
+
+	reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.BlobPoolOverflow}, reasons)
+}
