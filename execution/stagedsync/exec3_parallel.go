@@ -2894,21 +2894,17 @@ type blockExecutor struct {
 	// The old set is needed alongside the new one so a dependent that read a key the
 	// new incarnation DROPPED is still re-checked.
 	writeChangedPrev map[int]*state.WriteSet
-	// readerIdx: reverse index (read cell -> reader task indices) so
-	// revalidateCommittedDependents re-checks only actual readers of a changed tx's
-	// keys, not every later committed task.
-	readerIdx map[readerKey][]int
-	// readerByAddr: address-level reverse index (address -> reader task indices), used
-	// when a whole-account lifecycle write (create/self-destruct/incarnation) publishes:
-	// it re-derives every field, so every reader of the address must be re-validated, not
-	// only readers of the exact written cell (see AccountPath.AffectsAccountLifecycle).
+	// readerByAddr: reverse index (address -> reader task indices) so a published write
+	// re-checks only txs that read its address, not every later task. A per-cell index
+	// costs several map operations per read on the serial execLoop; the exact cell is
+	// checked against the reader's read set instead, once per write.
 	readerByAddr map[accounts.Address][]int
 
 	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
 	// published, so it must be re-validated at the finalize boundary. A clean tx is
 	// provably still valid there — every predecessor is final and any write to one of
 	// its read cells went through markReadersDirty. Maintained only on the execLoop
-	// (the single result-processing/finalize goroutine), like readerIdx, so no lock.
+	// (the single result-processing/finalize goroutine), like readerByAddr, so no lock.
 	revalidate map[int]bool
 
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
@@ -2968,7 +2964,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
-		readerIdx:           map[readerKey][]int{},
 		readerByAddr:        map[accounts.Address][]int{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
@@ -2978,24 +2973,14 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	return be
 }
 
-// readerKey identifies one versioned read cell (address, path, storage key).
-type readerKey struct {
-	addr accounts.Address
-	path state.AccountPath
-	key  accounts.StorageKey
-}
-
-// indexReads records taskIdx as a reader of every cell in rs. Append-only across
-// incarnations; the HasReadDep re-check filters stale entries, so over-inclusion
+// indexReads records taskIdx as a reader of every address in rs. Append-only across
+// incarnations; the DependsOn re-check filters stale entries, so over-inclusion
 // only costs a redundant check.
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
-	seenAddr := map[accounts.Address]struct{}{}
-	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
-		rk := readerKey{a, p, k}
-		be.readerIdx[rk] = insertSorted(be.readerIdx[rk], taskIdx)
-		if _, ok := seenAddr[a]; !ok {
-			seenAddr[a] = struct{}{}
-			be.readerByAddr[a] = insertSorted(be.readerByAddr[a], taskIdx)
+	rs.RangeFullHeaders(func(a accounts.Address, _ state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
+		l := be.readerByAddr[a]
+		if i, found := slices.BinarySearch(l, taskIdx); !found {
+			be.readerByAddr[a] = slices.Insert(l, i, taskIdx)
 		}
 		return true
 	})
@@ -3004,14 +2989,6 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
 const balDispatchWindow = 32
 
-// insertSorted adds tx to the ascending, duplicate-free list l.
-func insertSorted(l []int, tx int) []int {
-	if i, found := slices.BinarySearch(l, tx); !found {
-		l = slices.Insert(l, i, tx)
-	}
-	return l
-}
-
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []int, tx int) []int {
 	i, _ := slices.BinarySearch(l, tx+1)
@@ -3019,22 +2996,17 @@ func readersAbove(l []int, tx int) []int {
 }
 
 // readersOf returns the reader task indices whose reads a write of header h may have
-// invalidated: for a whole-account lifecycle write (create/self-destruct/incarnation)
-// that is every reader of the address, since the lifecycle change re-derives all its
-// fields; for any other write it is the exact-cell readers. Over-inclusion only costs a
-// redundant re-validation (the HasReadDep / ValidateVersion re-check filters), while a
-// missed reader commits a stale value — so err toward the wider address-level set.
+// invalidated: every reader of the address. Over-inclusion only costs a redundant
+// re-check (the DependsOn / ValidateVersion re-check filters), while a missed reader
+// commits a stale value.
 func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
-	if h.Path.AffectsAccountLifecycle() {
-		return be.readerByAddr[h.Address]
-	}
-	return be.readerIdx[readerKey{h.Address, h.Path, h.Key}]
+	return be.readerByAddr[h.Address]
 }
 
 // markReadersDirty flags every successor reader (> writerTx) of a cell writerTx
 // just published as needing finalize-boundary re-validation: a value it read may
 // have changed. Only successors can be invalidated by writerTx's write. Runs only
-// on the execLoop, so the readerIdx read and revalidate write need no lock. A missed
+// on the execLoop, so the readerByAddr read and revalidate write need no lock. A missed
 // reader is unsafe; the finalize oracle (ERIGON_ASSERT) guards against that.
 func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	if ws == nil {
@@ -3042,7 +3014,9 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 	for h := range ws.AllHeaders() {
 		for _, tx := range readersAbove(be.readersOf(h), writerTx) {
-			be.revalidate[tx] = true
+			if be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOn(h) {
+				be.revalidate[tx] = true
+			}
 		}
 	}
 }

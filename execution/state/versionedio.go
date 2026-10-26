@@ -3246,14 +3246,20 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 		return false
 	}
 	for h := range txFrom.AllHeaders() {
-		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
-			return true
-		}
-		if h.Path.AffectsAccountLifecycle() && txTo.hasAnyReadAt(h.Address) {
+		if txTo.DependsOn(h) {
 			return true
 		}
 	}
 	return false
+}
+
+// DependsOn reports whether a write of h can invalidate a read in s: a read of the same
+// cell, or any read of the address when h changes the account lifecycle.
+func (s ReadSet) DependsOn(h WriteHeader) bool {
+	if _, ok := s.getHeader(h.Address, h.Path, h.Key); ok {
+		return true
+	}
+	return h.Path.AffectsAccountLifecycle() && s.hasAnyReadAt(h.Address)
 }
 
 func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
