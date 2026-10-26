@@ -68,7 +68,7 @@ func TestInternAddressMatchesInternAddress(t *testing.T) {
 		func(w *uint256.Int) accounts.Address { return accounts.InternAddress(w.Bytes20()) })
 }
 
-func TestStorageKeyCacheNotAllocatedForShortLivedEVM(t *testing.T) {
+func TestStorageKeyCacheNotAllocatedForShortLivedState(t *testing.T) {
 	ibs := &IntraBlockState{}
 	word := uint256.NewInt(7)
 	for range storageKeyCacheMinOps {
@@ -80,7 +80,7 @@ func TestStorageKeyCacheNotAllocatedForShortLivedEVM(t *testing.T) {
 	assert.NotNil(t, ibs.internCache)
 }
 
-func TestAddressCacheNotAllocatedForShortLivedEVM(t *testing.T) {
+func TestAddressCacheNotAllocatedForShortLivedState(t *testing.T) {
 	ibs := &IntraBlockState{}
 	word := uint256.NewInt(7)
 	for range addressCacheMinOps {
@@ -256,4 +256,20 @@ func TestInternAddressSurvivesPooling(t *testing.T) {
 	require.NotNil(t, ibs.addrCache, "the memo outlives the call")
 	require.True(t, sentinel == ibs.InternAddress(&word),
 		"a warmed address must still hit in the next call on this state")
+}
+
+func TestInternStorageKeySurvivesPooling(t *testing.T) {
+	ibs := New(NewNoopReader())
+	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0x9abcdef0}
+	for range storageKeyCacheMinOps + 1 {
+		ibs.InternStorageKey(&word)
+	}
+	sentinel := accounts.InternKey(common.HexToHash("0xdeadbeef"))
+	require.Equal(t, 1, poisonEntry(ibs.internCache.handles[:], accounts.InternKey(word.Bytes32()), sentinel))
+
+	require.True(t, ibs.resetForPool())
+
+	require.NotNil(t, ibs.internCache, "the memo outlives the call")
+	require.True(t, sentinel == ibs.InternStorageKey(&word),
+		"a warmed key must still hit in the next call on this state")
 }
