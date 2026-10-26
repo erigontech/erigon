@@ -1698,9 +1698,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		pe.mintedWorkers = nil
 		pe.mintMu.Unlock()
 
-		if waitErr := pe.wait(); waitErr != nil && pe.cfg.readAheader != nil {
-			pe.cfg.readAheader.CancelWarmup()
-		}
+		_ = pe.wait()
 	}, nil
 }
 

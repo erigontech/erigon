@@ -15,8 +15,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestShouldWaitForReadAhead(t *testing.T) {
@@ -112,34 +115,64 @@ func TestExecutorStopCancelsWarmup(t *testing.T) {
 	}
 }
 
+type failingStageReadDB struct {
+	kv.TemporalRwDB
+	ctx context.Context
+	err error
+}
+
+func (db *failingStageReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	// Worker reads use a child context and must succeed to isolate setup failures.
+	if ctx.Done() == db.ctx.Done() {
+		return nil, db.err
+	}
+	return db.TemporalRwDB.BeginTemporalRo(ctx)
+}
+
 func TestExecutorFailureCancelsWarmup(t *testing.T) {
 	failure := errors.New("executor failure")
-	for name, faults := range map[string]chaos_monkey.Faults{
-		"worker startup": {WorkerError: failure},
-		"exec loop":      {ExecLoopPanic: failure},
+	for _, tc := range []struct {
+		name           string
+		faults         chaos_monkey.Faults
+		setupErr       error
+		preserveWarmup bool
+	}{
+		{name: "worker startup", faults: chaos_monkey.Faults{WorkerError: failure}},
+		{name: "exec loop", faults: chaos_monkey.Faults{ExecLoopPanic: failure}},
+		{name: "commitment setup", setupErr: failure},
+		{name: "cancelled setup", setupErr: context.Canceled, preserveWarmup: true},
+		{name: "cancelled setup with failure", setupErr: errors.Join(context.Canceled, failure)},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			pe, warmupCtx := newExecutorWithBlockedWarmup(t)
-			pe.enableChaosMonkey = true
-			pe.chaosFaults = faults
-			execCtx, finish, err := pe.run(t.Context())
-			defer func() {
-				finish(nil)
-				if faults.ExecLoopPanic != nil {
-					require.ErrorContains(t, pe.wait(), failure.Error())
-				}
-				require.ErrorIs(t, warmupCtx.Err(), context.Canceled, "executor returned a failure with warmup still active")
-			}()
-			if faults.WorkerError != nil {
-				require.ErrorIs(t, err, failure)
-				return
-			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			ctx = chaos_monkey.WithFaults(ctx, tc.faults)
+			tx, err := pe.cfg.db.BeginTemporalRw(ctx)
 			require.NoError(t, err)
-			select {
-			case <-execCtx.Done():
-				require.ErrorContains(t, context.Cause(execCtx), failure.Error())
-			case <-time.After(5 * time.Second):
-				t.Fatal("executor failure did not cancel its context")
+			defer tx.Rollback()
+
+			cfg := pe.cfg
+			cfg.vmConfig = &vm.Config{}
+			cfg.syncCfg = ethconfig.Defaults.Sync
+			cfg.syncCfg.ExecWorkerCount = 1
+			cfg.blockReader = frozenBlockReader{}
+			if tc.setupErr != nil {
+				cfg.db = &failingStageReadDB{TemporalRwDB: cfg.db, ctx: ctx, err: tc.setupErr}
+			}
+			out, err := ExecV3(ctx, cfg, pe.doms, tx, stages.ModeApplyingBlocks, true, "test",
+				execRange{blockNum: 1, maxBlockNum: 1}, &singleBlockSource{done: true}, pe.logger)
+			require.Nil(t, out.verdict)
+			if tc.setupErr != nil {
+				require.ErrorIs(t, err, tc.setupErr)
+				require.ErrorContains(t, err, "commitmentCalculator: open roTx")
+			} else {
+				require.ErrorContains(t, err, failure.Error())
+			}
+			if tc.preserveWarmup {
+				require.NoError(t, warmupCtx.Err(), "cancellation alone must preserve warmup")
+			} else {
+				require.ErrorIs(t, warmupCtx.Err(), context.Canceled, "executor returned a failure with warmup still active")
 			}
 		})
 	}

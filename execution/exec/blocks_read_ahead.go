@@ -186,14 +186,8 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 		bal = balSidecar.BlockAccessList()
 	}
 	go func() {
-		// Clear the cancel function before releasing the gate to another warmup.
 		defer bra.warmupGate.Release(1)
-		defer func() {
-			bra.warmupMu.Lock()
-			bra.cancelWarmup = nil
-			bra.warmupMu.Unlock()
-			cancel()
-		}()
+		defer cancel()
 		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
 }
