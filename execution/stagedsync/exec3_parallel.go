@@ -110,10 +110,8 @@ type parallelExecutor struct {
 	// bounded by execSem, so extra contexts add memory, not parallelism.
 	mintedWorkers []*exec.WorkerContext
 	mintMu        sync.Mutex
-	// cancelExecLoop publishes the stopCause on execLoopCtx — the signal the exec
-	// loop, calculator and apply loop each read to wind down. Every publish site is
-	// ordered after the exec loop has produced everything up to the coalesce block,
-	// so it never aborts an in-flight block mid-work.
+	// cancelExecLoop publishes the stop cause on execLoopCtx. Normal stops finish
+	// work up to the coalesce block; failures can abort speculative work in progress.
 	cancelExecLoop context.CancelCauseFunc
 	// cancelWorkers stops the OCC worker pool via workersCtx (child of execLoopCtx):
 	// the explicit ordered halt the exec loop calls once it has produced up to the
@@ -1224,9 +1222,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 				pe.clearChangesetAccumulator()
 
-				// Block-validity rejection: exit so we don't schedule the next block on
-				// discarded state — the apply loop's Err is the canonical signal. No
-				// cancel: cancelling would join context.Canceled onto the reported error.
+				// Leave failure reporting and cancellation to the apply loop so it can
+				// still select an earlier commitment failure while draining results.
 				if blockResult.Err != nil {
 					return nil
 				}
@@ -1611,16 +1608,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	// context — the exit path calls cancelWorkers so workers can't outlive it.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
 	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
-	pe.cancelExecLoop = func(cause error) {
-		stop, ok := errors.AsType[*stopCause](cause)
-		// Commitment work can outlive a normal batch stop, so preserve its warmup.
-		if !ok || (stop.kind != stopReachedMax && stop.kind != stopMoreWork) {
-			if pe.cfg.readAheader != nil {
-				pe.cfg.readAheader.CancelWarmup()
-			}
-		}
-		execLoopCtxCancel(cause)
-	}
+	pe.cancelExecLoop = execLoopCtxCancel
 
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
@@ -1639,7 +1627,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
 	if err != nil {
-		pe.cancelExecLoop(err)
 		return execLoopCtx, execLoopCtxCancel, err
 	}
 
@@ -1647,7 +1634,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
 	// channels. Deterministic — the fault is decided here, not in a speculative worker.
 	if chaosErr := pe.chaosFaults.WorkerError; pe.enableChaosMonkey && chaosErr != nil {
-		pe.cancelExecLoop(chaosErr)
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 

@@ -78,39 +78,24 @@ func newExecutorWithBlockedWarmup(t *testing.T) (*parallelExecutor, context.Cont
 	}
 }
 
-func TestExecutorStopCancelsWarmup(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		cause        error
-		cancelWarmup bool
-	}{
-		{"reached max", &stopCause{kind: stopReachedMax}, false},
-		{"more work", &stopCause{kind: stopMoreWork}, false},
-		{"bad block", &stopCause{kind: stopBadBlock}, true},
-		{"operational failure", &stopCause{kind: stopOperational, err: errors.New("database failed")}, true},
-		{"untyped failure", errors.New("apply loop failed"), true},
-		{"unknown stop", &stopCause{kind: stopKind(255)}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+func TestExecutorNormalStopPreservesWarmup(t *testing.T) {
+	for _, kind := range []stopKind{stopReachedMax, stopMoreWork} {
+		t.Run(kind.String(), func(t *testing.T) {
 			pe, warmupCtx := newExecutorWithBlockedWarmup(t)
 			execCtx, finish, err := pe.run(t.Context())
 			defer func() {
 				finish(nil)
 				require.NoError(t, pe.wait())
-				if !tc.cancelWarmup {
-					require.NoError(t, warmupCtx.Err(), "normal teardown must preserve warmup")
-				}
+				require.NoError(t, warmupCtx.Err(), "normal teardown must preserve warmup")
 			}()
 			require.NoError(t, err)
 
-			pe.cancelExecLoop(tc.cause)
+			cause := &stopCause{kind: kind}
+			require.NoError(t, warmupCtx.Err(), "warmup must remain active before the stop")
+			pe.cancelExecLoop(cause)
 
-			require.ErrorIs(t, context.Cause(execCtx), tc.cause)
-			if tc.cancelWarmup {
-				require.ErrorIs(t, warmupCtx.Err(), context.Canceled)
-			} else {
-				require.NoError(t, warmupCtx.Err(), "normal stops preserve warmup for commitment")
-			}
+			require.ErrorIs(t, context.Cause(execCtx), cause)
+			require.NoError(t, warmupCtx.Err(), "normal stops preserve warmup for commitment")
 		})
 	}
 }
@@ -160,6 +145,7 @@ func TestExecutorFailureCancelsWarmup(t *testing.T) {
 			if tc.setupErr != nil {
 				cfg.db = &failingStageReadDB{TemporalRwDB: cfg.db, ctx: ctx, err: tc.setupErr}
 			}
+			require.NoError(t, warmupCtx.Err(), "warmup must remain active before execution")
 			out, err := ExecV3(ctx, cfg, pe.doms, tx, stages.ModeApplyingBlocks, true, "test",
 				execRange{blockNum: 1, maxBlockNum: 1}, &singleBlockSource{done: true}, pe.logger)
 			require.Nil(t, out.verdict)

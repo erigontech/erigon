@@ -438,8 +438,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
-	// The EVM may stop on cancellation without returning an error.
-	// Discard the result so partial execution cannot be applied.
+	// The EVM can return a nil error after cancellation; reject that result.
 	if err := rw.ctx.Err(); err != nil {
 		return &TxResult{Task: txTask, Err: err, Operational: true}
 	}

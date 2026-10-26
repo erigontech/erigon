@@ -107,6 +107,7 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 				invalidTx, err := types.SignTx(types.NewTransaction(tx.GetNonce()+1, *tx.GetTo(), tx.GetValue(), tx.GetGasLimit(), tx.GetFeeCap(), tx.GetData()),
 					*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 				require.NoError(t, err)
+				body.Transactions = slices.Clone(body.Transactions)
 				body.Transactions[0] = invalidTx
 				header.TxHash = types.DeriveSha(types.Transactions(body.Transactions))
 			}
@@ -141,6 +142,7 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 			done := make(chan struct{})
 			var result execmodule.ValidationResult
+			require.NoError(t, warmupCtx.Err(), "warmup must remain active before validation")
 			go func() {
 				defer close(done)
 				result, err = m.ValidateChain(t.Context(), block.Header())
