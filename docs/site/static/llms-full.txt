@@ -2505,7 +2505,6 @@ Options for configuring the [transaction pool](https://docs.erigon.tech/fundamen
   - Default: `3h0m0s`
   - Set to `0` to disable dormancy-based eviction.
 
-
 ### Network and Peers
 
 These flags manage network connectivity, peer discovery, and traffic control. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) for the full port map.
