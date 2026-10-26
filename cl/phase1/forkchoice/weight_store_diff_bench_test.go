@@ -46,7 +46,7 @@ func BenchmarkHeadWeight_DeltaTreeVsFullScan(b *testing.B) {
 		}
 	})
 	b.Run("fullscan", func(b *testing.B) {
-		full := NewWeightStore(f) // constructed outside the lock (getCheckpointState is cached)
+		full := newWeightStoreFromCheckpointState(f, cs)
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		b.ResetTimer()

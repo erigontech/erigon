@@ -63,7 +63,7 @@ The all-in-one client is the preferred option for most users:
 
 This CLI command allows you to run an Ethereum **full node** where every process is integrated and no special configuration is needed.
 
-The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship embedded CL.
+The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship embedded Consensus Layer (CL).
 
 ## Example of configuration
 
@@ -85,7 +85,7 @@ To run Erigon with RPC Daemon, TxPool, and other components in a single process 
 
 ### Flags of Interest
 
-*   Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, use the flag:
+*   The default data directory is `~/.local/share/erigon` on Linux (`$XDG_DATA_HOME/erigon` when that variable is set), `~/Library/Erigon` on macOS and `%LOCALAPPDATA%\Erigon` on Windows. If you want to store Erigon files in a non-default location, use the flag:
 
     ```bash
     --datadir=/desired/path/to/datadir

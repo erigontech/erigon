@@ -47,39 +47,34 @@ func (r hidingReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	return r.FullBlockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (r hidingReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+func (r hidingReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (common.Hash, bool, error) {
 	if blockNum == r.block {
 		return common.Hash{}, false, nil
 	}
-	return r.FullBlockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, i)
+	return r.FullBlockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
-// TestStrict: a matched log whose transaction cannot be read is dropped,
-// unless the query is strict, which fails instead.
-func TestStrict(t *testing.T) {
+// TestMissingTransaction: a matched log whose transaction cannot be read
+// fails the query instead of vanishing from it.
+func TestMissingTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	const block = 10
-	query := func(reader dbservices.FullBlockReader, strict bool) logquery.Query {
+	query := func(reader dbservices.FullBlockReader) logquery.Query {
 		return logquery.Query{
 			TxNums: reader.TxnumReader(), Headers: reader, Txns: reader,
-			Receipts: receipts.NewGenerator(m.Dirs, reader, m.Engine, nil, time.Minute), Strict: strict,
+			Receipts: receipts.NewGenerator(m.Dirs, reader, m.Engine, nil, time.Minute),
 		}
 	}
 
-	q := query(m.BlockReader, true)
+	q := query(m.BlockReader)
 	all, err := q.Logs(t.Context(), tx, m.ChainConfig, block, block, filters.FilterCriteria{}, 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, all)
 
-	hiding := hidingReader{m.BlockReader, block}
-	q = query(hiding, false)
-	logs, err := q.Logs(t.Context(), tx, m.ChainConfig, block, block, filters.FilterCriteria{}, 0)
-	require.NoError(t, err)
-	require.Empty(t, logs)
-	q = query(hiding, true)
+	q = query(hidingReader{m.BlockReader, block})
 	_, err = q.Logs(t.Context(), tx, m.ChainConfig, block, block, filters.FilterCriteria{}, 0)
-	require.ErrorContains(t, err, "not found")
+	require.ErrorContains(t, err, "transaction not found")
 }

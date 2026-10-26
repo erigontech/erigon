@@ -53,11 +53,11 @@ func (r hidingReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	return r.FullBlockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (r hidingReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+func (r hidingReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (common.Hash, bool, error) {
 	if blockNum == r.block {
 		return common.Hash{}, false, nil
 	}
-	return r.FullBlockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, i)
+	return r.FullBlockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
 // TestNativeMissingTransaction: a matched log whose transaction the node

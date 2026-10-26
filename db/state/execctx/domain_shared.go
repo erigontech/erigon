@@ -1296,9 +1296,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	// Reads opened before the commit still see the unwound branches and may have filled them.
-	if sd.cacheUnwind.pending && sd.branchCache != nil {
-		sd.branchCache.UnwindCommitted(sd.cacheUnwind.toTxNum, viewID)
+	// Reads opened before the commit still see the replaced or unwound branches and may fill them.
+	if sd.branchCache != nil {
+		if sd.cacheUnwind.pending {
+			sd.branchCache.UnwindCommitted(sd.cacheUnwind.toTxNum, viewID)
+		} else {
+			sd.branchCache.Committed(viewID)
+		}
 	}
 	for i := range pendingBranches {
 		u := &pendingBranches[i]
@@ -2039,4 +2043,40 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		changes++
 	}
 	return changes, nil
+}
+
+type DomainReader interface {
+	membatchwithdb.DomainReader
+	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
+	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
+}
+
+// AsGetter returns a metrics-free execution getter.
+func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+}
+
+// AsGetterMetered returns a getter that records reads into the caller's single-owner metrics instance m.
+func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(m))
+}
+
+// SwapChangesetAccumulatorLocked installs the given changeset accumulator
+// and returns a func that restores the previous one. Callers must hold
+// changesetMu.
+func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
+	prev := sd.getChangesetAccumulatorLocked()
+	sd.setChangesetAccumulatorLocked(acc)
+	return func() { sd.setChangesetAccumulatorLocked(prev) }
+}
+
+// GetLatestContext is GetLatest with per-worker metrics carried on ctx: the
+// commitment worker's lock-free accumulator (a nil ctx-value collects nothing,
+// so concurrent workers neither share metrics state nor take a lock).
+func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+	var wm kv.GetLatestMetrics
+	if m := kvmetrics.MetricsFromContext(ctx); m != nil {
+		wm = m
+	}
+	return sd.getLatest(domain, tx, k, wm, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
 }

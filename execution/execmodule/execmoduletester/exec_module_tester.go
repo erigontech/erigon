@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester/txpoolwait"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -394,6 +395,12 @@ func WithSlowBlockThreshold(d time.Duration) Option {
 	}
 }
 
+func WithExecWorkerCount(n int) Option {
+	return func(opts *options) {
+		opts.execWorkerCount = n
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -429,6 +436,7 @@ type options struct {
 	alwaysGenerateChangesets *bool
 	maxReorgDepth            *uint64
 	slowBlockThreshold       *time.Duration
+	execWorkerCount          int
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
@@ -541,6 +549,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
+	}
+	if opt.execWorkerCount > 0 {
+		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
 	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
@@ -855,6 +866,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		return nil
 	})
 	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadBlockAccessListsMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
+	mock.StreamWg.Wait()
 
 	// app expecting that genesis will always be in db
 	c := &blockgen.ChainPack{
@@ -1015,6 +1032,9 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 }
 
 func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.Parameters) (uint64, error) {
+	if err := emt.WaitForTxPool(ctx, params.ParentHash); err != nil {
+		return 0, err
+	}
 	return retryBusy(ctx, func() (uint64, bool, error) {
 		result, err := emt.ExecModule.AssembleBlock(ctx, params)
 		if err != nil {
@@ -1022,6 +1042,10 @@ func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.
 		}
 		return result.PayloadID, result.Busy, nil
 	})
+}
+
+func (emt *ExecModuleTester) WaitForTxPool(ctx context.Context, parentHash common.Hash) error {
+	return txpoolwait.WaitForParent(ctx, emt.DB, emt.BlockReader, emt.TxPool, parentHash)
 }
 
 func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID uint64) (*types.Block, error) {

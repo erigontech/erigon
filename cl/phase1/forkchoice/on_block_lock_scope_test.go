@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/utils"
@@ -94,7 +95,7 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 
 	tickDone := make(chan struct{})
 	go func() {
-		store.OnTick(48)
+		store.OnTick(48 * 1000)
 		close(tickDone)
 	}()
 	awaitSignal(t, tickDone, "OnTick to acquire the fork-choice lock while NewPayload is blocked")
@@ -959,4 +960,20 @@ func TestNewPayloadFastPathPublishesNothingToRetract(t *testing.T) {
 	require.Equal(t, common.Hash{}, published, "the fast path must not claim the writer's entry")
 	_, held := store.inFlightInvalidPayloads.Load(executionHash)
 	require.True(t, held, "the writer's entry must survive a non-writer passing through")
+}
+
+// UpdateValidatorsCustody writes the indexing DB, so it must run without f.mu: the fork
+// choice stage holds an indexing-DB write tx while it waits for f.mu.
+func TestOnBlockUpdatesValidatorsCustodyWithoutForkChoiceLock(t *testing.T) {
+	store, block := buildExAnteStorePendingLast(t, nil)
+	store.localValidators.SetFeeRecipient(0, common.Address{})
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().UpdateValidatorsCustody(gomock.Any()).Times(1).Do(func(uint64) {
+		require.True(t, store.mu.TryLock(), "UpdateValidatorsCustody must not run under the fork-choice lock")
+		store.mu.Unlock()
+	})
+	store.InitPeerDas(peerDas)
+
+	require.NoError(t, store.OnBlock(context.Background(), block, false, true, false))
 }

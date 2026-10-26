@@ -326,7 +326,7 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
@@ -381,7 +381,7 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
@@ -456,7 +456,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, fmt.Errorf("header not found")
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+	if err := api.checkPruneStateAfterSystemTx(ctx, tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 

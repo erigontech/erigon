@@ -261,7 +261,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
 
@@ -284,8 +284,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, exceedLogResults(err, maxResults)
 }
 
-func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.Logs, error) {
-	logs, err := logquery.AppendLogs(logs, receiptLogs, addrMap, topicMap, blockTime, maxResults)
+func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, filter *types.LogFilter, blockTime uint64, maxResults int) (types.Logs, error) {
+	logs, err := logquery.AppendLogs(logs, receiptLogs, filter, blockTime, maxResults)
 	return logs, exceedLogResults(err, maxResults)
 }
 
@@ -319,13 +319,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
+		return nil, err
+	}
+	if err := api.checkReceiptAvailableAtIndex(ctx, tx, blockNum, uint64(txnIndex)); err != nil {
 		return nil, err
 	}
 

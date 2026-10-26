@@ -140,6 +140,7 @@ const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxPayloadSize uint64        = 10 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
 	// ExecutionPayload transactions bounds from consensus specs.
@@ -224,7 +225,7 @@ var (
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64             `yaml:"GOSSIP_MAX_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                       // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSize                   uint64             `yaml:"MAX_PAYLOAD_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                      // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64             `yaml:"GOSSIP_MAX_SIZE_BELLATRIX" json:"GOSSIP_MAX_SIZE_BELLATRIX,string"`                   // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxChunkSize                    uint64             `yaml:"MAX_CHUNK_SIZE" json:"MAX_CHUNK_SIZE,string"`                                         // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64             `yaml:"ATTESTATION_SUBNET_COUNT" json:"ATTESTATION_SUBNET_COUNT,string"`                     // The number of attestation subnets used in the gossipsub protocol.
@@ -246,6 +247,18 @@ type NetworkConfig struct {
 
 	BootNodes   []string `yaml:"-" json:"-"`
 	StaticPeers []string `yaml:"-" json:"-"`
+}
+
+// MaxCompressedPayloadSize is the spec's max_compressed_len(MAX_PAYLOAD_SIZE): the largest
+// snappy encoding of a payload within the uncompressed limit.
+func (n *NetworkConfig) MaxCompressedPayloadSize() uint64 {
+	return 32 + n.GossipMaxSize + n.GossipMaxSize/6
+}
+
+// MaxGossipMessageSize is the spec's max_message_size(): the largest gossipsub RPC frame
+// a peer may send, max_compressed_len(payload) plus 1024 bytes of framing, at least 1 MiB.
+func (n *NetworkConfig) MaxGossipMessageSize() uint64 {
+	return max(n.MaxCompressedPayloadSize()+1024, 1<<20)
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -887,10 +900,7 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 	if gloas {
 		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
 	}
-	if b.IntervalsPerSlot == 0 {
-		return 0
-	}
-	return b.SecondsPerSlot * 1000 / b.IntervalsPerSlot
+	return b.SecondsPerSlot * AttestationDueBps / (BpsFactor / 1000)
 }
 
 // PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
@@ -1383,8 +1393,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60000910
 	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
-	cfg.GloasForkEpoch = 132352
-	cfg.GloasForkVersion = 0x80000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1404,9 +1412,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.BlobSchedule = []BlobParameters{
 		{52480, 15},
 		{54016, 21},
-	}
-	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
-		{Epoch: 132352, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()

@@ -25,12 +25,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
 	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -137,6 +140,30 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
+		}
+	}
+}
+
+func TestOpDivPowerOfTwo(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	xs := []*uint256.Int{
+		uint256.NewInt(0), uint256.NewInt(7), new(uint256.Int).SetAllOne(),
+		uint256.MustFromHex("0x87ffb8b26394face67d77fae3608d0891"),
+		uint256.MustFromHex("0x40cf02000000000000000000000000000000000000000000000000000000000"),
+	}
+	one := uint256.NewInt(1)
+	for n := range uint(256) {
+		p := new(uint256.Int).Lsh(one, n)
+		for _, y := range []*uint256.Int{p, new(uint256.Int).AddUint64(p, 1), new(uint256.Int).Sub(p, one)} {
+			for _, x := range xs {
+				callContext.Stack.push(*y)
+				callContext.Stack.push(*x)
+				opDiv(0, evm, callContext)
+				got, want := callContext.Stack.popCopy(), new(uint256.Int).Div(x, y)
+				require.Equal(t, want, &got, "%x / %x", x, y)
+			}
 		}
 	}
 }
@@ -315,16 +342,18 @@ func innerOutputsShareBuffer(cfg Config) bool {
 	return unsafe.SliceData(a) == unsafe.SliceData(b)
 }
 
-func TestInnerFrameOutputReusesBuffer(t *testing.T) {
-	if !innerOutputsShareBuffer(Config{}) {
-		t.Fatal("each inner RETURN got a new buffer")
-	}
-}
-
-// Tracers such as callTracer keep every frame's output.
-func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
-	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
-		t.Fatal("a traced inner RETURN reused the buffer")
+// Tracers that see outputs (callTracer, opcode tracers) keep them, so those get copies.
+func TestInnerFrameOutputBufferPerTracer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hooks *tracing.Hooks
+		share bool
+	}{
+		"none":   {nil, true},
+		"enter":  {&tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}, true},
+		"exit":   {&tracing.Hooks{OnExit: func(int, []byte, uint64, error, bool) {}}, false},
+		"opcode": {&tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}, false},
+	} {
+		require.Equal(t, tc.share, innerOutputsShareBuffer(Config{Tracer: tc.hooks}), name)
 	}
 }
 
@@ -786,6 +815,65 @@ func TestOpCLZ(t *testing.T) {
 	}
 }
 
+func TestOpDifficulty(t *testing.T) {
+	t.Parallel()
+	randao := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	difficulty := uint256.MustFromHex("0x7000000000000007600000000000000650000000000000054000000000000004")
+	tests := []struct {
+		name     string
+		blockCtx evmtypes.BlockContext
+		want     uint256.Int
+	}{
+		{"prevrandao", evmtypes.BlockContext{PrevRanDao: &randao, Difficulty: *difficulty}, *new(uint256.Int).SetBytes(randao[:])},
+		{"zero prevrandao", evmtypes.BlockContext{PrevRanDao: &common.Hash{}, Difficulty: *difficulty}, uint256.Int{}},
+		{"difficulty", evmtypes.BlockContext{Difficulty: *difficulty}, *difficulty},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evm := NewEVM(tc.blockCtx, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+			callContext := &CallContext{}
+			callContext.Stack.push(*uint256.NewInt(1))
+			callContext.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+			callContext.Stack.pop()
+			pc, res, err := opDifficulty(42, evm, callContext)
+			require.NoError(t, err)
+			require.Nil(t, res)
+			require.Equal(t, uint64(42), pc)
+			require.Equal(t, 2, callContext.Stack.len())
+			require.Equal(t, tc.want, *callContext.Stack.peek())
+			require.Equal(t, *uint256.NewInt(1), *callContext.Stack.back(1))
+		})
+	}
+}
+
+func TestPushMatchesSetBytes(t *testing.T) {
+	code := make([]byte, 70)
+	for i := range code {
+		code[i] = 0x5a ^ byte(i*37)
+	}
+	for size := uint64(1); size <= 32; size++ {
+		push := makePush(size, int(size))
+		for pc := range uint64(len(code)) {
+			scope := &CallContext{}
+			scope.Contract.Code = code
+			fillSlotAboveTopWithOnes(&scope.Stack)
+			next, _, err := push(pc, nil, scope)
+			require.NoError(t, err)
+			require.Equal(t, pc+size, next)
+			start, end := min(pc+1, uint64(len(code))), min(pc+1+size, uint64(len(code)))
+			want := new(uint256.Int).SetBytes(common.RightPadBytes(code[start:end], int(size)))
+			require.Equal(t, want, scope.Stack.peek(), "PUSH%d at pc %d", size, pc)
+			require.Equal(t, 2, scope.Stack.len())
+		}
+	}
+}
+
+func fillSlotAboveTopWithOnes(st *Stack) {
+	st.pushRef().SetAllOne()
+	st.pushRef().SetAllOne()
+	st.pop()
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
@@ -1088,4 +1176,136 @@ func TestEIP8024_Execution(t *testing.T) {
 func ptrToByte(v byte) *byte {
 	b := v
 	return &b
+}
+
+func TestLogDataSurvivesMemoryAndArenaReuse(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	op := makeLog(3)
+	for i, size := range []int{1024 * 1024, 1024, 32, 0, 1024 * 1024} {
+		ibs.SetTxContext(1, 0)
+		scope.Memory.Resize(uint64(size + 6))
+		data := bytes.Repeat([]byte{byte(i + 1)}, size)
+		scope.Memory.Set(6, uint64(size), data)
+		for range 3 {
+			scope.Stack.push(uint256.Int{})
+		}
+		scope.Stack.push(*uint256.NewInt(uint64(size)))
+		scope.Stack.push(*uint256.NewInt(6))
+		_, _, err := op(0, evm, scope)
+		require.NoError(t, err)
+		clear(scope.Memory.Data())
+		logs := ibs.GetRawLogs(0)
+		require.Len(t, logs, 1)
+		require.Equal(t, []common.Hash{{}, {}, {}}, logs[0].Topics)
+		require.Len(t, logs[0].Data, size)
+		require.True(t, bytes.Equal(data, logs[0].Data), "log data changed for size %d", size)
+		ibs.Reset()
+	}
+}
+
+func TestExpSmallOperandBoundaries(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	for _, base := range []uint64{0, 1, 2, 3, 7, 13, 136279841, 1 << 31, 1 << 32, 1 << 63, ^uint64(0)} {
+		for power := range uint64(66) {
+			scope := &CallContext{}
+			scope.Stack.push(*uint256.NewInt(power))
+			scope.Stack.push(*uint256.NewInt(base))
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpMatchesBigInt(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	edges := []uint256.Int{{}, {1}, {2}, {3}, {1<<62 - 1}, {1 << 62}, {1<<62 + 1}, {1 << 63}, {0, 1}, {0, 0, 1}, {0, 0, 0, 1 << 63}, *new(uint256.Int).SetAllOne()}
+	rng := rand.New(rand.NewPCG(1, 2))
+	random := func() uint256.Int {
+		x := uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64()}
+		return *x.Rsh(&x, uint(rng.IntN(256)))
+	}
+	bases := append([]uint256.Int{{3}, {5}, {0x081f7721}, {1 << 32}, {^uint64(0) - 2, ^uint64(0), ^uint64(0), ^uint64(0)}}, edges...)
+	exponents := append([]uint256.Int(nil), edges...)
+	for range 200 {
+		bases = append(bases, random())
+		exponents = append(exponents, random())
+	}
+	for _, base := range bases {
+		for _, exponent := range exponents {
+			scope := &CallContext{}
+			scope.Stack.push(exponent)
+			scope.Stack.push(base)
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%x exponent=%x", &base, &exponent)
+		}
+	}
+}
+
+func TestExpNegativeOneParity(t *testing.T) {
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	base := new(uint256.Int).SetAllOne()
+	for _, exponent := range []uint256.Int{{}, {1}, {2}, {3}, {0, 1}, {1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}, *new(uint256.Int).SetAllOne()} {
+		scope := &CallContext{}
+		scope.Stack.push(exponent)
+		scope.Stack.push(*base)
+		_, _, err := opExp(0, nil, scope)
+		want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+		if err != nil || scope.Stack.peek().ToBig().Cmp(want) != 0 {
+			t.Fatalf("exp %x: got %x, %v; want %x", exponent, scope.Stack.peek(), err, want)
+		}
+	}
+}
+
+func TestContextAddressWordsReusedFrame(t *testing.T) {
+	evm := &EVM{}
+	addresses := []accounts.Address{
+		accounts.NilAddress,
+		accounts.ZeroAddress,
+		accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")),
+		accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")),
+	}
+	for frame := range addresses {
+		address := addresses[frame]
+		origin := addresses[(frame+1)%len(addresses)]
+		caller := addresses[(frame+2)%len(addresses)]
+		coinbase := addresses[(frame+3)%len(addresses)]
+		evm.TxContext = evmtypes.TxContext{Origin: origin}
+		evm.Context = evmtypes.BlockContext{Coinbase: coinbase}
+		scope := evm.getCallContext(*NewContract(caller, caller, address, uint256.Int{}), nil, mdgas.MdGas{})
+		for _, tc := range []struct {
+			name    string
+			op      executionFunc
+			address accounts.Address
+		}{
+			{"ADDRESS", opAddress, address},
+			{"ORIGIN", opOrigin, origin},
+			{"CALLER", opCaller, caller},
+			{"COINBASE", opCoinbase, coinbase},
+		} {
+			value := tc.address.Value()
+			want := new(uint256.Int).SetBytes(value[:])
+			for range 2 {
+				scope.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+				scope.Stack.pop()
+				_, _, err := tc.op(0, evm, scope)
+				if err != nil || *scope.Stack.peek() != *want {
+					t.Fatalf("frame %d %s: got %x, %v; want %x", frame, tc.name, scope.Stack.peek(), err, want)
+				}
+				scope.Stack.Reset()
+			}
+		}
+		evm.putCallContext(scope)
+	}
 }

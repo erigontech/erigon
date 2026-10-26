@@ -1375,7 +1375,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	// Candidate processing includes work unrelated to the bid. Evict only errors
 	// marked as deterministic bid-validation failures.
 	bidEvicted := false
-	if a.epbsPool != nil && errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
+	if a.epbsPool != nil && errors.Is(candidateErr, machine.ErrInvalidExecutionPayloadBid) {
 		bidEvicted = a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	}
 	if selfBuildErr != nil {
@@ -1765,14 +1765,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if payloadSource.parentExecutionRequests != nil {
 		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
 	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
-	if finalizedHash == (common.Hash{}) {
-		finalizedHash = head
-	}
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
-	if safeHash == (common.Hash{}) {
-		safeHash = head
-	}
+	finalizedHash, safeHash := a.payloadBuildFinalityHashes(baseState, head)
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, nil, err
@@ -2116,6 +2109,18 @@ func (a *ApiHandler) produceBeaconBody(
 
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
+}
+
+func (a *ApiHandler) payloadBuildFinalityHashes(baseState *state.CachingBeaconState, parentHash common.Hash) (common.Hash, common.Hash) {
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
+	if finalizedHash == (common.Hash{}) {
+		finalizedHash = parentHash
+	}
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
+	if safeHash == (common.Hash{}) {
+		safeHash = parentHash
+	}
+	return finalizedHash, safeHash
 }
 
 func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot uint64) (
@@ -3118,7 +3123,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 	}
 	currentSlot := a.ethClock.GetCurrentSlot()
-	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
+	a.forkchoiceStore.OnTick(utils.SecondsToMilliseconds(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot))
 	if !knownBlock {
 		var blockErr error
 		if rejectEquivocation {
@@ -3200,7 +3205,7 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 }
 
 func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {
-	auxiliaryState, err := a.forkchoiceStore.GetStateAtBlockRoot(auxiliaryRoot, false)
+	auxiliaryState, err := a.forkchoiceStore.GetStateAtBlockRoot(auxiliaryRoot)
 	if err != nil {
 		return common.Hash{}, 0, nil, err
 	}
@@ -3214,7 +3219,7 @@ func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, 
 	if headRoot == auxiliaryRoot {
 		return headRoot, headSlot, auxiliaryState, nil
 	}
-	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(headRoot, false)
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(headRoot)
 	if err != nil {
 		return common.Hash{}, 0, nil, err
 	}
@@ -3801,5 +3806,5 @@ func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
 		})
 		ws = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
 	}
-	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
+	a.blockReader.CacheBlockBody(payload.BlockNumber, payload.BlockHash, rawTxs, ws)
 }

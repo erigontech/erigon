@@ -492,7 +492,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	gossipManager := gossip.NewGossipManager(ctx, p2p, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics, uint64(len(activeIndicies)), config.MaxInboundTrafficPerPeer, config.MaxOutboundTrafficPerPeer, config.AdptableTrafficRequirements)
 
 	peerDasState.SetLocalNodeID(localNode)
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	gossipManager.SetLocalNodeID(localNode.ID())
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
 	forkChoice.InitPeerDas(peerDas)   // hack init
@@ -511,14 +512,16 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
-	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters, gossipManager)
+	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters, batchSignatureVerifier)
 	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,
 		forkChoice,
 		ethClock,
+		beaconConfig,
+		syncedDataManager.ActiveValidatorCount,
 		blockService,
 		attesterSlashingService,
 		blobService,
@@ -547,7 +550,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			for {
 				select {
 				case <-tickInterval.C:
-					forkChoice.OnTick(uint64(time.Now().Unix()))
+					forkChoice.OnTick(uint64(time.Now().UnixMilli()))
 				case <-ctx.Done():
 					return
 				}
@@ -592,7 +595,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
+	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
@@ -660,6 +663,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			proposerPreferencesService,
 		)
 		apiHandler.StartPayloadPreparation(ctx)
+		apiHandler.StartPayloadAttributes(ctx)
 		go func() {
 			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
 				ArchiveApi: apiHandler,

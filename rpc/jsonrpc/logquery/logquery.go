@@ -45,8 +45,8 @@ type Query struct {
 	Headers  dbservices.HeaderReader
 	Txns     dbservices.TxnReader
 	Receipts *receipts.Generator
-	// Strict fails on a matched transaction whose body or receipt is
-	// missing, which Logs otherwise drops.
+	// Strict fails on a matched transaction without a receipt, which Logs
+	// otherwise drops.
 	Strict bool
 }
 
@@ -54,11 +54,7 @@ type Query struct {
 // A positive maxResults bounds them; more fail with ErrTooManyLogs.
 func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, begin, end uint64, crit filters.FilterCriteria, maxResults int) (types.Logs, error) {
 	logs := types.Logs{}
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	topicMap := types.BuildTopicMap(crit.Topics)
+	filter := types.NewLogFilter(crit.Addresses, crit.Topics)
 
 	txNumbers, err := MatchingTxNums(q.TxNums, tx, begin, end, crit, order.Asc)
 	if err != nil {
@@ -72,7 +68,7 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, _, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -84,12 +80,12 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 				return nil, fmt.Errorf("header not found: %d", blockNum)
 			}
 		}
-		if isFinalTxn {
+		if isSystemTxn {
 			continue
 		}
 
 		if r, ok := q.Receipts.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			if logs, err = AppendLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults); err != nil {
+			if logs, err = AppendLogs(logs, r.Logs, filter, header.Time, maxResults); err != nil {
 				return nil, err
 			}
 			continue
@@ -104,11 +100,7 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 				return nil, err
 			}
 			if !ok {
-				// Index -1 is the block's opening system transaction, which has no body.
-				if q.Strict && txIndex >= 0 {
-					return nil, fmt.Errorf("transaction %d of block %d not found", txIndex, blockNum)
-				}
-				continue
+				return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 			}
 			if r, err = q.Receipts.GetReceipt(ctx, cfg, tx, header, txn, txIndex, txNum, nil); err != nil {
 				return nil, err
@@ -120,23 +112,23 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 			}
 			return nil, err
 		}
-		if logs, err = AppendLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults); err != nil {
+		if logs, err = AppendLogs(logs, r.Logs, filter, header.Time, maxResults); err != nil {
 			return nil, err
 		}
 	}
 	return logs, nil
 }
 
-// AppendLogs appends the receiptLogs that match the filter maps to logs; a
-// positive maxResults bounds the result, more fail with ErrTooManyLogs.
-func AppendLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.Logs, error) {
+// AppendLogs appends the receiptLogs that match filter to logs; a positive
+// maxResults bounds the result, more fail with ErrTooManyLogs.
+func AppendLogs(logs types.Logs, receiptLogs types.Logs, filter *types.LogFilter, blockTime uint64, maxResults int) (types.Logs, error) {
 	// One entry past the cap is enough to detect the overflow without converting the rest.
 	// At math.MaxInt there is no such entry, so the append stays unlimited.
 	var limit int
 	if maxResults != 0 && maxResults != math.MaxInt {
 		limit = maxResults + 1
 	}
-	logs = receiptLogs.AppendFilteredLogs(logs, addrMap, topicMap, blockTime, limit)
+	logs = receiptLogs.AppendFilteredLogs(logs, filter, blockTime, limit)
 	if maxResults != 0 && len(logs) > maxResults {
 		return nil, ErrTooManyLogs
 	}

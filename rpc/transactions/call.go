@@ -66,7 +66,7 @@ func DoCall(
 
 	ibs := state.NewPooled(stateReader)
 	defer state.ReleasePooled(ibs)
-	VersionedCallState(ibs, stateOverrides)
+	VersionedCallState(ibs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -201,15 +201,12 @@ func (r *ReusableCaller) Close() {
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
 // VersionedCallState puts a one-shot call on the versioned state path block execution
-// uses. Overrides keep the materializing path: they end in FinalizeTx, which clears the
-// journal, and the versioned read path then serves this tx's own writes only from a
-// resident stateObject. Reset clears the flags, so a reused state calls this again.
-func VersionedCallState(ibs *state.IntraBlockState, stateOverrides *ethapi2.StateOverrides) {
-	if !dbg.CallNoMaterialize || stateOverrides != nil {
+// uses. Reset clears the flags, so a reused state calls this again.
+func VersionedCallState(ibs *state.IntraBlockState) {
+	if !dbg.CallNoMaterialize {
 		return
 	}
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetNoConflictDetection()
 }
@@ -228,7 +225,7 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 	} else {
 		ibs.Reset()
 	}
-	VersionedCallState(ibs, r.stateOverrides)
+	VersionedCallState(ibs)
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}

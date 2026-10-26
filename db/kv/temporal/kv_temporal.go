@@ -839,16 +839,36 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) (uint64, error) {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.Tx)
 }
 
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+// HistoryFilesGeneration identifies pinned files, not the live aggregator view.
+// Combine it with ViewID when caching values that can also come from MDBX.
+func (tx *Tx) HistoryFilesGeneration() uint64 { return tx.aggtx.Generation() }
+
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.RwTx)
+}
+
+func (tx *tx) HistoryCoverageStart(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryCoverageStart(name)
+}
+
+func (tx *tx) historyRecordedInDB(name kv.Domain, roTx kv.Tx, fromTxNum, toTxNum uint64) (bool, error) {
+	return tx.aggtx.HistoryRecordedInDB(name, fromTxNum, toTxNum, roTx)
+}
+
+func (tx *Tx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
+	return tx.historyRecordedInDB(name, tx.Tx, fromTxNum, toTxNum)
+}
+
+func (tx *RwTx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
+	return tx.historyRecordedInDB(name, tx.RwTx, fromTxNum, toTxNum)
 }
 
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {

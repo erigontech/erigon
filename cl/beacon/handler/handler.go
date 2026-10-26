@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	commonlru "github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -232,8 +234,10 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
-	preparedPayload        preparedPayload
-	payloadPreparationGate payloadPreparationGate
+	preparedPayload              preparedPayload
+	payloadPreparationGate       payloadPreparationGate
+	parentExecutionRequests      *commonlru.Cache[common.Hash, *cltypes.ExecutionRequests]
+	parentExecutionRequestsGroup singleflight.Group
 
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
@@ -357,6 +361,7 @@ func NewApiHandler(
 		panic(err)
 	}
 	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
+	parentExecutionRequests := commonlru.NewCache[common.Hash, *cltypes.ExecutionRequests](maxCachedParentExecutionRequests)
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
@@ -410,6 +415,7 @@ func NewApiHandler(
 		selfBuildEnvelopes:               selfBuildEnvelopes,
 		executionPayloadEnvelopeRetries:  executionPayloadEnvelopeRetries,
 		builderRoutes:                    builderRoutes,
+		parentExecutionRequests:          parentExecutionRequests,
 	}
 }
 

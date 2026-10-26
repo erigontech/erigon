@@ -18,10 +18,12 @@ package forkchoice
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -31,7 +33,11 @@ import (
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
-	return f.beaconCfg.GenesisSlot + ((f.time.Load() - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
+	return f.slotAtTimeMs(f.timeMs.Load())
+}
+
+func (f *ForkChoiceStore) slotAtTimeMs(timeMs uint64) uint64 {
+	return f.beaconCfg.GenesisSlot + ((timeMs - utils.SecondsToMilliseconds(f.genesisTime)) / (f.beaconCfg.SecondsPerSlot * 1000))
 }
 
 // queueEmit defers an event send until after f.mu is released: Feed.Send blocks
@@ -106,7 +112,7 @@ func (f *ForkChoiceStore) runOperationPruner() {
 		if !f.operationsPool.HasPrunableOperations() {
 			continue
 		}
-		finalizedState, err := f.forkGraph.GetState(checkpoint.Root, true)
+		finalizedState, err := f.GetStateAtBlockRoot(checkpoint.Root)
 		if err != nil || finalizedState == nil {
 			log.Warn("Failed to load finalized state for operation pruning", "root", checkpoint.Root, "err", err)
 			continue
@@ -123,9 +129,9 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.checkpointStatesMu.Unlock()
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
-		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
@@ -285,19 +291,78 @@ func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 
 // getCheckpointState computes and caches checkpoint states.
 func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
-	// check if it can be found in cache.
-	if state, ok := f.checkpointStates.Load(checkpoint); ok {
-		return state.(*checkpointState), nil
+	if cached, ok := f.checkpointStates.Load(checkpoint); ok {
+		return cached.(*checkpointState), nil
 	}
-
-	// If it is not in cache compute it and then put in cache.
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
-	baseState, err := f.forkGraph.GetState(checkpoint.Root, true)
+	return f.checkpointStateOnce(checkpoint, "current", func() (*checkpointState, error) {
+		var cached *checkpointState
+		var baseState *state.CachingBeaconState
+		var current bool
+		var err error
+		func() {
+			f.mu.RLock()
+			defer f.mu.RUnlock()
+			if cs, ok := f.checkpointStates.Load(checkpoint); ok {
+				cached = cs.(*checkpointState)
+				return
+			}
+			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root)
+		}()
+		if cached != nil || err != nil {
+			return cached, err
+		}
+		if !current {
+			return f.replayCheckpointStateOnce(checkpoint)
+		}
+		return f.buildCheckpointState(checkpoint, baseState)
+	})
+}
+
+func (f *ForkChoiceStore) getCheckpointStateLocked(checkpoint solid.Checkpoint) (*checkpointState, error) {
+	if cached, ok := f.checkpointStates.Load(checkpoint); ok {
+		return cached.(*checkpointState), nil
+	}
+	if f.forkGraph == nil {
+		return nil, errors.New("getCheckpointState: forkGraph not initialized")
+	}
+	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root)
 	if err != nil {
 		return nil, err
 	}
+	if current {
+		return f.buildCheckpointState(checkpoint, baseState)
+	}
+	return f.replayCheckpointStateOnce(checkpoint)
+}
+
+// replayCheckpointStateOnce never takes f.mu, so callers that hold it can join its flight.
+func (f *ForkChoiceStore) replayCheckpointStateOnce(checkpoint solid.Checkpoint) (*checkpointState, error) {
+	return f.checkpointStateOnce(checkpoint, "replay", func() (*checkpointState, error) {
+		baseState, err := f.forkGraph.ReplayState(checkpoint.Root)
+		if err != nil {
+			return nil, err
+		}
+		return f.buildCheckpointState(checkpoint, baseState)
+	})
+}
+
+func (f *ForkChoiceStore) checkpointStateOnce(checkpoint solid.Checkpoint, flight string, build func() (*checkpointState, error)) (*checkpointState, error) {
+	cs, err, _ := f.checkpointStateBuilds.Do(fmt.Sprintf("%s:%d:%x", flight, checkpoint.Epoch, checkpoint.Root), func() (any, error) {
+		if cached, ok := f.checkpointStates.Load(checkpoint); ok {
+			return cached.(*checkpointState), nil
+		}
+		return build()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cs.(*checkpointState), nil
+}
+
+func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint, baseState *state.CachingBeaconState) (*checkpointState, error) {
 	if baseState == nil {
 		return nil, errors.New("getCheckpointState: baseState not found in graph")
 	}
@@ -319,9 +384,20 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	f.publicKeysRegistry.AddState(checkpoint, baseState)
 	checkpointState := newCheckpointState(f.beaconCfg, f.publicKeysRegistry, validators,
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), getUnslashedActiveBalance(baseState), state.Epoch(baseState.BeaconState), checkpoint)
+	if f.belowFinalized(checkpoint) {
+		return checkpointState, nil
+	}
 	// Cache in memory what we are left with.
 	f.storeCheckpointState(checkpoint, checkpointState)
+	if f.belowFinalized(checkpoint) {
+		f.checkpointStates.Delete(checkpoint)
+	}
 	return checkpointState, nil
+}
+
+func (f *ForkChoiceStore) belowFinalized(checkpoint solid.Checkpoint) bool {
+	finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	return ok && checkpoint.Epoch < finalized.Epoch
 }
 
 // storeCheckpointState stores the state, then evicts the lowest-epoch entries
@@ -354,12 +430,6 @@ func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, chec
 		}
 		f.checkpointStates.Delete(oldest)
 	}
-}
-
-// LoadJustifiedCheckpointState loads the current justified checkpoint state into the cache.
-func (f *ForkChoiceStore) LoadJustifiedCheckpointState() error {
-	_, err := f.getCheckpointState(f.justifiedCheckpoint.Load().(solid.Checkpoint))
-	return err
 }
 
 func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {

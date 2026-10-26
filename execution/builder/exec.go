@@ -153,10 +153,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	if ba.HasBAL() {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
-		// Versioned assembly commits from the write-set (BalIO) below, not from a
-		// materialized stateObject, and reads cross-tx state from the versionMap
-		// (flushed per tx), so it does not need the stateObject cache.
-		ibs.SetNoMaterialize(true)
 	}
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
@@ -212,7 +208,10 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
-				time.Sleep(50 * time.Millisecond)
+				select {
+				case <-time.After(50 * time.Millisecond):
+				case <-stopSignalsOf(ctx).stopped:
+				}
 			} else {
 				break
 			}
@@ -242,24 +241,18 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	// When assembled in versioned (BAL) mode, FinalizeBlockExecution skipped the
 	// so.data CommitBlock; commit the accumulated per-phase write-sets to the
-	// domains via WriteSet.Normalize/Apply instead — the same path the parallel
-	// executor and block generation use. Each recorded phase (init/txs/finalize)
-	// is applied in order so the next phase's stateReader fallback sees it.
+	// domains via ApplyWrites instead — the same domain apply the parallel
+	// executor and block generation use (rw_v3 handles the self-destruct delete,
+	// EIP-161 removal and storage-subtree cascade). Each recorded phase
+	// (init/txs/finalize) is applied in order.
 	if ibs.IsVersioned() {
 		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
 		blockRules := blockCtx.Rules(cfg.chainConfig)
-		domainStorageKeys := state.CommittedStorageKeysFn(sd, tx)
-		emptyRemoval := blockHeight != 0 && cfg.chainConfig.IsEIP161Enabled(blockHeight)
-		isAura := cfg.chainConfig.Aura != nil
-		for i, ws := range ba.BalIO().Outputs() {
+		for _, ws := range ba.BalIO().Outputs() {
 			if ws == nil || ws.IsEmpty() {
 				continue
 			}
-			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
-			if normErr != nil {
-				return fmt.Errorf("normalize block writes: %w", normErr)
-			}
-			if err := normalized.Apply(sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
+			if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
 				return fmt.Errorf("apply versioned block writes: %w", err)
 			}
 		}
@@ -306,6 +299,7 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
+		txnprovider.WithParentBlockWaitStop(stopSignalsOf(ctx).parentBlockWaitStopped),
 		txnprovider.WithBlockTime(header.Time),
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.
