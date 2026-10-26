@@ -21,8 +21,11 @@ import (
 	"fmt"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
@@ -122,6 +125,77 @@ func TestFrameFilterAllowsSponsoredSender(t *testing.T) {
 			require.Len(t, got, 1)
 			require.Equal(t, uint64(1), sim.account.Nonce)
 			require.True(t, sim.account.Balance.IsZero())
+		})
+	}
+}
+
+func TestFrameFilterKeyedNonce(t *testing.T) {
+	t.Parallel()
+	const accountNonce = uint64(7)
+	for _, test := range []struct {
+		name    string
+		seq     uint64
+		wrapped bool
+	}{
+		{name: "below account nonce", seq: 0},
+		{name: "equal to account nonce", seq: accountNonce},
+		{name: "above account nonce", seq: accountNonce + 1},
+		{name: "wrapped frame", seq: 0, wrapped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sim := &frameFilterState{account: &accounts.Account{Nonce: accountNonce}}
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{1}}, Nonce: test.seq, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+			}
+			var tx types.Transaction = frame
+			if test.wrapped {
+				tx = &types.FrameTxWrapper{FrameTransaction: frame}
+			}
+			got, err := filterBadTransactions([]types.Transaction{tx}, uint256.NewInt(1), chain.AllProtocolChanges, 1, &types.Header{BaseFee: uint256.NewInt(0)}, sim, sim, log.New(), nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			require.Same(t, tx, got[0])
+			require.Equal(t, accountNonce, sim.account.Nonce)
+		})
+	}
+}
+
+func TestGetNextTransactionsFrameNonceRetry(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name        string
+		key         uint64
+		wrapped     bool
+		wantYielded bool
+	}{
+		{name: "legacy nonce gap", key: 0},
+		{name: "keyed nonce with low fee", key: 1, wantYielded: true},
+		{name: "wrapped keyed nonce with low fee", key: 1, wrapped: true, wantYielded: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sim := &frameFilterState{account: &accounts.Account{}}
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, Nonce: 1, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+			}
+			var tx types.Transaction = frame
+			if test.wrapped {
+				tx = &types.FrameTxWrapper{FrameTransaction: frame}
+			}
+			header := &types.Header{GasLimit: 30_000_000, BaseFee: uint256.NewInt(2)}
+			cfg := BuilderExecCfg{
+				builderState: BuilderState{BuiltBlock: &exec.AssembledBlock{Header: header}},
+				chainConfig:  chain.AllProtocolChanges,
+				txnProvider:  &fakeTxnProvider{txns: []types.Transaction{tx}},
+			}
+			yielded := mapset.NewSet[[32]byte](tx.Hash())
+			got, err := getNextTransactions(t.Context(), cfg, uint256.NewInt(1), header, protocol.GasUsed{}, 1, 0, yielded, sim, sim, log.New(), nil)
+			require.NoError(t, err)
+			require.Empty(t, got)
+			require.Equal(t, test.wantYielded, yielded.Contains(tx.Hash()))
 		})
 	}
 }

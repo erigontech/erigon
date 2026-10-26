@@ -308,8 +308,8 @@ func getNextTransactions(
 		return nil, err
 	}
 
-	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
-	// in subsequent iterations. When best() skips blob TXs that exceed remaining blob gas,
+	// Remove legacy-nonce transactions with nonce gaps from alreadyYielded so they can be
+	// reconsidered in subsequent iterations. When best() skips blob TXs that exceed remaining blob gas,
 	// it can create nonce gaps in the returned set. filterBadTransactions rejects the
 	// higher-nonce TXs, but they get stuck in the yielded set and are never returned again.
 	// By removing only nonce-too-high TXs (nonce > sim state nonce), we allow them to be
@@ -323,6 +323,9 @@ func getNextTransactions(
 		for _, tx := range allTxns {
 			h := tx.Hash()
 			if _, ok := accepted[h]; ok {
+				continue
+			}
+			if frame, ok := tx.Unwrap().(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
 				continue
 			}
 			sender, ok := tx.GetSender()
@@ -396,6 +399,8 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	overflowCnt := 0
 	for len(transactions) > 0 && missedTxs != len(transactions) {
 		transaction := transactions[0]
+		frame, isFrame := transaction.Unwrap().(*types.FrameTransaction)
+		usesLegacyNonce := !isFrame || frame.UsesLegacyNonce()
 		transactionChainId := transaction.GetChainID()
 		if !transactionChainId.IsZero() && transactionChainId.Cmp(chainID) != 0 {
 			transactions = transactions[1:]
@@ -412,7 +417,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if err != nil {
 			return nil, err
 		}
-		if account == nil && transaction.Type() == types.FrameTxType {
+		if account == nil && isFrame {
 			emptyAccount := accounts.NewAccount()
 			account = &emptyAccount
 		}
@@ -421,21 +426,23 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			noAccountCnt++
 			continue
 		}
-		// Check transaction nonce
-		if account.Nonce > transaction.GetNonce() {
-			transactions = transactions[1:]
-			nonceTooLowCnt++
-			continue
-		}
-		if account.Nonce < transaction.GetNonce() {
-			missedTxs++
-			transactions = append(transactions[1:], transaction)
-			continue
+		// Execution validates keyed nonces against nonce-manager storage.
+		if usesLegacyNonce {
+			if account.Nonce > transaction.GetNonce() {
+				transactions = transactions[1:]
+				nonceTooLowCnt++
+				continue
+			}
+			if account.Nonce < transaction.GetNonce() {
+				missedTxs++
+				transactions = append(transactions[1:], transaction)
+				continue
+			}
 		}
 		missedTxs = 0
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() && transaction.Type() != types.FrameTxType {
+		if !account.IsEmptyCodeHash() && !isFrame {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
@@ -465,11 +472,13 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 				}
 			}
 		}
-		if transaction.Type() == types.FrameTxType {
-			newAccount := *account
-			newAccount.Nonce++
-			if err := simStateWriter.UpdateAccountData(senderAddress, account, &newAccount); err != nil {
-				return nil, err
+		if isFrame {
+			if usesLegacyNonce {
+				newAccount := *account
+				newAccount.Nonce++
+				if err := simStateWriter.UpdateAccountData(senderAddress, account, &newAccount); err != nil {
+					return nil, err
+				}
 			}
 			filtered = append(filtered, transaction)
 			transactions = transactions[1:]
