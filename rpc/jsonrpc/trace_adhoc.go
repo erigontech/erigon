@@ -1345,11 +1345,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err := ethapi.FinalizeCallTxTo(ibs, evm.ChainRules(), sd); err != nil {
+		if err := ethapi.EndCallTx(ibs, evm.ChainRules(), sd); err != nil {
 			return nil, err
-		}
-		if ibs.IsVersioned() {
-			ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
@@ -1540,7 +1537,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	transactions.VersionedBlockState(ibs)
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
@@ -1592,23 +1589,13 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	var precompiles vm.PrecompiledContracts
 	if overrides != nil {
 		rules := blockCtx.Rules(chainConfig)
-		// Committed to the cache because a stateDiff call resets ibs. The reset
-		// here drops the fake storage, whose committed value tracks every write.
-		if ibs.IsVersioned() {
-			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := overrides.OverrideTo(ibs, precompiles, rules, cachedWriter); err != nil {
-				return nil, nil, err
-			}
-		} else {
-			if precompiles, err = applyStateOverrides(ibs, overrides, rules); err != nil {
-				return nil, nil, err
-			}
-			if err := ibs.CommitOverrideDirtyAccounts(rules, cachedWriter, ibs.ExtractAndClearDirty()); err != nil {
-				return nil, nil, err
-			}
+		// Committed to the cache because a stateDiff call resets ibs.
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		if err := overrides.OverrideTo(ibs, precompiles, rules, cachedWriter); err != nil {
+			return nil, nil, err
 		}
 		ibs.Reset()
-		transactions.VersionedCallState(ibs)
+		transactions.VersionedBlockState(ibs)
 	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
@@ -1839,15 +1826,11 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	defer initialIbs.Close()
 	transactions.VersionedCallState(initialIbs)
 	var changes bufferedWriter
-	if err := ethapi.FinalizeCallTxTo(ibs, rules, &changes); err != nil {
+	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
 	}
 	if err := changes.writeTo(sd); err != nil {
 		return err
-	}
-	if ibs.IsVersioned() {
-		// The versioned state reads the tx's writes back from the next tx index.
-		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
 	}
 	if err := sd.CompareStates(initialIbs, ibs); err != nil {
 		return err
@@ -2027,11 +2010,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err := ethapi.FinalizeCallTxTo(ibs, evm.ChainRules(), sd); err != nil {
+		if err := ethapi.EndCallTx(ibs, evm.ChainRules(), sd); err != nil {
 			return nil, err
-		}
-		if ibs.IsVersioned() {
-			ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
 		}
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()

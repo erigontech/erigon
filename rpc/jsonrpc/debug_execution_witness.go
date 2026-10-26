@@ -634,7 +634,7 @@ func (api *BaseAPI) buildAccessedState(
 	// Create the in-block state with the recording state as reader
 	ibs := state.New(recordingState)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
@@ -715,7 +715,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = commitWitnessBlock(ibs, blockRules, recordingState); err != nil {
+	if err = ethapi.CommitCallState(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -2081,7 +2081,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
-	transactions.VersionedCallState(ibs)
+	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
@@ -2144,7 +2144,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = commitWitnessBlock(ibs, blockRules, stateless)
+	err = ethapi.CommitCallState(ibs, blockRules, stateless)
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
@@ -2155,13 +2155,4 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] stateless.Finalize() failed: %w", err)
 	}
 	return newStateRoot, stateless, nil
-}
-
-// commitWitnessBlock hands the block-end changes to w: a versioned state's pending
-// writes (engine.Finalize), or a materialized state's dirty objects.
-func commitWitnessBlock(ibs *state.IntraBlockState, rules *chain.Rules, w state.StateWriter) error {
-	if ibs.IsVersioned() {
-		return ethapi.FinalizeCallTxTo(ibs, rules, w)
-	}
-	return ibs.CommitBlock(rules, w)
 }

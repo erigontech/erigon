@@ -170,7 +170,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb := state.New(stateReader)
 	defer statedb.Close()
-	transactions.VersionedCallState(statedb)
+	transactions.VersionedBlockState(statedb)
 
 	header := block.HeaderNoCopy()
 
@@ -332,7 +332,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					continue
 				}
 				statedb := state.New(stateReader)
-				transactions.VersionedCallState(statedb)
+				transactions.VersionedBlockState(statedb)
 				func() {
 					defer statedb.Close()
 					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)

@@ -502,13 +502,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastRules *chain.Rules
 	var lastBaseFee uint256.Int
 
-	noop := state.NewNoopWriter()
 	isPos := false
 
 	traceFilterTxn := func(blockNum, txNum uint64, txIndex int, txn types.Transaction, msg *types.Message) (*TraceCallResult, error) {
-		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
-		cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
@@ -526,7 +522,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.New(cachedReader)
+		ibs := state.New(state.NewHistoryReaderV3(dbtx, txNum))
 		defer ibs.Close()
 		transactions.VersionedCallState(ibs)
 
@@ -567,7 +563,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
-		if err := commitTraceState(ibs, evm.ChainRules(), cachedWriter); err != nil {
+		if err := ethapi.FinalizeCallTx(ibs, evm.ChainRules()); err != nil {
 			return nil, err
 		}
 		return traceResult, nil
@@ -773,7 +769,9 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	transactions.VersionedBlockState(ibs)
+	// The block-start system calls come before tx 0, as block execution runs them.
+	ibs.SetTxContext(block.NumberU64(), -1)
 
 	logger := log.New("trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
@@ -781,7 +779,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := commitTraceState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -839,6 +837,8 @@ func (api *TraceAPIImpl) callBlock(
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
+	// Withdrawals and the block-end system calls see every tx.
+	ibs.SetTxContext(block.NumberU64(), len(txs))
 
 	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
 	wdiffs := make([]withdrawalBalanceDiff, 0, len(block.Withdrawals()))
@@ -1093,7 +1093,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err := commitTraceState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 
@@ -1155,16 +1155,4 @@ func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
 	default:
 		return fmt.Errorf("invalid trace filter mode %q: want union or intersection", mode)
 	}
-}
-
-// commitTraceState hands the state changes not yet in the cache to cachedWriter: a
-// versioned state's pending tx, or a materialized state's dirty objects.
-func commitTraceState(ibs *state.IntraBlockState, rules *chain.Rules, cachedWriter state.StateWriter) error {
-	if ibs.IsVersioned() {
-		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
-	}
-	if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
-		return err
-	}
-	return ibs.CommitBlock(rules, cachedWriter)
 }

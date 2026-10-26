@@ -148,13 +148,7 @@ func (so *StateOverrides) OverrideTo(ibs *state.IntraBlockState, precompiles vm.
 	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	if err := FinalizeCallTxTo(ibs, &overrideRules, stateWriter); err != nil {
-		return err
-	}
-	if ibs.IsVersioned() {
-		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
-	}
-	return nil
+	return EndCallTx(ibs, &overrideRules, stateWriter)
 }
 
 // FinalizeCallTx ends one transaction of a request that runs several on the same state.
@@ -186,4 +180,25 @@ func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWrite
 	ibs.SoftFinalise()
 	ibs.ResetVersionedIO()
 	return nil
+}
+
+// EndCallTx is FinalizeCallTxTo that also moves a versioned state to the next tx index,
+// where the finished tx's writes read back.
+func EndCallTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if err := FinalizeCallTxTo(ibs, rules, stateWriter); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// CommitCallState hands stateWriter the changes not yet handed to it: a versioned
+// state's pending tx, or a materialized state's dirty objects.
+func CommitCallState(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if ibs.IsVersioned() {
+		return FinalizeCallTxTo(ibs, rules, stateWriter)
+	}
+	return ibs.CommitBlock(rules, stateWriter)
 }
