@@ -564,7 +564,7 @@ func TestEthGetLogsInvariants_WideFilters(t *testing.T) {
 	}
 
 	srv := fakeLogsServer(t, logs, queryLimit)
-	err := EthGetLogsInvariants(t.Context(), srv.URL, "", false, blockNum, blockNum+1, false, true, queryLimit)
+	err := EthGetLogsInvariants(t.Context(), srv.URL, "", blockNum, blockNum+1, true, queryLimit)
 	require.NoError(t, err)
 }
 
