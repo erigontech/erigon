@@ -41,6 +41,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -358,6 +361,56 @@ func TestComputeForkChoiceRecordsGloasExecutionHeadAfterTimeout(t *testing.T) {
 	require.Equal(t, bid.BlockHash, cfg.executionHead)
 	previousWake.executionHead = bid.BlockHash
 	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
+}
+
+type busyOnceExecutionModule struct {
+	execmodule.ExecutionModule
+	forkChoiceCalls int
+}
+
+func (m *busyOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+	m.forkChoiceCalls++
+	if m.forkChoiceCalls == 1 {
+		return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
+	}
+	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, nil
+}
+
+func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	module := &busyOnceExecutionModule{}
+	direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+	require.NoError(t, err)
+	engine.forkChoiceFn = direct.ForkChoiceUpdate
+
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		previousExecutionHead := cfg.executionHead
+		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		require.NoError(t, err)
+		require.Equal(t, 1, module.forkChoiceCalls)
+		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")
+		require.Equal(t, bid.BlockHash, cfg.sleepForSlotLastWake.executionHead)
+		require.Equal(t, started, cfg.sleepForSlotLastWake.at)
+
+		wake, changed, err := waitForNextSlotOrHeadChange(
+			t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg, cfg.forkChoice,
+			sleepForSlotSyncedDataFake{head: headRoot},
+			sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
+			cfg.sleepForSlotLastWake, cfg.executionHead,
+		)
+		require.NoError(t, err)
+		require.True(t, changed, "the unapplied execution head must wake fork choice before the next slot")
+		require.Equal(t, bid.BlockHash, wake.executionHead)
+		require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval, "the re-send must stay throttled")
+
+		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		require.NoError(t, err)
+		require.Equal(t, 2, module.forkChoiceCalls)
+		require.Equal(t, bid.BlockHash, cfg.executionHead)
+	})
 }
 
 func TestComputeForkChoiceKeepsGloasExecutionHeadAfterFatalError(t *testing.T) {
