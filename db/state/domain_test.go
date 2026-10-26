@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3992,7 +3993,7 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 	t.Parallel()
 
 	db, d, txs := filledDomain(t, log.New())
-	d.btIndexInMem.Store(true)
+	d.btIndexFits = func() bool { return true }
 	requireBtIndexesInMem := func() {
 		t.Helper()
 		dc := d.beginForTests()
@@ -4039,7 +4040,8 @@ func TestReadBtIndexInMem(t *testing.T) {
 		{name: "receipt", enabled: false, inMem: []string{"receipt"}, want: true},
 		{name: "storage", enabled: true, inMem: []string{"storage"}, mmap: []string{"storage"}, want: false},
 	} {
-		require.Equal(t, tc.want, readBtIndexInMem(tc.name, tc.enabled, tc.inMem, tc.mmap), "%+v", tc)
+		enabled := func() bool { return tc.enabled }
+		require.Equal(t, tc.want, readBtIndexInMem(tc.name, enabled, tc.inMem, tc.mmap), "%+v", tc)
 	}
 }
 
@@ -4059,4 +4061,46 @@ func TestBtIndexFitsInMem(t *testing.T) {
 	} {
 		require.Equal(t, tc.want, btIndexFitsInMem(tc.btSize, tc.total), "%+v", tc)
 	}
+}
+
+func TestDomain_BtIndexInMemChecksBudgetOnBuildAndMerge(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	db, d, txs := filledDomain(t, log.New())
+	var checks atomic.Int32
+	d.btIndexFits = func() bool {
+		checks.Add(1)
+		return false
+	}
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
+	dc := d.beginForTests()
+	defer dc.Close()
+	require.NotEmpty(t, dc.files)
+	for _, f := range dc.files {
+		require.Falsef(t, f.src.bindex.InMem(), "%s", f.src.decompressor.FileName())
+	}
+	require.Greater(t, int(checks.Load()), len(dc.files), "the budget must be checked for every built and merged file")
+}
+
+func TestBtIndexFilesSize(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "[node]")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for name, size := range map[string]int{
+		"v1.1-accounts.0-64.bt":   100,
+		"v1.1-storage.0-64.bt":    50,
+		"v1.1-receipt.0-64.bt":    1000,
+		"v1.1-accounts.0-64.kv":   5000,
+		"v1.1-accounts.0-64.kvei": 7,
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644))
+	}
+	require.Equal(t, uint64(150), btIndexFilesSize(dir, btInMemDefaultDomains))
 }

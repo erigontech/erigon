@@ -23,11 +23,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -101,7 +101,7 @@ type Domain struct {
 	// before the build loop in buildHashMapAccessor.
 	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 
-	btIndexInMem atomic.Bool // read .bt files into memory instead of mapping them, see readBtIndexInMem
+	btIndexFits func() bool // set by AggOpts.BtIndexInMem: whether the .bt files of btInMemDefaultDomains fit in memory now
 }
 
 type domainVisible struct {
@@ -240,23 +240,47 @@ func btIndexFitsInMem(btSize, total uint64) bool {
 	return total >= btInMemMinTotalMemory && btSize <= total/btInMemMaxShare
 }
 
-// readBtIndexInMem reports whether a domain reads its .bt files into memory instead of mapping them, so state reads at the
-// chain tip do not wait for index pages the page cache dropped. It costs heap equal to the size of those files.
-// enabled turns it on for btInMemDefaultDomains. DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override it;
-// DOMAIN_BT_MMAP wins.
-func readBtIndexInMem(name string, enabled bool, forceInMem, forceMmap []string) bool {
+// readBtIndexInMem reports whether a domain reads a .bt file into memory instead of mapping it, so state reads at the
+// chain tip do not wait for index pages the page cache dropped. It costs heap equal to the size of the file.
+// For btInMemDefaultDomains, fits decides at each open, so the files built and merged later stay within the budget.
+// DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override it; DOMAIN_BT_MMAP wins.
+func readBtIndexInMem(name string, fits func() bool, forceInMem, forceMmap []string) bool {
 	switch {
 	case slices.Contains(forceMmap, name):
 		return false
 	case slices.Contains(forceInMem, name):
 		return true
 	default:
-		return enabled && slices.Contains(btInMemDefaultDomains, name)
+		return fits != nil && slices.Contains(btInMemDefaultDomains, name) && fits()
 	}
 }
 
+// btIndexFilesSize sums the sizes of the .bt files of the given domains in dir.
+func btIndexFilesSize(dir string, domains []string) uint64 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var size uint64
+	for _, e := range entries {
+		for _, name := range domains {
+			if ok, _ := filepath.Match("*-"+name+".*.bt", e.Name()); !ok {
+				continue
+			}
+			if info, err := e.Info(); err == nil {
+				size += uint64(info.Size())
+			}
+		}
+	}
+	return size
+}
+
+func (d *Domain) btIndexInMem() bool {
+	return readBtIndexInMem(d.Name.String(), d.btIndexFits, domainBtForceInMem, domainBtForceMmap)
+}
+
 func (d *Domain) openBtIndex(fPath string, r *seg.Reader) (*btindex.BtIndex, error) {
-	if d.btIndexInMem.Load() {
+	if d.btIndexInMem() {
 		return btindex.OpenBtreeIndexInMem(fPath, r)
 	}
 	return btindex.OpenBtreeIndexWithDecompressor(fPath, r)

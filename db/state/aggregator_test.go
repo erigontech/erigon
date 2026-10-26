@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -887,13 +886,14 @@ func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
 			opts = opts.BtIndexInMem()
 		}
 		agg := opts.MustOpen(t.Context())
-		agg.configureBtIndexInMem(64 << 30)
 		for _, d := range agg.d {
 			if d == nil {
 				continue
 			}
-			want := enabled && slices.Contains(btInMemDefaultDomains, d.Name.String())
-			require.Equal(t, want, d.btIndexInMem.Load(), "enabled=%v domain=%s", enabled, d.Name)
+			require.Equal(t, enabled, d.btIndexFits != nil, "enabled=%v domain=%s", enabled, d.Name)
+			if !enabled {
+				require.False(t, d.btIndexInMem(), "domain=%s", d.Name)
+			}
 		}
 		agg.Close()
 	}

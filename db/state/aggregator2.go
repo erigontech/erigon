@@ -73,7 +73,6 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
-	a.btIndexInMem = opts.btIndexInMem
 
 	a.savedSalt = salt
 
@@ -83,6 +82,13 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
+	}
+	if opts.btIndexInMem {
+		for _, d := range a.d {
+			if d != nil {
+				d.btIndexFits = a.btIndexFitsInMem
+			}
+		}
 	}
 
 	return a, nil
