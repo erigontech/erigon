@@ -257,7 +257,3 @@ func TestInternAddressSurvivesPooling(t *testing.T) {
 	require.True(t, sentinel == ibs.InternAddress(&word),
 		"a warmed address must still hit in the next call on this state")
 }
-
-var internSink accounts.Address
-
-var keySink accounts.StorageKey
