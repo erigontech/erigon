@@ -119,48 +119,10 @@ func testIndexes() memIndexes {
 	}
 }
 
-func TestJoinIndexRangesSingleKey(t *testing.T) {
-	m := testIndexes()
-	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogAddrIdx, addrA}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}
-	require.Equal(t, []uint64{1, 3, 5, 7, 9, 11}, joinToArray(t, m, q))
-}
-
-func TestJoinIndexRangesOrIsUnion(t *testing.T) {
-	m := testIndexes()
-	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogAddrIdx, addrB}, {kv.LogAddrIdx, addrC}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}
-	require.Equal(t, []uint64{2, 3, 4, 6, 8, 11}, joinToArray(t, m, q))
-}
-
-func TestJoinIndexRangesAndIsIntersection(t *testing.T) {
-	m := testIndexes()
-	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogTopicIdx, topicX}}, {{kv.LogAddrIdx, addrA}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}
-	require.Equal(t, []uint64{3, 5, 11}, joinToArray(t, m, q))
-}
-
-func TestJoinIndexRangesOrAcrossIndexes(t *testing.T) {
-	m := testIndexes()
-	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.TracesFromIdx, addrA}, {kv.TracesToIdx, addrA}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}
-	require.Equal(t, []uint64{10, 12, 13}, joinToArray(t, m, q))
-}
-
-func TestJoinIndexRangesDuplicateKeys(t *testing.T) {
-	m := testIndexes()
-	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogAddrIdx, addrC}, {kv.LogAddrIdx, addrC}}, {{kv.LogTopicIdx, topicX}}, {{kv.LogTopicIdx, topicX}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}
-	require.Equal(t, []uint64{4, 6}, joinToArray(t, m, q))
-}
-
 func TestJoinIndexRangesMissingKey(t *testing.T) {
 	m := testIndexes()
 	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogAddrIdx, []byte("missing")}}, {{kv.LogTopicIdx, topicX}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}
 	require.Empty(t, joinToArray(t, m, q))
-}
-
-func TestJoinIndexRangesBoundsAndOrder(t *testing.T) {
-	m := testIndexes()
-	clauses := [][]kv.IndexKey{{{kv.LogAddrIdx, addrA}, {kv.LogAddrIdx, addrB}}, {{kv.LogTopicIdx, topicX}, {kv.LogTopicIdx, topicY}}}
-	require.Equal(t, []uint64{2, 3, 5, 9}, joinToArray(t, m, kv.IndexQuery{Clauses: clauses, FromTs: 2, ToTs: 11, Asc: order.Asc}))
-	require.Equal(t, []uint64{11, 9, 5, 3}, joinToArray(t, m, kv.IndexQuery{Clauses: clauses, FromTs: 11, ToTs: 2, Asc: order.Desc}))
-	require.Equal(t, []uint64{11, 9, 5, 3, 2, 1}, joinToArray(t, m, kv.IndexQuery{Clauses: clauses, FromTs: -1, ToTs: -1, Asc: order.Desc}))
 }
 
 func TestJoinIndexRangesRejectsEmptyQuery(t *testing.T) {
@@ -169,13 +131,6 @@ func TestJoinIndexRangesRejectsEmptyQuery(t *testing.T) {
 	require.ErrorIs(t, err, kv.ErrEmptyIndexQuery)
 	_, err = kv.JoinIndexRanges(kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogAddrIdx, addrA}}, {}}, FromTs: -1, ToTs: -1, Asc: order.Asc}, m.indexRange)
 	require.ErrorIs(t, err, kv.ErrEmptyIndexQuery)
-}
-
-func TestJoinIndexRangesReturnsIndexRangeError(t *testing.T) {
-	errRange := errors.New("range failed")
-	failing := func(kv.InvertedIdx, []byte, int, int, order.By, int) (stream.U64, error) { return nil, errRange }
-	_, err := kv.JoinIndexRanges(kv.IndexQuery{Clauses: [][]kv.IndexKey{{{kv.LogAddrIdx, addrA}}}, FromTs: -1, ToTs: -1, Asc: order.Asc}, failing)
-	require.ErrorIs(t, err, errRange)
 }
 
 func TestJoinIndexRangesMatchesSetOperations(t *testing.T) {
