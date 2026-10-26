@@ -340,3 +340,56 @@ func TestBackwardBlockDownloader_HeaderWalkKeepsRangesOnPeersThatServeThem(t *te
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
 	require.Positive(t, fetcher.rangeCalls[*PeerIdFromUint64(2)])
 }
+
+type peerOneFailsFetcher struct {
+	onePeerRangeFailingFetcher
+}
+
+func (s *peerOneFailsFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	if amount > 1 && *peerId == *PeerIdFromUint64(1) {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.onePeerRangeFailingFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func TestBackwardBlockDownloader_HeaderRangeFailuresDoNotMarkPeersMissing(t *testing.T) {
+	headers := headerWalkChain(5001)
+	fetcher := &peerOneFailsFetcher{onePeerRangeFailingFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}, rangeCalls: map[PeerId]int{}}}
+	logger := testlog.Logger(t, log.LvlCrit)
+	tracker := NewPeerTracker(logger, nil)
+	tracker.PeerConnected(PeerIdFromUint64(1))
+	tracker.PeerConnected(PeerIdFromUint64(2))
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, tracker), &PeerPenalizer{}, tracker, t.TempDir())
+	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	defer collector.Close()
+	peers := newPeersContext([]*PeerId{PeerIdFromUint64(2), PeerIdFromUint64(1)})
+
+	_, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, peers, defaultBbdRequestConfig)
+	require.NoError(t, err)
+	require.Positive(t, fetcher.rangeCalls[*PeerIdFromUint64(1)])
+	require.Contains(t, tracker.ListPeersMayHaveBlockNum(headers[len(headers)-1].Number.Uint64()), PeerIdFromUint64(1))
+}
+
+type stallingRangeFetcher struct {
+	chainServingBbdFetcher
+}
+
+func (s *stallingRangeFetcher) FetchHeaders(ctx context.Context, _, _ uint64, _ *PeerId, _ ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	<-ctx.Done()
+	return FetcherResponse[[]*types.Header]{}, ctx.Err()
+}
+
+func TestBackwardBlockDownloader_HeaderWalkGivesUpOnStalledRanges(t *testing.T) {
+	headers := headerWalkChain(2001)
+	bbd := newTestBbd(t, &stallingRangeFetcher{chainServingBbdFetcher{headers: headers}})
+	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
+	defer collector.Close()
+	config := defaultBbdRequestConfig
+	config.headerChainBatchFetchTimeout = 100 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(ctx, headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), config)
+	require.NoError(t, err)
+	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
+}

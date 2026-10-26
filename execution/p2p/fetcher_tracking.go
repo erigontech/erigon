@@ -45,6 +45,9 @@ func (tf *TrackingFetcher) FetchHeaders(
 ) (FetcherResponse[[]*types.Header], error) {
 	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
+		if defaultFetcherConfig.CopyWithOptions(opts...).skipFailureTracking {
+			return FetcherResponse[[]*types.Header]{}, err
+		}
 		if errIncompleteHeaders, ok := errors.AsType[*ErrIncompleteHeaders](err); ok {
 			tf.peerTracker.BlockNumMissing(peerId, errIncompleteHeaders.LowestMissingBlockNum())
 		} else if errors.Is(err, context.DeadlineExceeded) {

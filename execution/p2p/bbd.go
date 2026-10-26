@@ -264,6 +264,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
 	var peersRefreshedAt uint64
+	rangeOpts := append([]FetcherOption{WithoutFailureTracking()}, fetcherOpts...)
 	fetchCtx, cancelFetches := context.WithCancel(ctx)
 	defer cancelFetches()
 	inFlight := make(map[uint64]chan headerBatchResult)
@@ -346,7 +347,9 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			inFlight[top] = result
 			nextRangeTop -= n
 			go func() {
-				resp, err := bbd.fetcher.FetchHeaders(fetchCtx, top-n+1, top+1, &rangePeer, fetcherOpts...)
+				rangeCtx, cancel := context.WithTimeout(fetchCtx, config.headerChainBatchFetchTimeout)
+				defer cancel()
+				resp, err := bbd.fetcher.FetchHeaders(rangeCtx, top-n+1, top+1, &rangePeer, rangeOpts...)
 				result <- headerBatchResult{headers: resp.Data, peerId: rangePeer, err: err}
 			}()
 		}
