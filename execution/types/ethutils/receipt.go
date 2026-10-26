@@ -18,6 +18,7 @@ package ethutils
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -87,6 +88,7 @@ func MarshalReceipt(
 	}
 
 	var logsToMarshal types.Logs
+	frameReceiptsToMarshal := receipt.FrameReceipts
 
 	switch {
 	case withBlockTimestamp:
@@ -101,6 +103,11 @@ func MarshalReceipt(
 			stamped[i].log.BlockTimestamp = &stamped[i].timestamp
 			logsToMarshal[i] = &stamped[i].log
 		}
+		if len(receipt.FrameReceipts) > 0 {
+			stampedReceipt := types.Receipt{FrameReceipts: slices.Clone(receipt.FrameReceipts)}
+			stampedReceipt.SetLogs(logsToMarshal)
+			frameReceiptsToMarshal = stampedReceipt.FrameReceipts
+		}
 	case receipt.Logs == nil:
 		logsToMarshal = types.Logs{}
 	default:
@@ -109,7 +116,7 @@ func MarshalReceipt(
 
 	result := &RPCReceipt{
 		Payer:             receipt.Payer,
-		FrameReceipts:     receipt.FrameReceipts,
+		FrameReceipts:     frameReceiptsToMarshal,
 		BlockHash:         receipt.BlockHash,
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		TransactionHash:   receipt.TxHash,

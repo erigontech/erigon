@@ -39,3 +39,55 @@ func TestFrameRPCReceipt(t *testing.T) {
 	require.Contains(t, fields, "payer")
 	require.Contains(t, fields, "frameReceipts")
 }
+
+func TestFrameRPCReceiptLogTimestamps(t *testing.T) {
+	t.Parallel()
+	logs := types.Logs{{Index: 1, Topics: []common.Hash{}}, {Index: 2, Topics: []common.Hash{}}, {Index: 3, Topics: []common.Hash{}}}
+	receipt := &types.Receipt{
+		Type: types.FrameTxType, BlockNumber: uint256.NewInt(1), Logs: logs,
+		FrameReceipts: []types.FrameReceipt{{}, {Status: 1, Logs: logs[:2:2]}, {}, {Status: 1, Logs: logs[2:]}},
+	}
+	before, err := json.Marshal(receipt)
+	require.NoError(t, err)
+	txn := &types.FrameTransaction{}
+	for _, tc := range []struct {
+		name  string
+		stamp bool
+		time  uint64
+	}{
+		{"stamped", true, 42},
+		{"unstamped", false, 42},
+		{"zero timestamp", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time, BaseFee: uint256.NewInt(0)}
+			result := MarshalReceipt(receipt, txn, chain.AllProtocolChanges, header, false, tc.stamp)
+			data, err := json.Marshal(result)
+			require.NoError(t, err)
+			var decoded struct {
+				Logs          types.Logs
+				FrameReceipts types.FrameReceipts
+			}
+			require.NoError(t, json.Unmarshal(data, &decoded))
+			require.Len(t, decoded.FrameReceipts, len(receipt.FrameReceipts))
+			offset := 0
+			for i, frame := range decoded.FrameReceipts {
+				require.Len(t, frame.Logs, len(receipt.FrameReceipts[i].Logs))
+				for _, log := range frame.Logs {
+					require.Equal(t, decoded.Logs[offset], log)
+					if tc.stamp {
+						require.Equal(t, stampedAt(tc.time), log.BlockTimestamp)
+					} else {
+						require.Nil(t, log.BlockTimestamp)
+					}
+					offset++
+				}
+			}
+			require.Equal(t, len(logs), offset)
+			after, err := json.Marshal(receipt)
+			require.NoError(t, err)
+			require.Equal(t, string(before), string(after), "RPC rendering must not change the cached receipt")
+			requireFastJSONMatches(t, result)
+		})
+	}
+}
