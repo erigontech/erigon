@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -119,5 +120,8 @@ func TestTxnHashByIdxInBlockReusesGrownBuffer(t *testing.T) {
 			_, _, _ = blockReader.TxnHashByIdxInBlock(t.Context(), tx, 5, txNum, 0)
 		})
 	}
-	require.Equal(t, allocs(0, small.Hash()), allocs(1, large.Hash()))
+	smallAllocs, largeAllocs := allocs(0, small.Hash()), allocs(1, large.Hash())
+	if !race.Enabled { // the race detector drops sync.Pool puts at random
+		require.Equal(t, smallAllocs, largeAllocs)
+	}
 }
