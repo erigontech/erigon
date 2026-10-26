@@ -167,7 +167,7 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 	if !PersistedReceiptsServed() {
 		return nil, false, nil
 	}
-	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txIndex)
+	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txNum, txIndex)
 	if err != nil || !ok {
 		return nil, false, err
 	}

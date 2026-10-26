@@ -565,8 +565,7 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 }
 
 // A touch of a pre-existing empty account with an incarnation (it held storage)
-// removes it under EIP-161. The block-end pass skips an account with an
-// incarnation, so the removal the touching tx writes must keep the leaf deleted.
+// removes it under EIP-161: the removal the touching tx writes keeps the leaf deleted.
 func TestApplyWrites_TouchedEmptyAccountWithIncarnationDeletes(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x0e, 0x49, 0x72})
 	acc := &accounts.Account{Incarnation: 1, CodeHash: accounts.EmptyCodeHash}
@@ -586,6 +585,22 @@ func TestApplyWrites_TouchedEmptyAccountWithIncarnationDeletes(t *testing.T) {
 	cs.FlushToUpdates(updates)
 	keyVal := addr.Value()
 	assert.Equal(t, commitment.DeleteUpdate, lookupKeyUpdate(t, updates, string(keyVal[:])).Flags)
+}
+
+// A BAL block carries no removal marker, so the block-end pass alone must delete
+// a touched empty account, also one that keeps an incarnation.
+func TestApplyEIP161Removal_TouchedEmptyAccountWithIncarnation(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x0e, 0x49, 0x73})
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := newWS().bal(addr, ver, uint256.Int{}).build()
+	vm := state.NewVersionMap(nil)
+	vm.WriteBalance(addr, ver, uint256.Int{}, true)
+
+	cs := newTestCalcState()
+	cs.accounts[addr] = &calcAccountState{CodeHash: empty.CodeHash, Incarnation: 1}
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
+	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
+	assert.True(t, cs.accounts[addr].Deleted)
 }
 
 // TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161 pins that emptyRemoval=true
