@@ -146,6 +146,10 @@ var (
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
+	OverrideGenesisFlag = cli.StringFlag{
+		Name:  "override.genesis",
+		Usage: "Load the genesis block and chain config from this JSON file instead of the --chain network's; written on first start like `erigon init`",
+	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
 		Usage: "Avoid overriding chain config already stored in the DB",
@@ -2172,6 +2176,22 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		}
 	case networkname.Dev:
 		setDevnetEthConfig(ctx, cfg, logger)
+	}
+
+	if path := ctx.String(OverrideGenesisFlag.Name); path != "" {
+		if ctx.IsSet(ChainFlag.Name) {
+			Fatalf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
+		}
+		genesis, err := ReadGenesisFile(path)
+		if err != nil {
+			Fatalf("%v", err)
+		}
+		cfg.Genesis = genesis
+		// The discovery defaults set above belong to the default --chain network,
+		// not to this genesis.
+		if !ctx.IsSet(DNSDiscoveryFlag.Name) && !ctx.Bool(NoDiscoverFlag.Name) {
+			cfg.EthDiscoveryURLs = nil
+		}
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
