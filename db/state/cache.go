@@ -131,11 +131,45 @@ func newIIVisible(name string, files visibleFiles) *iiVisible {
 		iiGetFromFileCacheEnabled = false
 	}
 	ii := &iiVisible{
-		name:   name,
-		files:  files,
-		caches: &sync.Pool{New: func() any { return NewIISeekInFilesCache() }},
+		name:       name,
+		files:      files,
+		caches:     &sync.Pool{New: func() any { return NewIISeekInFilesCache() }},
+		histCaches: &sync.Pool{New: func() any { return newHistorySeekInFilesCache() }},
 	}
 	return ii
+}
+
+var historyGetFromFileCacheLimit = uint32(dbg.EnvInt("H_LRU", 4096))
+
+// HistorySeekInFilesCache keeps decoded history values across read transactions of one file generation, so a
+// repeated seek skips the page lookup and its decompression.
+type HistorySeekInFilesCache struct {
+	*freelru.LRU[uint64, historySeekInFilesCacheItem] // murmur3(key) -> value at txNum
+}
+type historySeekInFilesCacheItem struct {
+	txNum uint64
+	v     []byte
+}
+
+func newHistorySeekInFilesCache() *HistorySeekInFilesCache {
+	if historyGetFromFileCacheLimit == 0 {
+		return nil
+	}
+	c, err := freelru.New[uint64, historySeekInFilesCacheItem](historyGetFromFileCacheLimit, u64noHash)
+	if err != nil {
+		panic(err)
+	}
+	return &HistorySeekInFilesCache{LRU: c}
+}
+
+func (v *iiVisible) newHistorySeekInFilesCache() *HistorySeekInFilesCache {
+	return v.histCaches.Get().(*HistorySeekInFilesCache)
+}
+
+func (v *iiVisible) returnHistorySeekInFilesCache(c *HistorySeekInFilesCache) {
+	if c != nil {
+		v.histCaches.Put(c)
+	}
 }
 
 func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {

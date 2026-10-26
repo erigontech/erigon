@@ -946,6 +946,8 @@ type HistoryRoTx struct {
 	readers      []*recsplit.IndexReader
 	stepSize     uint64
 
+	seekInFilesCache *HistorySeekInFilesCache
+
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
@@ -1146,6 +1148,10 @@ func (ht *HistoryRoTx) Close() {
 	for _, r := range ht.readers {
 		r.Close()
 	}
+	if ht.seekInFilesCache != nil {
+		ht.iit.visible.returnHistorySeekInFilesCache(ht.seekInFilesCache)
+		ht.seekInFilesCache = nil
+	}
 
 	ht.iit.Close()
 }
@@ -1168,6 +1174,16 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	if !ok {
 		return nil, false, nil
+	}
+	if ht.seekInFilesCache == nil {
+		ht.seekInFilesCache = ht.iit.visible.newHistorySeekInFilesCache()
+	}
+	var hi uint64
+	if ht.seekInFilesCache != nil {
+		hi, _ = ht.iit.hashKey(key)
+		if it, ok := ht.seekInFilesCache.Get(hi); ok && it.txNum == histTxNum {
+			return it.v, true, nil
+		}
 	}
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
@@ -1192,6 +1208,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	v, err := g.GetFromPage(historyKey)
 	if err != nil {
 		return nil, false, err
+	}
+	if ht.seekInFilesCache != nil {
+		v = bytes.Clone(v)
+		ht.seekInFilesCache.Add(hi, historySeekInFilesCacheItem{txNum: histTxNum, v: v})
 	}
 	if traceGetAsOf == ht.h.FilenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)

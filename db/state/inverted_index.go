@@ -83,9 +83,10 @@ type InvertedIndex struct {
 }
 
 type iiVisible struct {
-	files  visibleFiles
-	name   string
-	caches *sync.Pool
+	files      visibleFiles
+	name       string
+	caches     *sync.Pool
+	histCaches *sync.Pool
 }
 
 func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
