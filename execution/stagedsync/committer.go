@@ -108,6 +108,8 @@ type commitmentCalculator struct {
 	touchedAccounts map[accounts.Address]struct{}
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey]struct{}
 	destructed      map[accounts.Address]struct{}
+	// curVersionMap is the block currently being folded; emitTouched reads it.
+	curVersionMap *state.VersionMap
 
 	// asOfReader is shared between calcState (lazy-load) and compute methods
 	// (fold/unfold sibling reads); its txNum advances at each block boundary.
@@ -383,11 +385,15 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		writes := r.writes
 		if r.versionMap != nil {
 			writes = r.versionMap.WritesAtTxNum(r.txNum, r.isFinalize)
+			cc.curVersionMap = r.versionMap
 		}
 		if writes != nil && !writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.state.ApplyWrites(writes)
+			if dbg.GetAccountShadow {
+				cc.accumulateTouched(writes)
+			}
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -801,9 +807,16 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.finishPrefetch()
+	if dbg.GetAccountShadow {
+		if err := cc.shadowCompareEmit(ctx, t); err != nil {
+			cc.publish(ctx, commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, err: err})
+			return
+		}
+	}
 	cc.state.flushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
+		cc.clearTouched()
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()

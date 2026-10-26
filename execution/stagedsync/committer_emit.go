@@ -17,6 +17,9 @@
 package stagedsync
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -30,6 +33,62 @@ import (
 // version map via GetAccount/GetStorage and writes one Update per key. The version map
 // already carries the EIP-161 / self-destruct existence verdict, so this path has no
 // EIP knowledge and no re-derivation.
+
+// shadowCompareEmit (dbg.GetAccountShadow) folds this block's updates both ways —
+// calcState's flushToUpdates and the GetAccount emitTouched — into scratch buffers and
+// asserts they match key-by-key, returning the offending key on divergence so the write
+// side / projection gap is attributable. calcState stays authoritative (the real
+// flushToUpdates runs after), so the shadow adds a check without consensus risk.
+func (cc *commitmentCalculator) shadowCompareEmit(ctx context.Context, t commitTarget) error {
+	if cc.curVersionMap == nil {
+		return nil
+	}
+	calcScratch := cc.newScratchUpdates()
+	cc.state.flushToUpdates(calcScratch)
+	getScratch := cc.newScratchUpdates()
+	cc.emitTouched(cc.curVersionMap, t.lastTxNum, nil, getScratch)
+
+	calc, err := collectUpdatesMap(ctx, calcScratch)
+	if err != nil {
+		return fmt.Errorf("getaccount shadow: collect calcState: %w", err)
+	}
+	got, err := collectUpdatesMap(ctx, getScratch)
+	if err != nil {
+		return fmt.Errorf("getaccount shadow: collect emitTouched: %w", err)
+	}
+	for k, ua := range calc {
+		ub, ok := got[k]
+		if !ok {
+			return fmt.Errorf("%w: getaccount shadow block %d: key %x in calcState but not emitTouched (%+v)", ErrWrongTrieRoot, t.blockNum, []byte(k), ua)
+		}
+		if ua != ub {
+			return fmt.Errorf("%w: getaccount shadow block %d: key %x diverges calcState=%+v emitTouched=%+v", ErrWrongTrieRoot, t.blockNum, []byte(k), ua, ub)
+		}
+	}
+	for k, ub := range got {
+		if _, ok := calc[k]; !ok {
+			return fmt.Errorf("%w: getaccount shadow block %d: key %x in emitTouched but not calcState (%+v)", ErrWrongTrieRoot, t.blockNum, []byte(k), ub)
+		}
+	}
+	return nil
+}
+
+func (cc *commitmentCalculator) newScratchUpdates() *commitment.Updates {
+	u := cc.updates.NewEmpty()
+	if u.Mode() != commitment.ModeParallel {
+		u.SetMode(commitment.ModeUpdate)
+	}
+	return u
+}
+
+func collectUpdatesMap(ctx context.Context, u *commitment.Updates) (map[string]commitment.Update, error) {
+	out := map[string]commitment.Update{}
+	err := u.HashSort(ctx, nil, func(_, k []byte, upd *commitment.Update) error {
+		out[string(k)] = *upd
+		return nil
+	})
+	return out, err
+}
 
 func (cc *commitmentCalculator) ensureTouched() {
 	if cc.touchedAccounts == nil {
