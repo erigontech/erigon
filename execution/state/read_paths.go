@@ -342,10 +342,15 @@ reread:
 	var destructedVersion Version
 	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
 	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
-	if ok && sdRes.Status() == MVReadResultDependency && s.waitCommit != nil && s.waitCommit(sdRes.DepIdx()) {
-		s.wakeGen++
-		s.sdProbeEpoch++
-		goto reread
+	if ok && sdRes.Status() == MVReadResultDependency {
+		if s.waitCommit != nil && s.waitCommit(sdRes.DepIdx()) {
+			s.wakeGen++
+			s.sdProbeEpoch++
+			goto reread
+		}
+		if sdRes.DepIdx() > s.dep {
+			s.dep = sdRes.DepIdx()
+		}
 	}
 	if ok && sdRes.resolved() && destructed {
 		destructTxIndex := sdRes.DepIdx()
@@ -577,9 +582,9 @@ reread:
 				addr, AccountKey{path, key})
 		}
 		// The predecessor write is in flight (Estimate): wait for it to commit, then
-		// re-read the now-committed cell rather than aborting. waitCommit returns false
-		// only on shutdown; callers with no pause hook (serial/historical) never observe
-		// an Estimate and fall back to the in-flight value.
+		// re-read the now-committed cell rather than aborting. waitCommit returns false on
+		// shutdown and for a run that does not park; callers with no pause hook
+		// (serial/historical) never observe an Estimate and fall back to the in-flight value.
 		if s.waitCommit != nil && s.waitCommit(res.DepIdx()) {
 			s.wakeGen++
 			s.sdProbeEpoch++
