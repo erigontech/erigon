@@ -372,16 +372,19 @@ func TestBackwardBlockDownloader_HeaderRangeFailuresDoNotMarkPeersMissing(t *tes
 
 type stallingRangeFetcher struct {
 	chainServingBbdFetcher
+	rangeRetries atomic.Uint64
 }
 
-func (s *stallingRangeFetcher) FetchHeaders(ctx context.Context, _, _ uint64, _ *PeerId, _ ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+func (s *stallingRangeFetcher) FetchHeaders(ctx context.Context, _, _ uint64, _ *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	s.rangeRetries.Add(defaultFetcherConfig.CopyWithOptions(opts...).maxRetries)
 	<-ctx.Done()
 	return FetcherResponse[[]*types.Header]{}, ctx.Err()
 }
 
 func TestBackwardBlockDownloader_HeaderWalkGivesUpOnStalledRanges(t *testing.T) {
 	headers := headerWalkChain(2001)
-	bbd := newTestBbd(t, &stallingRangeFetcher{chainServingBbdFetcher{headers: headers}})
+	fetcher := &stallingRangeFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}}
+	bbd := newTestBbd(t, fetcher)
 	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
 	defer collector.Close()
 	config := defaultBbdRequestConfig
@@ -392,4 +395,5 @@ func TestBackwardBlockDownloader_HeaderWalkGivesUpOnStalledRanges(t *testing.T) 
 	connectionPoint, err := bbd.downloadHeaderChainBackwards(ctx, headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), config)
 	require.NoError(t, err)
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
+	require.Zero(t, fetcher.rangeRetries.Load())
 }

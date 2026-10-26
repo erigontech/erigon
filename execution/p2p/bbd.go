@@ -264,7 +264,11 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
 	var peersRefreshedAt uint64
-	rangeOpts := append([]FetcherOption{WithoutFailureTracking()}, fetcherOpts...)
+	rangeOpts := []FetcherOption{
+		WithResponseTimeout(config.headerChainBatchFetchTimeout),
+		WithMaxRetries(0),
+		WithoutFailureTracking(),
+	}
 	fetchCtx, cancelFetches := context.WithCancel(ctx)
 	defer cancelFetches()
 	inFlight := make(map[uint64]chan headerBatchResult)
