@@ -94,13 +94,19 @@ type verifyRangeTaskPreparer interface {
 	PrepareVerifyRanges(starts [][]byte) error
 }
 
+type verifyUpperRowPreparer interface {
+	PrepareVerifyUpper(rootKey []byte, upperBits int16) (map[string][]byte, error)
+}
+
 type VerifyStats struct {
 	PointLookups       atomic.Uint64
+	ExactRangeReads    atomic.Uint64
 	RangeTasks         atomic.Uint64
 	RangeReads         atomic.Uint64
 	RangeTaskReads     atomic.Uint64
 	RangeReadsAtOffset atomic.Uint64
 	RangeRows          atomic.Uint64
+	UpperRowsLoaded    atomic.Uint64
 	TaskWorkers        atomic.Uint64
 	TaskRowsLoaded     atomic.Uint64
 	TaskRowsReleased   atomic.Uint64
@@ -191,6 +197,16 @@ func (t *Trie) verifyKeyOwnedByTask(key []byte) bool {
 }
 
 func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment.TrieContextFactory) error {
+	if preparer, ok := t.ctx.(verifyUpperRowPreparer); ok {
+		upperRows, err := preparer.PrepareVerifyUpper(t.rootRecordKey(), verifyChainBits)
+		if err != nil {
+			return err
+		}
+		t.verifyUpperRows = upperRows
+		if t.verifyStats != nil {
+			t.verifyStats.UpperRowsLoaded.Add(uint64(len(upperRows)))
+		}
+	}
 	root, err := t.loadRoot()
 	if err != nil {
 		return err
@@ -388,6 +404,9 @@ func (t *Trie) loadVerifyExact(key []byte) error {
 		return nil
 	}
 	if t.verifyStats != nil {
+		t.verifyStats.ExactRangeReads.Add(1)
+	}
+	if t.verifyStats != nil {
 		t.verifyStats.RangeTasks.Add(1)
 	}
 	from := bytes.Clone(key)
@@ -425,6 +444,20 @@ func (t *Trie) verifyRowsComplete() error {
 }
 
 func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
+	if t.verifyOnly && t.verifyUpperRows != nil {
+		if data, ok := t.verifyUpperRows[string(key)]; ok {
+			if t.verifyUpperRowsUsed == nil {
+				t.verifyUpperRowsUsed = make(map[string]struct{})
+			}
+			if _, used := t.verifyUpperRowsUsed[string(key)]; !used {
+				t.verifyUpperRowsUsed[string(key)] = struct{}{}
+				if !t.verifyKeyOwnedByTask(key) {
+					t.verifyReferencedKeys++
+				}
+			}
+			return data, 0, nil
+		}
+	}
 	if t.verifyOnly && t.verifyRows != nil {
 		data, ok := t.verifyRows[string(key)]
 		if !ok && t.verifyRowsExact {
@@ -443,6 +476,24 @@ func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
 			}
 		}
 		return data, 0, nil
+	}
+	if t.verifyOnly {
+		if err := t.loadVerifyExact(key); err != nil {
+			return nil, 0, err
+		}
+		if t.verifyRows != nil {
+			data, ok := t.verifyRows[string(key)]
+			if ok {
+				keyString := string(key)
+				if _, used := t.verifyRowsUsed[keyString]; !used {
+					t.verifyRowsUsed[keyString] = struct{}{}
+					if !commitment.IsCommitmentStateKey(key) && !t.verifyKeyOwnedByTask(key) {
+						t.verifyReferencedKeys++
+					}
+				}
+			}
+			return data, 0, nil
+		}
 	}
 	if t.verifyOnly && t.verifyStats != nil {
 		t.verifyStats.PointLookups.Add(1)

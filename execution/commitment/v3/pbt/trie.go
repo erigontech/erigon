@@ -101,6 +101,8 @@ type Trie struct {
 	verifyRows             map[string][]byte
 	verifyRowsUsed         map[string]struct{}
 	verifyRowsExact        bool
+	verifyUpperRows        map[string][]byte
+	verifyUpperRowsUsed    map[string]struct{}
 	verifyTaskRows         uint64
 	verifyTaskBytes        uint64
 	verifyTaskLoaded       bool

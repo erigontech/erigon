@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 var (
@@ -2085,6 +2086,169 @@ func (dt *DomainRoTx) DebugRangeLatestOffsets(starts [][]byte) ([][]uint64, erro
 		}
 	}
 	return offsets, nil
+}
+
+func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upperBits int16) (map[uint64][]uint64, []uint64, map[string][]byte, error) {
+	if !dt.d.Accessors.Has(statecfg.AccessorHashMap) {
+		return nil, nil, nil, nil
+	}
+	type fileData struct {
+		prefixOffsets map[uint64]uint64
+		upperRows     map[string][]byte
+		end           uint64
+	}
+	data := make([]fileData, len(dt.files))
+	scan := func(fileIndex int) error {
+		reader := dt.dataReader(dt.files[fileIndex].src.decompressor)
+		reader.Reset(0)
+		result := fileData{prefixOffsets: make(map[uint64]uint64), upperRows: make(map[string][]byte)}
+		var keyBuf, valueBuf []byte
+		var offset uint64
+		for reader.HasNext() {
+			currentOffset := offset
+			key, _ := reader.Next(keyBuf[:0])
+			keyBuf = key
+			valueNeeded := false
+			path, err := eip8297.DecodeBitPath(key)
+			if err == nil && path.BitLen >= upperBits {
+				prefix := path.Words[0] >> uint(64-upperBits)
+				if _, ok := result.prefixOffsets[prefix]; !ok {
+					result.prefixOffsets[prefix] = currentOffset
+				}
+			}
+			if bytes.Equal(key, rootKey) || err == nil && (path.BitLen < upperBits || path.BitLen == 264) {
+				valueNeeded = true
+				result.upperRows[string(key)] = nil
+			}
+			if valueNeeded {
+				value, nextOffset := reader.Next(valueBuf[:0])
+				valueBuf = value
+				result.upperRows[string(key)] = bytes.Clone(value)
+				offset = nextOffset
+			} else {
+				offset, _ = reader.Skip()
+			}
+		}
+		result.end = offset
+		data[fileIndex] = result
+		return nil
+	}
+	if len(data) > 1 {
+		var group errgroup.Group
+		for fileIndex := range data {
+			fileIndex := fileIndex
+			group.Go(func() error { return scan(fileIndex) })
+		}
+		if err := group.Wait(); err != nil {
+			return nil, nil, nil, err
+		}
+	} else if len(data) == 1 {
+		if err := scan(0); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	prefixOffsets := make(map[uint64][]uint64)
+	fileEnds := make([]uint64, len(data))
+	upperRows := make(map[string][]byte)
+	for fileIndex, result := range data {
+		fileEnds[fileIndex] = result.end
+		for prefix, offset := range result.prefixOffsets {
+			planned := prefixOffsets[prefix]
+			if planned == nil {
+				planned = make([]uint64, len(data))
+				for i := range planned {
+					planned[i] = ^uint64(0)
+				}
+			}
+			planned[fileIndex] = offset
+			prefixOffsets[prefix] = planned
+		}
+		for key, value := range result.upperRows {
+			if len(value) == 0 {
+				delete(upperRows, key)
+			} else {
+				upperRows[key] = value
+			}
+		}
+	}
+	if roTx != nil {
+		if err := dt.debugVerifyUpperRowsFromDB(roTx, rootKey, upperBits, upperRows); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return prefixOffsets, fileEnds, upperRows, nil
+}
+
+func (dt *DomainRoTx) debugVerifyUpperRowsFromDB(roTx kv.Tx, rootKey []byte, upperBits int16, upperRows map[string][]byte) error {
+	isUpper := func(key []byte) bool {
+		if bytes.Equal(key, rootKey) {
+			return true
+		}
+		path, err := eip8297.DecodeBitPath(key)
+		return err == nil && (path.BitLen < upperBits || path.BitLen == 264)
+	}
+	filesEndTxNum := dt.files.EndTxNum()
+	if dt.d.LargeValues {
+		cursor, err := roTx.Cursor(dt.d.ValuesTable)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		key, value, err := cursor.Seek(nil)
+		for err == nil && key != nil {
+			if len(key) <= 8 {
+				key, value, err = cursor.Next()
+				continue
+			}
+			baseKey := key[:len(key)-8]
+			step := ^binary.BigEndian.Uint64(key[len(key)-8:])
+			if step*dt.stepSize >= filesEndTxNum && isUpper(baseKey) {
+				if len(value) == 0 {
+					delete(upperRows, string(baseKey))
+				} else {
+					upperRows[string(baseKey)] = bytes.Clone(value)
+				}
+			}
+			for key != nil && len(key) > 8 && bytes.Equal(key[:len(key)-8], baseKey) {
+				key, value, err = cursor.Next()
+			}
+		}
+		return err
+	}
+	cursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	key, value, err := cursor.Seek(nil)
+	for err == nil && key != nil {
+		baseKey := bytes.Clone(key)
+		for {
+			if len(value) < 8 {
+				return fmt.Errorf("%s: malformed verification value for key %x", dt.name, key)
+			}
+			step := ^binary.BigEndian.Uint64(value[:8])
+			if step*dt.stepSize >= filesEndTxNum {
+				if isUpper(key) {
+					if len(value[8:]) == 0 {
+						delete(upperRows, string(key))
+					} else {
+						upperRows[string(key)] = bytes.Clone(value[8:])
+					}
+				}
+				break
+			}
+			key, value, err = cursor.NextDup()
+			if err != nil || key == nil || !bytes.Equal(key, baseKey) {
+				break
+			}
+		}
+		if err != nil {
+			return err
+		}
+		key, value, err = cursor.NextNoDup()
+	}
+	return err
 }
 
 func (dt *DomainRoTx) debugRangeLatestFromFilesAfter(fromKey, toKey []byte, limit int, minFileEndTxNum uint64) (*DomainLatestIterFile, error) {

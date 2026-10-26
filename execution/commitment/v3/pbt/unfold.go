@@ -30,8 +30,10 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 	t.rootLoaded = true
 	rootKey := t.rootRecordKey()
 	if t.verifyOnly {
-		if err := t.loadVerifyExact(rootKey); err != nil {
-			return nil, err
+		if _, ok := t.verifyUpperRows[string(rootKey)]; !ok {
+			if err := t.loadVerifyExact(rootKey); err != nil {
+				return nil, err
+			}
 		}
 	}
 	data, _, err := t.verifyBranch(rootKey)
@@ -97,8 +99,10 @@ func (t *Trie) loadRow(path eip8297.Bitpath) (*rowNode, error) {
 		}
 	}
 	if t.verifyOnly && (t.verifyRows == nil || t.verifyRowsExact) {
-		if err := t.loadVerifyExact(key); err != nil {
-			return nil, err
+		if _, ok := t.verifyUpperRows[string(key)]; !ok {
+			if err := t.loadVerifyExact(key); err != nil {
+				return nil, err
+			}
 		}
 	}
 	data, _, err := t.verifyBranch(key)

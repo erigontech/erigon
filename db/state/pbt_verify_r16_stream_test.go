@@ -63,6 +63,7 @@ func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
 	_, err = state.VerifyPBinDomainRootWithStats(t.Context(), verifyTx, agg, kv.CommitmentDomain, stats)
 	require.NoError(t, err)
 	require.Zero(t, stats.PointLookups.Load(), "C-d must not use point lookups")
+	require.Zero(t, stats.ExactRangeReads.Load(), "verification must not use exact range reads")
 	require.Positive(t, stats.RangeReads.Load())
 	require.Equal(t, stats.RangeTasks.Load(), stats.RangeReads.Load(), "each verification task must use one range read")
 	require.Positive(t, stats.TaskRowsLoaded.Load())

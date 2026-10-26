@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
@@ -443,12 +444,12 @@ func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.Temporal
 	var verifyLiveKeys, verifyStateKeys uint64
 	verifyKeyCount := false
 	if planner, ok := tx.AggTx().(verifyRangePlanner); ok {
-		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain()}
+		roTx, ok := tx.(kv.Tx)
+		if !ok {
+			return errors.New("verification transaction is not a read transaction")
+		}
+		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain(), tx: roTx}
 		if counter, ok := tx.AggTx().(verifyDomainKeyCounter); ok {
-			roTx, ok := tx.(kv.Tx)
-			if !ok {
-				return errors.New("verification transaction is not a read transaction")
-			}
 			var err error
 			verifyLiveKeys, verifyStateKeys, err = counter.DebugRangeLatestCount(roTx, sdc.CommitmentDomain())
 			if err != nil {
@@ -1574,7 +1575,7 @@ type TrieContext struct {
 }
 
 type verifyRangePlanner interface {
-	DebugRangeLatestOffsets(kv.Domain, [][]byte) ([][]uint64, error)
+	DebugRangeLatestVerifyData(kv.Tx, kv.Domain, []byte, int16) (map[uint64][]uint64, []uint64, map[string][]byte, error)
 }
 
 type verifyDomainKeyCounter interface {
@@ -1586,24 +1587,56 @@ type verifyRangeAt interface {
 }
 
 type verifyRangePlan struct {
-	planner     verifyRangePlanner
-	domain      kv.Domain
-	offsets     map[string][]uint64
-	offsetReads *atomic.Uint64
+	planner        verifyRangePlanner
+	domain         kv.Domain
+	tx             kv.Tx
+	offsets        map[string][]uint64
+	offsetReads    *atomic.Uint64
+	prefixOffsets  map[uint64][]uint64
+	fileEnds       []uint64
+	upperRows      map[string][]byte
+	upperBits      int16
+	upperRowsReady bool
 }
 
 func (p *verifyRangePlan) prepare(starts [][]byte) error {
-	offsets, err := p.planner.DebugRangeLatestOffsets(p.domain, starts)
-	if err != nil {
-		return err
-	}
 	p.offsets = make(map[string][]uint64, len(starts))
-	for i, start := range starts {
-		if i < len(offsets) && len(offsets[i]) != 0 {
-			p.offsets[string(start)] = offsets[i]
+	for _, start := range starts {
+		if len(start)*8 < int(p.upperBits) {
+			continue
 		}
+		path := eip8297.PathFromBits(start, p.upperBits)
+		prefix := path.Words[0] >> uint(64-p.upperBits)
+		offsets := make([]uint64, len(p.fileEnds))
+		for fileIndex := range offsets {
+			offsets[fileIndex] = p.fileEnds[fileIndex]
+		}
+		if planned := p.prefixOffsets[prefix]; planned != nil {
+			for fileIndex, offset := range planned {
+				if offset != ^uint64(0) {
+					offsets[fileIndex] = offset
+				}
+			}
+		}
+		p.offsets[string(start)] = offsets
 	}
 	return nil
+}
+
+func (p *verifyRangePlan) prepareUpper(rootKey []byte, upperBits int16) (map[string][]byte, error) {
+	if p.upperRowsReady {
+		return p.upperRows, nil
+	}
+	prefixOffsets, fileEnds, upperRows, err := p.planner.DebugRangeLatestVerifyData(p.tx, p.domain, rootKey, upperBits)
+	if err != nil {
+		return nil, err
+	}
+	p.prefixOffsets = prefixOffsets
+	p.fileEnds = fileEnds
+	p.upperRows = upperRows
+	p.upperBits = upperBits
+	p.upperRowsReady = true
+	return upperRows, nil
 }
 
 func (p *verifyRangePlan) forStart(start []byte) []uint64 {
@@ -1624,6 +1657,13 @@ func (sdc *TrieContext) PrepareVerifyRanges(starts [][]byte) error {
 		return nil
 	}
 	return sdc.verifyRangePlan.prepare(starts)
+}
+
+func (sdc *TrieContext) PrepareVerifyUpper(rootKey []byte, upperBits int16) (map[string][]byte, error) {
+	if sdc.verifyRangePlan == nil {
+		return nil, nil
+	}
+	return sdc.verifyRangePlan.prepareUpper(rootKey, upperBits)
 }
 
 func (sdc *TrieContext) SetVerifyRangeOffsetCounter(counter *atomic.Uint64) {
