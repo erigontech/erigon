@@ -769,6 +769,10 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 0}},
 				Val:         *uint256.NewInt(1_000),
 			})
+			s.txOut.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: state.Version{TxIndex: 0}},
+				Val:         &accounts.Account{Balance: *uint256.NewInt(1_000), CodeHash: accounts.EmptyCodeHash},
+			})
 		}
 		r := s.buildExecResult()
 		r.TxOut = copyWrites(s.txOut)
@@ -776,7 +780,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.FlushVersionedWrites(r.TxOut, false, "")
 		be := &blockExecutor{coinbase: s.coinbase}
-		vm.MarkWritesValidated(r.TxOut, be.feeRecipient(r))
+		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
 
 		for addr, want := range map[accounts.Address]int{
 			s.coinbase:  state.MVReadResultDependency,
@@ -786,6 +790,9 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 			_, res, ok := vm.ReadBalance(addr, 1)
 			require.True(t, ok)
 			require.Equal(t, want, res.Status(), "balance of %x", addr.Value())
+			_, res, ok = vm.ReadAddress(addr, 1)
+			require.True(t, ok)
+			require.Equal(t, want, res.Status(), "account record of %x", addr.Value())
 		}
 	})
 
@@ -800,7 +807,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.FlushVersionedWrites(r.TxOut, false, "")
 		be := &blockExecutor{coinbase: s.coinbase}
-		vm.MarkWritesValidated(r.TxOut, be.feeRecipient(r))
+		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
 		_, res, ok := vm.ReadSelfDestruct(s.burntAddr, 1)
 		require.True(t, ok)
 		require.Equal(t, state.MVReadResultDependency, res.Status())

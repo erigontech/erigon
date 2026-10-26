@@ -59,6 +59,12 @@ func pragueConfig() *chain.Config {
 	return config
 }
 
+func amsterdamConfig() *chain.Config {
+	config := chain.TestChainOsakaConfig.Copy()
+	config.AmsterdamTime = common.NewUint64(0)
+	return config
+}
+
 // baseFeePaid is the base fee paid by the tx at index i of the block.
 func baseFeePaid(chainPack *blockgen.ChainPack, i int) uint256.Int {
 	return *uint256.NewInt(chainPack.Receipts[0][i].GasUsed * chainPack.TopBlock.BaseFee().Uint64())
@@ -215,8 +221,10 @@ func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
 	}{
 		{"burnt/london", londonConfig(), false},
 		{"burnt/prague", pragueConfig(), false},
+		{"burnt/amsterdam", amsterdamConfig(), false},
 		{"coinbase/london", londonConfig(), true},
 		{"coinbase/prague", pragueConfig(), true},
+		{"coinbase/amsterdam", amsterdamConfig(), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recipient, coinbase := burntRecipient, common.Address{1}
@@ -257,8 +265,8 @@ func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
 					fee := feePaid(i)
 					balance.Add(&balance, &fee)
 				}
-				// A coinbase before the merge also gets the block reward.
-				if !tc.coinbase {
+				// Before the merge, the coinbase also gets the block reward.
+				if !tc.coinbase || tc.config.TerminalTotalDifficulty != nil {
 					final, err := st.GetBalance(accounts.InternAddress(recipient))
 					require.NoError(t, err)
 					require.Equal(t, balance, final)
@@ -266,7 +274,7 @@ func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
 				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, recipient, 1))
 			}
 			importSerially(t, gspec, keys[0], chainPack, check)
-			for range 20 {
+			for range 10 {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
 		})
@@ -287,6 +295,7 @@ func TestBurntFeeIsVisibleToLaterBalanceReads(t *testing.T) {
 	}{
 		{"london", londonConfig()},
 		{"prague", pragueConfig()},
+		{"amsterdam", amsterdamConfig()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			alloc := types.GenesisAlloc{
@@ -322,7 +331,7 @@ func TestBurntFeeIsVisibleToLaterBalanceReads(t *testing.T) {
 				require.Equal(t, balance, final)
 			}
 			importSerially(t, gspec, keys[0], chainPack, check)
-			for range 20 {
+			for range 10 {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
 		})

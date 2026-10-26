@@ -1313,8 +1313,8 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 // validated its read-set out-of-order but is not yet sealed, so a reader continues on it
 // (early break) while it stays revertible until the in-order seal. A fee recipient's
 // Address, Balance and SelfDestruct cells are left Estimate: calcFees credits its fee,
-// and may undo its EIP-161 removal, at the same version, so readers keep pausing until then.
-func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(accounts.Address) bool) {
+// and may undo its EIP-161 removal, at the same version, so readers keep pausing until the seal.
+func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
@@ -1333,7 +1333,7 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(acc
 		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
 			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
 		}
-		feeAddr := feeEstimate != nil && feeEstimate(addr)
+		feeAddr := isFeeRecipient != nil && isFeeRecipient(addr)
 		if vw, ok := writes.address[addr]; ok && !feeAddr {
 			mark(AddressPath, accounts.NilKey, vw.Version)
 		}
