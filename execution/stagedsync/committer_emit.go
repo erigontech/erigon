@@ -48,33 +48,26 @@ func (cc *commitmentCalculator) shadowCompareEmit(ctx context.Context, t commitT
 	getScratch := cc.newScratchUpdates()
 	cc.emitTouched(cc.curVersionMap, t.lastTxNum, nil, getScratch)
 
-	return cc.compareUpdates(ctx, "raw-view", t.blockNum, calcScratch, getScratch)
-}
-
-// compareUpdates asserts the authoritative (calcState) and candidate (emitTouched)
-// update buffers hold the same key→Update set, returning the offending key on the
-// first divergence so a write-side / projection gap is attributable.
-func (cc *commitmentCalculator) compareUpdates(ctx context.Context, label string, blockNum uint64, authoritative, candidate *commitment.Updates) error {
-	calc, err := collectUpdatesMap(ctx, authoritative)
+	calc, err := collectUpdatesMap(ctx, calcScratch)
 	if err != nil {
 		return fmt.Errorf("getaccount shadow: collect calcState: %w", err)
 	}
-	got, err := collectUpdatesMap(ctx, candidate)
+	got, err := collectUpdatesMap(ctx, getScratch)
 	if err != nil {
 		return fmt.Errorf("getaccount shadow: collect emitTouched: %w", err)
 	}
 	for k, ua := range calc {
 		ub, ok := got[k]
 		if !ok {
-			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x in calcState but not emitTouched (%+v)", ErrWrongTrieRoot, label, blockNum, []byte(k), ua)
+			return fmt.Errorf("%w: getaccount shadow block %d: key %x in calcState but not emitTouched (%+v)", ErrWrongTrieRoot, t.blockNum, []byte(k), ua)
 		}
 		if ua != ub {
-			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x diverges calcState=%+v emitTouched=%+v", ErrWrongTrieRoot, label, blockNum, []byte(k), ua, ub)
+			return fmt.Errorf("%w: getaccount shadow block %d: key %x diverges calcState=%+v emitTouched=%+v", ErrWrongTrieRoot, t.blockNum, []byte(k), ua, ub)
 		}
 	}
 	for k, ub := range got {
 		if _, ok := calc[k]; !ok {
-			return fmt.Errorf("%w: getaccount shadow (%s) block %d: key %x in emitTouched but not calcState (%+v)", ErrWrongTrieRoot, label, blockNum, []byte(k), ub)
+			return fmt.Errorf("%w: getaccount shadow block %d: key %x in emitTouched but not calcState (%+v)", ErrWrongTrieRoot, t.blockNum, []byte(k), ub)
 		}
 	}
 	return nil

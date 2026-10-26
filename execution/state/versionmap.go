@@ -253,13 +253,6 @@ type VersionMap struct {
 	// so a global txNum maps to the block-relative TxIndex the access list is keyed by.
 	baseTxNum atomic.Uint64
 
-	// eip161Enabled/isAura are the block's empty-account rules, set once before the
-	// block executes. GetAccount uses them to resolve a touched-empty account as
-	// absent, so the EIP-161 removal verdict is one read-time projection rather than a
-	// marker the BAL seed lacks.
-	eip161Enabled atomic.Bool
-	isAura        atomic.Bool
-
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
