@@ -404,6 +404,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
+	for i, txn := range unwindTxns.Txns {
+		unwindTxns.IsLocal[i] = p.isLocalLRU.Contains(string(txn.IDHash[:]))
+	}
 	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
 		return err
