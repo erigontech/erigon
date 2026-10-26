@@ -47,6 +47,13 @@ func TestMaxGasLimit(t *testing.T) {
 		header.GasLimit++
 		assert.Error(t, VerifyParentGasLimit(config, parent, header), test.name)
 	}
+	for _, parentGasLimit := range []uint64{0, 1, 1023} {
+		parent := &types.Header{GasLimit: parentGasLimit}
+		parent.Number.SetUint64(10)
+		header := &types.Header{}
+		header.Number.SetUint64(11)
+		assert.Equal(t, parentGasLimit, MaxGasLimit(config, parent, header), "no gas limit is valid after a parent with gas limit %d", parentGasLimit)
+	}
 }
 
 // A test for https://github.com/erigontech/erigon/issues/18424
