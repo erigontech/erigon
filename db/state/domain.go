@@ -1633,6 +1633,19 @@ func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) (uint64, error) {
 	return dt.ht.files[0].startTxNum, nil
 }
 
+// HistoryCoverageStart returns the first txNum the domain's history covers, as
+// opposed to the first txNum it happens to hold a record for. With history
+// files that is the later start of the values and the index files, since a read
+// needs both. Without them the DB holds every change made after the domain's
+// frozen files, since pruning never reaches past them. This does not hold for a
+// history with snapshots disabled, which is pruned on its own.
+func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
+	if len(dt.ht.files) == 0 || len(dt.ht.iit.files) == 0 {
+		return dt.files.EndTxNum()
+	}
+	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
+}
+
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -2075,16 +2088,12 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 }
 
 func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
-		txTo = min(txTo, dt.files.EndTxNum())
-	}
+	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
-		txTo = min(txTo, dt.files.EndTxNum())
-	}
+	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
