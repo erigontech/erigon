@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -212,10 +211,12 @@ func newOverlayGetLogsSingleLogSetup(t *testing.T) (overlayGetLogsTestSetup, fil
 
 func TestOverlayGetLogsReturnsBlockReplayError(t *testing.T) {
 	setup, crit := newOverlayGetLogsSingleLogSetup(t)
-	setup.api.OverlayReplayBlockTimeout = time.Nanosecond
+	overrides := ethapi.StateOverrides{
+		accounts.InternAddress(crit.Addresses[0]): {State: &map[common.Hash]common.Hash{}, StateDiff: &map[common.Hash]common.Hash{}},
+	}
 
-	_, err := setup.api.GetLogs(setup.m.Ctx, crit, nil, setup.rules)
-	require.Error(t, err)
+	_, err := setup.api.GetLogs(setup.m.Ctx, crit, &overrides, setup.rules)
+	require.ErrorContains(t, err, "has both 'state' and 'stateDiff'")
 }
 
 type failWorkerBeginDB struct {
