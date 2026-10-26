@@ -45,10 +45,15 @@ func VerifyGaslimit(parentGasLimit, headerGasLimit uint64) error {
 	return nil
 }
 
-// MaxGasLimit is the largest gas limit VerifyParentGasLimit accepts for a header after parent.
+// MaxGasLimit is the largest gas limit VerifyParentGasLimit accepts for a header after parent, or
+// the parent's gas limit when it accepts none.
 func MaxGasLimit(config *chain.Config, parent, header *types.Header) uint64 {
 	gasLimit := parentGasLimit(config, parent, header)
-	return gasLimit + gasLimit/params.GasLimitBoundDivisor - 1
+	delta := gasLimit / params.GasLimitBoundDivisor
+	if delta == 0 {
+		return gasLimit
+	}
+	return gasLimit + delta - 1
 }
 
 // VerifyParentGasLimit checks the parent-relative gas limit rule (±1/1024).
