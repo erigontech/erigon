@@ -400,10 +400,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
-	if err := p.senders.registerNewSenders(&unwindTxns, p.logger); err != nil {
-		return err
-	}
-	if err := p.senders.registerNewSenders(&minedTxns, p.logger); err != nil {
+	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
 		return err
 	}
 

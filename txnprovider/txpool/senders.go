@@ -237,6 +237,13 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 	return nil
 }
 
+func (sc *sendersBatch) onNewBlock(unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+	if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
+		return err
+	}
+	return sc.registerNewSenders(&minedTxns, logger)
+}
+
 func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 	var structLength uint = 1 // 1 byte for fieldset
 	if !balance.IsZero() {
