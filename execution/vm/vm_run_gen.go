@@ -54,6 +54,9 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 			evm.readOnly = false
 		}
 		evm.depth--
+		if evm.depth == 0 {
+			evm.releaseInternCaches()
+		}
 	}()
 
 	// The Interpreter main run loop (contextual). This loop runs until either an

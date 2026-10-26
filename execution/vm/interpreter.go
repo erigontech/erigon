@@ -551,6 +551,9 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 			evm.readOnly = false
 		}
 		evm.depth--
+		if evm.depth == 0 {
+			evm.releaseInternCaches()
+		}
 	}()
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs

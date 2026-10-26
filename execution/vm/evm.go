@@ -173,8 +173,8 @@ var (
 	addressCachePool    = sync.Pool{New: func() any { return new(addressCache) }}
 )
 
-// ReleaseInternCaches hands the intern tables to the next EVM; call it once the EVM is done.
-func (evm *EVM) ReleaseInternCaches() {
+// releaseInternCaches hands the intern tables to the next top-level call, of this EVM or another.
+func (evm *EVM) releaseInternCaches() {
 	if evm.internCache != nil {
 		storageKeyCachePool.Put(evm.internCache)
 		evm.internCache = nil
