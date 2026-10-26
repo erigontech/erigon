@@ -1336,10 +1336,10 @@ func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
 	require.Equal(t, VersionInvalid, valid)
 }
 
-// A transaction can read slots wiped by two distinct destructs of the same
-// address. Both destructs must stay witnessed, so re-executing the later one
-// away invalidates the slot it wiped.
-func TestValidateRead_DistinctDestructWitnessesBothValidated(t *testing.T) {
+// An address is destroyed twice, with a re-creation after each destruct. Reads
+// of its wiped slots are anchored on the later destruct, so removing that
+// destruct invalidates the read of the slot written between the two destructs.
+func TestValidateRead_WipedSlotReadInvalidatedWhenLaterDestructGoes(t *testing.T) {
 	addr := getAddress(231)
 	keyA := accounts.InternKey(common.BigToHash(big.NewInt(1)))
 	keyB := accounts.InternKey(common.BigToHash(big.NewInt(2)))
@@ -1372,10 +1372,16 @@ func TestValidateRead_DistinctDestructWitnessesBothValidated(t *testing.T) {
 	require.True(t, a.IsZero(), "slot A was wiped by the tx20 destruct")
 	b, err := ibs.GetState(addr, keyB)
 	require.NoError(t, err)
-	require.True(t, b.IsZero(), "slot B was wiped by the tx10 destruct")
+	require.True(t, b.IsZero(), "slot B was wiped by both destructs")
 	ibs.PublishOrigins()
+	reads := ibs.VersionedReads()
+	for _, key := range []accounts.StorageKey{keyA, keyB} {
+		read, ok := reads.GetStorage(addr, key)
+		require.True(t, ok)
+		require.Equal(t, 20, read.Version.TxIndex, "the read is anchored on the later destruct")
+	}
 	io := NewVersionedIO(31)
-	io.RecordReads(Version{TxIndex: 30, Incarnation: 0}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 30, Incarnation: 0}, reads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(30, io, validateEqualVersion, false, ""))
 	require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, io, validateEqualVersion, false, ""),
 		"slot A reads 7 once the tx20 destruct is gone")
