@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"math/big"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -66,8 +65,8 @@ type warmupVerdictObserver struct {
 func (h *warmupVerdictObserver) Enabled(context.Context, log.Lvl) bool { return true }
 
 func (h *warmupVerdictObserver) Log(record *log.Record) error {
-	if strings.HasSuffix(record.Msg, "] Invalid block") {
-		// The executor reports its verdict before ValidateChain's deferred cleanup.
+	if record.Msg == "ethereumExecutionModule.ValidateChain: chain is invalid" {
+		// This verdict is logged before the deferred warmup cancellation.
 		select {
 		case h.atVerdict <- h.warmupCtx.Err():
 		default:
@@ -170,9 +169,9 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 				}
 				select {
 				case err := <-observer.atVerdict:
-					require.ErrorIs(t, err, context.Canceled, "executor reported an invalid block with warmup still active")
+					require.ErrorIs(t, err, context.Canceled, "validation reported an invalid block with warmup still active")
 				default:
-					t.Fatal("executor did not report the invalid block")
+					t.Fatal("validation did not report the invalid block")
 				}
 			}
 		})

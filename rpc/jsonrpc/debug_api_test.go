@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"testing"
@@ -1078,6 +1079,15 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		require.Empty(t, result.Storage)
 		require.NotNil(t, result.NextKey)
 		require.Equal(t, keys[0], *result.NextKey)
+
+		for _, maxResult := range []int{100_000_000_000, math.MaxInt} {
+			result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, maxResult)
+			require.NoError(t, err)
+			expect = StorageRangeResult{storage, nil}
+			if !reflect.DeepEqual(result, expect) {
+				t.Fatalf("maxResult %d: wrong result:\ngot %s\nwant %s", maxResult, dumper.Sdump(result), dumper.Sdump(&expect))
+			}
+		}
 	})
 }
 
@@ -1397,7 +1407,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()
-			txNum, _, _, _, _, _ := txNumsIter.Next()
+			txNum, _, _, _, _, _, _ := txNumsIter.Next()
 			require.Equal(t, expectTxNum, txNum)
 		}
 	}

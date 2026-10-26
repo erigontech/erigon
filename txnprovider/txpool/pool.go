@@ -400,7 +400,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
-	if err := p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
+	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
 		return err
 	}
 
@@ -432,10 +432,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
-		pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
+		stateChanges.BlockGasLimit, p.logger)
 	if err != nil {
 		return err
 	}
+	p.forgetUnusedSenders(senderIDsOf(&minedTxns))
 
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
@@ -1669,7 +1670,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger,
+	senders *sendersBatch, newTxns TxnSlots, blockGasLimit uint64, logger log.Logger,
 ) (Announcements, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {

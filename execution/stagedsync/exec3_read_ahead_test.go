@@ -92,7 +92,8 @@ func TestExecutorStopCancelsWarmup(t *testing.T) {
 			pe, warmupCtx := newExecutorWithBlockedWarmup(t)
 			execCtx, finish, err := pe.run(t.Context())
 			defer func() {
-				require.NoError(t, finish(nil))
+				finish(nil)
+				require.NoError(t, pe.wait())
 				if !tc.cancelWarmup {
 					require.NoError(t, warmupCtx.Err(), "normal teardown must preserve warmup")
 				}
@@ -111,11 +112,11 @@ func TestExecutorStopCancelsWarmup(t *testing.T) {
 	}
 }
 
-func TestExecutorGroupFailureCancelsWarmup(t *testing.T) {
+func TestExecutorFailureCancelsWarmup(t *testing.T) {
 	failure := errors.New("executor failure")
 	for name, faults := range map[string]chaos_monkey.Faults{
-		"worker":    {WorkerError: failure},
-		"exec loop": {ExecLoopPanic: failure},
+		"worker startup": {WorkerError: failure},
+		"exec loop":      {ExecLoopPanic: failure},
 	} {
 		t.Run(name, func(t *testing.T) {
 			pe, warmupCtx := newExecutorWithBlockedWarmup(t)
@@ -123,9 +124,16 @@ func TestExecutorGroupFailureCancelsWarmup(t *testing.T) {
 			pe.chaosFaults = faults
 			execCtx, finish, err := pe.run(t.Context())
 			defer func() {
-				require.ErrorContains(t, finish(nil), failure.Error())
+				finish(nil)
+				if faults.ExecLoopPanic != nil {
+					require.ErrorContains(t, pe.wait(), failure.Error())
+				}
 				require.ErrorIs(t, warmupCtx.Err(), context.Canceled, "executor returned a failure with warmup still active")
 			}()
+			if faults.WorkerError != nil {
+				require.ErrorIs(t, err, failure)
+				return
+			}
 			require.NoError(t, err)
 			select {
 			case <-execCtx.Done():

@@ -215,7 +215,7 @@ func DialOptions(ctx context.Context, rawurl string, logger log.Logger, options 
 	default:
 		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
 	}
-	return newClient(ctx, cfg, reconnect, logger)
+	return newClient(ctx, reconnect, logger)
 }
 
 // ClientFromContext retrieves the client from the context, if any. This can be used to perform
@@ -225,17 +225,17 @@ func ClientFromContext(ctx context.Context) (*Client, bool) {
 	return client, ok
 }
 
-func newClient(initctx context.Context, cfg *clientConfig, connect reconnectFunc, logger log.Logger) (*Client, error) {
+func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger) (*Client, error) {
 	conn, err := connect(initctx)
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, cfg, logger)
+	c := initClient(conn, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, cfg *clientConfig, logger log.Logger) *Client {
+func initClient(conn ServerCodec, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		isHTTP:      isHTTP,

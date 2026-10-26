@@ -159,20 +159,11 @@ func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	if !ibs.IsVersioned() {
 		return ibs.FinalizeTx(rules, state.NewNoopWriter())
 	}
-	writes := ibs.FinalizedWrites(rules)
-	ibs.FlushWritesToVersionMap(writes)
-	// A touched empty account has no write of its own: its EIP-161 removal is derived and published.
-	normalized, err := writes.Normalize(ibs.VersionMap(), ibs.TxnIndex(), 0, ibs.StateReader(), nil, rules.IsEIP161Enabled(), rules.IsAura, rules.IsAmsterdam)
+	writes, err := ibs.FinalizedWrites(rules)
 	if err != nil {
 		return err
 	}
-	for addr, removal := range normalized.SelfDestructs() {
-		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
-			// The transaction's own cells of the account would read as its revival.
-			ibs.VersionMap().DeleteAll(addr, ibs.TxnIndex())
-			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
-		}
-	}
+	ibs.FlushWritesToVersionMap(writes)
 	ibs.SoftFinalise()
 	ibs.ResetVersionedIO()
 	return nil

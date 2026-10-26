@@ -365,7 +365,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}
-	err = ethBackend.Init(ethNode, &ethConfig, genesis.Config)
+	err = ethBackend.Init(ethNode, &ethConfig)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
 	}

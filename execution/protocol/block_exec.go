@@ -328,7 +328,7 @@ func FinalizeBlockExecution(
 	}
 
 	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
-	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// write-set — the caller applies ba.BalIO() via ApplyWrites after
 	// assembly, so so.data must not also be flushed here. versionMap==nil callers
 	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
 	if !ibs.IsVersioned() {

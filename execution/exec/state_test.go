@@ -18,10 +18,7 @@ package exec
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 
@@ -31,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -71,11 +67,9 @@ func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
 					cancel()
 					synctest.Wait()
 				}
-				in := NewQueueWithRetry(1)
-				defer in.Release()
-				w := NewWorker(ctx, false, nil, nil, in, nil, chain.AllProtocolChanges, nil, NewResultsQueue(1, 1), nil, datadir.Dirs{}, log.New())
+				w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
 				defer w.Close()
-				w.SetReader(stubStateReader{})
+				w.SetReader(state.NewNoopReader())
 				var vmConfig vm.Config
 				if traced {
 					vmConfig.Tracer = &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {
@@ -84,9 +78,10 @@ func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
 						}
 					}}
 				}
-				w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, w.ibs, chain.AllProtocolChanges, vmConfig)
+				blockCtx := evmtypes.BlockContext{}
+				w.evm.ResetBetweenBlocks(blockCtx, evmtypes.TxContext{}, w.ibs, vmConfig, blockCtx.Rules(chain.AllProtocolChanges))
 				var executionErr error
-				in.Add(ctx, &workerTestTask{
+				result := w.RunTxTask(&workerTestTask{
 					TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
 					execute: func(evm *vm.EVM) *TxResult {
 						if !traced {
@@ -98,7 +93,7 @@ func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
 						return &TxResult{Err: executionErr}
 					},
 				})
-				require.ErrorIs(t, w.Run(), context.Canceled)
+				require.ErrorIs(t, result.Err, context.Canceled)
 				require.NoError(t, executionErr, "cancelled EVM must stop before exhausting gas")
 				require.True(t, w.evm.Cancelled())
 			})
@@ -143,8 +138,6 @@ func TestWorkerCancellationStopsSystemCalls(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
-				in := NewQueueWithRetry(1)
-				defer in.Release()
 				engine := &systemCallCancellationEngine{
 					Engine: ethash.NewFaker(), cancelAfter: cancelAfter,
 					cancel: func() {
@@ -152,12 +145,12 @@ func TestWorkerCancellationStopsSystemCalls(t *testing.T) {
 						synctest.Wait()
 					},
 				}
-				w := NewWorker(ctx, false, nil, nil, in, nil, chain.AllProtocolChanges, nil, NewResultsQueue(1, 1), engine, datadir.Dirs{}, log.New())
+				w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, engine, datadir.Dirs{}, log.New())
 				defer w.Close()
 				w.SetReader(state.NewNoopReader())
 				w.stateWriter = state.NewNoopWriter()
-				in.Add(ctx, &TxTask{Config: chain.AllProtocolChanges, TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}})
-				require.ErrorIs(t, w.Run(), context.Canceled)
+				result := w.RunTxTask(&TxTask{Config: chain.AllProtocolChanges, TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}})
+				require.ErrorIs(t, result.Err, context.Canceled)
 				require.Equal(t, uint64(cancelAfter), engine.value.Uint64(), "cancelled system calls must not write storage")
 				require.True(t, w.evm.Cancelled())
 			})
@@ -168,9 +161,9 @@ func TestWorkerCancellationStopsSystemCalls(t *testing.T) {
 func TestCancelledWorkerDoesNotInvalidateBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	w := NewWorker(ctx, false, nil, nil, nil, nil, chain.AllProtocolChanges, nil, nil, nil, datadir.Dirs{}, log.New())
+	w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
 	defer w.Close()
-	w.SetReader(stubStateReader{})
+	w.SetReader(state.NewNoopReader())
 	executed := false
 	result := w.RunTxTask(&workerTestTask{
 		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
@@ -188,9 +181,9 @@ func TestCancelledWorkerDoesNotInvalidateBlock(t *testing.T) {
 func TestWorkerCancellationDuringExecutionReturnsOperationalError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := NewWorker(ctx, false, nil, nil, nil, nil, chain.AllProtocolChanges, nil, nil, nil, datadir.Dirs{}, log.New())
+	w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
 	defer w.Close()
-	w.SetReader(stubStateReader{})
+	w.SetReader(state.NewNoopReader())
 	result := w.RunTxTask(&workerTestTask{
 		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
 		execute: func(*vm.EVM) *TxResult {
@@ -201,73 +194,4 @@ func TestWorkerCancellationDuringExecutionReturnsOperationalError(t *testing.T) 
 
 	require.ErrorIs(t, result.Err, context.Canceled)
 	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
-}
-
-func TestNewWorkersPoolForegroundReturnsWait(t *testing.T) {
-	in := NewQueueWithRetry(1)
-	t.Cleanup(in.Release)
-
-	_, _, _, clear, wait, err := NewWorkersPool(
-		context.Background(), WorkerFaults{}, nil, false, nil,
-		nil, nil, nil, in, nil, chain.AllProtocolChanges, nil,
-		nil, 1, NewWorkerMetrics(), datadir.Dirs{}, log.New(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(clear)
-	require.NotNil(t, wait)
-	require.NoError(t, wait())
-}
-
-// The background pool must keep every worker's failure, mirroring the
-// executor-group guarantee: a concurrent second failure is diagnostic
-// evidence, not noise to drop on the first-error slot.
-func TestNewWorkersPoolPreservesEveryWorkerFailure(t *testing.T) {
-	in := NewQueueWithRetry(1)
-	t.Cleanup(in.Release)
-
-	boom := errors.New("worker start fault")
-	var n atomic.Int64
-	faults := WorkerFaults{RunStart: func() error {
-		return fmt.Errorf("worker %d: %w", n.Add(1), boom)
-	}}
-
-	_, _, _, clear, wait, err := NewWorkersPool(
-		context.Background(), faults, nil, true, nil,
-		nil, nil, nil, in, nil, chain.AllProtocolChanges, nil,
-		nil, 2, NewWorkerMetrics(), datadir.Dirs{}, log.New(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(clear)
-
-	got := wait()
-	require.ErrorIs(t, got, boom)
-	require.Equal(t, 2, strings.Count(got.Error(), boom.Error()),
-		"both workers' failures must survive the join")
-}
-
-type failingRoDB struct{ kv.TemporalRoDB }
-
-func (db failingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
-	return nil, errors.New("disk failure")
-}
-
-type stubStateReader struct{ state.StateReader }
-
-// A worker setup failure (chain tx open) is an executor fault: the result must
-// carry the operational marker so it cannot become a block verdict downstream.
-func TestRunTxTaskMarksWorkerSetupFailureOperational(t *testing.T) {
-	in := NewQueueWithRetry(1)
-	t.Cleanup(in.Release)
-	rws := NewResultsQueue(8, 1)
-	w := NewWorker(context.Background(), true, NewWorkerMetrics(), failingRoDB{}, in,
-		nil, chain.AllProtocolChanges, nil, rws, nil, datadir.Dirs{}, log.New())
-	t.Cleanup(w.Close)
-	w.stateReader = stubStateReader{}
-
-	res := w.RunTxTask(&TxTask{})
-
-	require.Error(t, res.Err)
-	require.ErrorContains(t, res.Err, "disk failure")
-	require.True(t, res.Operational,
-		"a chain-tx open failure is an executor fault, never a statement about the block")
 }
