@@ -200,6 +200,79 @@ func TestZeroBaseFeeRemovesEmptyBurntRecipient(t *testing.T) {
 	importInParallel(t, gspec, keys[0], chainPack, check)
 }
 
+// Tx 0 touches an empty fee recipient, the burnt-fee recipient or the coinbase, with a zero-value
+// call, so EIP-161 removes it and its fee revives it with its storage. Every later tx stores the
+// recipient's balance, which must include the fees of all earlier txs.
+func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
+	const txCount = 32
+	const gasPrice = 10_000_000_000
+	toucher := common.HexToAddress("0x7007")
+	observer := common.HexToAddress("0x0b5e")
+	for _, tc := range []struct {
+		name     string
+		config   *chain.Config
+		coinbase bool
+	}{
+		{"burnt/london", londonConfig(), false},
+		{"burnt/prague", pragueConfig(), false},
+		{"coinbase/london", londonConfig(), true},
+		{"coinbase/prague", pragueConfig(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recipient, coinbase := burntRecipient, common.Address{1}
+			if tc.coinbase {
+				recipient = common.HexToAddress("0xc0c0")
+				coinbase = recipient
+			}
+			alloc := types.GenesisAlloc{
+				toucher:   {Code: callCode(recipient, 0)},
+				observer:  {Code: program.New().Push(recipient).Op(vm.BALANCE, vm.CALLER, vm.SSTORE).Bytes()},
+				recipient: {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{common.BytesToHash([]byte{1}): common.BytesToHash([]byte{1})}},
+			}
+			keys := revivalKeys(t, alloc, txCount)
+			calls := make([]revivalCall, txCount)
+			calls[0] = revivalCall{to: toucher}
+			for i := 1; i < txCount; i++ {
+				calls[i] = revivalCall{to: observer}
+			}
+			gspec := &types.Genesis{Config: burntFeeConfig(tc.config), GasLimit: txCount * 1_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, coinbase, gasPrice, calls)
+			feePaid := func(i int) uint256.Int {
+				if !tc.coinbase {
+					return baseFeePaid(chainPack, i)
+				}
+				tip := uint256.NewInt(gasPrice)
+				tip.Sub(tip, chainPack.TopBlock.BaseFee())
+				return *tip.Mul(tip, uint256.NewInt(chainPack.Receipts[0][i].GasUsed))
+			}
+			check := func(t *testing.T, st *state.IntraBlockState) {
+				var balance uint256.Int
+				for i, call := range calls {
+					if call.to == observer {
+						sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+						stored, err := st.GetState(accounts.InternAddress(observer), accounts.InternKey(common.BytesToHash(sender[:])))
+						require.NoError(t, err)
+						require.Equal(t, balance, stored, "the balance read by tx %d", i)
+					}
+					fee := feePaid(i)
+					balance.Add(&balance, &fee)
+				}
+				// A coinbase before the merge also gets the block reward.
+				if !tc.coinbase {
+					final, err := st.GetBalance(accounts.InternAddress(recipient))
+					require.NoError(t, err)
+					require.Equal(t, balance, final)
+				}
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, recipient, 1))
+			}
+			importSerially(t, gspec, keys[0], chainPack, check)
+			for range 20 {
+				importInParallel(t, gspec, keys[0], chainPack, check)
+			}
+		})
+	}
+}
+
 // Txs alternate between sending 1 wei to the burnt-fee recipient and storing its
 // balance, so every stored balance includes the base fees of all earlier txs.
 // A balance read can race with the crediting of an earlier tx's base fee, so the
