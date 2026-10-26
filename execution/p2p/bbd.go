@@ -263,6 +263,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
+	var peersRefreshedAt uint64
 	lastHeader := initialHeader
 	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
 	var connectionPoint *types.Header
@@ -303,6 +304,13 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		}
 
 		peerId, err := peers.nextAvailablePeer()
+		if err != nil && config.peerId == nil && chainLen > peersRefreshedAt {
+			if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
+				peersRefreshedAt = chainLen
+				peers = newPeersContext(connected)
+				peerId, err = peers.nextAvailablePeer()
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf(
 				"no peers available before reaching connection point num=%d, hash=%s: %w",
