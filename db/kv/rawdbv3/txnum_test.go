@@ -191,13 +191,14 @@ func TestTxNums2BlockNums(t *testing.T) {
 				prevBlock := -1
 				for _, want := range in {
 					require.True(t, it.HasNext())
-					txNum, blockNum, txIndex, isFinal, changed, err := it.Next()
+					txNum, blockNum, txIndex, isFinal, isSystem, changed, err := it.Next()
 					require.NoError(t, err)
 					b, _ := slices.BinarySearchFunc(spans, want, func(s blockSpan, n uint64) int { return int(s.max) - int(n) })
 					require.Equal(t, want, txNum)
 					require.Equal(t, uint64(b), blockNum, "txNum %d", want)
 					require.Equal(t, int(want)-int(spans[b].min)-1, txIndex)
 					require.Equal(t, bool(asc) && want == spans[b].max || !bool(asc) && want == spans[b].min, isFinal)
+					require.Equal(t, want == spans[b].min || want == spans[b].max, isSystem)
 					require.Equal(t, b != prevBlock, changed)
 					prevBlock = b
 				}
@@ -243,7 +244,7 @@ func TestTxNums2BlockNumsSearchesOnce(t *testing.T) {
 		index.blockNumberCalls = 0
 		it := TxNums2BlockNums(t.Context(), tx, reader, stream.Array(in), asc)
 		for it.HasNext() {
-			_, _, _, _, _, err := it.Next()
+			_, _, _, _, _, _, err := it.Next()
 			require.NoError(t, err)
 		}
 		it.Close()
@@ -266,10 +267,10 @@ func TestTxNums2BlockNumsFarJump(t *testing.T) {
 			slices.Reverse(in)
 		}
 		it := TxNums2BlockNums(t.Context(), tx, reader, stream.Array(in), asc)
-		_, _, _, _, _, err := it.Next()
+		_, _, _, _, _, _, err := it.Next()
 		require.NoError(t, err)
 		index.blockNumberCalls, index.maxTxNumCalls = 0, 0
-		_, blockNum, _, _, _, err := it.Next()
+		_, blockNum, _, _, _, _, err := it.Next()
 		require.NoError(t, err)
 		it.Close()
 		require.Equal(t, map[order.By]uint64{order.Asc: 1010, order.Desc: 10}[asc], blockNum)
@@ -285,9 +286,9 @@ func TestTxNums2BlockNumsPastLastBlock(t *testing.T) {
 	defer tx.Rollback()
 	it := TxNums2BlockNums(t.Context(), tx, TxNums, stream.Array([]uint64{spans[10].min, spans[99].max + 5}), order.Asc)
 	defer it.Close()
-	_, blockNum, _, _, _, err := it.Next()
+	_, blockNum, _, _, _, _, err := it.Next()
 	require.NoError(t, err)
 	require.Equal(t, uint64(10), blockNum)
-	_, _, _, _, _, err = it.Next()
+	_, _, _, _, _, _, err = it.Next()
 	require.ErrorContains(t, err, "can't find blockNumber")
 }

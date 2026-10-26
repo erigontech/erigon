@@ -471,6 +471,15 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	require.Equal(t, capBefore, cap(ibs.logs.entries), "the array survives revert+relog")
 }
 
+func TestLogTakesNoJournalEntry(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x01}})
+	require.Zero(t, ibs.journal.length())
+}
+
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
 // receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
 // the counter must run across transactions, roll back with a reverted log, and
