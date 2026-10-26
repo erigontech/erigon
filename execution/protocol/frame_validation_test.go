@@ -117,11 +117,40 @@ func TestFrameValidationDeploymentTransientWrite(t *testing.T) {
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 	}
 	_, err := ValidateFrameTransaction(evm, tx)
-	require.ErrorContains(t, err, "TSTORE")
+	require.NoError(t, err)
+}
+
+func TestFrameValidationVerifyTransientWrite(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	code := program.New().Tstore(0, 1).Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(tx.SenderAddress), code, tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
+	_, err := ValidateFrameTransaction(evm, tx)
+	require.ErrorIs(t, err, vm.ErrWriteProtection)
+}
+
+func TestFrameValidationHelperStorage(t *testing.T) {
+	for _, op := range []vm.OpCode{vm.SLOAD, vm.TLOAD} {
+		t.Run(op.String(), func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			helper := common.HexToAddress("0x2000")
+			require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(helper), program.New().Push0().Op(op, vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+			code := program.New().StaticCall(uint256.NewInt(3_000), helper, 0, 0, 0, 0).Op(vm.POP).Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()
+			require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(tx.SenderAddress), code, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 10_000}}}
+			_, err := ValidateFrameTransaction(evm, tx)
+			if op == vm.SLOAD {
+				require.ErrorContains(t, err, "SLOAD")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestFrameValidationExpiryNeedsVerifyMode(t *testing.T) {
 	evm, tx := frameTestEnv(t)
+	evm.Context.Time = 1
 	ibs := evm.IntraBlockState()
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(types.FrameExpiryVerifier), frameExpiryCode, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))

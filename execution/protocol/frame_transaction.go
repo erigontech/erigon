@@ -161,7 +161,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		}
 		st.state.ResetFrameTransientStorage()
 		frameSnapshot := st.state.PushSnapshot()
-		logStart := len(st.state.GetRawLogs(st.state.TxIndex()))
+		logStart := st.state.LogCount()
 		_, left, frameErr := st.evm.ExecuteTransactionFrame()
 		if frameErr != nil {
 			st.state.RevertToSnapshot(frameSnapshot, frameErr)
@@ -182,7 +182,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		ctx.Receipts[i].GasUsed.Execution = frame.Limits.Execution - left
 		if frameErr == nil {
 			ctx.Receipts[i].Status = types.ReceiptStatusSuccessful
-			ctx.Receipts[i].Logs = append(types.Logs(nil), st.state.GetRawLogs(st.state.TxIndex())[logStart:]...)
+			ctx.Receipts[i].Logs = st.state.LogsSince(logStart)
 		} else {
 			lastErr = frameErr
 			if frame.Mode == types.FrameVerify {

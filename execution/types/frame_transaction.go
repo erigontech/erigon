@@ -341,8 +341,8 @@ func (tx *FrameTransaction) IsContractDeploy() bool { return false }
 
 func (tx *FrameTransaction) Unwrap() Transaction { return tx }
 
-func (tx *FrameTransaction) Sender(Signer) (accounts.Address, error) {
-	return accounts.InternAddress(tx.SenderAddress), nil
+func (tx *FrameTransaction) Sender(signer Signer) (accounts.Address, error) {
+	return signer.Sender(tx)
 }
 
 func (tx *FrameTransaction) cachedSender() (accounts.Address, bool) {

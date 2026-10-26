@@ -185,8 +185,6 @@ Options for configuring the [transaction pool](/fundamentals/modules/txpool).
 * `--txpool.queued.dormancy value`: Evicts queued transactions from senders with no on-chain state changes for at least this duration (e.g. `3h`, `2h30m`).
   * Default: `3h0m0s`
   * Set to `0` to disable dormancy-based eviction.
-* `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
-  * Default: `false`
 
 ### Network and Peers
 

@@ -830,7 +830,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		if mt.TxnSlot.TxType() != FrameTxnType && mt.TxnSlot.GetGas() >= p.blockGasLimit.Load() {
+		if mt.TxnSlot.TxType() != FrameTxnType && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
 		}
@@ -1376,8 +1376,22 @@ func ValidateSerializedTxn(serializedTxn []byte) error {
 		}
 	}
 	maxSize := txnMaxSize
-	if txnType == BlobTxnType || txnType == FrameTxnType {
+	if txnType == BlobTxnType {
 		maxSize = blobTxnMaxSize
+	} else if txnType == FrameTxnType {
+		bodyPos, bodyLen, err := rlp.ParseList(serializedTxn, 1)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrParseTxn, err)
+		}
+		if bodyLen > 0 && serializedTxn[bodyPos] >= 0xc0 {
+			innerPos, innerLen, err := rlp.ParseList(serializedTxn, bodyPos)
+			if err != nil {
+				return fmt.Errorf("%w: %w", ErrParseTxn, err)
+			}
+			if 1+innerPos+innerLen-bodyPos <= txnMaxSize {
+				maxSize = blobTxnMaxSize
+			}
+		}
 	}
 	if len(serializedTxn) > maxSize {
 		return fmt.Errorf("%w: type=%d", ErrRlpTooBig, txnType)
@@ -2443,7 +2457,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 
 		mt.subPool &^= NotTooMuchGas
-		fits := mt.TxnSlot.GetGas() < blockGasLimit
+		fits := mt.TxnSlot.GetGas() <= blockGasLimit
 		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
 			_, _, limits, err := frame.GasLimits()
 			fits = err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit

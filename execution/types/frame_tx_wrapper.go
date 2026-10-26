@@ -49,7 +49,10 @@ func (tx *FrameTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.FrameTransaction = (*FrameTransaction)(wrapped.Transaction)
 	tx.WrapperVersion, tx.Blobs, tx.Commitments, tx.Proofs = wrapped.Version, wrapped.Blobs, wrapped.Commitments, wrapped.Proofs
-	return tx.validateSidecarShape()
+	if err := tx.validateSidecarShape(); err != nil {
+		return err
+	}
+	return tx.validateNonceKeys()
 }
 
 func (tx *FrameTxWrapper) MarshalBinaryWrapped(w io.Writer) error {

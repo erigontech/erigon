@@ -82,7 +82,7 @@ func TestFrameTransactionDefaultTransfer(t *testing.T) {
 	require.Equal(t, uint64(0), result.BlockStateGasUsed)
 }
 
-func frameTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
+func frameTestEnv(t testing.TB) (*vm.EVM, *types.FrameTransaction) {
 	t.Helper()
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
@@ -94,7 +94,7 @@ func frameTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	return evm, &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender}
 }
 
-func applyFrameTest(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction) (*evmtypes.ExecutionResult, error) {
+func applyFrameTest(t testing.TB, evm *vm.EVM, tx *types.FrameTransaction) (*evmtypes.ExecutionResult, error) {
 	t.Helper()
 	msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 	require.NoError(t, err)

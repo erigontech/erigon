@@ -63,7 +63,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	if err != nil {
 		return nil, err
 	}
-	if tx.Frames[0].Target != nil && *tx.Frames[0].Target == types.FrameExpiryVerifier && validation.Deadline < evm.Context.Time {
+	if first := &tx.Frames[0]; first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier && validation.Deadline < evm.Context.Time {
 		return nil, errors.New("expired frame transaction")
 	}
 	config, txContext := evm.Config(), evm.TxContext
@@ -236,7 +236,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 	stack := scope.StackData()
 	banned := false
 	switch vm.OpCode(op) {
-	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.SLOTNUM, vm.INVALID, vm.SELFDESTRUCT, vm.BALANCE, vm.SELFBALANCE, vm.TSTORE:
+	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.SLOTNUM, vm.INVALID, vm.SELFDESTRUCT, vm.BALANCE, vm.SELFBALANCE:
 		banned = true
 	case vm.TIMESTAMP:
 		frame := &ctx.Transaction.Frames[ctx.Index]
@@ -252,7 +252,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		banned = !deploy
 	case vm.SSTORE:
 		banned = !deploy || scope.Address().Value() != ctx.Transaction.SenderAddress
-	case vm.SLOAD, vm.TLOAD:
+	case vm.SLOAD:
 		banned = scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.EXTCODESIZE, vm.EXTCODEHASH, vm.EXTCODECOPY:
 		if len(stack) > 0 {

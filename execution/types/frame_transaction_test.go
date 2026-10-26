@@ -56,7 +56,7 @@ func TestFrameTransactionEncoding(t *testing.T) {
 	require.Equal(t, byte(0x06), txn.Type())
 	require.Equal(t, uint256.NewInt(1), txn.GetChainID())
 	require.Equal(t, uint64(7), txn.GetNonce())
-	actualSender, err := txn.Sender(Signer{})
+	actualSender, err := txn.Sender(*LatestSignerForChainID(uint256.NewInt(1)))
 	require.NoError(t, err)
 	require.Equal(t, accounts.InternAddress(sender), actualSender)
 	require.Equal(t, uint256.NewInt(2), txn.GetTipCap())
@@ -88,6 +88,13 @@ func TestFrameTransactionNonceKeys(t *testing.T) {
 			require.NoError(t, tx.MarshalBinary(&data))
 			_, err := DecodeTransaction(data.Bytes())
 			require.Error(t, err)
+
+			tx.BlobVersionedHashes = []common.Hash{{1}}
+			wrapped := &FrameTxWrapper{FrameTransaction: tx, WrapperVersion: 1, Blobs: Blobs{{}}, Commitments: BlobKzgs{{}}, Proofs: make(KZGProofs, 128)}
+			data.Reset()
+			require.NoError(t, wrapped.MarshalBinaryWrapped(&data))
+			_, err = DecodeWrappedTransaction(data.Bytes())
+			require.Error(t, err, "wrapped frames must enforce the same nonce-key rules")
 		})
 	}
 }
@@ -304,14 +311,26 @@ func TestFrameTransactionSigningHash(t *testing.T) {
 func TestFrameTransactionSigner(t *testing.T) {
 	t.Parallel()
 	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"), Frames: []Frame{{}}}
-	signer := LatestSignerForChainID(uint256.NewInt(1))
-	sender, err := signer.Sender(tx)
-	require.NoError(t, err)
-	require.Equal(t, tx.SenderAddress, sender.Value())
-	_, err = LatestSignerForChainID(uint256.NewInt(2)).Sender(tx)
-	require.ErrorIs(t, err, ErrInvalidChainId)
-	_, err = MakeSigner(&chain.Config{ChainID: uint256.NewInt(1)}, 0, 0).Sender(tx)
-	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+	for _, tc := range []struct {
+		name   string
+		signer Signer
+		err    error
+	}{
+		{"valid", *LatestSignerForChainID(uint256.NewInt(1)), nil},
+		{"wrong chain", *LatestSignerForChainID(uint256.NewInt(2)), ErrInvalidChainId},
+		{"before fork", *MakeSigner(&chain.Config{ChainID: uint256.NewInt(1)}, 0, 0), ErrTxTypeNotSupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sender, err := tc.signer.Sender(tx)
+			require.ErrorIs(t, err, tc.err)
+			fromTx, err := tx.Sender(tc.signer)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, sender, fromTx)
+			if tc.err == nil {
+				require.Equal(t, tx.SenderAddress, sender.Value())
+			}
+		})
+	}
 }
 
 func TestFrameTransactionJSON(t *testing.T) {
