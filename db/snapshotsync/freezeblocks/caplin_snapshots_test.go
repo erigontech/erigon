@@ -18,13 +18,16 @@ package freezeblocks
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/afero"
@@ -50,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -182,14 +186,32 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 2, "the unindexed tail segment must not be visible")
 	require.Len(t, view.BlobSidecars(), 1)
 
-	// dirty-backed: counts the unindexed tail, inclusive To-1.
-	require.Equal(t, uint64(3*limit-1), sn.SegmentsMax())
-	// visible-backed, inclusive To-1. BlocksAvailable is min(SegmentsMax, IndicesMax),
-	// so it follows IndicesMax whenever the tip is dumped but not yet indexed.
+	// visible-backed, inclusive To-1: the unindexed tail is not counted.
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
 	require.Equal(t, uint64(2*limit-1), sn.IndicesMax())
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
 	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+}
+
+func TestCaplinLogStatReportsDumpedTip(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, false)
+
+	logger := log.New()
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	recs := make(chan *log.Record, 1)
+	logger.SetHandler(log.ChannelHandler(recs))
+	sn.LogStat("test")
+	rec := <-recs
+	require.Equal(t, []any{"blocks", common.PrettyExact(3 * limit), "indices", common.PrettyExact(2 * limit)}, rec.Ctx)
 }
 
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
@@ -513,6 +535,53 @@ func TestBuildMissingIndicesSkipsClaimedRange(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 1, "a freshly indexed segment must be published")
 }
 
+func TestBuildMissingIndicesWaitsForOutstandingBuild(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+		once.Do(func() {
+			close(started)
+			<-release
+		})
+		return snapshotsync.BeaconSimpleIdx(ctx, info, salt, tmpDir, p, lvl, logger)
+	}))
+
+	first := make(chan error, 1)
+	go func() { first <- sn.BuildMissingIndices(t.Context(), log.New()) }()
+	<-started
+	tipAtReturn := make(chan uint64, 1)
+	go func() {
+		if err := sn.BuildMissingIndices(t.Context(), log.New()); err != nil {
+			t.Error(err)
+		}
+		tipAtReturn <- sn.BlocksAvailable()
+	}()
+	require.Eventually(t, buildBlockedOnBuildMu, 10*time.Second, time.Millisecond, "the second build must block on buildMu")
+	close(release)
+
+	require.NoError(t, <-first)
+	require.Equal(t, uint64(2*limit-1), <-tipAtReturn, "a second build must return only once the outstanding one is visible")
+}
+
+func buildBlockedOnBuildMu() bool {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	for g := range strings.SplitSeq(string(buf), "\n\n") {
+		if strings.Contains(g, "sync.(*Mutex).Lock(") && strings.Contains(g, "(*CaplinSnapshots).BuildMissingIndices(") {
+			return true
+		}
+	}
+	return false
+}
+
 // A corrupt .idx is not a missing one: the strict open rejects it, so the discovery open
 // inside BuildMissingIndices has to be optimistic or the node can never repair itself.
 func TestBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
@@ -616,6 +685,26 @@ func TestOpenStopsAtBeaconBlocksGap(t *testing.T) {
 	for _, name := range reported {
 		require.NotContains(t, name, "000030-000040", "a segment kept past the gap must keep seeding its index")
 	}
+}
+
+func TestSegmentsMaxIgnoresBlobsPastBeaconBlocksGap(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, 2*limit, 3*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BlobSidecars(), 3)
+	require.Equal(t, uint64(limit-1), sn.SegmentsMax(), "the backfill has to fill the beaconblocks gap")
 }
 
 func TestOpenSkipsCrossingBeaconBlocks(t *testing.T) {

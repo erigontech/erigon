@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -60,6 +61,10 @@ type CaplinSnapshots struct {
 	// salt-blocks.txt is the EL blocks salt; caplin has no salt file of its own, so its
 	// indexes stay on 0 as they always have been.
 	Salt uint32
+
+	// Range claims alone let a second BuildMissingIndices return before the first one's
+	// segments are visible.
+	buildMu sync.Mutex
 
 	tmpdir string
 	logger log.Logger
@@ -99,16 +104,22 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-// SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
-// not: the archive backfill stop condition asks how far data has been dumped, not how
-// far it is readable.
 func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	return s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)
+	return s.BlocksAvailable()
+}
+
+func (s *CaplinSnapshots) BlocksAvailableFrom() uint64 {
+	view := s.View()
+	defer view.Close()
+	if segs := view.BeaconBlocks(); len(segs) > 0 {
+		return segs[0].From()
+	}
+	return 0
 }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1))
+		"blocks", common.PrettyExact(s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)+1), "indices", common.PrettyExact(s.IndicesMax()+1))
 }
 
 func (s *CaplinSnapshots) LS() {
@@ -217,8 +228,6 @@ func (s *CaplinSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 // Go embedding has no virtual dispatch: the promoted base version would open past a gap.
 func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
-// SegmentsMax is dirty-backed, so a beaconblocks segment past a gap or crossing must stay
-// closed: backfill stops at SegmentsMax and would never write the missing slots.
 func (s *CaplinSnapshots) segmentsUpToGap() ([]string, []snaptype.FileInfo, error) {
 	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
@@ -542,6 +551,8 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
+	s.buildMu.Lock()
+	defer s.buildMu.Unlock()
 	list, _, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
