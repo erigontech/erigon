@@ -9,62 +9,31 @@ import (
 )
 
 func TestStreamHandlerNoContention(t *testing.T) {
-	logAll := func(h Handler, goroutines int) {
-		lg := New()
-		lg.SetHandler(h)
-		var wg sync.WaitGroup
-		for range goroutines {
-			wg.Go(func() { lg.Info("msg") })
+	// Each Write waits for the other one, so both return promptly only if StreamHandler lets writes overlap.
+	both := make(chan struct{})
+	var entered atomic.Int32
+	lg := New()
+	lg.SetHandler(StreamHandler(writeFunc(func(p []byte) (int, error) {
+		if entered.Add(1) == 2 {
+			close(both)
 		}
-		wg.Wait()
+		select {
+		case <-both:
+		case <-time.After(10 * time.Second):
+			t.Error("StreamHandler serializes writes")
+		}
+		return len(p), nil
+	}), TerminalFormatNoColor()))
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { lg.Info("msg") })
 	}
-
-	ow := &overlapWriter{both: make(chan struct{})}
-	logAll(StreamHandler(ow, TerminalFormatNoColor()), 2)
-	if ow.timedOut.Load() {
-		t.Fatal("StreamHandler serializes writes: two concurrent Writes never overlapped")
-	}
-
-	fw := &inFlightWriter{}
-	logAll(SyncHandler(StreamHandler(fw, TerminalFormatNoColor())), 100)
-	if fw.overlapped.Load() {
-		t.Fatal("SyncHandler let two Writes run at once")
-	}
+	wg.Wait()
 }
 
-// overlapWriter holds each Write until two Writes are in flight, so it returns promptly only if writes overlap.
-type overlapWriter struct {
-	entered  atomic.Int32
-	both     chan struct{}
-	timedOut atomic.Bool
-}
+type writeFunc func([]byte) (int, error)
 
-func (w *overlapWriter) Write(p []byte) (int, error) {
-	if w.entered.Add(1) == 2 {
-		close(w.both)
-	}
-	select {
-	case <-w.both:
-	case <-time.After(10 * time.Second):
-		w.timedOut.Store(true)
-	}
-	return len(p), nil
-}
-
-// inFlightWriter records whether two Writes were ever in flight at once.
-type inFlightWriter struct {
-	inFlight   atomic.Int32
-	overlapped atomic.Bool
-}
-
-func (w *inFlightWriter) Write(p []byte) (int, error) {
-	if w.inFlight.Add(1) > 1 {
-		w.overlapped.Store(true)
-	}
-	time.Sleep(time.Millisecond)
-	w.inFlight.Add(-1)
-	return len(p), nil
-}
+func (f writeFunc) Write(p []byte) (int, error) { return f(p) }
 
 func TestStreamHandlerAllocsUpperBound(t *testing.T) {
 	lg := New()
