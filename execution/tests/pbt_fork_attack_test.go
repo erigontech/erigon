@@ -41,6 +41,8 @@ import (
 
 const pbtForkActivationTime = uint64(30)
 
+var pbtForkContractAddress = common.HexToAddress("0x1000000000000000000000000000000000000001")
+
 type pbtForkChain struct {
 	t              *testing.T
 	m              *execmoduletester.ExecModuleTester
@@ -55,6 +57,10 @@ type pbtForkChain struct {
 }
 
 func newPBTForkChain(t *testing.T, options ...execmoduletester.Option) *pbtForkChain {
+	return newPBTForkChainWithAlloc(t, nil, options...)
+}
+
+func newPBTForkChainWithAlloc(t *testing.T, extra types.GenesisAlloc, options ...execmoduletester.Option) *pbtForkChain {
 	commitmentflags.Restore(t)
 	previousExec3Parallel := dbg.Exec3Parallel
 	previousBatchCommitments := dbg.BatchCommitments
@@ -83,7 +89,7 @@ func newPBTForkChain(t *testing.T, options ...execmoduletester.Option) *pbtForkC
 		config:         config,
 		key:            key,
 		from:           crypto.PubkeyToAddress(key.PublicKey),
-		contract:       common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		contract:       pbtForkContractAddress,
 		code:           common.FromHex("0x60003560005500"),
 		initialBalance: new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether)),
 	}
@@ -95,6 +101,9 @@ func newPBTForkChain(t *testing.T, options ...execmoduletester.Option) *pbtForkC
 		},
 		GasLimit: 30_000_000,
 		BaseFee:  uint256.NewInt(0),
+	}
+	for address, account := range extra {
+		c.genesis.Alloc[address] = account
 	}
 	c.m = execmoduletester.New(t, append([]execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(c.genesis),

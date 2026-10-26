@@ -104,7 +104,7 @@ func newPBTAcceptanceChain(tb testing.TB, binary bool, dual bool, sharedCode []b
 		BaseFee:  uint256.NewInt(0),
 	}
 	addAmsterdamBuilderContracts(genesis)
-	addPBTRequestContracts(genesis)
+	AddPBTRequestContracts(genesis)
 	dirs := datadir.New(tb.TempDir())
 	refs := false
 	variant := dbstate.TrieVariantHex
@@ -257,7 +257,7 @@ func newPBTAcceptanceChain(tb testing.TB, binary bool, dual bool, sharedCode []b
 	return &PBTAcceptanceChain{Tester: tester, Chain: pack, Genesis: genesis, Key: key, Sender: sender, Contract: contract}, nil
 }
 
-func addPBTRequestContracts(genesis *types.Genesis) {
+func AddPBTRequestContracts(genesis *types.Genesis) {
 	if genesis.Config.AmsterdamTime == nil {
 		return
 	}
