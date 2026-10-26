@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -260,6 +261,49 @@ func TestBinaryTrieOverrideRefusedWithoutStoredChainConfig(t *testing.T) {
 		require.Nil(t, cfg)
 		return err
 	}))
+}
+
+// The shape of a shadowfork worker: no genesis supplied, --keep.stored.chain.config,
+// the default chain name, a hex+bin datadir, and a head already past Amsterdam.
+func TestBinaryTrieOverrideKeepStoredChainConfigPastGenesis(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	dirs := datadir.New(t.TempDir())
+	_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+	require.NoError(t, err)
+	db := temporaltest.NewTestDB(t, dirs)
+	g := delayedPBinGenesis()
+	g.Config.BinaryTrieTime = nil
+	_, genesisBlock, err := genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+	require.NoError(t, err)
+	head := &types.Header{ParentHash: genesisBlock.Hash(), Number: *uint256.NewInt(1), Time: 15}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, head); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, head.Hash(), 1); err != nil {
+			return err
+		}
+		return rawdb.WriteHeadHeaderHash(tx, head.Hash())
+	}))
+
+	atHead := head.Time
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, nil, "mainnet", nil, nil, &atHead, true, dirs, log.New())
+	var compatErr *chain.ConfigCompatError
+	require.ErrorAs(t, err, &compatErr)
+	require.True(t, compatErr.HasTimestampConflict())
+	require.Nil(t, readStoredChainConfig(t, db).BinaryTrieTime)
+
+	binaryTrieTime := uint64(1000)
+	cfg, _, err := genesiswrite.CommitGenesisBlockWithOverride(db, nil, "mainnet", nil, nil, &binaryTrieTime, true, dirs, log.New())
+	require.NoError(t, err)
+	require.Equal(t, &binaryTrieTime, cfg.BinaryTrieTime)
+	stored := readStoredChainConfig(t, db)
+	require.Equal(t, &binaryTrieTime, stored.BinaryTrieTime)
+	require.Equal(t, g.Config.AmsterdamTime, stored.AmsterdamTime)
+
+	cfg, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, nil, "mainnet", nil, nil, nil, true, dirs, log.New())
+	require.NoError(t, err)
+	require.Equal(t, &binaryTrieTime, cfg.BinaryTrieTime, "a restart without the flag keeps the stored fork time")
 }
 
 func TestPBinGenesisComputesBothRootsAtBlockZero(t *testing.T) {
