@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strconv"
 	"testing"
@@ -172,6 +173,8 @@ func TestCapEVMTimeout(t *testing.T) {
 		{5 * time.Minute, 1000, time.Second},
 		{0, 1000, time.Second},
 		{0, 0, 0},
+		{1500 * time.Microsecond, 1, time.Millisecond},
+		{0, math.MaxInt64, time.Duration(math.MaxInt64/int64(time.Millisecond)) * time.Millisecond},
 	} {
 		require.Equal(t, tc.want, capEVMTimeout(tc.server, tc.clientMs), "server %v, client %d ms", tc.server, tc.clientMs)
 	}

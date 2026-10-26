@@ -70,10 +70,14 @@ func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 
 // capEVMTimeout lets a client lower the server EVM timeout, never raise or remove it.
 func capEVMTimeout(serverTimeout time.Duration, clientMilliSeconds int64) time.Duration {
-	if clientMilliSeconds <= 0 || (serverTimeout > 0 && clientMilliSeconds >= serverTimeout.Milliseconds()) {
+	if clientMilliSeconds <= 0 {
 		return serverTimeout
 	}
-	return time.Duration(clientMilliSeconds) * time.Millisecond
+	clientTimeout := time.Duration(min(clientMilliSeconds, math.MaxInt64/int64(time.Millisecond))) * time.Millisecond
+	if serverTimeout > 0 {
+		return min(clientTimeout, serverTimeout)
+	}
+	return clientTimeout
 }
 
 // setupEVMTimeout cancels the EVM registered via the returned store func once timeout
