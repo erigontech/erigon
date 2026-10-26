@@ -593,7 +593,11 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 
 // btIndexFitsInMem reports whether the .bt files of btInMemDefaultDomains, as they are on disk now, fit the in-memory budget.
 func (a *Aggregator) btIndexFitsInMem() bool {
-	return btIndexFitsInMem(btIndexFilesSize(a.dirs.SnapDomain, btInMemDefaultDomains), estimate.TotalMemory())
+	total := estimate.TotalMemory()
+	if total < btInMemMinTotalMemory {
+		return false
+	}
+	return btIndexFitsInMem(btIndexFilesSize(a.dirs.SnapDomain, btInMemDefaultDomains), total)
 }
 
 // checkFilesDBGap refuses to open a datadir where the DB was pruned past where the

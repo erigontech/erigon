@@ -267,7 +267,7 @@ func btIndexFilesSize(dir string, domains []string) uint64 {
 			if ok, _ := filepath.Match("*-"+name+".*.bt", e.Name()); !ok {
 				continue
 			}
-			if info, err := e.Info(); err == nil {
+			if info, err := os.Stat(filepath.Join(dir, e.Name())); err == nil { // follows symlinks, like the open does
 				size += uint64(info.Size())
 			}
 		}

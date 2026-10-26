@@ -4102,5 +4102,8 @@ func TestBtIndexFilesSize(t *testing.T) {
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644))
 	}
-	require.Equal(t, uint64(150), btIndexFilesSize(dir, btInMemDefaultDomains))
+	target := filepath.Join(t.TempDir(), "code.bt")
+	require.NoError(t, os.WriteFile(target, make([]byte, 300), 0o644))
+	require.NoError(t, os.Symlink(target, filepath.Join(dir, "v1.1-code.0-64.bt")))
+	require.Equal(t, uint64(450), btIndexFilesSize(dir, btInMemDefaultDomains), "a symlinked .bt counts its target's size")
 }
