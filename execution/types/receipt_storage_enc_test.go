@@ -114,6 +114,41 @@ func TestDecodeLogsForStorageBothPaths(t *testing.T) {
 	}
 }
 
+// Stored logs are parsed in place, not through rlp.Stream, so the stream's
+// per-value checks must hold on both paths.
+func TestDecodeLogsForStorageRejectsMalformed(t *testing.T) {
+	t.Parallel()
+	addr, topic, data := make([]byte, 20), make([]byte, 32), []byte{1, 2}
+	enc := func(v any) rlp.RawValue {
+		b, err := rlp.EncodeToBytes(v)
+		require.NoError(t, err)
+		return b
+	}
+	cases := map[string]rlp.RawValue{
+		"short address":      enc([]any{addr[:19], [][]byte{topic}, data}),
+		"short topic":        enc([]any{addr, [][]byte{topic[:31]}, data}),
+		"topic is a list":    enc([]any{addr, []any{[]any{}}, data}),
+		"topics not a list":  enc([]any{addr, topic, data}),
+		"data is a list":     enc([]any{addr, [][]byte{topic}, []any{}}),
+		"missing data":       enc([]any{addr, [][]byte{topic}}),
+		"trailing field":     enc([]any{addr, [][]byte{topic}, data, data}),
+		"non-canonical data": enc([]any{addr, [][]byte{topic}, rlp.RawValue{0x81, 0x05}}),
+		"log not a list":     enc(data),
+	}
+	valid := enc([]any{addr, [][]byte{topic}, data})
+	for name, bad := range cases {
+		list := enc([]rlp.RawValue{valid, bad})
+
+		s := rlp.NewBytesStream(list)
+		_, err := decodeLogsForStorage(s)
+		rlp.PutStream(s)
+		require.Error(t, err, "%s, slice-backed", name)
+
+		_, err = decodeLogsForStorage(rlp.NewStream(bytes.NewReader(list), 0))
+		require.Error(t, err, "%s, reader", name)
+	}
+}
+
 // The arena is sized from attacker-controlled bytes: a payload of one-byte items
 // must not allocate a Log for each, since a stored log needs at least 24 bytes.
 func TestDecodeLogsForStorageArenaBounded(t *testing.T) {
