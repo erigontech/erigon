@@ -60,19 +60,22 @@ func TestFrameTransactionInsertChain(t *testing.T) {
 					b.AddTx(&types.FrameTransaction{
 						NonceKeys: []uint256.Int{{}},
 						ChainID:   *cfg.ChainID, SenderAddress: sender, Nonce: nonce,
-						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}, {Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 30_000, State: params.StateGasPerStorageSet}}},
+						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}, {Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 200_000, State: genesis.GasLimit - params.StateGasPerStorageSet}}},
 						Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000), TipCap: *uint256.NewInt(1_000_000_000)},
 					})
 				}
 			})
 			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(pack))
 			require.Len(t, pack.Receipts[0], 2)
 			for _, receipt := range pack.Receipts[0] {
 				require.Equal(t, &sender, receipt.Payer)
 				require.Len(t, receipt.FrameReceipts, 2)
 				require.Equal(t, types.ReceiptStatusSuccessful, receipt.FrameReceipts[1].Status)
+				require.Len(t, receipt.Logs, 1)
+				require.Len(t, receipt.FrameReceipts[1].Logs, 1)
+				require.Equal(t, receipt.Logs[0], receipt.FrameReceipts[1].Logs[0])
 			}
+			require.NoError(t, m.InsertChain(pack))
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 				ibs := state.New(m.NewStateReader(tx))
 				defer ibs.Close()

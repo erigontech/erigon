@@ -18,6 +18,7 @@ package engineapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -47,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -193,6 +196,112 @@ func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, engine_types.SyncingStatus, status.Status)
+		})
+	}
+}
+
+func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
+	t.Parallel()
+
+	const gasLimit = 4 * 16_800 // the per-transaction minimum after London
+	for _, test := range []struct {
+		name          string
+		txCount       int
+		txGasLimit    uint64
+		cfg           *chain.Config
+		frame         bool
+		noWithdrawals bool
+		nilBlobHashes bool
+		prague        bool
+		amsterdam     bool
+		wantStatus    engine_types.EngineStatus
+		wantErr       string
+		wantErrCode   int
+	}{
+		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached"},
+		{name: "5 frame txs on Bogota", txCount: 5, cfg: allForksChainConfig(), frame: true, amsterdam: true, wantStatus: engine_types.SyncingStatus},
+		{name: "6 frame txs on Bogota", txCount: 6, cfg: allForksChainConfig(), frame: true, amsterdam: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 6 transactions use at least 12000 gas each"},
+		{name: "4 txs on Prague", txCount: 4, cfg: preOsakaChainConfig(), prague: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 21000 gas each"},
+		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
+		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
+		{name: "5 txs with null blob hashes", txCount: 5, cfg: prePragueChainConfig(), nilBlobHashes: true, wantErrCode: -32602},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if test.frame {
+				test.cfg.BogotaTime = common.NewUint64(0)
+			}
+			to := common.Address{0x1}
+			txs := make(types.Transactions, test.txCount)
+			for i := range txs {
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
+				if test.frame {
+					txs[i] = &types.FrameTransaction{
+						ChainID: *test.cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(i), SenderAddress: to,
+						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: gasLimit}}},
+					}
+				}
+			}
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			if test.nilBlobHashes || test.prague || test.amsterdam {
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
+			if test.prague || test.amsterdam {
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+			}
+			if test.amsterdam {
+				balHash := empty.BlockAccessListHash
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+			if test.noWithdrawals {
+				payload.Withdrawals = nil
+			}
+
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, test.cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), test.cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			var status *engine_types.PayloadStatus
+			switch {
+			case test.amsterdam:
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.prague:
+				status, err = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.nilBlobHashes:
+				status, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
+			default:
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			if test.wantErrCode != 0 {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, test.wantErrCode, rpcErr.ErrorCode())
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.wantStatus, status.Status)
+			if test.wantErr != "" {
+				require.EqualError(t, status.ValidationError.Error(), test.wantErr)
+			}
 		})
 	}
 }

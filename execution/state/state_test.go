@@ -27,6 +27,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/execctx"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -34,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -81,7 +81,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.NoError(t, err)
 	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	setup := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	setup := New(NewReaderV3(domains.AsGetter(tx)))
 	defer setup.Close()
 	require.NoError(t, setup.CreateAccount(addr, true))
 	require.NoError(t, setup.SetState(addr, key, valA))
@@ -91,7 +91,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	// IBS for the next block — reads block-start state (slot=A) from domains.
-	ibs := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	ibs := New(NewReaderV3(domains.AsGetter(tx)))
 	defer ibs.Close()
 
 	// Tx1: A → B.
@@ -123,7 +123,7 @@ func TestNull(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
@@ -157,7 +157,7 @@ func TestTouchDelete(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
@@ -194,7 +194,7 @@ func TestSnapshot(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
 	defer state.Close()
 
@@ -239,7 +239,7 @@ func TestSnapshotEmpty(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
 	defer state.Close()
 
@@ -260,7 +260,7 @@ func TestSnapshot2(t *testing.T) {
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -339,7 +339,7 @@ func TestCodeResolve(t *testing.T) {
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -369,7 +369,7 @@ func TestCodeResolve(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	state1 := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	state1 := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
@@ -435,6 +435,25 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+
+	dirs := datadir.New(tb.TempDir())
+
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+
+	return db, tx, domains
+}
+
 func TestDump(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -444,7 +463,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	st := New(NewReaderV3(domains.AsGetter(tx)))
 	defer st.Close()
 
 	// generate a few entries
@@ -511,23 +530,4 @@ func TestDump(t *testing.T) {
 	if got != want {
 		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
-}
-
-func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
-	tb.Helper()
-
-	dirs := datadir.New(tb.TempDir())
-
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
-	tb.Cleanup(db.Close)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(tb, err)
-	tb.Cleanup(tx.Rollback)
-
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), execctx.WithParaTrieDB(db))
-	require.NoError(tb, err)
-	tb.Cleanup(domains.Close)
-
-	return db, tx, domains
 }

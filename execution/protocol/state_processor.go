@@ -175,7 +175,7 @@ func MakeReceipt(
 		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
+	receipt.SetLogs(ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash))
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(ibs.TxnIndex())

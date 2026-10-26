@@ -157,6 +157,18 @@ func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 	return r
 }
 
+// SetLogs preserves frame boundaries and shares log objects between the combined
+// log list and frame receipts, so metadata updates apply to both.
+func (r *Receipt) SetLogs(logs Logs) {
+	r.Logs = logs
+	for i := range r.FrameReceipts {
+		if n := len(r.FrameReceipts[i].Logs); n > 0 {
+			r.FrameReceipts[i].Logs = logs[:n:n]
+			logs = logs[n:]
+		}
+	}
+}
+
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
 func (r *Receipt) EncodeRLP(w io.Writer) error {
