@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -499,11 +501,33 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 	if !ok {
 		return &remoteproto.FrameValidationReply{}, nil
 	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sd, seq := s.notifications.Events.OverlaySnapshot()
+		result, err := s.validateFrameTransaction(ctx, frame, sd)
+		// Notifications precede commit. Retry if the published head changes while
+		// we open the database snapshot or validate against its overlay.
+		if _, current := s.notifications.Events.OverlaySnapshot(); current == seq {
+			return result, err
+		}
+	}
+}
+
+func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains) (*remoteproto.FrameValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	if sd != nil {
+		if overlay := sd.BlockOverlay(); overlay != nil {
+			tx = overlay.NewReadView(tx)
+		} else {
+			sd = nil
+		}
+	}
 	block, err := s.blockReader.CurrentBlock(tx)
 	if err != nil {
 		return nil, err
@@ -516,7 +540,15 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 	if err != nil {
 		return nil, err
 	}
-	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum+1))
+	var reader state.StateReader
+	if sd != nil {
+		latest := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+		latest.SetTxNum(maxTxNum + 1)
+		reader = latest
+	} else {
+		reader = state.NewHistoryReaderV3(tx, maxTxNum+1)
+	}
+	ibs := state.New(reader)
 	defer ibs.Close()
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})

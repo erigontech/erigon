@@ -18,15 +18,21 @@ package executiontests
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -91,30 +97,122 @@ func TestFrameTransactionInsertChain(t *testing.T) {
 	}
 }
 
-func TestFrameValidationUsesHeadWithdrawals(t *testing.T) {
+func TestFrameValidationUsesPublishedHead(t *testing.T) {
 	cfg := chain.TestChainOsakaConfig.Copy()
 	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
-	sender := common.HexToAddress("0x1000")
+	sender, withdrawn, recipient := common.HexToAddress("0x1000"), common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
-		sender: {Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+		sender:                    {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+		withdrawn:                 {Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+		recipient:                 {Balance: big.NewInt(1)},
+		types.FrameNonceManager:   {Nonce: 1, Code: common.FromHex("60006000fd")},
+		types.FrameExpiryVerifier: {Code: common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")},
 	}}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	var armed atomic.Bool
+	commitReady, proceed := make(chan struct{}), make(chan struct{})
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithStateTransitionObserver(func(ctx context.Context, point execmodule.StateTransitionPoint) {
+			if point != execmodule.StateTransitionCommitReady || !armed.CompareAndSwap(true, false) {
+				return
+			}
+			close(commitReady)
+			select {
+			case <-proceed:
+			case <-ctx.Done():
+			}
+		}))
+	frame := func(sender common.Address, key, nonce, fee uint64) *types.FrameTransaction {
+		return &types.FrameTransaction{
+			NonceKeys: []uint256.Int{*uint256.NewInt(key)},
+			ChainID:   *cfg.ChainID, SenderAddress: sender, Nonce: nonce,
+			Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
+			Fees:   types.FrameFees{FeeCap: *uint256.NewInt(fee)},
+		}
+	}
+	expiring := frame(sender, 2, 0, 10_000_000_000)
+	expiring.Frames = append([]types.Frame{{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: make([]byte, 8), Limits: mdgas.MdGas{Execution: 5_000}}}, expiring.Frames...)
+	binary.BigEndian.PutUint64(expiring.Frames[0].Data, m.Genesis.Time())
+	tests := []struct {
+		name                     string
+		tx                       *types.FrameTransaction
+		validBefore, validAtHead bool
+	}{
+		{"withdrawal", frame(withdrawn, 0, 0, 10_000_000_000), false, true},
+		{"consumed key", frame(sender, 1, 0, 10_000_000_000), true, false},
+		{"next sequence", frame(sender, 1, 1, 10_000_000_000), false, true},
+		{"other key", frame(sender, 2, 0, 10_000_000_000), true, true},
+		{"reduced payer balance", frame(sender, 2, 0, 1_000_000_000_000), true, false},
+		{"expired", expiring, true, false},
+	}
+	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	check := func(phase string, atHead bool) {
+		t.Run(phase, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					var encoded bytes.Buffer
+					require.NoError(t, tt.tx.MarshalBinary(&encoded))
+					result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+					require.NoError(t, err)
+					valid := tt.validBefore
+					if atHead {
+						valid = tt.validAtHead
+					}
+					require.Equal(t, valid, result.Valid)
+					if tt.tx.SenderAddress == withdrawn && atHead {
+						require.Equal(t, uint256.NewInt(1_000_000_000_000_000_000).Bytes(), result.PayerBalance)
+					}
+				})
+			}
+		})
+	}
+	check("before publication", false)
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddWithdrawal(&types.Withdrawal{Address: sender, Amount: 1_000_000_000})
+		b.AddWithdrawal(&types.Withdrawal{Address: withdrawn, Amount: 1_000_000_000})
+		tx := frame(sender, 1, 0, 10_000_000_000)
+		tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameSender, Target: &recipient, Value: *uint256.NewInt(900_000_000_000_000_000), Limits: mdgas.MdGas{Execution: 50_000}})
+		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(pack))
-	tx := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}},
-		ChainID:   *cfg.ChainID, SenderAddress: sender,
-		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-		Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
-	}
-	var encoded bytes.Buffer
-	require.NoError(t, tx.MarshalBinary(&encoded))
-	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
-	result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+	status, err := m.InsertBlocks(t.Context(), pack.Blocks)
 	require.NoError(t, err)
-	require.True(t, result.Valid)
-	require.Equal(t, uint256.NewInt(1_000_000_000_000_000_000).Bytes(), result.PayerBalance)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	armed.Store(true)
+	fcuDone := make(chan error, 1)
+	go func() {
+		_, err := m.UpdateForkChoice(t.Context(), pack.TopBlock.Header())
+		fcuDone <- err
+	}()
+	release := sync.OnceFunc(func() { close(proceed) })
+	defer func() {
+		release()
+		require.NoError(t, <-fcuDone)
+		m.ExecModule.WaitIdle(t.Context())
+	}()
+	select {
+	case <-commitReady:
+	case <-time.After(time.Minute):
+		t.Fatal("forkchoice did not reach commit")
+	}
+	require.Equal(t, uint64(0), m.Current(nil).NumberU64())
+	check("before commit", true)
+	db := &frameValidationCommitDB{TemporalRwDB: m.DB, afterOpen: sync.OnceFunc(func() {
+		release()
+		m.ExecModule.WaitIdle(t.Context())
+	})}
+	server = privateapi.NewEthBackendServer(t.Context(), nil, db, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	check("commit during validation", true)
+	check("after commit", true)
+}
+
+type frameValidationCommitDB struct {
+	kv.TemporalRwDB
+	afterOpen func()
+}
+
+func (db *frameValidationCommitDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRwDB.BeginTemporalRo(ctx) //nolint:gocritic // The caller owns the returned transaction.
+	if err == nil {
+		db.afterOpen()
+	}
+	return tx, err
 }
