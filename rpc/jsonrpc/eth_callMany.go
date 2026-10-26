@@ -68,6 +68,14 @@ func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 	return nil
 }
 
+// capEVMTimeout lets a client lower the server EVM timeout, never raise or remove it.
+func capEVMTimeout(serverTimeout time.Duration, clientMilliSeconds int64) time.Duration {
+	if clientMilliSeconds <= 0 || (serverTimeout > 0 && clientMilliSeconds >= serverTimeout.Milliseconds()) {
+		return serverTimeout
+	}
+	return time.Duration(clientMilliSeconds) * time.Millisecond
+}
+
 // setupEVMTimeout cancels the EVM registered via the returned store func once timeout
 // elapses (or ctx is cancelled), and returns the deadline-carrying context. Callers must
 // store the EVM once created — and again whenever it is recreated — so cancellation
@@ -186,11 +194,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	header := block.HeaderNoCopy()
 
-	timeout := api.evmCallTimeout
-
-	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
-		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
+	var timeoutMilliSeconds int64
+	if timeoutMilliSecondsPtr != nil {
+		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
+	timeout := capEVMTimeout(api.evmCallTimeout, timeoutMilliSeconds)
 
 	ctx, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()

@@ -160,6 +160,21 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 	require.NotContains(t, byNumber[0][0], "error")
 }
 
+func TestCallManyClientTimeoutCannotRaiseServerTimeout(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.evmCallTimeout = time.Nanosecond
+
+	to := common.Address{3}
+	gas := hexutil.Uint64(21_000)
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{{From: &m.Address, To: &to, Gas: &gas}}}}
+	clientTimeout := (24 * time.Hour).Milliseconds()
+
+	_, err := api.CallMany(context.Background(), bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}, nil, &clientTimeout)
+	require.ErrorContains(t, err, "execution aborted")
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api, debugApi := newCallManyApisForTest(m)
