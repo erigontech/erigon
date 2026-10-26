@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -89,21 +90,12 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	}
 	blockBalHash := *h.BlockAccessListHash
 	// A stored BAL sidecar may be absent, so cross-check it only when present.
-	var blockBal types.BlockAccessList
+	// The stored bytes are canonical RLP, so their Keccak is the BAL hash.
 	if blockBalBytes != nil {
-		blockBal, err = types.DecodeBlockAccessListBytes(blockBalBytes)
-		if err != nil {
-			return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-		}
-		if err = blockBal.Validate(); err != nil {
-			return nil, fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
-		}
-		if err = blockBal.ValidateMaxItems(h.GasLimit); err != nil {
-			return nil, fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
-		}
-		if blockBalHash != blockBal.Hash() {
+		if storedHash := crypto.Keccak256Hash(blockBalBytes); storedHash != blockBalHash {
+			blockBal, _ := types.DecodeBlockAccessListBytes(blockBalBytes)
 			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
-			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, blockBal.Hash(), blockBalHash)
+			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, storedHash, blockBalHash)
 		}
 	}
 	// Always validate computed BAL against header. The BalancePath cross-check
@@ -111,6 +103,10 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
+		var blockBal types.BlockAccessList
+		if blockBalBytes != nil {
+			blockBal, _ = types.DecodeBlockAccessListBytes(blockBalBytes)
+		}
 		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
 		return nil, fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
 			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)

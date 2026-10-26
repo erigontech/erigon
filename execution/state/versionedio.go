@@ -2,6 +2,8 @@ package state
 
 import (
 	"bytes"
+	"cmp"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"iter"
@@ -2850,25 +2852,42 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 
 // Build finalizes the list; the builder must not be used after it.
 func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
-	bal := make(types.BlockAccessList, 0, len(b.ac))
-	for _, account := range b.ac {
-		account.finalize()
-		account.changes.Normalize()
-		bal = append(bal, *account.changes)
+	// Sorting AccountChanges by value moves 144-byte structs and calls
+	// bytes.Compare per step; sort small integer keys instead.
+	type sortKey struct {
+		hi, mid uint64
+		lo      uint32
+		account *accountState
 	}
-
-	slices.SortFunc(bal, func(a, b types.AccountChanges) int {
-		return a.Address.Cmp(b.Address)
+	keys := make([]sortKey, 0, len(b.ac))
+	for _, account := range b.ac {
+		a := &account.changes.Address
+		keys = append(keys, sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account})
+	}
+	slices.SortFunc(keys, func(a, b sortKey) int {
+		if c := cmp.Compare(a.hi, b.hi); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.mid, b.mid); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.lo, b.lo)
 	})
 
+	bal := make(types.BlockAccessList, 0, len(keys))
+	for _, k := range keys {
+		k.account.finalize()
+		k.account.changes.Normalize()
+		bal = append(bal, k.account.changes)
+	}
 	return bal
 }
 
 type accountState struct {
-	changes             *types.AccountChanges
-	balance             *fieldTracker[uint256.Int]
-	nonce               *fieldTracker[uint64]
-	code                *fieldTracker[accounts.Code]
+	changes             types.AccountChanges
+	balance             fieldTracker[uint256.Int]
+	nonce               fieldTracker[uint64]
+	code                fieldTracker[accounts.Code]
 	balanceValue        *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
@@ -2886,9 +2905,9 @@ func (account *accountState) finalize() {
 			account.changes.StorageReads[i] = slot.Value()
 		}
 	}
-	applyToBalance(account.balance, account.changes, account.initialBalanceValue)
-	applyToNonce(account.nonce, account.changes)
-	applyToCode(account.code, account.changes, account.initialCodeEmpty)
+	applyToBalance(&account.balance, &account.changes, account.initialBalanceValue)
+	applyToNonce(&account.nonce, &account.changes)
+	applyToCode(&account.code, &account.changes, account.initialCodeEmpty)
 }
 
 type fieldTracker[T any] struct {
@@ -2897,10 +2916,6 @@ type fieldTracker[T any] struct {
 
 func (ft *fieldTracker[T]) recordWrite(idx uint32, value T) {
 	ft.changes.recordWrite(idx, value)
-}
-
-func newBalanceTracker() *fieldTracker[uint256.Int] {
-	return &fieldTracker[uint256.Int]{}
 }
 
 func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
@@ -2924,10 +2939,6 @@ func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, ini
 	})
 }
 
-func newNonceTracker() *fieldTracker[uint64] {
-	return &fieldTracker[uint64]{}
-}
-
 func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 	nt.changes.apply(func(idx uint32, value uint64) {
 		ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
@@ -2935,10 +2946,6 @@ func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 			Value: value,
 		})
 	})
-}
-
-func newCodeTracker() *fieldTracker[accounts.Code] {
-	return &fieldTracker[accounts.Code]{}
 }
 
 func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, initialCodeEmpty bool) {
@@ -2998,12 +3005,7 @@ func (account *accountState) setBalanceValue(v uint256.Int) {
 }
 
 func newAccountState(addr accounts.Address) *accountState {
-	return &accountState{
-		changes: &types.AccountChanges{Address: addr.Value()},
-		balance: newBalanceTracker(),
-		nonce:   newNonceTracker(),
-		code:    newCodeTracker(),
-	}
+	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
 
 func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
@@ -3136,7 +3138,7 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	account.removeStorageRead(slot)
 
-	ac := account.changes
+	ac := &account.changes
 	if at >= 0 {
 		sc := &ac.StorageChanges[at]
 		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
