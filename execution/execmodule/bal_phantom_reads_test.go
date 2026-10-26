@@ -82,16 +82,22 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 	oldReadAheadWait := dbg.ReadAheadWait
 	dbg.ReadAheadWait = false
 	defer func() { dbg.ReadAheadWait = oldReadAheadWait }()
-	for _, kind := range []string{"valid", "BAL mismatch", "wrong trie root", "wrong receipts", "invalid transaction"} {
-		t.Run(kind, func(t *testing.T) {
-			workload := "valid"
-			if kind == "BAL mismatch" {
-				workload = "attack"
-			}
-			m, block := phantomReadFixture(t, workload, 2)
+	for _, tc := range []struct {
+		name      string
+		workload  string
+		wantError string
+	}{
+		{"valid", "valid", ""},
+		{"BAL mismatch", "attack", "block access list mismatch"},
+		{"wrong trie root", "valid", "wrong trie root"},
+		{"wrong receipts", "valid", "receiptHash mismatch"},
+		{"invalid transaction", "valid", "nonce too high"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, block := phantomReadFixture(t, tc.workload, 2)
 			header := block.Header()
 			body := block.Body()
-			switch kind {
+			switch tc.name {
 			case "wrong trie root":
 				header.Root[0] ^= 1
 			case "wrong receipts":
@@ -153,20 +159,11 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 				t.Fatal("block validation did not finish within one minute")
 			}
 			require.NoError(t, err)
-			if kind == "valid" {
+			if tc.wantError == "" {
 				require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
 			} else {
 				require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus, result.ValidationError)
-				switch kind {
-				case "BAL mismatch":
-					require.Contains(t, result.ValidationError, "block access list mismatch")
-				case "wrong trie root":
-					require.Contains(t, result.ValidationError, "wrong trie root")
-				case "wrong receipts":
-					require.Contains(t, result.ValidationError, "receiptHash mismatch")
-				case "invalid transaction":
-					require.Contains(t, result.ValidationError, "nonce too high")
-				}
+				require.Contains(t, result.ValidationError, tc.wantError)
 				select {
 				case err := <-observer.atVerdict:
 					require.ErrorIs(t, err, context.Canceled, "validation reported an invalid block with warmup still active")
