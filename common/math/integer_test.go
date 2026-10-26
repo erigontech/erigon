@@ -25,14 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type operation byte
-
-const (
-	sub operation = iota
-	add
-	mul
-)
-
 func TestHexOrDecimal64(t *testing.T) {
 	tests := []struct {
 		input string
