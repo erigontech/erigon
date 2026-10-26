@@ -325,7 +325,7 @@ func TestSyncColumnDataWorkerSkipsTheAvailabilityScanWithoutPeers(t *testing.T) 
 		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
 		columnStorage: columnStorage,
 		blobStorage:   blobStorage,
-		rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil),
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock),
 	}
 	require.NoError(t, d.SyncColumnDataLater(block))
 
@@ -368,7 +368,7 @@ func unservedRootWorker(t *testing.T, canonicalAtSlot func(root common.Hash) com
 		columnStorage: columnStorage,
 		blobStorage:   blobStorage,
 		indiciesDB:    db,
-		rpc:           rpc.NewBeaconRpcP2P(t.Context(), &peerCountSentinel{active: 1}, &cfg, clock, nil),
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), &peerCountSentinel{active: 1}, &cfg, clock),
 	}
 	require.NoError(t, d.SyncColumnDataLater(block))
 	return d, root

@@ -63,6 +63,10 @@ func (*statusSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
+func (*statusSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	return &sentinelproto.PeerCount{Active: 1}, nil
+}
+
 func (*statusSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
 	return &sentinelproto.PeersInfoResponse{}, nil
 }
@@ -130,7 +134,7 @@ func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
 	}
 	return lockOrderFixture{
 		cfg: &Cfg{
-			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock, headState),
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock),
 			ethClock:   clock,
 			beaconCfg:  &beaconCfg,
 			forkChoice: store,

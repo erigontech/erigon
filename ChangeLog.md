@@ -1,4 +1,82 @@
-# Erigon v3.8.0 — Watery Whiskers — TBD
+# Erigon v3.8.1 — Watery Whiskers — TBD
+
+Erigon 3.8.1 **unschedules Glamsterdam on Hoodi** and improves block validation, validator reliability,
+and block production.
+
+Non-archive nodes can upgrade from 3.8.0 without a re-sync. Caplin archive operators should read the
+upgrade notes below.
+
+### Highlight: Glamsterdam on Hoodi postponed
+
+**Hoodi operators running Erigon 3.8.0 must upgrade to 3.8.1 before 26 October 2026, 17:42:48 UTC.**
+For Hoodi nodes on Erigon versions earlier than 3.8.0, upgrading to 3.8.1 is recommended but **not urgent**.
+
+This release removes the Amsterdam execution-layer and Gloas Caplin activations at epoch `132352`
+and the scheduled gas-limit increase to **200 million**. **No replacement activation date has been
+set.** This supersedes the 3.8.0 Hoodi activation instructions (#25269) — by @yperbasis.
+
+Check your consensus client (Caplin or external) and validator client for any required updates to
+match the postponed schedule. See the [Ethereum Foundation announcement](https://blog.ethereum.org/2026/10/22/glamsterdam-hoodi-delay).
+
+### Important fixes and improvements
+
+- **Block validation.** Fixes state-copy races and balance errors after reorgs in Caplin, plus stale
+  commitment-cache reads during block access list prefetching. These could produce wrong state roots
+  and reject valid blocks (#25257, #25215, #25159) — by @domiwei, @yperbasis
+- **Validator votes.** Caplin waits for late blocks before rejecting Beacon API attestations and
+  accepts a full slot's aggregate burst from one peer, avoiding lost votes. Sync committee
+  subscriptions honor requested indices and survive fork-digest changes
+  (#25114, #25250, #25130, #25119) — by @lystopad, @domiwei
+- **Faster head updates at epoch boundaries.** Caplin prepares checkpoint states ahead of time and
+  reduces epoch-processing work, shortening head-update delays at the first slot of an epoch
+  (#25171, #25170, #25163) — by @awskii, @domiwei
+- **Gloas performance.** Caplin reduces hashing and signature-verification costs on Gloas networks
+  such as Sepolia, retries payload preparation sooner when block processing is busy, and relays
+  bursts of proposer preferences more reliably
+  (#25175, #25202, #25217, #25255, #25221, #25147, #25246) — by @domiwei, @lystopad
+- **Block-production delays.** `engine_getPayload` returns the payload built so far instead of
+  waiting for its parent after a head change. `engine_newPayload` avoids scanning every header
+  snapshot before validation. `--caplin.payload-preparation.disable` disables speculative payload
+  preparation while keeping the validator API and normal block production enabled
+  (#25254, #25242, #25180) — by @domiwei, @lystopad, @yperbasis
+- **Head updates and envelope propagation.** Caplin reduces state-dump pauses, speeds up block
+  validation at epoch boundaries, and publishes head changes at slot start to prevent proposal
+  failures from stale heads. Gloas payload envelopes received before their beacon block are
+  republished after successful processing (#25287) — by @domiwei
+- **Validator-client recovery after Gloas.** Caplin recognizes attached Teku and Prysm validators
+  after restarts, restoring aggregate and sync contribution processing, custody requirements, and
+  the correct block fee recipient (#25195) — by @domiwei
+- **Data availability after downtime.** Caplin backfills missing custody columns within the current
+  forward-sync range and preserves its highest advertised custody group count across restarts.
+  Older gaps outside that range are not repaired automatically (#25148, #25196) — by @lystopad, @domiwei
+- **Blob snapshot protection.** `capcli dump-blobs-snapshots` preserves existing and preverified
+  segments by default and no longer overwrites valid blob data with empty entries after blob-count
+  pruning (#25174) — by @awskii, @lystopad
+- **Peer-traffic resilience.** Caplin enforces consensus-spec size limits on gossip and peer responses.
+  Historical block access list requests use a separate serving stream and bounded re-execution,
+  protecting block-body and receipt responses (#25119, #25107) — by @domiwei, @yperbasis
+- **Beacon API compatibility.** `/eth/v1/node/identity` now returns `seq_number` instead of `seq`,
+  `0x`-prefixed `attnets` and `syncnets`, and `custody_group_count` from Fulu. Update metadata parsers.
+  `POST /eth/v1/beacon/pool/sync_committees` returns HTTP `400` with failing message indices for
+  validators outside the slot's sync committee, instead of silently returning `200`
+  (#25194, #25131) — by @domiwei, @lystopad
+
+### Caplin archive upgrade notes
+
+Gloas historical-state fixes change the builder-history format and reduce archive growth
+(#25256) — by @domiwei, @0xShadowX.
+
+- Nodes that already processed Gloas may rebuild historical states from before the fork. Without
+  `PtcWindowEpoch` snapshots, post-fork history is processed locally.
+- **Downgrading after writing the new builder-history records is not supported.**
+- Upgrading does not repair frozen Gloas history in the old format, including affected Sepolia
+  snapshots. Historical reads keep failing until those snapshots are rebuilt or replaced.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.8.0...v3.8.1
+
+---
+
+# Erigon v3.8.0 — Watery Whiskers — 2026-10-20
 
 Erigon 3.8.0 is **Glamsterdam-ready**, with **Glamsterdam on Hoodi**, faster commitment and execution,
 and further RPC performance improvements. It also improves Caplin block production, recovery after restarts,
