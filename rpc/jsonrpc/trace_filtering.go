@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -527,6 +528,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 		ibs := state.New(cachedReader)
 		defer ibs.Close()
+		transactions.VersionedCallState(ibs)
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
@@ -565,10 +567,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
-		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			return nil, err
-		}
-		if err := ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+		if err := commitTraceState(ibs, evm.ChainRules(), cachedWriter); err != nil {
 			return nil, err
 		}
 		return traceResult, nil
@@ -774,6 +773,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	logger := log.New("trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
@@ -781,7 +781,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := commitTraceState(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -968,7 +968,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			if err != nil {
 				return err
 			}
-			noop := state.NewNoopWriter()
 
 			// traceTxnJob traces one job's transaction, closing its state on every
 			// exit path. A non-nil error aborts this worker and cancels the rest.
@@ -978,6 +977,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
 				workerIbs := state.New(workerReader)
 				defer workerIbs.Close()
+				transactions.VersionedCallState(workerIbs)
 
 				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
 
@@ -1012,7 +1012,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 				}
 
-				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+				if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
 					return err
 				}
 
@@ -1085,6 +1085,7 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	logger := log.New("trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
@@ -1092,7 +1093,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := commitTraceState(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 
@@ -1154,4 +1155,16 @@ func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
 	default:
 		return fmt.Errorf("invalid trace filter mode %q: want union or intersection", mode)
 	}
+}
+
+// commitTraceState hands the state changes not yet in the cache to cachedWriter: a
+// versioned state's pending tx, or a materialized state's dirty objects.
+func commitTraceState(ibs *state.IntraBlockState, rules *chain.Rules, cachedWriter state.StateWriter) error {
+	if ibs.IsVersioned() {
+		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
+	}
+	if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		return err
+	}
+	return ibs.CommitBlock(rules, cachedWriter)
 }
