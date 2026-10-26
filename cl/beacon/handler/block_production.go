@@ -1765,14 +1765,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if payloadSource.parentExecutionRequests != nil {
 		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
 	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
-	if finalizedHash == (common.Hash{}) {
-		finalizedHash = head
-	}
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
-	if safeHash == (common.Hash{}) {
-		safeHash = head
-	}
+	finalizedHash, safeHash := a.payloadBuildFinalityHashes(baseState, head)
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, nil, err
@@ -2116,6 +2109,18 @@ func (a *ApiHandler) produceBeaconBody(
 
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
+}
+
+func (a *ApiHandler) payloadBuildFinalityHashes(baseState *state.CachingBeaconState, parentHash common.Hash) (common.Hash, common.Hash) {
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
+	if finalizedHash == (common.Hash{}) {
+		finalizedHash = parentHash
+	}
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
+	if safeHash == (common.Hash{}) {
+		safeHash = parentHash
+	}
+	return finalizedHash, safeHash
 }
 
 func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot uint64) (

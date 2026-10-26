@@ -499,19 +499,23 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 	if err != nil {
 		return nil, err
 	}
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.ElectraVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("pending consolidations are not available before Electra: slot %d", *slot))
+	}
 
 	pendingConsolidations := solid.NewPendingConsolidationList(a.beaconChainCfg)
 
-	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
-
-	if isSlotAvailableInMemory {
-		var ok bool
-		pendingConsolidations, ok = a.forkchoiceStore.GetPendingConsolidations(blockRoot)
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending consolidations found for block root: %x", blockRoot))
-		}
-		// If we have the pending consolidations in memory, we can return them directly.
+	if cached, ok := a.forkchoiceStore.GetPendingConsolidations(blockRoot); ok {
+		pendingConsolidations = cached
 	} else {
+		isReconstructed, err := a.isStateReconstructed(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot != blockRoot || !isReconstructed {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read pending consolidations: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 
@@ -520,7 +524,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 		}
 	}
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingConsolidations).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
@@ -561,18 +564,23 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 	if err != nil {
 		return nil, err
 	}
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.ElectraVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("pending deposits are not available before Electra: slot %d", *slot))
+	}
 
 	pendingDeposits := solid.NewPendingDepositList(a.beaconChainCfg)
 
-	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
-
-	if isSlotAvailableInMemory {
-		var ok bool
-		pendingDeposits, ok = a.forkchoiceStore.GetPendingDeposits(blockRoot)
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending deposits found for block root: %x", blockRoot))
-		}
+	if cached, ok := a.forkchoiceStore.GetPendingDeposits(blockRoot); ok {
+		pendingDeposits = cached
 	} else {
+		isReconstructed, err := a.isStateReconstructed(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot != blockRoot || !isReconstructed {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read pending deposits: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 
@@ -581,7 +589,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 		}
 	}
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingDeposits).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
@@ -622,18 +629,23 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 	if err != nil {
 		return nil, err
 	}
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.ElectraVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("pending partial withdrawals are not available before Electra: slot %d", *slot))
+	}
 
 	pendingWithdrawals := solid.NewPendingWithdrawalList(a.beaconChainCfg)
 
-	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
-
-	if isSlotAvailableInMemory {
-		var ok bool
-		pendingWithdrawals, ok = a.forkchoiceStore.GetPendingPartialWithdrawals(blockRoot)
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending partial withdrawals found for block root: %x", blockRoot))
-		}
+	if cached, ok := a.forkchoiceStore.GetPendingPartialWithdrawals(blockRoot); ok {
+		pendingWithdrawals = cached
 	} else {
+		isReconstructed, err := a.isStateReconstructed(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot != blockRoot || !isReconstructed {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read pending partial withdrawals: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 
@@ -642,12 +654,22 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 		}
 	}
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingWithdrawals).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
 		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+}
+
+func (a *ApiHandler) isStateReconstructed(tx kv.Tx, slot uint64) (bool, error) {
+	stateProgress, err := state_accessors.GetStateProcessingProgress(tx)
+	if err != nil {
+		return false, err
+	}
+	if a.caplinStateSnapshots != nil {
+		stateProgress = max(stateProgress, a.caplinStateSnapshots.BlocksAvailable())
+	}
+	return slot <= stateProgress, nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

@@ -35,19 +35,17 @@ type emptinessScenario struct {
 	want  bool
 }
 
-// emptinessMode is one of the three state configurations that must agree:
-// the serial path, and the versioned path with the stateObject cache on and
-// off. noMaterialize is the configuration staged sync runs.
+// emptinessMode is one of the two state configurations that must agree: the
+// serial path, and the versioned (noMaterialize) path staged sync runs. A
+// versionMap forces noMaterialize, so there is no versioned+materialize config.
 type emptinessMode struct {
-	name          string
-	versioned     bool
-	noMaterialize bool
+	name      string
+	versioned bool
 }
 
 var emptinessModes = []emptinessMode{
-	{"serial", false, false},
-	{"versioned", true, false},
-	{"versioned+noMaterialize", true, true},
+	{"serial", false},
+	{"versioned", true},
 }
 
 func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr accounts.Address) bool {
@@ -57,7 +55,6 @@ func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr a
 	var ibs *IntraBlockState
 	if mode.versioned {
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
-		ibs.SetNoMaterialize(mode.noMaterialize)
 	} else {
 		ibs = New(reader)
 	}

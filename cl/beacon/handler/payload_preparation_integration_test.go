@@ -321,7 +321,7 @@ func applyGossipIntegrationEnvelope(
 	require.NoError(t, err)
 	require.Equal(t, validator.PublicKey(), [48]byte(bls.CompressPublicKey(key.PublicKey())), "the signing key must match the fixture's proposer")
 	signExecutionPayloadEnvelope(t, blockState, block.Block.Slot, envelope, key)
-	service := services.NewExecutionPayloadService(t.Context(), store, blockState.BeaconConfig(), emitter)
+	service := services.NewExecutionPayloadService(t.Context(), store, blockState.BeaconConfig(), emitter, nil)
 	encoded, err := envelope.EncodeSSZ(nil)
 	require.NoError(t, err)
 	decoded, err := service.DecodeGossipMessage("", encoded, clparams.GloasVersion)

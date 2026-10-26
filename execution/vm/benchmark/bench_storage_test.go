@@ -104,7 +104,6 @@ func BenchmarkSLOADCommitted(b *testing.B) {
 	for b.Loop() {
 		statedb.Reset()
 		statedb.SetVersionMap(versionMap)
-		statedb.SetNoMaterialize(true)
 		statedb.SetNoConflictDetection()
 		if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
 			b.Fatal(err)
