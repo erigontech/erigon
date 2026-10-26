@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Test helpers
@@ -1658,4 +1659,30 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 
 	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
 	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
+}
+
+func TestAccountCodeHashes(t *testing.T) {
+	addr := makeAddr(1)
+	code := []byte{0x60, 0x00}
+	hash := crypto.Keccak256Hash(code)
+	enc := accounts.SerialiseV3(&accounts.Account{CodeHash: accounts.InternCodeHash(hash)})
+	codeUpd := StateUpdate{Domain: kv.CodeDomain, Key: addr, Value: code, TxNum: 5}
+	accUpd := StateUpdate{Domain: kv.AccountsDomain, Key: addr, Value: enc, TxNum: 5}
+	key := codeUpdateKey{string(addr), 5}
+
+	require.Equal(t, hash[:], accountCodeHashes([]StateUpdate{codeUpd, accUpd})[key])
+	require.Equal(t, hash[:], accountCodeHashes([]StateUpdate{accUpd, codeUpd})[key])
+
+	other := accUpd
+	other.TxNum = 6
+	require.Nil(t, accountCodeHashes([]StateUpdate{codeUpd, other})[key], "an account written by another tx")
+	other = accUpd
+	other.Key = makeAddr(2)
+	require.Nil(t, accountCodeHashes([]StateUpdate{codeUpd, other})[key], "another account")
+	other = accUpd
+	other.Value = enc[:2]
+	require.Nil(t, accountCodeHashes([]StateUpdate{codeUpd, other})[key], "a truncated account")
+	require.Nil(t, accountCodeHashes([]StateUpdate{accUpd}), "no code update")
+
+	require.Equal(t, hash[:], prepareStateUpdate(codeUpd, nil).codeHash, "no account hash falls back to hashing")
 }
