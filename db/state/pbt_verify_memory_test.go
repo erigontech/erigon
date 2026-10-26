@@ -43,6 +43,7 @@ func TestPBinVerifyStorageRowsStayBounded(t *testing.T) {
 	defer sourceTx.Rollback()
 	targetTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer targetTx.Rollback()
 	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
 		SourceAggregator: agg,
 		SourceTx:         sourceTx,

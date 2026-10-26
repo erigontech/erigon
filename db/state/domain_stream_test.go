@@ -51,6 +51,7 @@ func TestCommitmentDomain_DebugRangeLatestOffsetsSkipPrefix(t *testing.T) {
 	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	writer := domainRoTx.NewWriter(db)
 	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
