@@ -49,7 +49,7 @@ func NewNative(db kv.TemporalRoDB, blocks dbservices.FullBlockReader, receipts *
 	return &Native{
 		db:     db,
 		blocks: blocks,
-		query:  logquery.Query{TxNums: blocks.TxnumReader(), Headers: blocks, Txns: blocks, Receipts: receipts, Strict: true},
+		query:  logquery.Query{TxNums: blocks.TxnumReader(), Headers: blocks, Txns: blocks, Receipts: receipts},
 		config: config,
 	}
 }
