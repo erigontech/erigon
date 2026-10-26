@@ -693,7 +693,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
 					}
-					// Keep draining so an earlier commitment failure can take precedence.
+					// Keep draining so a commitment failure in an earlier block can
+					// take precedence.
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
@@ -709,10 +710,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 						continue
 					}
-					// failInfra routes an apply-loop infrastructure fault through
-					// failCandidate + cancel and keeps the loop draining. Never
-					// bare-return while the exec loop may sit in a terminal mustDeliver
-					// send on a full applyResults — that strands shutdown and wedges pe.wait.
+					// Keep draining after either an operational failure or an invalid-block
+					// verdict. Exiting the apply loop early can block producers during shutdown.
 					failInfra := func(err error) {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, err)
@@ -1614,6 +1613,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
 	pe.cancelExecLoop = func(cause error) {
 		stop, ok := errors.AsType[*stopCause](cause)
+		// Commitment work can outlive a normal batch stop, so preserve its warmup.
 		if !ok || (stop.kind != stopReachedMax && stop.kind != stopMoreWork) {
 			if pe.cfg.readAheader != nil {
 				pe.cfg.readAheader.CancelWarmup()

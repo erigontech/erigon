@@ -66,7 +66,7 @@ func (h *warmupVerdictObserver) Enabled(context.Context, log.Lvl) bool { return 
 
 func (h *warmupVerdictObserver) Log(record *log.Record) error {
 	if record.Msg == "ethereumExecutionModule.ValidateChain: chain is invalid" {
-		// This verdict is logged before the deferred warmup cancellation.
+		// Observe cancellation before ValidateChain runs its deferred cleanup.
 		select {
 		case h.atVerdict <- h.warmupCtx.Err():
 		default:
