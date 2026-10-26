@@ -17,6 +17,7 @@
 package merkle_tree
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/prysmaticlabs/gohashtree"
@@ -47,6 +48,14 @@ func newMerkleHasher() *merkleHasher {
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit uint64) (err error) {
+	chunks := uint64(len(leaves) / 32)
+	if chunks > limit {
+		return fmt.Errorf("merkleize: %d chunks exceed limit %d", chunks, limit)
+	}
+	if chunks == 0 {
+		copy(out, ZeroHashes[GetDepth(limit)][:])
+		return nil
+	}
 	return m.merkleizeTrieLeavesFlatWithStart(leaves, out, limit, 0)
 }
 

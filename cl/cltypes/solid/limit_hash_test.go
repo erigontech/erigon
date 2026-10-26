@@ -111,3 +111,22 @@ func TestElementProofNonPowerOfTwoLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestHashSSZRejectsOverLimit(t *testing.T) {
+	checkpoints := solid.NewStaticListSSZ[*solid.Checkpoint](2, 40)
+	indices := solid.NewRawUint64List(2, nil)
+	for i := range uint64(3) {
+		checkpoints.Append(&solid.Checkpoint{})
+		indices.Append(i)
+	}
+	_, err := checkpoints.HashSSZ()
+	require.Error(t, err, "ListSSZ")
+	_, err = indices.HashSSZ()
+	require.Error(t, err, "RawUint64List")
+}
+
+func TestByteListSSZHashSSZZeroLimit(t *testing.T) {
+	root, err := solid.NewByteListSSZ(0).HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, crypto.Sha256(make([]byte, 64)), common.Hash(root))
+}
