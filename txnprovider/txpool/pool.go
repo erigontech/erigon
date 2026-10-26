@@ -1497,11 +1497,11 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if reason == txpoolcfg.Success {
 			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
 			if p.all.get(txn.SenderID, txn.Nonce) == nil {
-				blobs := uint64(len(txn.GetBlobHashes()))
 				senderTxns[txn.SenderID]++
-				senderBlobs[txn.SenderID] += blobs
-				totalBlobs += blobs
 			}
+			blobs := uint64(len(txn.GetBlobHashes()))
+			senderBlobs[txn.SenderID] += blobs
+			totalBlobs += blobs
 			// Success here means no DiscardReason yet, so leave it NotSet
 			continue
 		}

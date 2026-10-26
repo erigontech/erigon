@@ -330,3 +330,30 @@ func TestRemoteBlobBatchRespectsTotalBlobPoolLimit(t *testing.T) {
 
 	require.LessOrEqual(t, pool.totalBlobsInPool.Load(), pool.cfg.TotalBlobPoolLimit)
 }
+
+func TestRemoteBatchOfBlobReplacementsRespectsSenderBlobSlots(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.BlobSlots = 4
+	sender := [20]byte{1}
+	nonces := []uint64{0, 1, 2}
+
+	var regular TxnSlots
+	for _, nonce := range nonces {
+		txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+		txn.IDHash[0] = 0x50 + byte(nonce)
+		regular.Append(txn, sender[:], false)
+	}
+	pool.AddRemoteTxns(ctx, regular, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	senderID := pool.senders.senderIDs[sender]
+	require.Equal(t, len(nonces), pool.all.count(senderID))
+
+	addRemoteBlobBatch(t, ctx, pool, [][20]byte{sender, sender, sender}, nonces)
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.LessOrEqual(t, pool.all.blobCount(senderID), pool.cfg.BlobSlots)
+}
