@@ -3035,6 +3035,10 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
 }
 
+func (at *AggregatorRoTx) DebugRangeLatestCount(tx kv.Tx, domain kv.Domain) (uint64, error) {
+	return at.d[domain].DebugRangeLatestCount(tx)
+}
+
 func (at *AggregatorRoTx) DebugRangeLatestWithOffsets(tx kv.Tx, domain kv.Domain, from, to []byte, limit int, fileOffsets []uint64) (stream.KV, error) {
 	return at.d[domain].DebugRangeLatestWithOffsets(tx, from, to, limit, fileOffsets)
 }

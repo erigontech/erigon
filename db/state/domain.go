@@ -1992,6 +1992,23 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 	return dt.debugRangeLatest(roTx, fromKey, toKey, limit, nil)
 }
 
+func (dt *DomainRoTx) DebugRangeLatestCount(roTx kv.Tx) (uint64, error) {
+	it, err := dt.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+	if err != nil {
+		return 0, err
+	}
+	defer it.Close()
+	var count uint64
+	for it.HasNext() {
+		_, _, err := it.Next()
+		if err != nil {
+			return 0, err
+		}
+		count++
+	}
+	return count, nil
+}
+
 func (dt *DomainRoTx) DebugRangeLatestWithOffsets(roTx kv.Tx, fromKey, toKey []byte, limit int, fileOffsets []uint64) (*DomainLatestIterFile, error) {
 	return dt.debugRangeLatest(roTx, fromKey, toKey, limit, fileOffsets)
 }

@@ -438,14 +438,41 @@ func (sdc *SharedDomainsCommitmentContext) SetVerifyPointLookupCounter(counter *
 	sdc.verifyPointLookups = counter
 }
 
-func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) {
+func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) error {
 	sdc.verifyRangePlan = nil
+	var verifyLiveKeys, verifyStateKeys uint64
+	verifyKeyCount := false
 	if planner, ok := tx.AggTx().(verifyRangePlanner); ok {
 		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain()}
+		if counter, ok := tx.AggTx().(verifyDomainKeyCounter); ok {
+			roTx, ok := tx.(kv.Tx)
+			if !ok {
+				return errors.New("verification transaction is not a read transaction")
+			}
+			var err error
+			verifyLiveKeys, err = counter.DebugRangeLatestCount(roTx, sdc.CommitmentDomain())
+			if err != nil {
+				return err
+			}
+			for _, key := range CommitmentStateKeys {
+				value, _, err := tx.GetLatest(sdc.CommitmentDomain(), key, kv.GetLatestOptions{})
+				if err != nil {
+					return err
+				}
+				if len(value) != 0 {
+					verifyStateKeys++
+				}
+			}
+			verifyKeyCount = true
+		}
 	}
 	ctx := sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
 	ctx.verifyRange = verifyRangeReader(tx, sdc.CommitmentDomain(), sdc.verifyRangePlan)
 	ctx.verifyRangePlan = sdc.verifyRangePlan
+	ctx.verifyLiveKeys = verifyLiveKeys
+	ctx.verifyStateKeys = verifyStateKeys
+	ctx.verifyKeyCount = verifyKeyCount
+	return nil
 }
 
 var errVerificationViewDrifted = errors.New("verification worker view drifted from the caller's snapshot")
@@ -1550,10 +1577,17 @@ type TrieContext struct {
 	branchBuf       []byte // reused across Branch calls; see the ownership note on Branch
 	verifyRange     func([]byte, []byte, func([]byte, []byte) error) (uint64, error)
 	verifyRangePlan *verifyRangePlan
+	verifyLiveKeys  uint64
+	verifyStateKeys uint64
+	verifyKeyCount  bool
 }
 
 type verifyRangePlanner interface {
 	DebugRangeLatestOffsets(kv.Domain, [][]byte) ([][]uint64, error)
+}
+
+type verifyDomainKeyCounter interface {
+	DebugRangeLatestCount(kv.Tx, kv.Domain) (uint64, error)
 }
 
 type verifyRangeAt interface {
@@ -1561,9 +1595,10 @@ type verifyRangeAt interface {
 }
 
 type verifyRangePlan struct {
-	planner verifyRangePlanner
-	domain  kv.Domain
-	offsets map[string][]uint64
+	planner     verifyRangePlanner
+	domain      kv.Domain
+	offsets     map[string][]uint64
+	offsetReads *atomic.Uint64
 }
 
 func (p *verifyRangePlan) prepare(starts [][]byte) error {
@@ -1587,11 +1622,34 @@ func (p *verifyRangePlan) forStart(start []byte) []uint64 {
 	return p.offsets[string(start)]
 }
 
+func (p *verifyRangePlan) recordRangeAtOffset() {
+	if p != nil && p.offsetReads != nil {
+		p.offsetReads.Add(1)
+	}
+}
+
 func (sdc *TrieContext) PrepareVerifyRanges(starts [][]byte) error {
 	if sdc.verifyRangePlan == nil {
 		return nil
 	}
 	return sdc.verifyRangePlan.prepare(starts)
+}
+
+func (sdc *TrieContext) SetVerifyRangeOffsetCounter(counter *atomic.Uint64) {
+	if sdc.verifyRangePlan != nil {
+		sdc.verifyRangePlan.offsetReads = counter
+	}
+}
+
+func (sdc *TrieContext) VerifyKeyCount(referenced uint64) error {
+	if !sdc.verifyKeyCount {
+		return nil
+	}
+	want := referenced + sdc.verifyStateKeys
+	if want != sdc.verifyLiveKeys {
+		return fmt.Errorf("unreferenced verification row count: referenced %d of %d live keys", want, sdc.verifyLiveKeys)
+	}
+	return nil
 }
 
 func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan) func([]byte, []byte, func([]byte, []byte) error) (uint64, error) {
@@ -1607,6 +1665,7 @@ func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan
 		var err error
 		if rangeAt, ok := agg.(verifyRangeAt); ok {
 			if offsets := plan.forStart(from); offsets != nil {
+				plan.recordRangeAtOffset()
 				it, err = rangeAt.DebugRangeLatestWithOffsets(roTx, domain, from, to, -1, offsets)
 			}
 		}

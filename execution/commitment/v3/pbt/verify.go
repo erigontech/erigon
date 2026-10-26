@@ -72,6 +72,11 @@ func (t *Trie) VerifyContext(ctx context.Context, workers int, factory commitmen
 	if err := verifier.verify(); err != nil {
 		return err
 	}
+	if checker, ok := verifier.ctx.(interface{ VerifyKeyCount(uint64) error }); ok {
+		if err := checker.VerifyKeyCount(verifier.verifyReferencedKeys); err != nil {
+			return err
+		}
+	}
 	t.root = verifier.root
 	t.rootLoaded = verifier.rootLoaded
 	t.foldedRoot = verifier.foldedRoot
@@ -90,24 +95,33 @@ type verifyRangeTaskPreparer interface {
 }
 
 type VerifyStats struct {
-	PointLookups     atomic.Uint64
-	RangeTasks       atomic.Uint64
-	RangeReads       atomic.Uint64
-	RangeRows        atomic.Uint64
-	TaskWorkers      atomic.Uint64
-	TaskRowsLoaded   atomic.Uint64
-	TaskRowsReleased atomic.Uint64
-	LiveRows         atomic.Uint64
-	LiveBytes        atomic.Uint64
-	PeakRows         atomic.Uint64
-	PeakBytes        atomic.Uint64
-	MaxTaskRows      atomic.Uint64
-	UpperRowsAtStart atomic.Uint64
-	liveProgress     func(uint64, uint64)
+	PointLookups       atomic.Uint64
+	RangeTasks         atomic.Uint64
+	RangeReads         atomic.Uint64
+	RangeTaskReads     atomic.Uint64
+	RangeReadsAtOffset atomic.Uint64
+	RangeRows          atomic.Uint64
+	TaskWorkers        atomic.Uint64
+	TaskRowsLoaded     atomic.Uint64
+	TaskRowsReleased   atomic.Uint64
+	LiveRows           atomic.Uint64
+	LiveBytes          atomic.Uint64
+	PeakRows           atomic.Uint64
+	PeakBytes          atomic.Uint64
+	MaxTaskRows        atomic.Uint64
+	UpperRowsAtStart   atomic.Uint64
+	liveProgress       func(uint64, uint64)
 }
 
 func (t *Trie) SetVerifyStats(stats *VerifyStats) {
 	t.verifyStats = stats
+	if setter, ok := t.ctx.(interface{ SetVerifyRangeOffsetCounter(*atomic.Uint64) }); ok {
+		if stats == nil {
+			setter.SetVerifyRangeOffsetCounter(nil)
+		} else {
+			setter.SetVerifyRangeOffsetCounter(&stats.RangeReadsAtOffset)
+		}
+	}
 }
 
 func (s *VerifyStats) SetLiveProgress(progress func(uint64, uint64)) {
@@ -144,9 +158,10 @@ func (s *VerifyStats) releaseRows(rows, bytes uint64) {
 }
 
 type verifiedChain struct {
-	row    *rowNode
-	result FoldResult
-	err    error
+	row            *rowNode
+	result         FoldResult
+	err            error
+	referencedKeys uint64
 }
 
 func (t *Trie) trackBucketKeys() {
@@ -193,8 +208,9 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 		if err != nil {
 			return nil
 		}
-		starts[i] = key
+		start, _ := verifyRangeBounds(&paths[i])
 		keys[i] = string(key)
+		starts[i] = start
 	}
 	if preparer, ok := t.ctx.(verifyRangeTaskPreparer); ok {
 		if err := preparer.PrepareVerifyRanges(starts); err != nil {
@@ -244,6 +260,9 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 				if chain.err == nil {
 					chain.err = worker.verifyRowsComplete()
 				}
+				if chain.err == nil {
+					chain.referencedKeys = worker.verifyReferencedKeys
+				}
 				worker.releaseVerifyRows()
 				if chain.err != nil {
 					for failed := firstFailed.Load(); int64(i) < failed && !firstFailed.CompareAndSwap(failed, int64(i)); failed = firstFailed.Load() {
@@ -263,6 +282,7 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 			continue
 		}
 		t.verifiedChains[keys[i]] = chains[i]
+		t.verifyReferencedKeys += chains[i].referencedKeys
 		for key := range bucketKeys[i] {
 			t.verifiedBucketKeys[key] = struct{}{}
 		}
@@ -277,6 +297,7 @@ func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
 	}
 	if t.verifyStats != nil {
 		t.verifyStats.RangeTasks.Add(1)
+		t.verifyStats.RangeTaskReads.Add(1)
 	}
 	from, to := verifyRangeBounds(&path)
 	rows := make(map[string][]byte)
@@ -377,6 +398,9 @@ func (t *Trie) verifyRowsComplete() error {
 			return fmt.Errorf("unreferenced verification row %x", []byte(key))
 		}
 	}
+	if !t.verifyRowsExact {
+		t.verifyReferencedKeys += uint64(len(t.verifyRows))
+	}
 	return nil
 }
 
@@ -390,7 +414,13 @@ func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
 			data, ok = t.verifyRows[string(key)]
 		}
 		if ok {
-			t.verifyRowsUsed[string(key)] = struct{}{}
+			keyString := string(key)
+			if _, used := t.verifyRowsUsed[keyString]; !used {
+				t.verifyRowsUsed[keyString] = struct{}{}
+				if t.verifyRowsExact {
+					t.verifyReferencedKeys++
+				}
+			}
 		}
 		return data, 0, nil
 	}

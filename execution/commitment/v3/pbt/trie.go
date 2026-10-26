@@ -104,6 +104,7 @@ type Trie struct {
 	verifyTaskRows         uint64
 	verifyTaskBytes        uint64
 	verifyTaskLoaded       bool
+	verifyReferencedKeys   uint64
 	verifyStats            *VerifyStats
 }
 

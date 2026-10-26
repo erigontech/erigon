@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,10 +68,30 @@ func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
 	require.Positive(t, stats.TaskRowsLoaded.Load())
 	require.Equal(t, stats.TaskRowsLoaded.Load(), stats.TaskRowsReleased.Load(), "every verification task must release its rows")
 	require.Zero(t, stats.UpperRowsAtStart.Load(), "upper rows must be verified after task rows are released")
+	require.Equal(t, stats.RangeTaskReads.Load(), stats.RangeReadsAtOffset.Load(), "every verification task must start at a planned file offset")
 	require.LessOrEqual(t, stats.PeakRows.Load(), stats.TaskWorkers.Load()*stats.MaxTaskRows.Load(), "verification row memory exceeded the worker bound")
 }
 
 func TestPBinVerifyRejectsUnreferencedRowInsideChainRange(t *testing.T) {
+	verifyPBinRejectsUnreferencedRow(t, pbinUnreferencedRowInsideChainRange)
+}
+
+func TestPBinVerifyRejectsUnreferencedRowInChainGap(t *testing.T) {
+	verifyPBinRejectsUnreferencedRow(t, pbinUnreferencedRowInChainGap)
+}
+
+func TestPBinVerifyRejectsUnreferencedRowInEmptyZone(t *testing.T) {
+	verifyPBinRejectsUnreferencedRow(t, pbinUnreferencedRowInEmptyZone)
+}
+
+func TestPBinVerifyRejectsUnreferencedRowAboveChainDepth(t *testing.T) {
+	verifyPBinRejectsUnreferencedRow(t, pbinUnreferencedRowAboveChainDepth)
+}
+
+type pbinUnreferencedRowSelector func(*testing.T, map[string][]byte) ([]byte, []byte)
+
+func verifyPBinRejectsUnreferencedRow(t *testing.T, selectRow pbinUnreferencedRowSelector) {
+	t.Helper()
 	selectPBinBinOnlyHash(t)
 	db, agg := temporal.Open(t, 8)
 	writePBinConvertStateN(t, db, 1024)
@@ -94,27 +115,7 @@ func TestPBinVerifyRejectsUnreferencedRowInsideChainRange(t *testing.T) {
 	require.NoError(t, err)
 	targetTx.Rollback()
 	rows := pbinCommitmentRows(t, agg)
-	var extraKey, extraValue []byte
-	for key, value := range rows {
-		path, decodeErr := eip8297.DecodeBitPath([]byte(key))
-		if decodeErr != nil || path.BitLen <= 12 {
-			continue
-		}
-		for bit := int16(12); bit < path.BitLen; bit++ {
-			candidate := path
-			candidate.SetBitAt(bit, 1-candidate.Bit(bit))
-			candidateKey, encodeErr := pbt.EncodeRowKey(&candidate)
-			require.NoError(t, encodeErr)
-			if _, exists := rows[string(candidateKey)]; !exists {
-				extraKey = candidateKey
-				extraValue = bytes.Clone(value)
-				break
-			}
-		}
-		if len(extraKey) != 0 {
-			break
-		}
-	}
+	extraKey, extraValue := selectRow(t, rows)
 	require.NotEmpty(t, extraKey)
 	badTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -133,4 +134,135 @@ func TestPBinVerifyRejectsUnreferencedRowInsideChainRange(t *testing.T) {
 	defer verifyTx.Rollback()
 	_, err = state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
 	require.ErrorContains(t, err, "unreferenced verification row")
+}
+
+func pbinSortedRowKeys(t *testing.T, rows map[string][]byte) []string {
+	t.Helper()
+	keys := make([]string, 0, len(rows))
+	for key, value := range rows {
+		if len(value) == 0 || commitment.IsCommitmentStateKey([]byte(key)) {
+			continue
+		}
+		if _, err := eip8297.DecodeBitPath([]byte(key)); err != nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func pbinUnreferencedRowInsideChainRange(t *testing.T, rows map[string][]byte) ([]byte, []byte) {
+	for _, key := range pbinSortedRowKeys(t, rows) {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		require.NoError(t, err)
+		if path.BitLen <= 16 {
+			continue
+		}
+		candidate := path
+		candidate.SetBitAt(16, 1-candidate.Bit(16))
+		candidateKey, err := pbt.EncodeRowKey(&candidate)
+		require.NoError(t, err)
+		if _, exists := rows[string(candidateKey)]; !exists {
+			return candidateKey, bytes.Clone(rows[key])
+		}
+	}
+	t.Fatal("no deterministic row candidate inside a chain range")
+	return nil, nil
+}
+
+func pbinUnreferencedRowInChainGap(t *testing.T, rows map[string][]byte) ([]byte, []byte) {
+	taskPrefixes := make(map[string]map[string]struct{})
+	keys := pbinSortedRowKeys(t, rows)
+	for _, key := range keys {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		require.NoError(t, err)
+		if path.BitLen < 16 {
+			continue
+		}
+		parent := path.Slice(0, 12)
+		task := path.Slice(0, 16)
+		parentKey, err := pbt.EncodeRowKey(&parent)
+		require.NoError(t, err)
+		taskKey, err := pbt.EncodeRowKey(&task)
+		require.NoError(t, err)
+		if taskPrefixes[string(parentKey)] == nil {
+			taskPrefixes[string(parentKey)] = make(map[string]struct{})
+		}
+		taskPrefixes[string(parentKey)][string(taskKey)] = struct{}{}
+	}
+	for _, key := range keys {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		require.NoError(t, err)
+		if path.BitLen < 16 {
+			continue
+		}
+		parent := path.Slice(0, 12)
+		parentKey, err := pbt.EncodeRowKey(&parent)
+		require.NoError(t, err)
+		prefixes := taskPrefixes[string(parentKey)]
+		if len(prefixes) < 2 {
+			continue
+		}
+		for bit := int16(12); bit < 16; bit++ {
+			candidate := path
+			candidate.SetBitAt(bit, 1-candidate.Bit(bit))
+			task := candidate.Slice(0, 16)
+			taskKey, err := pbt.EncodeRowKey(&task)
+			require.NoError(t, err)
+			if _, exists := prefixes[string(taskKey)]; exists {
+				continue
+			}
+			candidateKey, err := pbt.EncodeRowKey(&candidate)
+			require.NoError(t, err)
+			if _, exists := rows[string(candidateKey)]; !exists {
+				return candidateKey, bytes.Clone(rows[key])
+			}
+		}
+	}
+	t.Fatal("no deterministic row candidate in a chain gap")
+	return nil, nil
+}
+
+func pbinUnreferencedRowInEmptyZone(t *testing.T, rows map[string][]byte) ([]byte, []byte) {
+	for _, key := range pbinSortedRowKeys(t, rows) {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		require.NoError(t, err)
+		if path.BitLen < 16 {
+			continue
+		}
+		candidate := path
+		for bit := int16(0); bit < 8; bit++ {
+			candidate.SetBitAt(bit, uint64((0x05>>uint(7-bit))&1))
+		}
+		candidateKey, err := pbt.EncodeRowKey(&candidate)
+		require.NoError(t, err)
+		if _, exists := rows[string(candidateKey)]; !exists {
+			return candidateKey, bytes.Clone(rows[key])
+		}
+	}
+	t.Fatal("no deterministic row candidate in an empty zone")
+	return nil, nil
+}
+
+func pbinUnreferencedRowAboveChainDepth(t *testing.T, rows map[string][]byte) ([]byte, []byte) {
+	keys := pbinSortedRowKeys(t, rows)
+	require.NotEmpty(t, keys)
+	value := bytes.Clone(rows[keys[0]])
+	for bitLen := int16(12); bitLen >= 4; bitLen -= 4 {
+		for candidateValue := 0; candidateValue < 1<<bitLen; candidateValue++ {
+			var candidate eip8297.Bitpath
+			candidate.BitLen = bitLen
+			for bit := int16(0); bit < bitLen; bit++ {
+				candidate.SetBitAt(bit, uint64(candidateValue>>uint(bitLen-1-bit)&1))
+			}
+			candidateKey, err := pbt.EncodeRowKey(&candidate)
+			require.NoError(t, err)
+			if _, exists := rows[string(candidateKey)]; !exists {
+				return candidateKey, value
+			}
+		}
+	}
+	t.Fatal("no deterministic row candidate above chain depth")
+	return nil, nil
 }
