@@ -232,8 +232,8 @@ func pbinUnreferencedRowInEmptyZone(t *testing.T, rows map[string][]byte) ([]byt
 			continue
 		}
 		candidate := path
-		for bit := int16(0); bit < 8; bit++ {
-			candidate.SetBitAt(bit, uint64((0x05>>uint(7-bit))&1))
+		for bit := range 8 {
+			candidate.SetBitAt(int16(bit), uint64((0x05>>uint(7-bit))&1))
 		}
 		candidateKey, err := pbt.EncodeRowKey(&candidate)
 		require.NoError(t, err)

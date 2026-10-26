@@ -278,7 +278,8 @@ func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	}
 	commitmentCtx.SetVerifyPointLookupCounter(&verifyStats.PointLookups)
 	defer commitmentCtx.SetVerifyPointLookupCounter(nil)
-	if err := commitmentCtx.PrepareForVerification(tx); err != nil {
+	err = commitmentCtx.PrepareForVerification(tx)
+	if err != nil {
 		return common.Hash{}, fmt.Errorf("pbin verification: prepare: %w", err)
 	}
 	trie := commitmentCtx.Trie()
