@@ -17,12 +17,9 @@
 package eip8297
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/common"
 )
 
 func TestReviewR17ParallelRejectsCrossShardPrefix(t *testing.T) {
@@ -49,22 +46,11 @@ func TestReviewR17ParallelBufferReuse(t *testing.T) {
 	}
 	want, err := serial.RootHash()
 	require.NoError(t, err)
-	entered, release := make(chan struct{}), make(chan struct{})
-	first := true
-	parallel, err := NewParallelStreamRoot(func(data []byte) common.Hash {
-		if first {
-			first = false
-			close(entered)
-			<-release
-		}
-		return sum(data)
-	}, 1)
+	parallel, err := NewParallelStreamRoot(sum, 1)
 	require.NoError(t, err)
 	require.NoError(t, parallel.Add(entries[0].Key, entries[0].Value))
-	<-entered
 	require.NoError(t, parallel.Add(entries[1].Key, entries[1].Value))
-	copy(entries[1].Value, bytes.Repeat([]byte{0x7f}, ValueLength))
-	close(release)
+	entries[1].Value[0] = 0x7f
 	got, err := parallel.RootHash()
 	require.NoError(t, err)
 	require.Equal(t, want, got, "root changed after reuse of a buffer passed to Add")

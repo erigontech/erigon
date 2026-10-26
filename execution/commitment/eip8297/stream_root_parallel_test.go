@@ -18,6 +18,7 @@ package eip8297
 
 import (
 	"bytes"
+	"encoding/binary"
 	"math/rand"
 	"slices"
 	"sync/atomic"
@@ -104,6 +105,39 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 	_, err = parallel.RootHash()
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, maxActive.Load(), int32(2), "sorted stream must build at least two shards concurrently")
+}
+
+func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
+	entries := parallelStreamRootSkewedEntries(100_000)
+	serial, err := NewStreamRootBuilder(streamRootHash(HashKeccak))
+	require.NoError(t, err)
+	for _, entry := range entries {
+		require.NoError(t, serial.Add(entry.Key, entry.Value))
+	}
+	want, err := serial.RootHash()
+	require.NoError(t, err)
+	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 4)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		require.NoError(t, parallel.Add(entry.Key, entry.Value))
+	}
+	got, err := parallel.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.LessOrEqual(t, parallel.peakResident.Load(), parallel.residentLimit)
+}
+
+func parallelStreamRootSkewedEntries(count int) []Entry {
+	entries := make([]Entry, count)
+	for i := range entries {
+		key := make([]byte, StorageKeyLength)
+		key[0] = StorageZone
+		binary.BigEndian.PutUint64(key[StorageKeyLength-8:], uint64(i))
+		value := streamRootValue(byte(i))
+		value[0] = 1
+		entries[i] = Entry{Key: key, Value: value}
+	}
+	return entries
 }
 
 func parallelStreamRootCorpora() [][]Entry {

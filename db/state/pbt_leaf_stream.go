@@ -396,10 +396,7 @@ func pbinAddressBoundary(value *big.Int) []byte {
 	if value.Sign() == 0 || value.Bit(pbinAddressLength*8) != 0 {
 		return nil
 	}
-	result := make([]byte, pbinAddressLength)
-	valueBytes := value.Bytes()
-	copy(result[len(result)-len(valueBytes):], valueBytes)
-	return result
+	return value.FillBytes(make([]byte, pbinAddressLength))
 }
 
 func pbinWalkLeafRange(accountsCursor, codeCursor, storageCursor pbinLatestCursor, collector *etl.Collector, report func(uint64)) error {
@@ -549,23 +546,6 @@ func pbinCollectOp(collector *etl.Collector, scratch *[8 + eip8297.ValueLength]b
 	binary.BigEndian.PutUint64(scratch[:], stamp)
 	copy(scratch[8:], op.Value[:])
 	return collector.Collect(op.Key, scratch[:])
-}
-
-type pbinStreamProgress struct {
-	progress *PBTProgress
-}
-
-func (p *pbinStreamProgress) Add(n uint64) {
-	if p.progress == nil {
-		p.progress = NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load"})
-	}
-	p.progress.Add(n)
-}
-
-func (p *pbinStreamProgress) Done() {
-	if p.progress != nil {
-		p.progress.Done()
-	}
 }
 
 func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {

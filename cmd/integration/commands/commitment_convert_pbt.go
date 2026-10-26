@@ -224,10 +224,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		}
 	}
 	if resume {
-		resumeSourceSettings := sourceSettings
-		if resumeSourceSettings == nil {
-			resumeSourceSettings = resumeBase.settings
-		}
 		if err := pbtResumeValidateBaseLayout(sourceDirs, outputDirs, resumeSourceSettings, resumeBase.settings, keepHex, outputHasFiles, resumeBase.point.TxNum); err != nil {
 			return err
 		}
@@ -498,6 +494,11 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		logger.Info("PBT resume gap", "X", resumeBase.point.TxNum, "Y", resumeSourceEnd, "gap_keys", gapKeyCount.Load())
 	}
 	targetAgg.Close()
+	if resume && !hooks.skipVerify {
+		if err := verifyPBTResumeStreamRoot(sourceWalkAgg, root); err != nil {
+			return err
+		}
+	}
 	if resume {
 		if err := pbtResumeRemoveExtraOutputRanges(outputDirs, targetDomain, resumeSourceRanges, sourceAgg.StepSize()); err != nil {
 			return err
@@ -528,10 +529,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	if resume {
-		resumeSourceSettings := sourceSettings
-		if resumeSourceSettings == nil {
-			resumeSourceSettings = resumeBase.settings
-		}
 		if err := pbtResumeValidateFinalLayout(sourceDirs, outputDirs, resumeSourceSettings, resumeBase.settings, keepHex, outputHasFiles); err != nil {
 			return err
 		}
@@ -618,16 +615,11 @@ func pbtResumeRejectOutputMDBXState(ctx context.Context, dirs datadir.Dirs) erro
 }
 
 func pbtResumeOutputMDBXTableHasRows(tx kv.Tx, table string) (bool, error) {
-	cursor, err := tx.CursorDupSort(table)
+	key, err := kv.FirstKey(tx, table)
 	if err != nil {
 		return false, fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, err)
 	}
-	defer cursor.Close()
-	key, _, err := cursor.First()
-	if err != nil {
-		return false, fmt.Errorf("commitment convert-pbt: inspect output MDBX %s: %w", table, err)
-	}
-	return key != nil, nil
+	return len(key) != 0, nil
 }
 
 func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected, command, role string) error {
@@ -1383,6 +1375,19 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	return err
 }
 
+func verifyPBTResumeStreamRoot(aggregator *dbstate.Aggregator, want common.Hash) error {
+	at := aggregator.BeginFilesRo()
+	defer at.Close()
+	got, err := dbstate.PBinStateRoot(at, nil, true, eip8297.HashBytes)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: C-e stream root: %w", err)
+	}
+	if got != want {
+		return fmt.Errorf("commitment convert-pbt: C-e stream root %x differs from resumed root %x", got, want)
+	}
+	return nil
+}
+
 func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, visibleRanges map[string]struct{}, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
 	sourceFiles, err := pbtAttachFiles(sourceDirs)
 	if err != nil {
@@ -1462,16 +1467,7 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, visibleRanges 
 		}
 	}
 	stateErr := verifyPBTOutputStateRecords(outputDirs, settings, domain, point)
-	if missing != nil {
-		if stateErr != nil {
-			return errors.Join(missing, stateErr)
-		}
-		return missing
-	}
-	if stateErr != nil {
-		return stateErr
-	}
-	return nil
+	return errors.Join(missing, stateErr)
 }
 
 func verifyPBTOutputStateRecords(dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint) error {
@@ -1556,14 +1552,6 @@ func verifyPBTRowsInScratchDB(ctx context.Context, dirs datadir.Dirs, settings *
 	return verifyPBTRows(ctx, rawDB, nil, dirs, settings, domain, what, logger)
 }
 
-func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
-	err := requirePBinSourceEndWithWorkers(context.Background(), agg, endTxNum, 1, log.Root())
-	if err != nil && strings.Contains(err.Error(), "pbin stamp walk") {
-		return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum, after conversion txNum %d", endTxNum)
-	}
-	return err
-}
-
 func requirePBinSourceEndWithWorkers(ctx context.Context, agg *dbstate.Aggregator, endTxNum uint64, workers int, logger log.Logger) error {
 	at := agg.BeginFilesRo()
 	defer at.Close()
@@ -1584,20 +1572,9 @@ func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) err
 }
 
 func writePBTOutputManifest(ctx context.Context, dirs datadir.Dirs, point pbinConversionPoint, pbtRoot common.Hash, hexRoot, trieHash string, skipVerify bool, workers int, logger log.Logger) error {
-	files, err := pbtAttachFiles(dirs)
+	sources, err := pbtAttachManifestSources(dirs)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: manifest files: %w", err)
-	}
-	sources := make([]dbstate.PBTManifestFileSource, 0, len(files))
-	for _, file := range pbtAttachVisibleFiles(files) {
-		if !pbtAttachAdoptsFile(file) {
-			continue
-		}
-		rel, relErr := filepath.Rel(dirs.Snap, file.path)
-		if relErr != nil {
-			return relErr
-		}
-		sources = append(sources, dbstate.PBTManifestFileSource{Name: filepath.Clean(rel), Path: file.path})
 	}
 	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{
 		Logger:  logger,

@@ -81,31 +81,7 @@ func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 }
 
 func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
-	selectPBTCommandSuite(t)
-	base, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, 1, []int{1, 1})
-	require.NoError(t, err)
-	require.NoError(t, base.Tester.InsertChain(base.Chain))
-	base.Tester.Close()
-	baseEnd := pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata)
-	buildPBTAcceptanceFilesAt(t, base, baseEnd)
-	baseOutput := filepath.Join(t.TempDir(), "base-output")
-	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, baseOutput, true, "", log.New()))
-	source, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, true, 1, 1, []int{1, 1, 1, 1})
-	require.NoError(t, err)
-	source.Tester.Close()
-	copyPBTStateSalt(t, base, source)
-	source.Tester = execmoduletester.New(t,
-		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
-		execmoduletester.WithGenesisSpec(source.Genesis),
-		execmoduletester.WithKey(source.Key),
-		execmoduletester.WithStepSize(1),
-		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
-		execmoduletester.WithoutGenesisCommit(),
-	)
-	require.NoError(t, source.Tester.InsertChain(source.Chain))
-	source.Tester.Close()
-	sourceEnd := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
-	buildPBTAcceptanceFilesAt(t, source, sourceEnd)
+	source, baseOutput := pbtR15ResumeFixture(t, 1, false, false)
 	freshOutput := filepath.Join(t.TempDir(), "fresh-output")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New()))
 	require.NotEqual(t, readPBTBinRows(t, baseOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata))
@@ -129,6 +105,36 @@ func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"), salt, 0o644))
 	setExecutionProgress(t, source.Tester.Dirs.Chaindata, 1)
 	require.NoError(t, attachPBTWithHooks(t.Context(), source.Tester.Dirs.DataDir, baseOutput, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
+}
+
+func TestConvertPBTResumeRejectsUntouchedStateDifference(t *testing.T) {
+	selectPBTCommandSuite(t)
+	base, err := execmoduletester.NewPBTAcceptanceChainWithSharedCodeAndStepSize(t, true, true, []byte{0x60, 0x00, 0x60, 0x00, 0x52}, 1)
+	require.NoError(t, err)
+	require.NoError(t, base.Tester.InsertChain(base.Chain))
+	base.Tester.Close()
+	buildPBTResumeFiles(t, base, pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata), false)
+	output := filepath.Join(t.TempDir(), "base-output")
+	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, output, true, "", log.New()))
+
+	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 1, 6)
+	require.NoError(t, err)
+	source.Tester.Close()
+	copyPBTStateSalt(t, base, source)
+	source.Tester = execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	source.Tester.Close()
+	buildPBTResumeFiles(t, source, pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata), false)
+
+	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
+	require.ErrorContains(t, err, "C-e stream root")
 }
 
 func TestConvertPBTResumeFromStoppedHexBinSource(t *testing.T) {
@@ -316,7 +322,7 @@ func TestPBTRealChainTxNumConvention(t *testing.T) {
 	})
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
-	require.ErrorContains(t, requirePBinSourceEnd(agg, lastTxNum-1), "the last file holds writes up to txNum")
+	require.ErrorContains(t, requirePBinSourceEndWithWorkers(context.Background(), agg, lastTxNum-1, 1, log.Root()), "pbin stamp walk")
 	seekTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer seekTx.Rollback()

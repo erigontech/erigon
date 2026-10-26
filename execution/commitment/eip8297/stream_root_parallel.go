@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -45,35 +46,40 @@ type parallelStreamRootLeaf struct {
 }
 
 type parallelStreamRootBatch struct {
-	shard  int
-	arena  []byte
-	leaves []parallelStreamRootLeaf
+	shard         int
+	arena         []byte
+	leaves        []parallelStreamRootLeaf
+	residentBytes uint64
+	queueTokens   int
 }
 
 type ParallelStreamRoot struct {
-	sum          HashFn
-	workers      int
-	inputs       chan *parallelStreamRootBatch
-	stopped      chan struct{}
-	stopOnce     sync.Once
-	parts        []map[int]streamRootSubtree
-	workerErrs   []error
-	workerErrMu  sync.Mutex
-	workerFailed atomic.Bool
-	wg           sync.WaitGroup
-	closed       bool
-	lastShard    int
-	hasShard     bool
-	prevKey      []byte
-	prevBits     []byte
-	err          error
-	root         common.Hash
-	rootReady    bool
-	current      *parallelStreamRootBatch
-	primed       bool
-	buildActive  *atomic.Int32
-	buildMax     *atomic.Int32
-	buildStart   func()
+	sum           HashFn
+	workers       int
+	inputs        []chan *parallelStreamRootBatch
+	queueTokens   chan struct{}
+	stopped       chan struct{}
+	stopOnce      sync.Once
+	parts         []map[int]streamRootSubtree
+	workerErrs    []error
+	workerErrMu   sync.Mutex
+	workerFailed  atomic.Bool
+	wg            sync.WaitGroup
+	closed        bool
+	lastShard     int
+	hasShard      bool
+	prevKey       []byte
+	prevBits      []byte
+	err           error
+	root          common.Hash
+	rootReady     bool
+	current       *parallelStreamRootBatch
+	buildActive   *atomic.Int32
+	buildMax      *atomic.Int32
+	buildStart    func()
+	resident      atomic.Int64
+	peakResident  atomic.Uint64
+	residentLimit uint64
 }
 
 func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error) {
@@ -84,14 +90,20 @@ func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error)
 		return nil, ErrParallelStreamRootWorkers
 	}
 	b := &ParallelStreamRoot{
-		sum:        sum,
-		workers:    workers,
-		inputs:     make(chan *parallelStreamRootBatch, workers+2),
-		stopped:    make(chan struct{}),
-		parts:      make([]map[int]streamRootSubtree, workers),
-		workerErrs: make([]error, workers),
+		sum:           sum,
+		workers:       workers,
+		inputs:        make([]chan *parallelStreamRootBatch, workers),
+		queueTokens:   make(chan struct{}, parallelStreamRootQueueBytes/parallelStreamRootQueueTokenBytes),
+		stopped:       make(chan struct{}),
+		parts:         make([]map[int]streamRootSubtree, workers),
+		workerErrs:    make([]error, workers),
+		residentLimit: parallelStreamRootQueueBytes + uint64(workers+1)*parallelStreamRootBatchResidentBytes,
+	}
+	for range cap(b.queueTokens) {
+		b.queueTokens <- struct{}{}
 	}
 	for worker := range workers {
+		b.inputs[worker] = make(chan *parallelStreamRootBatch)
 		b.parts[worker] = make(map[int]streamRootSubtree)
 		b.wg.Add(1)
 		go b.run(worker)
@@ -136,11 +148,13 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 		b.err = errors.New("eip8297: stream keys are not strictly ascending")
 		return b.err
 	}
-	if b.current == nil || b.current.shard != shard {
+	if b.current == nil || b.current.shard != shard || !b.current.canAppend(key, value) {
 		if err := b.flush(ctx); err != nil {
 			return err
 		}
-		b.current = &parallelStreamRootBatch{shard: shard, arena: make([]byte, 0, len(key)+len(value)), leaves: make([]parallelStreamRootLeaf, 0, 1024)}
+		b.current = newParallelStreamRootBatch(shard)
+		b.current.residentBytes = b.current.capacityBytes()
+		b.adjustResident(int64(b.current.residentBytes))
 	}
 	keyStart := len(b.current.arena)
 	b.current.arena = append(b.current.arena, key...)
@@ -151,16 +165,6 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 	b.prevBits = append(b.prevBits[:0], bits...)
 	b.lastShard = shard
 	b.hasShard = true
-	if b.workers == 1 && !b.primed {
-		probe := &parallelStreamRootBatch{shard: b.current.shard, arena: slices.Clone(b.current.arena), leaves: slices.Clone(b.current.leaves)}
-		select {
-		case b.inputs <- probe:
-			b.primed = true
-		case <-ctx.Done():
-			b.err = ctx.Err()
-			return b.err
-		}
-	}
 	return nil
 }
 
@@ -179,14 +183,24 @@ func (b *ParallelStreamRoot) flush(ctx context.Context) error {
 	}
 	batch := b.current
 	b.current = nil
+	tokens, err := b.acquireQueueTokens(ctx, batch.residentBytes)
+	if err != nil {
+		b.releaseBatch(batch)
+		b.err = err
+		return err
+	}
+	batch.queueTokens = tokens
+	input := b.inputs[streamRootWorker(batch.shard, b.workers)]
 	select {
-	case b.inputs <- batch:
+	case input <- batch:
 		return nil
 	case <-b.stopped:
+		b.releaseBatch(batch)
 		err := b.workerError()
 		b.err = err
 		return err
 	case <-ctx.Done():
+		b.releaseBatch(batch)
 		b.err = ctx.Err()
 		return b.err
 	}
@@ -202,8 +216,13 @@ func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
 	b.closed = true
 	if b.err == nil {
 		_ = b.flush(context.Background())
+	} else if b.current != nil {
+		b.releaseBatch(b.current)
+		b.current = nil
 	}
-	close(b.inputs)
+	for _, input := range b.inputs {
+		close(input)
+	}
 	b.wg.Wait()
 	if b.err != nil {
 		return common.Hash{}, b.err
@@ -237,18 +256,25 @@ func (b *ParallelStreamRoot) RootHash() (common.Hash, error) {
 
 func (b *ParallelStreamRoot) run(worker int) {
 	defer b.wg.Done()
+	input := b.inputs[worker]
+	var builder *StreamRootBuilder
+	currentShard := -1
 	for {
 		var batch *parallelStreamRootBatch
 		var ok bool
 		select {
-		case batch, ok = <-b.inputs:
+		case batch, ok = <-input:
 			if !ok {
+				if builder != nil {
+					b.parts[worker][currentShard] = builder.subtree()
+				}
 				return
 			}
 		case <-b.stopped:
 			return
 		}
-		if b.workerErrs[worker] != nil {
+		if b.workerFailed.Load() {
+			b.releaseBatch(batch)
 			return
 		}
 		active := int32(0)
@@ -262,7 +288,14 @@ func (b *ParallelStreamRoot) run(worker int) {
 		if b.buildStart != nil {
 			b.buildStart()
 		}
-		builder, err := NewStreamRootBuilder(b.sum)
+		var err error
+		if builder == nil || currentShard != batch.shard {
+			if builder != nil {
+				b.parts[worker][currentShard] = builder.subtree()
+			}
+			builder, err = NewStreamRootBuilder(b.sum)
+			currentShard = batch.shard
+		}
 		if err == nil {
 			for _, leaf := range batch.leaves {
 				key := batch.arena[leaf.keyStart : leaf.keyStart+leaf.keyLength]
@@ -273,6 +306,7 @@ func (b *ParallelStreamRoot) run(worker int) {
 			}
 		}
 		if err != nil {
+			b.releaseBatch(batch)
 			if b.buildActive != nil {
 				b.buildActive.Add(-1)
 			}
@@ -286,8 +320,60 @@ func (b *ParallelStreamRoot) run(worker int) {
 		if b.buildActive != nil {
 			b.buildActive.Add(-1)
 		}
-		b.parts[worker][batch.shard] = builder.subtree()
+		b.releaseBatch(batch)
 	}
+}
+
+func (b *ParallelStreamRoot) adjustResident(delta int64) {
+	resident := uint64(b.resident.Add(delta))
+	for peak := b.peakResident.Load(); resident > peak && !b.peakResident.CompareAndSwap(peak, resident); peak = b.peakResident.Load() {
+	}
+}
+
+func (b *ParallelStreamRoot) releaseBatch(batch *parallelStreamRootBatch) {
+	for range batch.queueTokens {
+		b.queueTokens <- struct{}{}
+	}
+	batch.queueTokens = 0
+	b.adjustResident(-int64(batch.residentBytes))
+}
+
+func (b *parallelStreamRootBatch) capacityBytes() uint64 {
+	return uint64(cap(b.arena)) + uint64(cap(b.leaves))*uint64(unsafe.Sizeof(parallelStreamRootLeaf{}))
+}
+
+func newParallelStreamRootBatch(shard int) *parallelStreamRootBatch {
+	return &parallelStreamRootBatch{
+		shard:  shard,
+		arena:  make([]byte, 0, parallelStreamRootBatchBytes),
+		leaves: make([]parallelStreamRootLeaf, 0, parallelStreamRootBatchBytes/int(unsafe.Sizeof(parallelStreamRootLeaf{}))),
+	}
+}
+
+func (b *parallelStreamRootBatch) canAppend(key, value []byte) bool {
+	return len(b.arena)+len(key)+len(value) <= cap(b.arena) && len(b.leaves) < cap(b.leaves)
+}
+
+func (b *ParallelStreamRoot) acquireQueueTokens(ctx context.Context, bytes uint64) (int, error) {
+	tokens := int((bytes + parallelStreamRootQueueTokenBytes - 1) / parallelStreamRootQueueTokenBytes)
+	acquired := 0
+	for acquired < tokens {
+		select {
+		case <-b.queueTokens:
+			acquired++
+		case <-b.stopped:
+			for range acquired {
+				b.queueTokens <- struct{}{}
+			}
+			return 0, b.workerError()
+		case <-ctx.Done():
+			for range acquired {
+				b.queueTokens <- struct{}{}
+			}
+			return 0, ctx.Err()
+		}
+	}
+	return acquired, nil
 }
 
 func (b *ParallelStreamRoot) workerError() error {
@@ -302,11 +388,15 @@ func (b *ParallelStreamRoot) workerError() error {
 }
 
 func streamRootShard(key []byte) int {
-	shard := int(key[0]) << 4
+	shard := int(key[0]) << 8
 	if len(key) > 1 {
-		shard |= int(key[1] >> 4)
+		shard |= int(key[1])
 	}
 	return shard
+}
+
+func streamRootWorker(shard, workers int) int {
+	return (shard >> 4) % workers
 }
 
 func combineStreamRootSubtrees(sum HashFn, level int, left, right streamRootSubtree) streamRootSubtree {
@@ -356,4 +446,10 @@ func hashStreamRootBranch(sum HashFn, prefix []byte, left, right common.Hash) co
 	return common.Hash(sum(preimage))
 }
 
-const pbinStreamRootPartitionBits = 12
+const (
+	parallelStreamRootBatchBytes         = 512 * 1024
+	parallelStreamRootBatchResidentBytes = parallelStreamRootBatchBytes + parallelStreamRootBatchBytes
+	parallelStreamRootQueueBytes         = 2 * 1024 * 1024
+	parallelStreamRootQueueTokenBytes    = 64 * 1024
+	pbinStreamRootPartitionBits          = 16
+)
