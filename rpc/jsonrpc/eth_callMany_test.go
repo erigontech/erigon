@@ -160,19 +160,21 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 	require.NotContains(t, byNumber[0][0], "error")
 }
 
-func TestCallManyClientTimeoutCannotRaiseServerTimeout(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api, _ := newCallManyApisForTest(m)
-	api.evmCallTimeout = time.Nanosecond
-
-	to := common.Address{3}
-	gas := hexutil.Uint64(21_000)
-	bundles := []Bundle{{Transactions: []ethapi.CallArgs{{From: &m.Address, To: &to, Gas: &gas}}}}
-	clientTimeout := (24 * time.Hour).Milliseconds()
-
-	_, err := api.CallMany(context.Background(), bundles,
-		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}, nil, &clientTimeout)
-	require.ErrorContains(t, err, "execution aborted")
+func TestCapEVMTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		server   time.Duration
+		clientMs int64
+		want     time.Duration
+	}{
+		{5 * time.Minute, 0, 5 * time.Minute},
+		{5 * time.Minute, -1, 5 * time.Minute},
+		{5 * time.Minute, (24 * time.Hour).Milliseconds(), 5 * time.Minute},
+		{5 * time.Minute, 1000, time.Second},
+		{0, 1000, time.Second},
+		{0, 0, 0},
+	} {
+		require.Equal(t, tc.want, capEVMTimeout(tc.server, tc.clientMs), "server %v, client %d ms", tc.server, tc.clientMs)
+	}
 }
 
 func TestCallManyEmptyBundles(t *testing.T) {

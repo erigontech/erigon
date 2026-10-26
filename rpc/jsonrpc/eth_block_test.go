@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -609,22 +608,4 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedAmount, *txCount)
-}
-
-func TestCallBundleZeroClientTimeoutKeepsServerTimeout(t *testing.T) {
-	api, m, pendingNum := pendingTestAPIs(t, false)
-	api.evmCallTimeout = time.Nanosecond
-	tip := pendingNum - 1
-
-	var txHash common.Hash
-	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, tip)
-		require.NoError(t, err)
-		txHash = block.Transactions()[0].Hash()
-		return nil
-	}))
-
-	clientTimeout := int64(0)
-	_, err := api.CallBundle(m.Ctx, []common.Hash{txHash}, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tip-1)), &clientTimeout)
-	require.ErrorContains(t, err, "execution aborted")
 }
