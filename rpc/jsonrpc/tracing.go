@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -346,7 +347,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
+		txIndex := int(min(*config.TxIndex, math.MaxInt))
+		if err = api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+			return err
+		}
+		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, txIndex, api._txNumReader)
 	}
 	if err != nil {
 		return fmt.Errorf("create state reader: %w", err)
@@ -472,6 +477,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
 	} else {
+		if err = api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
+			return err
+		}
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
 	}
 
