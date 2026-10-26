@@ -111,7 +111,7 @@ func TestPBinReviewR19LiveRowsDuringLoad(t *testing.T) {
 	for key := range corpus.snapshot {
 		path, err := eip8297.DecodeBitPath([]byte(key))
 		if err == nil && path.BitLen >= paths[0].BitLen && path.HasPrefix(&paths[0]) {
-			records[key] = bytes.Repeat([]byte{0}, rowValueBytes)
+			records[key] = make([]byte, rowValueBytes)
 		}
 	}
 	var actualRows, actualBytes, liveRows, liveBytes uint64
