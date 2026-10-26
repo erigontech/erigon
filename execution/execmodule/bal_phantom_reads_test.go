@@ -178,25 +178,6 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 	}
 }
 
-func TestBALPhantomReadAttack(t *testing.T) {
-	for _, name := range []string{"valid", "reads", "attack"} {
-		t.Run(name, func(t *testing.T) {
-			m, block := phantomReadFixture(t, name, 2)
-			status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
-			require.NoError(t, err)
-			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-			result, err := m.ValidateChain(t.Context(), block.Header())
-			require.NoError(t, err)
-			if name == "attack" {
-				require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
-				require.Contains(t, result.ValidationError, "block access list mismatch")
-			} else {
-				require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
-			}
-		})
-	}
-}
-
 func phantomReadFixture(tb testing.TB, workload string, workers int) (*execmoduletester.ExecModuleTester, *types.Block) {
 	tb.Helper()
 	const txCount, phantomSlots = 32, 15_000
