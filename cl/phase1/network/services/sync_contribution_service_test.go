@@ -225,7 +225,7 @@ func TestSyncContributionServiceSeenSetIsBounded(t *testing.T) {
 	}
 
 	slots := 100 * service.beaconCfg.SyncCommitteeSize
-	for slot := uint64(0); slot < slots; slot++ {
+	for slot := range slots {
 		service.markContributionAsSeen(contribution(slot))
 	}
 	require.False(t, service.wasContributionSeen(contribution(0)))
