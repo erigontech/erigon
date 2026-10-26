@@ -28,10 +28,13 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -324,4 +327,36 @@ func TestInitializeTracesHistoryStorageCall(t *testing.T) {
 	}
 	require.NoError(t, New(nil).Initialize(chainConfig, readerMock{config: chainConfig}, header, &intraBlockState, syscall, log.New(), &tracer))
 	require.Equal(t, []string{"start", "call", "end"}, callOrder)
+}
+
+func TestFinalizeZeroRewardOmittedFromBlockAccessList(t *testing.T) {
+	stepDuration, startStep, blockReward := uint64(1), uint64(0), uint64(0)
+	beneficiary := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	auraEngine, err := aura.NewAuRa(&chain.AuRaConfig{
+		StepDuration: &stepDuration,
+		StartStep:    &startStep,
+		BlockReward:  &blockReward,
+		Validators:   &chain.ValidatorSetJson{List: []common.Address{beneficiary}},
+	}, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
+	require.NoError(t, err)
+
+	header := &types.Header{
+		Coinbase:   beneficiary,
+		Difficulty: *ProofOfStakeDifficulty,
+		Number:     *uint256.NewInt(1),
+	}
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+	ibs.StartAccessRecording()
+	t.Cleanup(ibs.Close)
+
+	amsterdam := uint64(0)
+	_, err = New(auraEngine).Finalize(&chain.Config{AmsterdamTime: &amsterdam}, header, ibs, nil, nil, nil, nil, nil, false, log.New())
+	require.NoError(t, err)
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true})
+	require.NoError(t, err)
+	io := state.NewVersionedIO(1)
+	ibs.MergeTxIOInto(io, writes)
+	require.Empty(t, io.AsBlockAccessList())
 }
