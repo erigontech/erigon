@@ -23,23 +23,46 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
 // SystemTxType is the EIP-2718 type of EEZ's unsigned system transactions.
 const SystemTxType byte = 0x76
 
-// SystemTxGasLimit is the execution budget of every system transaction; the
-// envelope carries no gas fields.
-const SystemTxGasLimit uint64 = 2_000_000
+// The envelope carries no gas fields. Under rollup0 a system transaction
+// reserves SystemTxGasLimit like any transaction; under rollupX it executes
+// with the gas its block has left, at most RollupXSystemTxGasCap, the
+// EIP-7825 cap.
+const (
+	SystemTxGasLimit      uint64 = 2_000_000
+	RollupXSystemTxGasCap uint64 = params.MaxTxnGasLimit
+)
 
 var (
 	// SystemAddress is the implicit sender of system transactions.
 	SystemAddress = common.HexToAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0076")
-	// EEZL2Address is the EEZL2 predeploy, the only target of system
-	// transactions.
+	// EEZL2Address is the EEZL2 predeploy of rollup0, the only target of its
+	// system transactions.
 	EEZL2Address = common.HexToAddress("0x4200000000000000000000000000000000000007")
+	// RollupXEEZL2Address is the EEZL2 proxy of rollupX, the only target of
+	// its system transactions.
+	RollupXEEZL2Address = common.HexToAddress("0x4B2760F84B83d6b3829E30A7573B0172B6d6402C")
 )
+
+// IsEEZL2 reports whether addr is the EEZL2 of a rule set.
+func IsEEZL2(addr common.Address) bool {
+	return addr == EEZL2Address || addr == RollupXEEZL2Address
+}
+
+// GasLimit returns the gas limit of the transaction, which its EEZL2 implies:
+// SystemTxGasLimit under rollup0, RollupXSystemTxGasCap under rollupX.
+func (tx *SystemTx) GasLimit() uint64 {
+	if tx.To == RollupXEEZL2Address {
+		return RollupXSystemTxGasCap
+	}
+	return SystemTxGasLimit
+}
 
 // ErrSystemTx reports bytes that are not a valid type-0x76 transaction.
 var ErrSystemTx = errors.New("invalid system transaction")
@@ -57,7 +80,7 @@ type SystemTx struct {
 
 // MarshalBinary returns the EIP-2718 encoding 0x76 ‖ rlp(body).
 func (tx *SystemTx) MarshalBinary() ([]byte, error) {
-	if tx.To != EEZL2Address {
+	if !IsEEZL2(tx.To) {
 		return nil, fmt.Errorf("%w: target %v is not EEZL2", ErrSystemTx, tx.To)
 	}
 	body, err := rlp.EncodeToBytes(tx)
@@ -77,7 +100,8 @@ func (tx *SystemTx) Hash() (common.Hash, error) {
 }
 
 // DecodeSystemTx decodes a type-0x76 transaction: canonical RLP of exactly
-// the five body fields, targeting EEZL2, with nothing after it.
+// the five body fields, targeting the EEZL2 of a rule set, with nothing after
+// it.
 func DecodeSystemTx(enc []byte) (*SystemTx, error) {
 	if len(enc) == 0 || enc[0] != SystemTxType {
 		return nil, fmt.Errorf("%w: not type 0x76", ErrSystemTx)
@@ -86,7 +110,7 @@ func DecodeSystemTx(enc []byte) (*SystemTx, error) {
 	if err := rlp.DecodeBytes(enc[1:], &tx); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSystemTx, err)
 	}
-	if tx.To != EEZL2Address {
+	if !IsEEZL2(tx.To) {
 		return nil, fmt.Errorf("%w: target %v is not EEZL2", ErrSystemTx, tx.To)
 	}
 	return &tx, nil

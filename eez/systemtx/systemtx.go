@@ -143,7 +143,7 @@ func (tx *Transaction) Sender(sg types.Signer) (accounts.Address, error) {
 // check and the EIP-7825 gas cap are not. Outside an EEZ chain the type is
 // not supported.
 func (tx *Transaction) AsMessage(s types.Signer, _ *uint256.Int, rules *chain.Rules) (*types.Message, error) {
-	if rules == nil || rules.L2Version < config.ProtocolVersion {
+	if rules == nil || rules.L2Version < config.Rollup0 {
 		return nil, fmt.Errorf("%w: 0x%x outside an EEZ chain", types.ErrTxTypeNotSupported, protocol.SystemTxType)
 	}
 	from, err := tx.Sender(s)

@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 // crates/eez-primitives/src/tests.rs (native_wire_sender_hash_and_storage_round_trip).
 const minimalSystemTx = "0x76dd0180944200000000000000000000000000000000000007808401020304"
 
-var eezRules = &chain.Rules{ChainID: uint256.NewInt(1), IsLondon: true, L2Version: config.ProtocolVersion}
+var eezRules = &chain.Rules{ChainID: uint256.NewInt(1), IsLondon: true, L2Version: config.Rollup0}
 
 func mustNew(t *testing.T, body protocol.SystemTx) *systemtx.Transaction {
 	t.Helper()

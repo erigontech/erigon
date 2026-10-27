@@ -25,7 +25,9 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Name identifies the EEZ stack in chain configurations and selects its rules
@@ -55,21 +57,79 @@ type L2Config struct {
 	L1BlockTime uint64 `json:"l1BlockTime"`
 	// BlockGasLimit is the gas limit of every L2 block.
 	BlockGasLimit uint64 `json:"blockGasLimit"`
+	// RollupX selects the eez-rollupX rule set; it is the config.rollupX
+	// section of an eez-rollupX genesis.
+	RollupX *RollupXConfig `json:"rollupX,omitempty"`
 }
+
+// RollupXConfig is the derivation schedule of an eez-rollupX network.
+type RollupXConfig struct {
+	// BlockIntervalSeconds is the L2 block time.
+	BlockIntervalSeconds uint64 `json:"blockIntervalSeconds"`
+	// SyncIntervalBlocks is the number of L2 blocks from one Sync block to
+	// the next.
+	SyncIntervalBlocks uint64 `json:"syncIntervalBlocks"`
+	// L1Reference is the finalized L1 block the genesis is anchored to.
+	L1Reference L1Reference `json:"l1Reference"`
+}
+
+// L1Reference is the L1 block an eez-rollupX genesis is anchored to. Its
+// timestamp fixes the phase of the settlement slots; its prevRandao is the
+// genesis mixHash and the seed of every block before the first live anchor.
+type L1Reference struct {
+	ChainID    uint64      `json:"chainId"`
+	Number     uint64      `json:"number"`
+	Hash       common.Hash `json:"hash"`
+	Timestamp  uint64      `json:"timestamp"`
+	PrevRandao common.Hash `json:"prevRandao"`
+}
+
+// Rule sets, as chain.Rules.L2Version carries them; L2Version is zero
+// outside EEZ chains. Transaction types EEZ registers process-wide are valid
+// only where it is set.
+const (
+	// Rollup0 is the rule set of eez-rollup0, the reference client.
+	Rollup0 uint64 = 1
+	// RollupX is the rule set of eez-rollupX, which the Gnosis-hosted
+	// networks run.
+	RollupX uint64 = 2
+)
+
+// RollupX constants.
+const (
+	RollupXBlockGasLimit            uint64 = 30_000_000
+	RollupXBaseFeeChangeDenominator uint64 = 50
+)
 
 var _ chain.L2Config = (*L2Config)(nil)
 
 // Name returns the EEZ stack name.
 func (c *L2Config) Name() string { return Name }
 
-// ProtocolVersion is the L2Version of every EEZ block. Transaction types EEZ
-// registers process-wide are valid only where it is set.
-const ProtocolVersion uint64 = 1
-
-// ResolveRules sets ProtocolVersion. Forks activate by the genesis
-// timestamps; EEZ has no version ladder of its own.
+// ResolveRules sets the rule set. Forks activate by the genesis timestamps;
+// EEZ has no version ladder of its own.
 func (c *L2Config) ResolveRules(l2Version, blockNum, blockTime uint64, rules *chain.Rules) {
-	rules.L2Version = ProtocolVersion
+	rules.L2Version = c.RuleSet()
+}
+
+// RuleSet returns RollupX when the section has a rollupX schedule, Rollup0
+// otherwise.
+func (c *L2Config) RuleSet() uint64 {
+	if c.RollupX != nil {
+		return RollupX
+	}
+	return Rollup0
+}
+
+// EEZL2 returns the address of the rule set's EEZL2.
+func (c *L2Config) EEZL2() common.Address { return EEZL2(c.RuleSet()) }
+
+// EEZL2 returns the address of the EEZL2 of ruleSet.
+func EEZL2(ruleSet uint64) common.Address {
+	if ruleSet == RollupX {
+		return protocol.RollupXEEZL2Address
+	}
+	return protocol.EEZL2Address
 }
 
 // BlocksPerL1Block is the number of L2 blocks one L1 block spans.
@@ -93,6 +153,70 @@ func (c *L2Config) Validate() error {
 		return fmt.Errorf("%w: %d L2 blocks per L1 block, need at least 2", ErrInvalid, c.BlocksPerL1Block())
 	case c.BlockGasLimit == 0:
 		return fmt.Errorf("%w: blockGasLimit is zero", ErrInvalid)
+	}
+	if c.RollupX != nil {
+		return c.RollupX.validate(c)
+	}
+	return nil
+}
+
+// validate checks the schedule on its own and against the l2 section, which
+// restates its interval and slot time.
+func (x *RollupXConfig) validate(l2 *L2Config) error {
+	step, positions, ref := x.BlockIntervalSeconds, x.SyncIntervalBlocks, x.L1Reference
+	switch {
+	case step == 0 || positions < 2:
+		return fmt.Errorf("%w: rollupX schedule of %d s and %d blocks", ErrInvalid, step, positions)
+	case ref.ChainID == 1 && (step != 2 || positions != 6):
+		return fmt.Errorf("%w: rollupX on Ethereum needs 2 s blocks and Sync every 6", ErrInvalid)
+	case ref.ChainID == 10200 && (step != 1 || positions != 5):
+		return fmt.Errorf("%w: rollupX on Chiado needs 1 s blocks and Sync every 5", ErrInvalid)
+	case ref.ChainID != l2.L1ChainID:
+		return fmt.Errorf("%w: rollupX L1 reference on chain %d, l1ChainId %d", ErrInvalid, ref.ChainID, l2.L1ChainID)
+	case ref.Hash == (common.Hash{}):
+		return fmt.Errorf("%w: rollupX L1 reference hash is zero", ErrInvalid)
+	case l2.BlockInterval != step || l2.L1BlockTime/positions != step || l2.L1BlockTime%positions != 0:
+		return fmt.Errorf("%w: blockInterval %d and l1BlockTime %d differ from the rollupX schedule", ErrInvalid, l2.BlockInterval, l2.L1BlockTime)
+	case l2.BlockGasLimit != RollupXBlockGasLimit:
+		return fmt.Errorf("%w: rollupX blockGasLimit %d, want %d", ErrInvalid, l2.BlockGasLimit, RollupXBlockGasLimit)
+	}
+	return nil
+}
+
+// ValidateChain rejects chain configuration fields the rule set fixes
+// otherwise. RollupX runs Osaka from genesis, burns the base fee and has the
+// 2/50 EIP-1559 rule.
+func (c *L2Config) ValidateChain(cc *chain.Config) error {
+	if c.RollupX == nil {
+		if cc.BaseFeeChangeDenominator != nil {
+			return fmt.Errorf("%w: baseFeeChangeDenominator outside rollupX", ErrInvalid)
+		}
+		return nil
+	}
+	switch {
+	case cc.BaseFeeChangeDenominator == nil || *cc.BaseFeeChangeDenominator != RollupXBaseFeeChangeDenominator:
+		return fmt.Errorf("%w: rollupX needs baseFeeChangeDenominator %d", ErrInvalid, RollupXBaseFeeChangeDenominator)
+	case cc.FeeCollector != nil || len(cc.BurntContract) > 0:
+		return fmt.Errorf("%w: rollupX burns the base fee", ErrInvalid)
+	case cc.OsakaTime == nil || *cc.OsakaTime != 0 || cc.AmsterdamTime != nil:
+		return fmt.Errorf("%w: rollupX runs Osaka from genesis and no later fork", ErrInvalid)
+	}
+	return nil
+}
+
+// CheckGenesis checks the genesis against the schedule: block 0, a whole
+// number of slots after the L1 reference, the reference prevRandao as
+// mixHash.
+func (x *RollupXConfig) CheckGenesis(genesis *types.Header) error {
+	slot := x.BlockIntervalSeconds * x.SyncIntervalBlocks
+	ref := x.L1Reference
+	switch {
+	case !genesis.Number.IsZero():
+		return fmt.Errorf("%w: rollupX genesis number %d", ErrInvalid, &genesis.Number)
+	case genesis.Time < ref.Timestamp || (genesis.Time-ref.Timestamp)%slot != 0:
+		return fmt.Errorf("%w: rollupX genesis time %d off the slots of L1 reference time %d", ErrInvalid, genesis.Time, ref.Timestamp)
+	case genesis.MixDigest != ref.PrevRandao:
+		return fmt.Errorf("%w: rollupX genesis mixHash %x, want L1 reference prevRandao %x", ErrInvalid, genesis.MixDigest, ref.PrevRandao)
 	}
 	return nil
 }
