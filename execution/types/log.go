@@ -257,13 +257,28 @@ func (logs Logs) FilterWith(f *LogFilter, maxLogs uint64) Logs {
 // adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
 // enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
 func (logs Logs) AppendFilteredLogs(dst Logs, f *LogFilter, timestamp uint64, limit int) Logs {
+	start := len(dst)
 	for _, l := range logs {
 		if limit != 0 && len(dst) >= limit {
 			break
 		}
 		if _, matched := l.matchFilter(f); matched {
-			dst = append(dst, StampedLog(l, timestamp))
+			dst = append(dst, l)
 		}
+	}
+	matched := dst[start:]
+	if len(matched) == 0 {
+		return dst
+	}
+	stamped := make([]struct {
+		log       Log
+		timestamp hexutil.Uint64
+	}, len(matched))
+	for i, l := range matched {
+		s := &stamped[i]
+		s.log, s.timestamp = *l, hexutil.Uint64(timestamp)
+		s.log.BlockTimestamp = &s.timestamp
+		matched[i] = &s.log
 	}
 	return dst
 }

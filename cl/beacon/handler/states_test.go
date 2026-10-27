@@ -648,41 +648,157 @@ func TestGetRandao(t *testing.T) {
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
-	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
 
 	var err error
 	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
 	require.NoError(t, err)
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	lowest := uint64(0)
-	fcu.LowestAvailableSlotVal = &lowest
+	require.NotZero(t, fcu.HeadSlotVal)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, fcu.HeadSlotVal-1)
+	}))
+	pendingConsolidations := solid.NewPendingConsolidationList(&clparams.MainnetBeaconConfig)
+	pendingConsolidations.Append(&solid.PendingConsolidation{SourceIndex: 123, TargetIndex: 456})
 	fcu.PendingConsolidationsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]{
-		fcu.HeadVal: solid.NewPendingConsolidationList(&clparams.MainnetBeaconConfig),
+		fcu.HeadVal: pendingConsolidations,
 	}
+	pendingDeposits := solid.NewPendingDepositList(&clparams.MainnetBeaconConfig)
+	pendingDeposits.Append(&solid.PendingDeposit{Amount: 789, Slot: 1011})
 	fcu.PendingDepositsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]{
-		fcu.HeadVal: solid.NewPendingDepositList(&clparams.MainnetBeaconConfig),
+		fcu.HeadVal: pendingDeposits,
 	}
+	pendingWithdrawals := solid.NewPendingWithdrawalList(&clparams.MainnetBeaconConfig)
+	pendingWithdrawals.Append(&solid.PendingPartialWithdrawal{ValidatorIndex: 1213, Amount: 1415, WithdrawableEpoch: 1617})
 	fcu.PendingPartialWithdrawalsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]{
-		fcu.HeadVal: solid.NewPendingWithdrawalList(&clparams.MainnetBeaconConfig),
+		fcu.HeadVal: pendingWithdrawals,
 	}
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 
-	versions := map[string]string{}
-	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
-		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/head/"+endpoint, nil)
-		require.NoError(t, err)
-		resp, err := server.Client().Do(req)
-		require.NoError(t, err)
-		resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode, endpoint)
-		v := resp.Header.Get("Eth-Consensus-Version")
-		require.NotEmpty(t, v, "%s must set Eth-Consensus-Version", endpoint)
-		versions[endpoint] = v
+	want := map[string]string{
+		"pending_consolidations":      `"source_index":"123"`,
+		"pending_deposits":            `"amount":"789"`,
+		"pending_partial_withdrawals": `"validator_index":"1213"`,
 	}
-	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
-	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+	for _, lowest := range []uint64{0, fcu.HeadSlotVal} {
+		fcu.LowestAvailableSlotVal = &lowest
+		for endpoint, marker := range want {
+			status, body, version := getPendingQueue(t, server, "head", endpoint)
+			require.Equal(t, http.StatusOK, status, "%s at lowest slot %d", endpoint, lowest)
+			require.Contains(t, body, marker, "%s at lowest slot %d", endpoint, lowest)
+			require.Equal(t, clparams.FuluVersion.String(), version, "%s at lowest slot %d", endpoint, lowest)
+		}
+	}
+}
+
+func getPendingQueue(t *testing.T, server *httptest.Server, stateID, endpoint string) (int, string, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+stateID+"/"+endpoint, nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(body), resp.Header.Get("Eth-Consensus-Version")
+}
+
+func TestGetPendingQueuesRejectPreElectraState(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		status, body, _ := getPendingQueue(t, server, "head", endpoint)
+		require.Equal(t, http.StatusBadRequest, status, "%s: %s", endpoint, body)
+	}
+}
+
+func TestGetPendingQueuesRejectNonCanonicalCacheMiss(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	slot := blocks[len(blocks)-1].Block.Slot
+	sideBlockRoot := common.Hash{1}
+	sideStateRoot := common.Hash{2}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHeaderSlot(tx, sideBlockRoot, slot); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteStateRoot(tx, sideBlockRoot, sideStateRoot)
+	}))
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	stateID := "0x" + common.Bytes2Hex(sideStateRoot[:])
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		status, body, _ := getPendingQueue(t, server, stateID, endpoint)
+		require.Equal(t, http.StatusNotFound, status, "%s: %s", endpoint, body)
+	}
+}
+
+func TestGetPendingQueuesRejectUnreconstructedCacheMiss(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	require.NotZero(t, fcu.HeadSlotVal)
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, fcu.HeadSlotVal-1)
+	}))
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		status, body, _ := getPendingQueue(t, server, "head", endpoint)
+		require.Equal(t, http.StatusNotFound, status, "%s: %s", endpoint, body)
+	}
+}
+
+func TestGetPendingQueuesFallBackToHistoricalOnCacheMiss(t *testing.T) {
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, fcu.HeadSlotVal)
+	}))
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	want := map[string]json.Marshaler{
+		"pending_consolidations":      postState.GetPendingConsolidations(),
+		"pending_deposits":            postState.GetPendingDeposits(),
+		"pending_partial_withdrawals": postState.GetPendingPartialWithdrawals(),
+	}
+	for endpoint, queue := range want {
+		status, body, _ := getPendingQueue(t, server, "head", endpoint)
+		require.Equal(t, http.StatusOK, status, "%s: %s", endpoint, body)
+		var response struct {
+			Data json.RawMessage `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &response), endpoint)
+		expected, err := queue.MarshalJSON()
+		require.NoError(t, err, endpoint)
+		require.JSONEq(t, string(expected), string(response.Data), endpoint)
+	}
 }
 
 // The response can be hundreds of MB on mainnet, so it must not stay in the pool.

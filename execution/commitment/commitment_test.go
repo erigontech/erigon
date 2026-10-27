@@ -726,6 +726,31 @@ func (r *recordingCtx) Account(_ []byte) (*Update, error) { return nil, nil }
 func (r *recordingCtx) Storage(_ []byte) (*Update, error) { return nil, nil }
 func (r *recordingCtx) TxNum() uint64                     { return 0 }
 
+// CollectTombstone writes the empty-branch tombstone raw and carries prev through
+// for the domain diff — it must NOT merge the tombstone against prev (a real branch
+// can be shorter than its bitmap implies, and Merge would overrun it).
+func TestCollectTombstone_WritesRawAndCarriesPrev(t *testing.T) {
+	t.Parallel()
+	prefix := []byte{0xab, 0xcd}
+	row, bm := generateCellRow(t, 5)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	be := NewBranchEncoder(1024)
+	branch, err := be.EncodeBranch(bm, bm, bm, &cells)
+	require.NoError(t, err)
+	prev := bytes.Clone(branch)
+
+	wantTomb, err := NewBranchEncoder(1024).EncodeBranch(0, bm, 0, nil)
+	require.NoError(t, err)
+
+	ctx := &recordingCtx{}
+	require.NoError(t, be.CollectTombstone(ctx, prefix, bm, prev))
+	require.Len(t, ctx.puts, 1)
+	require.Equal(t, 0, BranchData(ctx.puts[0].data).ChildCount(), "tombstone is an empty branch")
+	require.Equal(t, []byte(wantTomb), ctx.puts[0].data, "raw tombstone, not a merge of prev")
+	require.Equal(t, prev, ctx.puts[0].prev, "prev is carried for the domain diff / unwind")
+}
+
 func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0xab, 0xcd}

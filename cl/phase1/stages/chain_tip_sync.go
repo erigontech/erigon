@@ -285,6 +285,8 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		remaining: len(storedReplayRoots),
 		results:   make(map[common.Hash]error),
 	}
+	var imported importedSlots
+	defer imported.requestCustodyBackfill(cfg)
 
 	for _, block := range blocks {
 		blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
@@ -322,6 +324,9 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 					log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 				}
 				parentBlock := parentBlockByRoot(parentRoot)
+				if parentBlock != nil {
+					imported.add(parentBlock.Block.Slot)
+				}
 				if wasStored && parentEnvelopeRequired(block, parentBlock) {
 					if reason := payloadReplay.rejection(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr); reason != nil {
 						rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "parent payload not accepted", reason)
@@ -331,7 +336,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 			}
 		}
 
-		// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
+		// Process the block without its data; the deferred requestCustodyBackfill fetches it.
 		if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
 			if parentEnvelopeUnavailable(cfg, block, envelopes, parentBlockByRoot) {
 				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errParentEnvelopeUnavailable.Error(), errParentEnvelopeUnavailable)
@@ -344,6 +349,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 			continue
 		}
 
+		imported.add(block.Block.Slot)
 		delete(rejected, blockRoot)
 		seenBlockRoots[blockRoot] = struct{}{}
 		if block.Block.Slot >= args.targetSlot {
@@ -351,6 +357,30 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 	}
 	return false
+}
+
+// importedSlots is the slot range of the blocks a chain tip batch imported and of the parents whose
+// envelopes it applied or found applied.
+type importedSlots struct {
+	from, to uint64
+	any      bool
+}
+
+func (s *importedSlots) add(slot uint64) {
+	if !s.any {
+		s.from, s.to, s.any = slot, slot, true
+		return
+	}
+	s.from, s.to = min(s.from, slot), max(s.to, slot)
+}
+
+// requestCustodyBackfill asks for the custody columns of what the batch imported: it skips their
+// data availability check, and the blob history downloader that would fetch them later runs only
+// on nodes that backfill blobs.
+func (s *importedSlots) requestCustodyBackfill(cfg *Cfg) {
+	if s.any && cfg.peerDas != nil {
+		cfg.peerDas.BackfillCustodyColumns(s.from, s.to)
+	}
 }
 
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
@@ -737,7 +767,7 @@ type selectedHeadEnvelopeStore interface {
 type anchorEnvelopeStore interface {
 	AnchorRoot() common.Hash
 	HasEnvelope(common.Hash) bool
-	GetStateAtBlockRoot(common.Hash, bool) (*state.CachingBeaconState, error)
+	GetStateAtBlockRoot(common.Hash) (*state.CachingBeaconState, error)
 }
 
 type anchorEnvelopeRecoverer func(context.Context) error
@@ -761,7 +791,7 @@ func ensureAnchorEnvelopeForChild(
 	if store.HasEnvelope(anchorRoot) {
 		return true
 	}
-	anchorState, err := store.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := store.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		return false
 	}
@@ -1429,7 +1459,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if skipped := cfg.gloasSkippedAnchorValidation; skipped.root == anchorRoot && depth.keeps(skipped.blockNumber) {
 		return
 	}
-	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		log.Debug("[chainTipSync] anchor state not available for payload retry", "anchorRoot", anchorRoot, "err", err)
 		return

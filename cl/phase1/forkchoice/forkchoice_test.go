@@ -20,12 +20,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -309,7 +313,7 @@ type pruningStateForkGraph struct {
 	*embeddedPtcVoteForkGraph
 }
 
-func (g *pruningStateForkGraph) GetState(blockRoot common.Hash, _ bool) (*state.CachingBeaconState, error) {
+func (g *pruningStateForkGraph) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	delete(g.headers, blockRoot)
 	delete(g.states, blockRoot)
 	return nil, nil
@@ -344,7 +348,7 @@ func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {
 			true,
 			func(store *ForkChoiceStore, root common.Hash) {
 				sign := addGossipPayloadAttestationSigner(t, store, root, 1, gossipTestValidator, gossipTestPTCPosition, true)
-				require.NoError(t, store.OnGossipPayloadAttestationMessage(t.Context(), sign(true)))
+				require.NoError(t, store.OnGossipPayloadAttestationMessage(t.Context(), sign(true), nil))
 				timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(root)
 				require.True(t, timelinessPresent)
 				require.True(t, dataAvailabilityPresent)
@@ -371,7 +375,7 @@ func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {
 		)
 		sign := addGossipPayloadAttestationSigner(t, store, anchorRoot, 1, gossipTestValidator, gossipTestPTCPosition, true)
 
-		err := store.OnGossipPayloadAttestationMessage(t.Context(), sign(true))
+		err := store.OnGossipPayloadAttestationMessage(t.Context(), sign(true), nil)
 
 		require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
 		timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(anchorRoot)
@@ -383,6 +387,20 @@ func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {
 }
 
 func runEmbeddedPtcVoteBlock(
+	t *testing.T,
+	configuredPtcSize uint64,
+	committee []uint64,
+	selectedPositions []int,
+	payloadValidated bool,
+	beforeBlock func(*ForkChoiceStore, common.Hash),
+) (*ForkChoiceStore, common.Hash, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	store, anchorRoot, child := prepareEmbeddedPtcVoteBlock(t, configuredPtcSize, committee, selectedPositions, payloadValidated, beforeBlock)
+	require.NoError(t, store.OnBlock(context.Background(), child, false, false, false))
+	return store, anchorRoot, child
+}
+
+func prepareEmbeddedPtcVoteBlock(
 	t *testing.T,
 	configuredPtcSize uint64,
 	committee []uint64,
@@ -478,7 +496,6 @@ func runEmbeddedPtcVoteBlock(
 		},
 	})
 
-	require.NoError(t, store.OnBlock(context.Background(), child, false, false, false))
 	return store, anchorRoot, child
 }
 
@@ -852,7 +869,6 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 		return !operationsPool.VoluntaryExitsPool.Has(0)
 	}, time.Second, time.Millisecond)
 	require.Equal(t, []common.Hash{finalizedRoot}, graph.stateRoots())
-	require.Equal(t, []bool{true}, graph.stateCopyModes())
 	requireOperationPrunerIdle(t, store)
 }
 
@@ -1343,12 +1359,12 @@ type failOnceStateForkGraph struct {
 	calls int
 }
 
-func (g *failOnceStateForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (g *failOnceStateForkGraph) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	g.calls++
 	if g.calls == 1 {
 		return nil, g.err
 	}
-	return g.ForkGraph.GetState(blockRoot, alwaysCopy)
+	return g.ForkGraph.ReplayState(blockRoot)
 }
 
 func TestFailedCheckpointStateBuildIsNotCached(t *testing.T) {
@@ -1363,6 +1379,185 @@ func TestFailedCheckpointStateBuildIsNotCached(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, built)
 	require.Equal(t, 2, graph.calls)
+}
+
+func waitForCheckpointSignal(t *testing.T, signal <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatal(message)
+	}
+}
+
+func TestCheckpointStateLockedJoinsUnlockedReplayBuild(t *testing.T) {
+	type buildResult struct {
+		state *checkpointState
+		err   error
+	}
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	graph := store.forkGraph.(*getFinalizedExecutionHashForkGraph)
+	graph.getStateStarted = make(chan common.Hash, 2)
+	graph.getStateRelease = make(chan struct{})
+
+	unlockedDone := make(chan buildResult, 1)
+	go func() {
+		built, err := store.getCheckpointState(checkpoint)
+		unlockedDone <- buildResult{state: built, err: err}
+	}()
+	waitForStateLoad(t, graph.getStateStarted)
+
+	lockedStarted := make(chan struct{})
+	lockedDone := make(chan buildResult, 1)
+	go func() {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		close(lockedStarted)
+		built, err := store.getCheckpointStateLocked(checkpoint)
+		lockedDone <- buildResult{state: built, err: err}
+	}()
+	waitForCheckpointSignal(t, lockedStarted, "locked checkpoint build did not start")
+	time.Sleep(20 * time.Millisecond)
+	close(graph.getStateRelease)
+
+	var unlocked, locked buildResult
+	select {
+	case unlocked = <-unlockedDone:
+	case <-time.After(time.Second):
+		t.Fatal("unlocked checkpoint build did not finish")
+	}
+	select {
+	case locked = <-lockedDone:
+	case <-time.After(time.Second):
+		t.Fatal("locked checkpoint build did not finish")
+	}
+	require.NoError(t, unlocked.err)
+	require.NoError(t, locked.err)
+	require.Len(t, graph.stateRoots(), 1)
+	require.Same(t, unlocked.state, locked.state)
+	cached, ok := store.checkpointStates.Load(checkpoint)
+	require.True(t, ok)
+	require.Same(t, unlocked.state, cached)
+}
+
+type currentOnceForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	currentReads atomic.Int32
+}
+
+func (g *currentOnceForkGraph) CurrentStateLocked(root common.Hash) *state.CachingBeaconState {
+	if g.currentReads.Add(1) > 1 {
+		return nil
+	}
+	return g.getFinalizedExecutionHashForkGraph.CurrentStateLocked(root)
+}
+
+func TestCheckpointStateRootLeavingCurrentReplaysOnce(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	fixture := store.forkGraph.(*getFinalizedExecutionHashForkGraph)
+	fixture.currentStateRoot = checkpoint.Root
+	fixture.getStateRelease = make(chan struct{})
+	graph := &currentOnceForkGraph{getFinalizedExecutionHashForkGraph: fixture}
+	store.forkGraph = graph
+
+	unlockedDone := make(chan error, 1)
+	go func() {
+		_, err := store.getCheckpointState(checkpoint)
+		unlockedDone <- err
+	}()
+	lockedDone := make(chan error, 1)
+	go func() {
+		for graph.currentReads.Load() == 0 {
+			runtime.Gosched()
+		}
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, err := store.getCheckpointStateLocked(checkpoint)
+		lockedDone <- err
+	}()
+	time.AfterFunc(50*time.Millisecond, func() { close(fixture.getStateRelease) })
+
+	for _, done := range []chan error{unlockedDone, lockedDone} {
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("checkpoint build did not finish")
+		}
+	}
+	require.LessOrEqual(t, len(fixture.stateRoots()), 1)
+}
+
+func TestCurrentCheckpointFlightUsesStateBuiltWhileWaitingForLock(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	store.forkGraph.(*getFinalizedExecutionHashForkGraph).currentStateRoot = checkpoint.Root
+
+	store.mu.Lock()
+	unlockedDone := make(chan *checkpointState, 1)
+	go func() {
+		built, err := store.getCheckpointState(checkpoint)
+		assert.NoError(t, err)
+		unlockedDone <- built
+	}()
+	time.Sleep(20 * time.Millisecond)
+	locked, err := store.getCheckpointStateLocked(checkpoint)
+	store.mu.Unlock()
+	require.NoError(t, err)
+
+	select {
+	case unlocked := <-unlockedDone:
+		require.Same(t, locked, unlocked)
+	case <-time.After(time.Second):
+		t.Fatal("unlocked checkpoint build did not finish")
+	}
+}
+
+func currentStateCopyCount(t *testing.T) uint64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	require.NoError(t, currentStateCopy.Write(metric))
+	return metric.GetSummary().GetSampleCount()
+}
+
+func TestConcurrentCurrentCheckpointStateMissesBuildOnce(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	graph := store.forkGraph.(*getFinalizedExecutionHashForkGraph)
+	graph.currentStateRoot = checkpoint.Root
+	graph.currentStateStarted = make(chan struct{}, 4)
+	graph.currentStateRelease = make(chan struct{})
+
+	beforeCopies := currentStateCopyCount(t)
+	results := make(chan *checkpointState, 4)
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() {
+			built, err := store.getCheckpointState(checkpoint)
+			results <- built
+			errs <- err
+		}()
+	}
+	waitForCheckpointSignal(t, graph.currentStateStarted, "current checkpoint copy did not start")
+	time.Sleep(20 * time.Millisecond)
+	close(graph.currentStateRelease)
+
+	var first *checkpointState
+	for range 4 {
+		require.NoError(t, <-errs)
+		built := <-results
+		if first == nil {
+			first = built
+		} else {
+			require.Same(t, first, built)
+		}
+	}
+	require.Equal(t, uint64(1), currentStateCopyCount(t)-beforeCopies)
+	cached, ok := store.checkpointStates.Load(checkpoint)
+	require.True(t, ok)
+	require.Same(t, first, cached)
 }
 
 func TestJustifiedPromotionWaitsForCheckpointStateEviction(t *testing.T) {
@@ -1471,12 +1666,16 @@ type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
 	headers               map[common.Hash]*cltypes.BeaconBlockHeader
 	states                map[common.Hash]*state.CachingBeaconState
+	getHeaderCalls        int
+	getBlockCalls         int
 	getStateMu            sync.Mutex
 	getStateRoots         []common.Hash
-	getStateAlwaysCopy    []bool
 	getStateStarted       chan common.Hash
 	getStateRelease       chan struct{}
 	getStateErr           error
+	currentStateRoot      common.Hash
+	currentStateStarted   chan struct{}
+	currentStateRelease   chan struct{}
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
@@ -1513,11 +1712,17 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	g.getStateMu.Lock()
+	g.getHeaderCalls++
+	g.getStateMu.Unlock()
 	header := g.headers[blockRoot]
 	return header, header != nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	g.getStateMu.Lock()
+	g.getBlockCalls++
+	g.getStateMu.Unlock()
 	block := g.blocks[blockRoot]
 	return block, block != nil
 }
@@ -1531,10 +1736,25 @@ func (g *getFinalizedExecutionHashForkGraph) HasBlockChildAtOrAfter(blockRoot co
 	return false
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (g *getFinalizedExecutionHashForkGraph) CurrentStateLocked(blockRoot common.Hash) *state.CachingBeaconState {
+	if g.currentStateStarted != nil {
+		select {
+		case g.currentStateStarted <- struct{}{}:
+		default:
+		}
+	}
+	if g.currentStateRelease != nil {
+		<-g.currentStateRelease
+	}
+	if blockRoot != g.currentStateRoot {
+		return nil
+	}
+	return g.states[blockRoot]
+}
+
+func (g *getFinalizedExecutionHashForkGraph) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	g.getStateMu.Lock()
 	g.getStateRoots = append(g.getStateRoots, blockRoot)
-	g.getStateAlwaysCopy = append(g.getStateAlwaysCopy, alwaysCopy)
 	g.getStateMu.Unlock()
 	if g.getStateStarted != nil {
 		g.getStateStarted <- blockRoot
@@ -1545,8 +1765,7 @@ func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alw
 	if g.getStateErr != nil {
 		return nil, g.getStateErr
 	}
-	state := g.states[blockRoot]
-	return state, nil
+	return g.states[blockRoot], nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) stateRoots() []common.Hash {
@@ -1555,10 +1774,10 @@ func (g *getFinalizedExecutionHashForkGraph) stateRoots() []common.Hash {
 	return slices.Clone(g.getStateRoots)
 }
 
-func (g *getFinalizedExecutionHashForkGraph) stateCopyModes() []bool {
+func (g *getFinalizedExecutionHashForkGraph) forkGraphCalls() (int, int) {
 	g.getStateMu.Lock()
 	defer g.getStateMu.Unlock()
-	return slices.Clone(g.getStateAlwaysCopy)
+	return g.getHeaderCalls, g.getBlockCalls
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
