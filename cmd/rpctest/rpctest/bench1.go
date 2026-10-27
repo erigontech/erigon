@@ -40,7 +40,7 @@ var routes map[string]string
 //	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFileName string) error {
+func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64) error {
 	setRoutes(erigonURL, gethURL)
 
 	resultsCh := make(chan CallResult, 1000)

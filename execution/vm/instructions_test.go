@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
@@ -64,14 +65,6 @@ var (
 	commonParams []*twoOperandParams
 	twoOpMethods map[string]executionFunc
 )
-
-type contractRef struct {
-	addr common.Address
-}
-
-func (c contractRef) Address() common.Address {
-	return c.addr
-}
 
 func init() {
 	// Params is a list of common edgecases that should be used for some common tests
@@ -139,6 +132,30 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
+		}
+	}
+}
+
+func TestOpDivPowerOfTwo(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	xs := []*uint256.Int{
+		uint256.NewInt(0), uint256.NewInt(7), new(uint256.Int).SetAllOne(),
+		uint256.MustFromHex("0x87ffb8b26394face67d77fae3608d0891"),
+		uint256.MustFromHex("0x40cf02000000000000000000000000000000000000000000000000000000000"),
+	}
+	one := uint256.NewInt(1)
+	for n := range uint(256) {
+		p := new(uint256.Int).Lsh(one, n)
+		for _, y := range []*uint256.Int{p, new(uint256.Int).AddUint64(p, 1), new(uint256.Int).Sub(p, one)} {
+			for _, x := range xs {
+				callContext.Stack.push(*y)
+				callContext.Stack.push(*x)
+				opDiv(0, evm, callContext)
+				got, want := callContext.Stack.popCopy(), new(uint256.Int).Div(x, y)
+				require.Equal(t, want, &got, "%x / %x", x, y)
+			}
 		}
 	}
 }
@@ -1195,6 +1212,35 @@ func TestExpSmallOperandBoundaries(t *testing.T) {
 			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
 			got := scope.Stack.popCopy()
 			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpMatchesBigInt(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	edges := []uint256.Int{{}, {1}, {2}, {3}, {1<<62 - 1}, {1 << 62}, {1<<62 + 1}, {1 << 63}, {0, 1}, {0, 0, 1}, {0, 0, 0, 1 << 63}, *new(uint256.Int).SetAllOne()}
+	rng := rand.New(rand.NewPCG(1, 2))
+	random := func() uint256.Int {
+		x := uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64()}
+		return *x.Rsh(&x, uint(rng.IntN(256)))
+	}
+	bases := append([]uint256.Int{{3}, {5}, {0x081f7721}, {1 << 32}, {^uint64(0) - 2, ^uint64(0), ^uint64(0), ^uint64(0)}}, edges...)
+	exponents := append([]uint256.Int(nil), edges...)
+	for range 200 {
+		bases = append(bases, random())
+		exponents = append(exponents, random())
+	}
+	for _, base := range bases {
+		for _, exponent := range exponents {
+			scope := &CallContext{}
+			scope.Stack.push(exponent)
+			scope.Stack.push(base)
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%x exponent=%x", &base, &exponent)
 		}
 	}
 }
