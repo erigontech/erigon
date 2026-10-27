@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -230,8 +231,17 @@ func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	case slices.Contains(domainExistenceForceRandom, name):
 		return statecfg.ExistenceFilterRandom
 	default:
-		return d.ExistenceFilter
+		return defaultExistenceFilterMode(d.ExistenceFilter, estimate.TotalMemory())
 	}
+}
+
+const smallMemExistenceFilterTotal = 20 << 30
+
+func defaultExistenceFilterMode(mode statecfg.ExistenceFilterMode, total uint64) statecfg.ExistenceFilterMode {
+	if mode == statecfg.ExistenceFilterInMem && total > 0 && total < smallMemExistenceFilterTotal {
+		return statecfg.ExistenceFilterRandom
+	}
+	return mode
 }
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
