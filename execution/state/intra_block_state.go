@@ -199,8 +199,9 @@ type IntraBlockState struct {
 	// Block-STM invariant holds (versionMap mutated only at pre-exec seed and flush).
 	versionedOrigins WriteSet
 	// committedBase memoizes the per-tx committed (pre-block) account fallback for
-	// versionedAccountBase. The committed view is block-immutable, so the cached
-	// pointer is safe to share across the tx's read-only callers. Reset per tx.
+	// versionedAccountBase. The base reader can serve the published writes of lower txs,
+	// so the memo keeps the attempt's view consistent; its read-only callers share the
+	// cached pointer. Reset per tx.
 	committedBase       map[accounts.Address]*accounts.Account
 	accountReadDuration time.Duration
 	accountReadCount    int64
@@ -1290,11 +1291,6 @@ func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 	return ibs.versionedAccountBase(addr, readStorage)
 }
 
-// versionedAccountBase resolves account existence via the AddressPath read (and
-// storage fallback), applying the self-destruct/revival gate, but does NOT
-// overlay the per-field versionMap cells. It returns nil when the account is
-// absent or was destroyed with no revival. The AddressPath read it performs
-// records the nil-read that OCC uses to detect create/absent conflicts.
 // readAbsentFromMap reports whether this tx already read addr as absent from the
 // version map (a destruct with no revival). That verdict is final for the tx: the
 // committed record must not revive it, and validation catches a later re-creation.
@@ -1303,6 +1299,18 @@ func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
 	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
+// readAbsent is like readAbsentFromMap, but also counts an absence read from the committed state:
+// the base reader can serve a lower tx's creation later in the attempt.
+func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
+	tr, ok := ibs.versionedReads.GetAddress(addr)
+	return ok && (tr.Val == nil || tr.Val.Account() == nil)
+}
+
+// versionedAccountBase resolves account existence via the AddressPath read (and
+// storage fallback), applying the self-destruct/revival gate, but does NOT
+// overlay the per-field versionMap cells. It returns nil when the account is
+// absent or was destroyed with no revival. The AddressPath read it performs
+// records the nil-read that OCC uses to detect create/absent conflicts.
 func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if ibs.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
@@ -2036,7 +2044,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	if account != nil {
 		return ibs.stateObjectForAccount(addr, account), nil
 	}
-	if ibs.readAbsentFromMap(addr) {
+	if ibs.readAbsent(addr) {
 		return nil, nil
 	}
 
