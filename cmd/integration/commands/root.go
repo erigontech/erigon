@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -96,7 +97,7 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 		}
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			rawDBExcl := opts.Exclusive(true).MustOpen()
+			rawDBExcl := opts.RemoveFlags(mdbx.Accede).Exclusive(true).MustOpen()
 			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
 				rawDBExcl.Close()
 				return nil, err
