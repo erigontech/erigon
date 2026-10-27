@@ -2441,7 +2441,7 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) {
 		Fatalf("%v", err)
 	}
 	cfg.Genesis = genesis
-	if !ctx.IsSet(NetworkIdFlag.Name) && genesis.Config.ChainID != nil {
+	if !ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = genesis.Config.ChainID.Uint64()
 	}
 	if !ctx.IsSet(DNSDiscoveryFlag.Name) && !ctx.Bool(NoDiscoverFlag.Name) {

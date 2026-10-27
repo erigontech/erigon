@@ -54,6 +54,12 @@ func TestReadGenesisFile(t *testing.T) {
 		_, err := ReadGenesisFile(writeGenesis(t, `{"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`))
 		require.ErrorContains(t, err, "missing 'config'")
 	})
+	t.Run("missing chain id", func(t *testing.T) {
+		_, err := ReadGenesisFile(writeGenesis(t, `{"config":{},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`))
+		require.ErrorContains(t, err, "missing 'config.chainId'")
+		_, err = ReadGenesisFile(writeGenesis(t, `{"config":{"chainId":null},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`))
+		require.ErrorContains(t, err, "missing 'config.chainId'")
+	})
 	t.Run("bor config", func(t *testing.T) {
 		_, err := ReadGenesisFile(writeGenesis(t, `{"config":{"chainId":137,"bor":{"period":{"0":2}}},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`))
 		require.ErrorContains(t, err, "Polygon is not supported")

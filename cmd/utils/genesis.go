@@ -38,6 +38,9 @@ func ReadGenesisFile(path string) (*types.Genesis, error) {
 	if genesis.Config == nil {
 		return nil, fmt.Errorf("invalid genesis file %s: missing 'config'", path)
 	}
+	if genesis.Config.ChainID == nil {
+		return nil, fmt.Errorf("invalid genesis file %s: missing 'config.chainId'", path)
+	}
 
 	// chain.Config has no 'bor' field, so a Polygon genesis would otherwise
 	// initialise with its consensus settings silently dropped.
