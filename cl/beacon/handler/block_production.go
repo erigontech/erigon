@@ -495,7 +495,8 @@ func (a *ApiHandler) feeRecipientForProposal(
 	return common.Address{}
 }
 
-// productionErrorSeverity orders failures by diagnostic value and determines their log level.
+// productionErrorSeverity ranks failures by diagnostic value, not log level.
+// A terminal unknown-payload response takes priority over transient contention.
 type productionErrorSeverity uint8
 
 const (
@@ -534,7 +535,7 @@ func mostActionableProductionError(first, second error) error {
 	return first
 }
 
-// The caller owns retries and logging for fork-choice head changes.
+// The request handler owns retries and logging for fork-choice head changes.
 func reportProductionFailure(err error, targetSlot uint64) {
 	if errors.Is(err, errForkChoiceHeadChanged) {
 		return
