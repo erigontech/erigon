@@ -135,22 +135,38 @@ func TestFrameCallTracerDefaultVerification(t *testing.T) {
 }
 
 func TestFrameCallTracerOnlyTopCall(t *testing.T) {
-	for _, onlyTop := range []bool{false, true} {
-		t.Run(map[bool]string{false: "nested", true: "top"}[onlyTop], func(t *testing.T) {
+	for _, tc := range []struct {
+		op      vm.OpCode
+		onlyTop bool
+	}{
+		{vm.CALL, false},
+		{vm.CALL, true},
+		{vm.SELFDESTRUCT, false},
+		{vm.SELFDESTRUCT, true},
+	} {
+		t.Run(tc.op.String()+"/"+map[bool]string{false: "nested", true: "top"}[tc.onlyTop], func(t *testing.T) {
 			evm, tx := frameTraceTestEnv(t)
+			tx.Frames[1].Limits.Execution = 20_000
 			target := accounts.InternAddress(*tx.Frames[1].Target)
 			child := common.HexToAddress("0x3000")
 			require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(child), []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
-			require.NoError(t, evm.IntraBlockState().SetCode(target, program.New().Call(uint256.NewInt(1_000), child, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
-			cfg, err := json.Marshal(map[string]bool{"onlyTopCall": onlyTop})
+			code := program.New().Call(uint256.NewInt(1_000), child, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
+			if tc.op == vm.SELFDESTRUCT {
+				code = program.New().Push(child).Op(vm.SELFDESTRUCT).Bytes()
+			}
+			require.NoError(t, evm.IntraBlockState().SetCode(target, code, tracing.CodeChangeUnspecified))
+			cfg, err := json.Marshal(map[string]bool{"onlyTopCall": tc.onlyTop})
 			require.NoError(t, err)
 			var trace frameCallTrace
 			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "callTracer", cfg), &trace))
+			require.Empty(t, trace.Error)
 			require.Len(t, trace.Calls, 2)
-			if onlyTop {
+			require.Empty(t, trace.Calls[1].Error)
+			if tc.onlyTop {
 				require.Empty(t, trace.Calls[1].Calls)
 			} else {
 				require.Len(t, trace.Calls[1].Calls, 1)
+				require.Equal(t, tc.op.String(), trace.Calls[1].Calls[0].Type)
 				require.Equal(t, child, trace.Calls[1].Calls[0].To)
 			}
 		})
