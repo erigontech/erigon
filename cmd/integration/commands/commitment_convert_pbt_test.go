@@ -111,82 +111,63 @@ func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
 }
 
 func TestConvertPBTResumeRejectsUntouchedStateDifference(t *testing.T) {
-	selectPBTCommandSuite(t)
-	base, err := execmoduletester.NewPBTAcceptanceChainWithSharedCodeAndStepSize(t, true, true, []byte{0x60, 0x00, 0x60, 0x00, 0x52}, 1)
-	require.NoError(t, err)
-	require.NoError(t, base.Tester.InsertChain(base.Chain))
-	base.Tester.Close()
-	buildPBTResumeFiles(t, base, pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata), false)
-	output := filepath.Join(t.TempDir(), "base-output")
-	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, output, true, "", log.New()))
+	for _, test := range []struct {
+		name       string
+		beforeFork bool
+	}{
+		{name: "after-binary-fork"},
+		{name: "before-binary-fork", beforeFork: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selectPBTCommandSuite(t)
+			base, err := execmoduletester.NewPBTAcceptanceChainWithSharedCodeAndStepSize(t, true, true, []byte{0x60, 0x00, 0x60, 0x00, 0x52}, 1)
+			require.NoError(t, err)
+			require.NoError(t, base.Tester.InsertChain(base.Chain))
+			base.Tester.Close()
+			buildPBTResumeFiles(t, base, pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata), false)
+			output := filepath.Join(t.TempDir(), "base-output")
+			require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, output, true, "", log.New()))
 
-	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 1, 6)
-	require.NoError(t, err)
-	source.Tester.Close()
-	copyPBTStateSalt(t, base, source)
-	source.Tester = execmoduletester.New(
-		t,
-		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
-		execmoduletester.WithGenesisSpec(source.Genesis),
-		execmoduletester.WithKey(source.Key),
-		execmoduletester.WithStepSize(1),
-		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
-		execmoduletester.WithoutGenesisCommit(),
-	)
-	require.NoError(t, source.Tester.InsertChain(source.Chain))
-	source.Tester.Close()
-	buildPBTResumeFiles(t, source, pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata), false)
+			source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 1, 6)
+			require.NoError(t, err)
+			source.Tester.Close()
+			copyPBTStateSalt(t, base, source)
+			source.Tester = execmoduletester.New(
+				t,
+				execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+				execmoduletester.WithGenesisSpec(source.Genesis),
+				execmoduletester.WithKey(source.Key),
+				execmoduletester.WithStepSize(1),
+				execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+				execmoduletester.WithoutGenesisCommit(),
+			)
+			require.NoError(t, source.Tester.InsertChain(source.Chain))
+			source.Tester.Close()
+			buildPBTResumeFiles(t, source, pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata), false)
 
-	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
-	require.ErrorContains(t, err, "C-e stream root")
-}
+			if test.beforeFork {
+				rawDB := dbCfg(dbcfg.ChainDB, source.Tester.Dirs.Chaindata).MustOpen()
+				updateErr := rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+					genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+					if err != nil {
+						return err
+					}
+					config, err := rawdb.ReadChainConfig(tx, genesisHash)
+					if err != nil {
+						return err
+					}
+					forkTime := uint64(100)
+					config.BinaryTrieTime = &forkTime
+					return rawdb.WriteChainConfig(tx, genesisHash, config)
+				})
+				rawDB.Close()
+				require.NoError(t, updateErr)
+			}
 
-func TestConvertPBTResumeRejectsUntouchedStateDifferenceBeforeBinaryFork(t *testing.T) {
-	selectPBTCommandSuite(t)
-	base, err := execmoduletester.NewPBTAcceptanceChainWithSharedCodeAndStepSize(t, true, true, []byte{0x60, 0x00, 0x60, 0x00, 0x52}, 1)
-	require.NoError(t, err)
-	require.NoError(t, base.Tester.InsertChain(base.Chain))
-	base.Tester.Close()
-	buildPBTResumeFiles(t, base, pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata), false)
-	output := filepath.Join(t.TempDir(), "base-output")
-	require.NoError(t, convertPBT(t.Context(), base.Tester.Dirs.DataDir, output, true, "", log.New()))
-
-	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 1, 6)
-	require.NoError(t, err)
-	source.Tester.Close()
-	copyPBTStateSalt(t, base, source)
-	source.Tester = execmoduletester.New(
-		t,
-		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
-		execmoduletester.WithGenesisSpec(source.Genesis),
-		execmoduletester.WithKey(source.Key),
-		execmoduletester.WithStepSize(1),
-		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
-		execmoduletester.WithoutGenesisCommit(),
-	)
-	require.NoError(t, source.Tester.InsertChain(source.Chain))
-	source.Tester.Close()
-	buildPBTResumeFiles(t, source, pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata), false)
-
-	rawDB := dbCfg(dbcfg.ChainDB, source.Tester.Dirs.Chaindata).MustOpen()
-	updateErr := rawDB.Update(t.Context(), func(tx kv.RwTx) error {
-		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		config, err := rawdb.ReadChainConfig(tx, genesisHash)
-		if err != nil {
-			return err
-		}
-		forkTime := uint64(100)
-		config.BinaryTrieTime = &forkTime
-		return rawdb.WriteChainConfig(tx, genesisHash, config)
-	})
-	rawDB.Close()
-	require.NoError(t, updateErr)
-
-	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
-	require.ErrorContains(t, err, "C-e stream root")
+			err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
+			require.ErrorContains(t, err, "C-e stream root")
+		})
+	}
 }
 
 func TestConvertPBTResumeFromStoppedHexBinSource(t *testing.T) {
@@ -621,22 +602,6 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 	statecfg.InitSchemas()
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-	binFiles := func(output string) map[string][]byte {
-		snapDomain := datadir.Open(output).SnapDomain
-		names, err := dir.ListFiles(snapDomain, ".kv")
-		require.NoError(t, err)
-		files := make(map[string][]byte)
-		for _, name := range names {
-			if !strings.Contains(filepath.Base(name), kv.CommitmentBinDomain.String()) {
-				continue
-			}
-			data, err := os.ReadFile(name)
-			require.NoError(t, err)
-			files[filepath.Base(name)] = data
-		}
-		require.NotEmpty(t, files)
-		return files
-	}
 	for _, maxOps := range []int{100000, 7} {
 		converted := make(map[bool]map[string][]byte, 2)
 		for _, sequential := range []bool{true, false} {
@@ -647,7 +612,8 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 			if !sequential {
 				require.Greater(t, workerViews.Load(), int32(1), "maxOps=%d: the parallel round acquired no worker contexts", maxOps)
 			}
-			converted[sequential] = binFiles(output)
+			converted[sequential] = pbtCommitmentBinFiles(t, output, ".kv")
+			require.NotEmpty(t, converted[sequential])
 		}
 		require.Equal(t, converted[true], converted[false], "maxOps=%d", maxOps)
 	}
@@ -1194,7 +1160,57 @@ func addPBTSourcePastPointFile(t *testing.T, source pbtConversionSource, address
 	rawDB.Close()
 }
 
+type pbtDomainRow struct {
+	key, value []byte
+	stamp      uint64
+}
+
 func corruptPBTDomain(ctx context.Context, dirs datadir.Dirs, domain kv.Domain) error {
+	return rewritePBTDomain(ctx, dirs, domain, func(rows *[]pbtDomainRow) error {
+		if domain == kv.CommitmentDomain {
+			state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), 1, 6, nil)
+			if err != nil {
+				return err
+			}
+			changed := false
+			for i := range *rows {
+				if bytes.Equal((*rows)[i].key, commitment.KeyCommitmentV3State) {
+					(*rows)[i].value = state
+					changed = true
+				}
+			}
+			if !changed {
+				return errors.New("commitment state record is missing")
+			}
+			return nil
+		}
+		for i := range *rows {
+			if !commitment.IsCommitmentStateKey((*rows)[i].key) {
+				(*rows)[i].value[0] ^= 1
+				return nil
+			}
+		}
+		return errors.New("no binary row to corrupt")
+	})
+}
+
+func removePBTGlobalRootDomain(ctx context.Context, dirs datadir.Dirs) error {
+	return rewritePBTDomain(ctx, dirs, kv.CommitmentBinDomain, func(rows *[]pbtDomainRow) error {
+		filtered := (*rows)[:0]
+		for _, row := range *rows {
+			if !bytes.Equal(row.key, pbt.GlobalRootKey()) {
+				filtered = append(filtered, row)
+			}
+		}
+		if len(filtered) == len(*rows) {
+			return errors.New("binary root record is missing")
+		}
+		*rows = filtered
+		return nil
+	})
+}
+
+func rewritePBTDomain(ctx context.Context, dirs datadir.Dirs, domain kv.Domain, mutate func(*[]pbtDomainRow) error) error {
 	refs := false
 	variant := dbstate.TrieVariantHexBin
 	hash := commitment.PBinHashBlake3
@@ -1249,10 +1265,7 @@ func corruptPBTDomain(ctx context.Context, dirs datadir.Dirs, domain kv.Domain) 
 		return err
 	}
 	iter := it.(*dbstate.DomainLatestIterFile)
-	rows := make([]struct {
-		key, value []byte
-		stamp      uint64
-	}, 0)
+	rows := make([]pbtDomainRow, 0)
 	for iter.HasNext() {
 		key, value, nextErr := iter.Next()
 		if nextErr != nil {
@@ -1266,42 +1279,14 @@ func corruptPBTDomain(ctx context.Context, dirs datadir.Dirs, domain kv.Domain) 
 		if domain == kv.CommitmentDomain {
 			stamp = iter.Stamp()
 		}
-		rows = append(rows, struct {
-			key, value []byte
-			stamp      uint64
-		}{key: bytes.Clone(key), value: bytes.Clone(value), stamp: stamp})
+		rows = append(rows, pbtDomainRow{key: bytes.Clone(key), value: bytes.Clone(value), stamp: stamp})
 	}
 	iter.Close()
 	at.Close()
 	agg.Close()
 	rawDB.Close()
-	if domain == kv.CommitmentDomain {
-		state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), 1, 6, nil)
-		if err != nil {
-			return err
-		}
-		changed := false
-		for i := range rows {
-			if bytes.Equal(rows[i].key, commitment.KeyCommitmentV3State) {
-				rows[i].value = state
-				changed = true
-			}
-		}
-		if !changed {
-			return errors.New("commitment state record is missing")
-		}
-	} else {
-		changed := false
-		for i := range rows {
-			if !commitment.IsCommitmentStateKey(rows[i].key) {
-				rows[i].value[0] ^= 1
-				changed = true
-				break
-			}
-		}
-		if !changed {
-			return errors.New("no binary row to corrupt")
-		}
+	if err := mutate(&rows); err != nil {
+		return err
 	}
 	if err := removePBTOutputDomainFilesForHook(dirs, domain.String()); err != nil {
 		return err
@@ -2059,19 +2044,23 @@ func readPBTBinRows(t *testing.T, output, rawPath string) map[string][]byte {
 }
 
 func pbtCommitmentBinKVBytes(t *testing.T, output string) map[string][]byte {
+	return pbtCommitmentBinFiles(t, output, ".kv")
+}
+
+func pbtCommitmentBinFiles(t *testing.T, output, suffix string) map[string][]byte {
 	t.Helper()
-	dirs := datadir.Open(output)
-	bytesByRange := make(map[string][]byte)
-	for _, name := range domainFileNames(t, dirs.SnapDomain) {
-		parsed, _, ok := snaptype.ParseFileName(dirs.SnapDomain, name)
-		if !ok || parsed.TypeString != kv.CommitmentBinDomain.String() || filepath.Ext(name) != ".kv" {
+	names, err := dir.ListFiles(datadir.Open(output).SnapDomain, suffix)
+	require.NoError(t, err)
+	files := make(map[string][]byte)
+	for _, name := range names {
+		if !strings.Contains(filepath.Base(name), kv.CommitmentBinDomain.String()) {
 			continue
 		}
-		value, err := os.ReadFile(filepath.Join(dirs.SnapDomain, name))
+		value, err := os.ReadFile(name)
 		require.NoError(t, err)
-		bytesByRange[name] = value
+		files[filepath.Base(name)] = value
 	}
-	return bytesByRange
+	return files
 }
 
 func pbtSortedBinFileNames(files map[string][]byte) []string {

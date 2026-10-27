@@ -51,7 +51,6 @@ type PBinRangeWriter struct {
 	aggregator         *Aggregator
 	domain             kv.Domain
 	endTxNum           uint64
-	baseTxNum          uint64
 	leafStamp          uint64
 	ranges             []pbinRange
 	maxOps             int
@@ -534,7 +533,6 @@ func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseT
 		aggregator:   aggregator,
 		domain:       domain,
 		endTxNum:     endTxNum,
-		baseTxNum:    baseTxNum,
 		leafStamp:    endTxNum,
 		maxOps:       pbinRangeWriterMaxOps,
 		maxBytes:     pbinRangeWriterMaxBytes,

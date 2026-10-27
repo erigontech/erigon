@@ -351,6 +351,38 @@ func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {
 	require.Equal(t, wantRoot[:], root)
 }
 
+func TestAttachPBTAcceptsEmptyConversion(t *testing.T) {
+	for _, skipVerify := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip-verify=%t", skipVerify), func(t *testing.T) {
+			commitmentflags.Restore(t)
+			statecfg.ExperimentalCommitmentV3 = true
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			statecfg.BinCommitmentHash = ""
+			require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+			source := newPBTEmptyConversionSource(t)
+			published := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+			setExecutionProgress(t, source.Chaindata, 1)
+			require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: skipVerify}))
+		})
+	}
+}
+
+func TestAttachPBTRejectsMissingRootForNonEmptyConversion(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	require.NoError(t, removePBTGlobalRootDomain(t.Context(), datadir.Open(published)))
+	setExecutionProgress(t, source.Chaindata, 1)
+	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: true})
+	require.ErrorContains(t, err, "published binary root record")
+}
+
 func TestAttachPBTManifestRefusesTamperingBeforeAdoption(t *testing.T) {
 	for _, test := range []struct {
 		name   string

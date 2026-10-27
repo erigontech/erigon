@@ -25,7 +25,6 @@ import (
 	"math"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -2035,53 +2034,6 @@ func (dt *DomainRoTx) debugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 // ignoring keys in MDBX.
 func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	return dt.debugRangeLatestFromFiles(fromKey, toKey, limit, false, 0)
-}
-
-func (dt *DomainRoTx) DebugRangeLatestOffsets(starts [][]byte) ([][]uint64, error) {
-	if len(starts) == 0 || !dt.d.Accessors.Has(statecfg.AccessorHashMap) {
-		return nil, nil
-	}
-	offsets := make([][]uint64, len(starts))
-	for i := range offsets {
-		offsets[i] = make([]uint64, len(dt.files))
-	}
-	orderByStart := make([]int, len(starts))
-	for i := range orderByStart {
-		orderByStart[i] = i
-	}
-	sort.Slice(orderByStart, func(i, j int) bool {
-		return bytes.Compare(starts[orderByStart[i]], starts[orderByStart[j]]) < 0
-	})
-	for fileIndex := range dt.files {
-		reader := dt.reusableReader(fileIndex)
-		reader.Reset(0)
-		var offset uint64
-		for position, startIndex := range orderByStart {
-			if position > 0 && bytes.Equal(starts[startIndex], starts[orderByStart[position-1]]) {
-				copy(offsets[startIndex], offsets[orderByStart[position-1]])
-				continue
-			}
-			found := false
-			for reader.HasNext() {
-				currentOffset := offset
-				cmp := reader.MatchCmp(starts[startIndex])
-				if cmp <= 0 {
-					offsets[startIndex][fileIndex] = currentOffset
-					found = true
-					if cmp == 0 {
-						offset, _ = reader.Skip()
-					}
-					break
-				}
-				reader.Skip()
-				offset, _ = reader.Skip()
-			}
-			if !found {
-				offsets[startIndex][fileIndex] = offset
-			}
-		}
-	}
-	return offsets, nil
 }
 
 func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upperBits int16) (map[uint64][]uint64, []uint64, map[string][]byte, error) {

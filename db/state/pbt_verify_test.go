@@ -107,6 +107,43 @@ func TestPBinVerifySerialManyStorageSlots(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPBinVerifySerialUsesPlannedRangeOffsets(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 1024)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg,
+		SourceTx:         sourceTx,
+		TargetAggregator: agg,
+		TargetTx:         targetTx,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         7,
+		Hash:             eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+	verifyTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer verifyTx.Rollback()
+	previousWorkers := dbg.PBTWorkers
+	dbg.PBTWorkers = 1
+	t.Cleanup(func() { dbg.PBTWorkers = previousWorkers })
+	stats := new(pbt.VerifyStats)
+	_, err = state.VerifyPBinDomainRootWithStats(t.Context(), verifyTx, agg, kv.CommitmentDomain, stats)
+	require.NoError(t, err)
+	require.Zero(t, stats.ExactRangeReads.Load(), "serial verification must not use exact range reads")
+	require.Positive(t, stats.RangeTaskReads.Load())
+	require.Equal(t, stats.RangeTaskReads.Load(), stats.RangeReadsAtOffset.Load(), "every serial verification task must start at a planned file offset")
+}
+
 func TestPBinVerifyRejectsUnreferencedRowInsideChainRange(t *testing.T) {
 	verifyPBinRejectsUnreferencedRow(t, pbinUnreferencedRowInsideChainRange)
 }

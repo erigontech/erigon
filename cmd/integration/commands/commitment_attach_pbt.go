@@ -843,6 +843,22 @@ func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs
 		return err
 	}
 	if !found || start > point.TxNum || end < point.TxNum {
+		if !found && wantRoot == eip8297.EmptyTreeHash {
+			state, stateFound, stateStart, stateEnd, stateErr := at.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, math.MaxUint64)
+			if stateErr != nil {
+				return stateErr
+			}
+			if stateFound && stateStart <= point.TxNum && stateEnd >= point.TxNum {
+				empty, emptyErr := pbtStateRootIsEmpty(state)
+				if emptyErr != nil {
+					return fmt.Errorf("commitment attach-pbt: decode published binary state: %w", emptyErr)
+				}
+				if empty {
+					progress.Add(1)
+					return nil
+				}
+			}
+		}
 		return fmt.Errorf("commitment attach-pbt: published binary root record is not at conversion txNum %d", point.TxNum)
 	}
 	record, err := pbt.DecodeRecord(pbt.GlobalRootKey(), value)
@@ -858,6 +874,24 @@ func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs
 	}
 	progress.Add(1)
 	return nil
+}
+
+func pbtStateRootIsEmpty(value []byte) (bool, error) {
+	state := value
+	if !commitment.IsPBinState(state) {
+		if len(state) < 18 {
+			return false, fmt.Errorf("state envelope is %d bytes, want at least 18", len(state))
+		}
+		stateLen := int(state[16])<<8 | int(state[17])
+		if len(state) != 18+stateLen {
+			return false, fmt.Errorf("state envelope claims %d bytes, %d present", stateLen, len(state)-18)
+		}
+		state = state[18:]
+	}
+	if err := commitment.PBinValidateRowStateFormat(state); err != nil {
+		return false, err
+	}
+	return len(state) == 5, nil
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {

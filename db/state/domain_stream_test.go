@@ -14,6 +14,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
@@ -54,11 +56,16 @@ func TestCommitmentDomain_DebugRangeLatestOffsetsSkipPrefix(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	writer := domainRoTx.NewWriter(db)
-	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
-		var key, value [8]byte
-		binary.BigEndian.PutUint64(key[:], keyNum)
-		binary.BigEndian.PutUint64(value[:], keyNum+100)
-		require.NoError(t, writer.PutWithPrev(key[:], value[:], keyNum, nil))
+	for keyNum := range 31 {
+		path := eip8297.Bitpath{BitLen: 16}
+		prefix := uint64(keyNum%15 + 1)
+		value := (prefix << 12) | uint64(keyNum)
+		for bit := int16(0); bit < path.BitLen; bit++ {
+			path.SetBitAt(bit, value>>uint(path.BitLen-1-bit)&1)
+		}
+		key, keyErr := pbt.EncodeRowKey(&path)
+		require.NoError(t, keyErr)
+		require.NoError(t, writer.PutWithPrev(key, []byte{byte(keyNum + 100)}, uint64(keyNum+1), nil))
 	}
 	require.NoError(t, writer.Flush(ctx, tx))
 	writer.Close()
@@ -81,9 +88,32 @@ func TestCommitmentDomain_DebugRangeLatestOffsetsSkipPrefix(t *testing.T) {
 	}
 	all.Close()
 	require.Greater(t, len(keys), 1)
-	starts := [][]byte{keys[0], keys[len(keys)-1]}
-	offsets, err := domainRoTx.DebugRangeLatestOffsets(starts)
+	firstPath, err := eip8297.DecodeBitPath(keys[0])
 	require.NoError(t, err)
+	starts := [][]byte{keys[0]}
+	for _, key := range keys[1:] {
+		path, pathErr := eip8297.DecodeBitPath(key)
+		require.NoError(t, pathErr)
+		if path.Words[0]>>60 != firstPath.Words[0]>>60 {
+			starts = append(starts, key)
+			break
+		}
+	}
+	require.Len(t, starts, 2)
+	prefixOffsets, fileEnds, _, err := domainRoTx.DebugRangeLatestVerifyData(readTx, pbt.GlobalRootKey(), 4)
+	require.NoError(t, err)
+	offsets := make([][]uint64, len(starts))
+	for i, start := range starts {
+		offsets[i] = make([]uint64, len(fileEnds))
+		copy(offsets[i], fileEnds)
+		path, pathErr := eip8297.DecodeBitPath(start)
+		require.NoError(t, pathErr)
+		for fileIndex, offset := range prefixOffsets[path.Words[0]>>60] {
+			if offset != ^uint64(0) {
+				offsets[i][fileIndex] = offset
+			}
+		}
+	}
 	require.Len(t, offsets, len(starts))
 	var skipped bool
 	for fileIndex := range offsets[0] {

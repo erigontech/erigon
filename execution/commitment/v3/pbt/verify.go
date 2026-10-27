@@ -64,7 +64,8 @@ func (t *Trie) VerifyContext(ctx context.Context, workers int, factory commitmen
 		return fmt.Errorf("nil Patricia context")
 	}
 	verifier := t.newVerifier()
-	if workers > 1 && factory != nil {
+	_, hasRangePlanner := verifier.ctx.(verifyRangeTaskPreparer)
+	if workers > 0 && (factory != nil || hasRangePlanner) {
 		if err := verifier.verifyChains(ctx, workers, factory); err != nil {
 			return err
 		}
@@ -249,6 +250,51 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 		if err := preparer.PrepareVerifyRanges(starts); err != nil {
 			return err
 		}
+	}
+	if factory == nil || workers <= 1 {
+		if t.verifyStats != nil {
+			t.verifyStats.TaskWorkers.Store(1)
+		}
+		t.trackBucketKeys()
+		chains := make([]verifiedChain, len(paths))
+		bucketKeys := make([]map[string]struct{}, len(paths))
+		for i := range paths {
+			worker := t.newVerifier()
+			worker.ctx = t.ctx
+			worker.verifyProgress = t.verifyProgress
+			if t.verifiedBucketKeys != nil {
+				worker.verifiedBucketKeys = make(map[string]struct{})
+			}
+			chain := verifiedChain{}
+			chain.err = worker.loadVerifyRows(paths[i])
+			if chain.err == nil {
+				chain.row, chain.err = worker.loadRow(paths[i])
+			}
+			if chain.err == nil {
+				chain.result, chain.err = worker.verifyRow(chain.row)
+			}
+			if chain.err == nil {
+				chain.err = worker.verifyRowsComplete()
+			}
+			if chain.err == nil {
+				chain.referencedKeys = worker.verifyReferencedKeys
+			}
+			worker.releaseVerifyRows()
+			if chain.err != nil {
+				return chain.err
+			}
+			chains[i] = chain
+			bucketKeys[i] = worker.verifiedBucketKeys
+		}
+		t.verifiedChains = make(map[string]verifiedChain, len(chains))
+		for i := range chains {
+			t.verifiedChains[keys[i]] = chains[i]
+			t.verifyReferencedKeys += chains[i].referencedKeys
+			for key := range bucketKeys[i] {
+				t.verifiedBucketKeys[key] = struct{}{}
+			}
+		}
+		return nil
 	}
 	chains := make([]verifiedChain, len(paths))
 	bucketKeys := make([]map[string]struct{}, len(paths))

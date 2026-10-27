@@ -518,5 +518,7 @@ The partition scheduler is kept on `awskii/pbt-convert-pipeline` at `3f6f54a37c0
 
 **Rollout**: outputs without a manifest are refused, and convert must be rerun.
 
+**Resume recovery limitation**: Resume replaces published files before replacing their manifest. A failed resume is refused loudly by the next resume and by attach; recovery is a fresh convert because the source datadir is untouched.
+
 **Deferred by the owner (2026-10-24)**: a `verify-pbt` command, and the docs (`docs/pbt-migration.md`,
 `cmd/integration/Readme.md`, the root `CLAUDE.md`/`AGENTS.md` PBT paragraph).

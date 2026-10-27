@@ -444,14 +444,10 @@ func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.Temporal
 	var verifyLiveKeys, verifyStateKeys uint64
 	verifyKeyCount := false
 	if planner, ok := tx.AggTx().(verifyRangePlanner); ok {
-		roTx, ok := tx.(kv.Tx)
-		if !ok {
-			return errors.New("verification transaction is not a read transaction")
-		}
-		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain(), tx: roTx}
+		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain(), tx: tx}
 		if counter, ok := tx.AggTx().(verifyDomainKeyCounter); ok {
 			var err error
-			verifyLiveKeys, verifyStateKeys, err = counter.DebugRangeLatestCount(roTx, sdc.CommitmentDomain())
+			verifyLiveKeys, verifyStateKeys, err = counter.DebugRangeLatestCount(tx, sdc.CommitmentDomain())
 			if err != nil {
 				return err
 			}
@@ -1684,8 +1680,7 @@ func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan
 	agg, ok := tx.AggTx().(interface {
 		DebugRangeLatest(kv.Tx, kv.Domain, []byte, []byte, int) (stream.KV, error)
 	})
-	roTx, roOK := tx.(kv.Tx)
-	if !ok || !roOK {
+	if !ok {
 		return nil
 	}
 	return func(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
@@ -1694,11 +1689,11 @@ func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan
 		if rangeAt, ok := agg.(verifyRangeAt); ok {
 			if offsets := plan.forStart(from); offsets != nil {
 				plan.recordRangeAtOffset()
-				it, err = rangeAt.DebugRangeLatestWithOffsets(roTx, domain, from, to, -1, offsets)
+				it, err = rangeAt.DebugRangeLatestWithOffsets(tx, domain, from, to, -1, offsets)
 			}
 		}
 		if it == nil {
-			it, err = agg.DebugRangeLatest(roTx, domain, from, to, -1)
+			it, err = agg.DebugRangeLatest(tx, domain, from, to, -1)
 		}
 		if err != nil {
 			return 0, err
