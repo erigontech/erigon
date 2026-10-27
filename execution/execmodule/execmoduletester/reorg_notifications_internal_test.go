@@ -402,6 +402,7 @@ func TestFailedForkchoiceDoesNotReportNeverCanonicalLogsRemoved(t *testing.T) {
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Zero(t, got.logCount(b2.Hash(), true))
+	require.Equal(t, 1, got.logCount(a2.Hash(), true))
 	require.Equal(t, 1, got.logCount(a3.Hash(), true))
 }
 
@@ -439,4 +440,62 @@ func TestMissingSegmentForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(a3.Hash(), true))
+}
+
+func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 2, 2)
+	b1, a2 := canonical.Blocks[0], canonical.Blocks[1]
+	b2 := side.Blocks[1]
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(a2.Hash())
+
+	fcu, err := m.UpdateForkChoice(t.Context(), b1.Header(), WithFinalisedHash(a2.Hash()), WithSafeHash(a2.Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	logs, unsubscribe := m.Notifications.Events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	m.Notifications.Events.EmptyLogSubscription(false)
+	status, err := m.InsertBlocks(t.Context(), []*types.Block{b2})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(t.Context(), b2.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(b2.Hash())
+
+	got := collectReorgSubscriptions(nil, logs, nil)
+	require.Equal(t, 1, got.logCount(b2.Hash(), false))
+	require.Equal(t, 1, got.logCount(a2.Hash(), true), "replaced canonical block's log was not reported as removed")
+}
+
+func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing.T) {
+	m, canonical, _ := newReorgChains(t, 3, 3)
+	b1, a2, a3 := canonical.Blocks[0], canonical.Blocks[1], canonical.Blocks[2]
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{b1, a2}))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(a2.Hash())
+
+	fcu, err := m.UpdateForkChoice(t.Context(), b1.Header(), WithFinalisedHash(a2.Hash()), WithSafeHash(a2.Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	logs, unsubscribe := m.Notifications.Events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	m.Notifications.Events.EmptyLogSubscription(false)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{a3}))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(a3.Hash())
+
+	got := collectReorgSubscriptions(nil, logs, nil)
+	require.Equal(t, 1, got.logCount(a3.Hash(), false))
+	require.Zero(t, got.logCount(a2.Hash(), true), "canonical block's log was reported as removed")
 }

@@ -58,6 +58,18 @@ func (r *RecentReceipts) Clear() {
 	r.removedLogs = nil
 }
 
+// Snapshot returns a function that restores the cache to its state at the time of the call.
+func (r *RecentReceipts) Snapshot() (restore func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	receipts, txs, headers, removedLogs := maps.Clone(r.receipts), maps.Clone(r.txs), maps.Clone(r.headers), slices.Clone(r.removedLogs)
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.receipts, r.txs, r.headers, r.removedLogs = receipts, txs, headers, removedLogs
+	}
+}
+
 // NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to).
 func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 	r.mu.Lock()

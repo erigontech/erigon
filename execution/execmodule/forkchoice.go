@@ -561,10 +561,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return nil
 	}
 
-	clearRecentReceipts := false
+	var restoreRecentReceipts func()
 	defer func() {
-		if clearRecentReceipts && e.accum != nil && e.accum.RecentReceipts != nil {
-			e.accum.RecentReceipts.Clear()
+		if restoreRecentReceipts != nil {
+			restoreRecentReceipts()
 		}
 	}()
 	result, fcuUnwindPoint, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, *finalisedBlockNum, isSynced)
@@ -575,9 +575,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
 		return nil
 	}
-	clearRecentReceipts = true
-	if fcuUnwindPoint != nil && e.accum != nil && e.accum.RecentReceipts != nil {
-		e.accum.RecentReceipts.Unwind(*fcuUnwindPoint)
+	if e.accum != nil && e.accum.RecentReceipts != nil {
+		restoreRecentReceipts = e.accum.RecentReceipts.Snapshot()
+		if fcuUnwindPoint != nil {
+			e.accum.RecentReceipts.Unwind(*fcuUnwindPoint)
+		}
 	}
 	if isDomainAheadOfBlocks {
 		// Open a brief RwTx to flush accumulated overlay + SD state atomically.
@@ -589,6 +591,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
+		restoreRecentReceipts = nil
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusTooFarAway,
@@ -678,6 +681,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
+			restoreRecentReceipts = nil
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
@@ -820,11 +824,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// Flush + commit: pass the outer roTx so it gets released between
 		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
 		persistStart := time.Now()
-		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
+		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		clearRecentReceipts = false
+		restoreRecentReceipts = nil
+		// Update head and announce block range (notifications already dispatched).
+		if e.hook != nil {
+			if err := e.db.View(e.backgroundCtx, func(tx kv.Tx) error {
+				return e.hook.UpdateHead(tx, finishProgressBefore, isSynced)
+			}); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			}
+		}
 		persist := time.Since(persistStart)
 		e.observeStateTransition(ctx, StateTransitionCommitComplete)
 
@@ -931,7 +943,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 }
 
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
-// (block overlay + domain mem), commits, then updates the sentry head.
+// (block overlay + domain mem) and commits.
 //
 // roTxToCloseBeforeCommit (may be nil) is released between Flush and Commit so
 // the commit transaction observes openTxs=1 in MDBX rather than 2. This lets
@@ -940,7 +952,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 // only writes in-memory state to rwTx and does not read from the RO tx, so
 // closing it after Flush is safe. Rollback is idempotent, so callers keep their
 // outer `defer roTx.Rollback()` unchanged.
-func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
+func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx) ([]any, error) {
 	timings := make([]any, 0, 2)
 
 	rwTx, err := e.db.BeginTemporalRw(e.backgroundCtx)
@@ -960,15 +972,6 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		return nil, err
 	}
 	timings = append(timings, "flush+commit", common.Round(time.Since(flushStart), 0))
-
-	// Update head and announce block range (notifications already dispatched).
-	if e.hook != nil {
-		if err := e.db.View(e.backgroundCtx, func(tx kv.Tx) error {
-			return e.hook.UpdateHead(tx, finishProgressBefore, isSynced)
-		}); err != nil {
-			return nil, err
-		}
-	}
 	return timings, nil
 }
 
