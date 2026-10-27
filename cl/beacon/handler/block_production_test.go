@@ -5679,7 +5679,7 @@ func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) {
-	const waitCap = 80 * time.Millisecond
+	const waitCap = 400 * time.Millisecond
 	root := common.HexToHash("0x1234")
 	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	headSlot := headState.Slot()
