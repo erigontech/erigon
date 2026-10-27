@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -57,10 +58,14 @@ type slowRangeServer struct {
 	forked      []*cltypes.SignedBeaconBlock
 	forkBelow   uint64
 	delay       time.Duration
+	held        func(start uint64) bool
+	badPeer     string
+	badStart    uint64
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
 	mu          sync.Mutex
 	calls       map[uint64]int
+	cancelled   []uint64
 }
 
 func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
@@ -68,15 +73,25 @@ func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count
 	defer s.inFlight.Add(-1)
 	for m := s.maxInFlight.Load(); n > m && !s.maxInFlight.CompareAndSwap(m, n); m = s.maxInFlight.Load() {
 	}
+	delay := s.delay
+	if s.held != nil && s.held(start) {
+		delay = time.Hour
+	}
 	select {
-	case <-time.After(s.delay):
+	case <-time.After(delay):
 	case <-ctx.Done():
+		s.mu.Lock()
+		s.cancelled = append(s.cancelled, start)
+		s.mu.Unlock()
 		return nil, "", ctx.Err()
 	}
 	s.mu.Lock()
 	s.calls[start]++
 	firstCall := s.calls[start] == 1
 	s.mu.Unlock()
+	if firstCall && s.badPeer != "" && start == s.badStart {
+		return nil, s.badPeer, errors.New("bad response")
+	}
 	served := s.blocks
 	if firstCall && start < s.forkBelow {
 		served = s.forked
@@ -90,9 +105,8 @@ func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count
 	return out, "peer", nil
 }
 
-func walkBackwardFromTop(t *testing.T, blocks []*cltypes.SignedBeaconBlock, server *slowRangeServer, httpFallbackURL string) []uint64 {
+func newRangeDownloader(t *testing.T, top *cltypes.SignedBeaconBlock, server *slowRangeServer) *BackwardBeaconDownloader {
 	t.Helper()
-	top := blocks[len(blocks)-1]
 	topRoot, err := top.Block.HashSSZ()
 	require.NoError(t, err)
 	downloader := &BackwardBeaconDownloader{
@@ -101,10 +115,21 @@ func walkBackwardFromTop(t *testing.T, blocks []*cltypes.SignedBeaconBlock, serv
 		reqInterval:          time.NewTicker(time.Millisecond),
 		baseInterval:         time.Millisecond,
 		requestBlocksByRange: server.requestBlocksByRange,
-		httpFallbackURL:      httpFallbackURL,
 	}
-	defer downloader.reqInterval.Stop()
+	t.Cleanup(downloader.reqInterval.Stop)
 	downloader.slotToDownload.Store(top.Block.Slot)
+	return downloader
+}
+
+func walkBackwardFromTop(t *testing.T, blocks []*cltypes.SignedBeaconBlock, server *slowRangeServer, httpFallbackURL string) []uint64 {
+	t.Helper()
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	downloader.httpFallbackURL = httpFallbackURL
+	return walkBackward(t, downloader)
+}
+
+func walkBackward(t *testing.T, downloader *BackwardBeaconDownloader) []uint64 {
+	t.Helper()
 	var processed []uint64
 	downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, _ *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
 		processed = append(processed, blk.Block.Slot)
@@ -132,6 +157,123 @@ func TestBackwardBeaconDownloaderKeepsSeveralRangesInFlight(t *testing.T) {
 
 	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
 	require.Greater(t, server.maxInFlight.Load(), int32(1))
+	require.LessOrEqual(t, server.maxInFlight.Load(), int32(maxPrefetchedRanges+1))
+}
+
+func TestBackwardBeaconDownloaderBansPeerOnPrefetchError(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, badPeer: "bad", badStart: 512, calls: map[uint64]int{}}
+	sentinel := &emptyResponseBanRecordingSentinel{banned: make(chan string, 1)}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	downloader.rpc, _ = newContextBlockingBeaconRPC(t.Context(), sentinel)
+
+	require.Equal(t, descending(blocks), walkBackward(t, downloader))
+	select {
+	case pid := <-sentinel.banned:
+		require.Equal(t, "bad", pid)
+	default:
+		t.Fatal("peer that failed a prefetched range was not banned")
+	}
+}
+
+func TestBackwardBeaconDownloaderPrefetchHitResetsEmptyBackoff(t *testing.T) {
+	block := makeDenebBlock(10)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot: root,
+		reqInterval:  time.NewTicker(time.Hour),
+		baseInterval: time.Hour,
+	}
+	defer downloader.reqInterval.Stop()
+	downloader.slotToDownload.Store(10)
+	downloader.emptyResponses.Store(3)
+	ready := make(chan []*cltypes.SignedBeaconBlock, 1)
+	ready <- []*cltypes.SignedBeaconBlock{block}
+	downloader.prefetched = []prefetchedRange{{lo: 0, hi: 63, blocks: ready, cancel: func() {}}}
+
+	blocks, err := downloader.fetchBlockRange(t.Context())
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+	require.Zero(t, downloader.emptyResponses.Load())
+}
+
+func TestBackwardBeaconDownloaderTakesPrefetchBelowEmptyRangeBottom(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(slot uint64) bool { return slot == 512 }))
+	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, calls: map[uint64]int{}}
+
+	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
+	want := map[uint64]int{}
+	for start := uint64(0); start < 640; start += slotsPerRange {
+		want[start] = 1
+	}
+	require.Equal(t, want, server.calls)
+}
+
+func TestBackwardBeaconDownloaderCancelsDroppedPrefetches(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, held: func(start uint64) bool { return start > 0 && start < 576 }, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		return false, nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	require.NoError(t, downloader.RequestMore(ctx))
+	require.NotEmpty(t, downloader.prefetched)
+	var dropped []uint64
+	for _, r := range downloader.prefetched {
+		dropped = append(dropped, r.lo)
+	}
+	slices.Sort(dropped)
+	root, err := blocks[63].Block.HashSSZ()
+	require.NoError(t, err)
+	downloader.SetSlotToDownload(63)
+	downloader.SetExpectedRoot(root)
+
+	require.NoError(t, downloader.RequestMore(ctx))
+	require.True(t, downloader.Finished())
+	require.Eventually(t, func() bool {
+		server.mu.Lock()
+		defer server.mu.Unlock()
+		return slices.Equal(dropped, slices.Sorted(slices.Values(server.cancelled)))
+	}, 5*time.Second, time.Millisecond)
+}
+
+func TestBackwardBeaconDownloaderHTTPFastPathCancelsPrefetches(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = 11
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	beaconAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/eth/v2/beacon/blocks/11" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Eth-Consensus-Version", "phase0")
+		_, _ = w.Write(encoded)
+	}))
+	defer beaconAPI.Close()
+	downloader := &BackwardBeaconDownloader{
+		reqInterval:     time.NewTicker(time.Hour),
+		httpFallbackURL: beaconAPI.URL,
+		beaconCfg:       &cfg,
+	}
+	defer downloader.reqInterval.Stop()
+	downloader.slotToDownload.Store(63)
+	downloader.httpPreferred.Store(true)
+	prefetchCtx, cancelPrefetch := context.WithCancel(t.Context())
+	defer cancelPrefetch()
+	downloader.prefetched = []prefetchedRange{{lo: 0, hi: 63, blocks: make(chan []*cltypes.SignedBeaconBlock, 1), cancel: cancelPrefetch}}
+
+	blocks, err := downloader.fetchBlockRange(t.Context())
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+	require.Empty(t, downloader.prefetched)
+	require.ErrorIs(t, prefetchCtx.Err(), context.Canceled)
 }
 
 func TestBackwardBeaconDownloaderRefetchesPrefetchedRangeFromAnotherFork(t *testing.T) {

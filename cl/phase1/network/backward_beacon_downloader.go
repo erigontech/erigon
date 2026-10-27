@@ -101,6 +101,7 @@ type BackwardBeaconDownloader struct {
 type prefetchedRange struct {
 	lo, hi uint64
 	blocks chan []*cltypes.SignedBeaconBlock
+	cancel context.CancelFunc
 }
 
 var (
@@ -412,6 +413,10 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
 		if err == nil && len(blocks) > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
+			for _, r := range b.prefetched {
+				r.cancel()
+			}
+			b.prefetched = nil
 			return blocks, nil
 		}
 		// HTTP failed — fall back to P2P probing.
@@ -424,11 +429,12 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 
 	slot := b.slotToDownload.Load()
 	for len(b.prefetched) > 0 && b.prefetched[0].lo > slot {
+		b.prefetched[0].cancel()
 		b.prefetched = b.prefetched[1:]
 	}
 	bottom := start
 	var prefetched chan []*cltypes.SignedBeaconBlock
-	if len(b.prefetched) > 0 && slot <= b.prefetched[0].hi {
+	if len(b.prefetched) > 0 {
 		prefetched, bottom = b.prefetched[0].blocks, b.prefetched[0].lo
 		b.prefetched = b.prefetched[1:]
 		requestSent.Store(true)
@@ -452,6 +458,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 		case blocks := <-prefetched:
 			prefetched = nil
 			if blockWithRoot(blocks, b.expectedRoot) != nil {
+				b.resetEmptyBackoff()
 				return blocks, nil
 			}
 			bottom = start
@@ -488,15 +495,28 @@ func (b *BackwardBeaconDownloader) prefetchRange(ctx context.Context, bottom uin
 	}
 	hi := bottom - 1
 	lo := hi - min(hi, slotsPerRange-1)
+	reqCtx, cancel := context.WithCancel(ctx)
 	blocks := make(chan []*cltypes.SignedBeaconBlock, 1)
-	b.prefetched = append(b.prefetched, prefetchedRange{lo: lo, hi: hi, blocks: blocks})
+	b.prefetched = append(b.prefetched, prefetchedRange{lo: lo, hi: hi, blocks: blocks, cancel: cancel})
 	go func() {
-		resp, _, err := b.requestBlocksByRange(ctx, lo, hi-lo+1)
+		defer cancel()
+		resp, peerId, err := b.requestBlocksByRange(reqCtx, lo, hi-lo+1)
 		if err != nil {
+			b.banPeerOnError(peerId, err, lo, hi-lo+1)
 			resp = nil
 		}
 		blocks <- resp
 	}()
+}
+
+func (b *BackwardBeaconDownloader) banPeerOnError(peerId string, err error, start, count uint64) {
+	if errors.Is(err, peers.ErrNoPeers) {
+		log.Debug("[Caplin] no peers available for backward beacon block request", "start", start, "count", count)
+		return
+	}
+	if peerId != "" && b.rpc != nil {
+		b.rpc.BanPeer(peerId)
+	}
 }
 
 // sendBlockRequest sends a block range request and writes the result to the channel.
@@ -512,12 +532,7 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 	}
 	blocks, peerId, err := b.requestBlocksByRange(ctx, start, count)
 	if err != nil {
-		// Don't ban when the error is due to no peers being available.
-		if !errors.Is(err, peers.ErrNoPeers) && b.rpc != nil {
-			b.rpc.BanPeer(peerId)
-		} else {
-			log.Debug("[Caplin] no peers available for backward beacon block request", "start", start, "count", count)
-		}
+		b.banPeerOnError(peerId, err, start, count)
 		requestSent.Store(false)
 		return
 	}
