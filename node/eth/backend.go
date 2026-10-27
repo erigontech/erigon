@@ -1288,7 +1288,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			WithErigonDBSettings(erigonDBSettings).
 			CommitmentHotMaxMergeSteps(snConfig.Sync.TieringCommitmentHotMergeSteps)
 		if snConfig.Sync.TieringDemote {
-			aggOpts = aggOpts.DemoteColdDir(snConfig.Sync.TieringColdDir).ColdMergePause(snConfig.Sync.TieringColdMergePause).DemoteMaxMBps(snConfig.Sync.TieringDemoteMaxMBps)
+			aggOpts = aggOpts.DemoteColdDir(snConfig.Sync.TieringColdDir).ColdMergePause(snConfig.Sync.TieringColdMergePause).ColdIOMaxMBps(snConfig.Sync.TieringColdIOMaxMBps)
 		}
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile

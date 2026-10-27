@@ -110,7 +110,7 @@ type Aggregator struct {
 	demoting      atomic.Bool
 	onDemoteCopy  func(ctx context.Context) // test hook
 	coldIO        *coldIOGate
-	demoteLimiter *rate.Limiter // nil: no cap
+	coldIOLimiter *rate.Limiter // nil: no cap; shared by demotion copies and cold merges
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc

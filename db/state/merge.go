@@ -474,7 +474,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	if r.toColdDir {
-		kvFile.SetOutputPacer(func() error { return dt.d.waitColdMerge(ctx) })
+		kvFile.SetOutputPacer(func() error { return dt.d.waitColdMerge(ctx, 1<<20) })
 	}
 	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
 	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
@@ -530,13 +530,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
-	i := uint64(0)
+	i, readBytes := uint64(0), 0 // shortcut: counts decompressed bytes, so a compressed input is capped below the rate
 	for cp.Len() > 0 {
 		if r.toColdDir && i%4096 == 0 {
 			mxColdMergeProgress.Set(float64(i) / float64(cnt))
-			if err := dt.d.waitColdMerge(ctx); err != nil {
+			if err := dt.d.waitColdMerge(ctx, readBytes); err != nil {
 				return nil, nil, nil, err
 			}
+			readBytes = 0
 		}
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
@@ -545,6 +546,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
+			readBytes += len(ci1.key) + len(ci1.val)
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])

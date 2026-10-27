@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -204,4 +205,18 @@ func TestAggregatorColdMergeIgnoresPauseWhenDisabled(t *testing.T) {
 
 	mergeAll(t, agg, 4*agg.StepSize())
 	require.True(t, isSymlink(t, domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv")))
+}
+
+func TestAggregatorColdMergeKeepsRateCap(t *testing.T) {
+	t.Parallel()
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}}
+	agg := testAggWithColdCommitment(t, ranges, 4)
+	lim := rate.NewLimiter(rate.Limit(4<<20), 1<<20)
+	require.True(t, lim.AllowN(time.Now(), 1<<20))
+	agg.d[kv.CommitmentDomain].coldIOLimiter = lim
+
+	start := time.Now()
+	mergeAll(t, agg, 5*agg.StepSize())
+	require.GreaterOrEqual(t, time.Since(start), 200*time.Millisecond) // the output's first 1 MB chunk waits 250 ms for an empty bucket
+	domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv")
 }

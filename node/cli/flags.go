@@ -168,9 +168,9 @@ var (
 		Usage: "Move fully-cold commitment files to --tiering.cold-dir in the background (needs --tiering.lookback-blocks)",
 	}
 
-	TieringDemoteMaxMBpsFlag = cli.Uint64Flag{
-		Name:  "tiering.demote-max-mbps",
-		Usage: "Max rate of a demotion copy to the cold dir in MB/s (0 = no cap)",
+	TieringColdIOMaxMBpsFlag = cli.Uint64Flag{
+		Name:  "tiering.cold-io-max-mbps",
+		Usage: "Max cold-dir traffic of demotion copies and cold merges together, in MB/s (0 = no cap)",
 	}
 	TieringColdMergePauseFlag = cli.BoolFlag{
 		Name:  "tiering.cold-merge-pause",
@@ -395,7 +395,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	cfg.Sync.TieringCommitmentHotMergeSteps = ctx.Uint64(TieringCommitmentHotMergeStepsFlag.Name)
 	cfg.Sync.TieringDemote = ctx.Bool(TieringDemoteFlag.Name)
 	cfg.Sync.TieringColdMergePause = ctx.Bool(TieringColdMergePauseFlag.Name)
-	cfg.Sync.TieringDemoteMaxMBps = ctx.Uint64(TieringDemoteMaxMBpsFlag.Name)
+	cfg.Sync.TieringColdIOMaxMBps = ctx.Uint64(TieringColdIOMaxMBpsFlag.Name)
 	if cfg.Sync.TieringDemote {
 		if err := tiering.ValidateDemote(cfg.Sync.TieringLookbackBlocks, cfg.Sync.TieringColdDir, cfg.Dirs.SnapDomain, ctx.Bool(TieringAllowSameFSFlag.Name)); err != nil {
 			utils.Fatalf("%v", err)

@@ -61,7 +61,7 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 	if a.onDemoteCopy != nil {
 		a.onDemoteCopy(ctx)
 	}
-	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO, a.demoteLimiter); err != nil {
+	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO, a.coldIOLimiter); err != nil {
 		return fmt.Errorf("DemoteFile: copy %s: %w", ssdPath, err)
 	}
 	copyBytesPerSec := float64(size) / time.Since(start).Seconds()
@@ -181,10 +181,8 @@ func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldI
 			return err
 		}
 		mxDemotionPausedSeconds.Add(time.Since(waitStart).Seconds())
-		if lim != nil {
-			if err := lim.WaitN(ctx, chunk); err != nil {
-				return err
-			}
+		if err := waitColdIOBytes(ctx, lim, chunk); err != nil {
+			return err
 		}
 		n, err := io.CopyN(dst, src, chunk)
 		if n > 0 {
