@@ -795,10 +795,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							continue
 						}
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						var notifyErr error
 						for _, writes := range pendingAccumulatorWrites {
-							state.NotifyAccumulator(pe.accumulator, writes)
+							if notifyErr = pe.rs.NotifyAccumulator(pe.accumulator, rwTx, writes); notifyErr != nil {
+								break
+							}
 						}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+						if notifyErr != nil {
+							<-balDone
+							failInfra(fmt.Errorf("notify accumulator, block %d: %w", applyResult.BlockNum, notifyErr))
+							continue
+						}
 					}
 
 					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&

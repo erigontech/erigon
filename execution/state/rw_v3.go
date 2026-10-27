@@ -614,12 +614,12 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
 
 // NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
-// It reconstructs account state from the per-field writes and calls
-// ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
-// have been called on the accumulator before this function is invoked.
-func NotifyAccumulator(accumulator *shards.Accumulator, writes WriteSetView) {
+// It overlays the per-field writes on the account's latest state and calls
+// ChangeAccount/ChangeCode/ChangeStorage on the accumulator.
+// StartChange must have been called on the accumulator before this function is invoked.
+func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx, writes WriteSetView) error {
 	if accumulator == nil || writes.IsEmpty() {
-		return
+		return nil
 	}
 
 	type pendingAccount struct {
@@ -678,7 +678,17 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes WriteSetView) {
 		if p.balance == nil && p.nonce == nil {
 			continue // no account fields collected (e.g. only storage/code)
 		}
-		var acc accounts.Account
+		acc := accounts.NewAccount()
+		address := addr.Value()
+		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
+				return err
+			}
+		}
 		if p.balance != nil {
 			acc.Balance = *p.balance
 		}
@@ -694,6 +704,7 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes WriteSetView) {
 		serialised := accounts.SerialiseV3(&acc)
 		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, serialised)
 	}
+	return nil
 }
 
 // Writer - used by parallel workers to accumulate updates and then send them to conflict-resolution.

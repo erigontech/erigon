@@ -170,7 +170,7 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 		t.Skip("requires mdbx")
 	}
 
-	_, domains := setup2CacheTest(t)
+	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
@@ -211,7 +211,7 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	// Now drive the accumulator from the collected writes —
 	// this is what the apply loop does after ApplyStateWrites.
 	writes := collector.Writes()
-	state.NotifyAccumulator(accumulator, writes)
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, writes))
 
 	changes := accumulator.Changes()
 	require.Len(t, changes, 1, "one StateChange batch expected")
