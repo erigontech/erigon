@@ -28,6 +28,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -423,12 +424,18 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 		fixtureByAddr[common.HexToAddress(hexAddr)] = fixture
 	}
 	seenTypes := map[reflect.Type]bool{}
+	precompileType := func(p PrecompiledContract) reflect.Type {
+		if c, ok := p.(*cachedPrecompile); ok {
+			return reflect.TypeOf(c.PrecompiledContract)
+		}
+		return reflect.TypeOf(p)
+	}
 	for _, p := range allPrecompiles {
-		seenTypes[reflect.TypeOf(p)] = true
+		seenTypes[precompileType(p)] = true
 	}
 	for _, set := range precompiledContractSets {
 		for addr, p := range set {
-			typ := reflect.TypeOf(p)
+			typ := precompileType(p)
 			if seenTypes[typ] {
 				continue
 			}
@@ -510,4 +517,17 @@ func TestBLSRepeatedPointScalars(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrecompileResultLRUStaysUnderBudget(t *testing.T) {
+	c := newPrecompileResultLRU()
+	value := make([]byte, maxCacheablePrecompileOutput)
+	for i := range 4096 {
+		c.add([]byte(strconv.Itoa(i)), value)
+	}
+	require.LessOrEqual(t, c.size, uint64(maxCacheablePrecompileBytes))
+	_, ok := c.get([]byte("4095"))
+	require.True(t, ok)
+	_, ok = c.get([]byte("0"))
+	require.False(t, ok)
 }
