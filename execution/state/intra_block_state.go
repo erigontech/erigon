@@ -228,6 +228,12 @@ type IntraBlockState struct {
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
+	// Intern tables survive Reset and the pool on purpose: an idle pooled state keeps ~51 KB of
+	// tables and their unique handles alive, which is the reuse the next call pays for.
+	internCache *storageKeyCache
+	addrCache   *addressCache
+	internOps   uint32
+	addrOps     uint32
 }
 
 type sdProbeEntry struct {
@@ -1316,18 +1322,35 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// A prior tx's balance-preserving SELFDESTRUCT (EIP-8246) keeps the account
 	// alive (balance kept, code/nonce cleared); AddressPath reads zero under SD, so
 	// reconstruct the surviving account from the version map here, covering both
-	// committed and in-block-created accounts — unless a later tx re-created it, in
-	// which case fall through to the normal read. Branch-agnostic: a burn stamps the
-	// balance ValueDeleted, so the reconstruction yields nil and this falls through.
+	// committed and in-block-created accounts — unless a later tx re-created it.
+	// Branch-agnostic: a burn stamps the balance ValueDeleted, so the
+	// reconstruction yields nil and this falls through.
 	if readAccount == nil {
-		if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed {
+		if ibs.versionMap.absentAccountHook != nil {
+			ibs.versionMap.absentAccountHook()
+		}
+		// Prefer the destruct that the read above saw, so that an in-flight re-creation
+		// does not hide it; without one, probe the version map, as a destruct may have
+		// been flushed since.
+		destructed, sdRes, ok := ibs.readSelfDestructMemo(addr)
+		if !ok || !sdRes.resolved() || !destructed {
+			destructed, sdRes, ok = ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex)
+		}
+		if ok && sdRes.resolved() && destructed {
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount writing AddressPath)
 			// skips reconstruction. Later Balance/Nonce/CodeHash writes are updates
 			// to the still-preserved account, not a revival.
 			revived := false
 			if hi, ok := ibs.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, ibs.txIndex-1); ok && hi > destructTxIndex {
-				revived = true
+				// The re-creation may have been flushed after the read above. If the
+				// re-read finds no account either and this tx has not read it as absent,
+				// the re-creation was withdrawn, so the reconstruction applies.
+				readAccount, source, version, err = readAccountInternal(ibs, addr)
+				if err != nil {
+					return nil, UnknownSource, UnknownVersion, err
+				}
+				revived = readAccount != nil || ibs.readAbsentFromMap(addr)
 			}
 			if !revived {
 				preserved, err := ibs.eip8246PreservedAccount(addr)
@@ -2850,6 +2873,64 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	}
 	writes.assertNotArena("flush")
 	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+}
+
+// WriteFlushedTo hands the current tx's writes, already flushed to the versionMap, to
+// stateWriter the way FinalizeTx hands a materialized tx's: each account as it reads
+// before and after the tx, each storage slot with its value at tx start.
+func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWriter) error {
+	for addr := range writes.addrs() {
+		before := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
+		original := before.Account()
+		if err := before.Err(); err != nil {
+			return err
+		}
+		if original == nil {
+			original = &accounts.Account{}
+		}
+		after := NewVersionedAccountView(addr, ibs.txIndex+1, ibs.versionMap, ibs.stateReader)
+		account := after.Account()
+		if err := after.Err(); err != nil {
+			return err
+		}
+		if account == nil {
+			if bal, ok := writes.GetBalance(addr); ok && !bal.Deletes() && !bal.Val.IsZero() {
+				// An EIP-8246 SELFDESTRUCT leaves a balance-only account, as updateAccount does.
+				preserved := accounts.NewAccount()
+				preserved.Balance = bal.Val
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
+				if err := stateWriter.UpdateAccountData(addr, original, &preserved); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := stateWriter.DeleteAccount(addr, original); err != nil {
+				return err
+			}
+			continue
+		}
+		if code, ok := writes.GetCode(addr); ok {
+			if err := stateWriter.UpdateAccountCode(addr, account.Incarnation, account.CodeHash, code.Val.Bytes); err != nil {
+				return err
+			}
+		}
+		if created, ok := writes.GetCreateContract(addr); ok && created.Val {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return err
+			}
+		}
+		for key, vw := range writes.storage[addr] {
+			if err := stateWriter.WriteAccountStorage(addr, account.Incarnation, key, vw.orig, vw.Val); err != nil {
+				return err
+			}
+		}
+		if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
