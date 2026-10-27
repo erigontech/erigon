@@ -29,13 +29,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestGetAccountVerdict_SelfDestructAndEmpty asks the pivotal write-side-completeness
-// question: once a tx's FinalizedWrites are flushed to the version map, does the
-// GetAccount projection return the correct present/absent verdict for every
-// self-destruct and EIP-161 shape — with NO commitment-side re-derivation? If yes,
-// the version map is a complete ledger and the calculator can drop calcState +
-// ApplyEIP161Removal in favour of GetAccount. Each case flushes at TxIndex 0, so the
-// block-end projection is GetAccount(addr, 1, base) (txNum = baseTxNum(0) + 0 + 1).
+// TestGetAccountVerdict_SelfDestructAndEmpty pins write-side completeness: once a tx's
+// FinalizedWrites are flushed to the version map, the view's GetAccount returns the
+// correct present/absent verdict for every self-destruct and EIP-161 shape with no
+// commitment-side re-derivation — the version map is the complete commitment ledger.
+// Each case flushes at TxIndex 0, so the block-end projection is
+// View(1, base).GetAccount(addr) (txNum = baseTxNum(0) + 0 + 1).
 func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -60,7 +59,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true, "")
 
-		_, ok := vm.GetAccount(addr, 1, reader)
+		_, ok := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a destroyed pre-existing contract must project as absent")
 	})
 
@@ -83,7 +82,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true, "")
 
-		_, ok := vm.GetAccount(addr, 1, reader)
+		_, ok := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "an account created and destroyed in one tx must project as absent")
 	})
 
@@ -105,7 +104,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true, "")
 
-		_, ok := vm.GetAccount(addr, 1, reader)
+		_, ok := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a pre-existing account left empty must project as absent (EIP-161)")
 	})
 
@@ -137,7 +136,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
 		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true, "")
 
-		acc, ok := vm.GetAccount(addr, 2, reader)
+		acc, ok := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "a recreated account must project as live after the recreate tx")
 		require.Equal(t, crypto.Keccak256Hash(code), acc.CodeHash.Value(),
 			"the recreated account carries the new code hash")
@@ -158,8 +157,34 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true, "")
 
-		acc, ok := vm.GetAccount(addr, 1, reader)
+		acc, ok := vm.View(1, reader).GetAccount(addr)
 		require.True(t, ok, "a funded account must project as live")
 		require.True(t, acc.Balance.Eq(uint256.NewInt(150)), "live account carries its final balance")
+	})
+}
+
+// TestVersionMapView_GetAccountCrossBlockExistence pins the batch-fold existence verdict:
+// the touched union carries accounts whose writes are in an earlier batch block, so they
+// have no cell in the current block's version map and are resolved from the base. An
+// account the base reports absent (removed in an earlier block) must project as absent —
+// not as a resurrected empty leaf — while one the base still carries projects as present.
+func TestVersionMapView_GetAccountCrossBlockExistence(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0b10c"))
+
+	t.Run("no cell and absent base projects absent", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+		_, ok := vm.View(1, base).GetAccount(addr)
+		require.False(t, ok, "no version-map cell and no base account must project as absent")
+	})
+
+	t.Run("no cell and present base projects present", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		base := newAccountStateReader(addr) // balance 100
+		acc, ok := vm.View(1, base).GetAccount(addr)
+		require.True(t, ok, "an account the base still carries must project as present")
+		require.True(t, acc.Balance.Eq(uint256.NewInt(100)), "present account takes its value from the base")
 	})
 }

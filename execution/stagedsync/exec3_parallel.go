@@ -2428,14 +2428,16 @@ func (result *execResult) calcFees(
 		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
 			burntCreatedContract = true
 		}
-		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
+		// A self-destruct marker is proof the account was a contract (only a contract
+		// can SELFDESTRUCT), even after the removal cleared its code/create cells.
+		burntWasContract = burntSelfdestructed || !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
-	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
-	// a touched EOA coinbase, where the delayed tip must still be credited (it
-	// re-creates the account) to match serial.
-	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
+	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT. The self-destruct
+	// marker rides the removal only for a real destruct (a contract); an EIP-161
+	// touched-empty EOA carries none, so its delayed tip is credited and re-creates the
+	// account, matching serial.
+	coinbaseWasContract := coinbaseSelfdestructed || !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	// A contract coinbase self-destructed with no same-tx re-create is net-absent:
 	// its code/nonce are wiped and a later fee credit revives it balance-only
@@ -2495,14 +2497,6 @@ func (result *execResult) calcFees(
 	if burntEmptied || burntNetDeleted {
 		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
 	}
-	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
-	// serial credits the tip before the tx's empty-account sweep, so the account and its
-	// storage survive.
-	if coinbaseSelfdestructed && !coinbaseWasContract && !newCoinbaseBalance.IsZero() {
-		addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
-			WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
-		})
-	}
 	if emitCoinbase {
 		{
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
@@ -2559,14 +2553,6 @@ func (result *execResult) calcFees(
 				})
 			}
 		}
-	}
-	// The worker's EIP-161 removal of a codeless burnt recipient is undone by the
-	// base-fee credit: serial credits the fee before the tx's empty-account sweep,
-	// so the account and its storage survive. Mirrors the coinbase revival above.
-	if hasBurnt && burntSelfdestructed && !burntWasContract && !newBurntBalance.IsZero() {
-		addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
-			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
-		})
 	}
 	if emitBurnt {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{

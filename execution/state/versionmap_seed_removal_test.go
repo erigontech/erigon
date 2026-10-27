@@ -55,10 +55,10 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	vm.SeedEmptyRemovals(bal, true, false, reader)
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
-	_, ok := vm.GetAccount(emptied, 1, reader)
+	_, ok := vm.View(1, reader).GetAccount(emptied)
 	require.False(t, ok, "a touched account drained to empty is removed via the seeded self-destruct")
 
-	acc, ok := vm.GetAccount(survives, 1, reader)
+	acc, ok := vm.View(1, reader).GetAccount(survives)
 	require.True(t, ok, "a balance-zeroed account with a non-zero base nonce is NOT empty and survives")
 	require.Equal(t, uint64(5), acc.Nonce)
 }

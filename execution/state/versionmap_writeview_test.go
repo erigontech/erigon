@@ -125,10 +125,10 @@ func TestVersionMapWriteView_SelfDestructFallsBackToKeySetOnMapMiss(t *testing.T
 	require.True(t, got, "SelfDestructs must fall back to the key-set value on a versionMap miss, not drop the delete")
 }
 
-// StoragesChanged drops a write whose final value equals what the tx would have
+// StorageChanges drops a write whose final value equals what the tx would have
 // read, and keeps one that only looks equal: after a destruct the slot baseline
 // is zero, so writing the pre-destruct value back is a real change.
-func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
+func TestVersionMapWriteView_StorageChanges(t *testing.T) {
 	t.Parallel()
 
 	const priorTx, myTx = 2, 5
@@ -160,7 +160,7 @@ func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
 	require.True(t, all[unchanged] && all[changed], "Storages must still yield every write")
 
 	got := map[accounts.StorageKey]uint256.Int{}
-	for _, inner := range view.StoragesChanged() {
+	for _, inner := range view.StorageChanges() {
 		for k, vw := range inner {
 			got[k] = vw.Val
 		}
@@ -174,7 +174,7 @@ func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
 	revivedKeys := &WriteSet{}
 	revivedKeys.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, valStatus: ValueCreated}, Val: val100})
 	revived := map[accounts.StorageKey]uint256.Int{}
-	for _, inner := range NewVersionMapWriteView(revivedKeys, vm, myTx).StoragesChanged() {
+	for _, inner := range NewVersionMapWriteView(revivedKeys, vm, myTx).StorageChanges() {
 		for k, vw := range inner {
 			revived[k] = vw.Val
 		}
@@ -227,9 +227,11 @@ func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
 	require.Equal(t, 2, seen)
 }
 
-// An account absent before the tx that the tx creates and self-destructs leaves no
-// state, so its writes are dropped; a CREATE onto a pre-funded address, or one an
-// earlier tx of the block funded, still deletes the account.
+// An account the tx creates and self-destructs folds to the uniform balance-deleted
+// removal verdict — whether it was absent before the tx, funded at base, funded by an
+// earlier tx of the block, or left empty by an earlier tx. The removal is encoded as
+// data (so commitment reads it absent without lifecycle re-derivation), not dropped;
+// WithoutVanished leaves that verdict in place.
 func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
@@ -249,27 +251,23 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 		require.NoError(t, err)
 		return out
 	}
-	hasAddr := func(ws *WriteSet) bool {
-		for h := range ws.AllHeaders() {
-			if h.Address == addr {
-				return true
-			}
-		}
-		return false
+	removed := func(ws *WriteSet) bool {
+		bal, ok := ws.GetBalance(addr)
+		return ok && bal.Deletes()
 	}
-	require.False(t, hasAddr(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx and gone after it")
-	require.True(t, hasAddr(run(t, newAccountStateReader(addr), NewVersionMap(nil))), "a CREATE onto a pre-funded address must still delete it")
+	require.True(t, removed(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx: folds to the removal verdict")
+	require.True(t, removed(run(t, newAccountStateReader(addr), NewVersionMap(nil))), "a CREATE onto a pre-funded address deletes it")
 
 	funded := NewVersionMap(nil)
 	w := &WriteSet{}
 	w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
 	funded.FlushVersionedWrites(w, true, "")
-	require.True(t, hasAddr(run(t, &minimalStateReader{}, funded)), "an earlier tx of the block funded the address")
+	require.True(t, removed(run(t, &minimalStateReader{}, funded)), "an earlier tx of the block funded the address")
 
 	// Before EIP-161 an earlier tx can leave an empty account that only its AddressPath cell records.
 	empty := NewVersionMap(nil)
 	w = &WriteSet{}
 	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
 	empty.FlushVersionedWrites(w, true, "")
-	require.True(t, hasAddr(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
+	require.True(t, removed(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
 }

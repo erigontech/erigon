@@ -1328,24 +1328,43 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 			if vw, ok := ws.codeSize[addr]; ok {
 				out.SetCodeSize(addr, cloneVW(vw))
 			}
+		} else if bw, ok := ws.balance[addr]; ok && !bw.Deletes() {
+			// A balance-preserving destruct (EIP-8246) resolves at end-of-tx to a codeless
+			// EOA — the domain apply writes NewAccount+balance (nonce 0, EmptyCodeHash). The
+			// per-field writes were dropped above, so re-stamp the cleared nonce/code — but
+			// only for a pre-existing account, whose base record the commitment would
+			// otherwise read. An account created this block has no base, so the commitment
+			// composes the codeless-EOA defaults on its own, and re-stamping nonce 0 would
+			// leak a net-zero nonce change (0→1→0) into the block access list.
+			if _, created := ws.createContract[addr]; !created {
+				out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: bw.Version}, Val: 0})
+				out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: bw.Version}, Val: accounts.EmptyCodeHash})
+			}
 		}
 	}
 	return out
 }
 
-// SetEmptyRemoval replaces addr's writes with an EIP-161 removal: a self-destruct
-// and a balance delete. The balance write makes a reader that saw the account empty
-// depend on the removal; its delete stamp keeps the leaf deleted downstream, where an
-// unstamped balance would read as the account surviving its destruct.
+// SetEmptyRemoval clears addr's whole footprint and stamps the account-removal signal: a
+// balance write marked ValueDeleted, which commitment and the domain apply read to drop
+// the leaf with no lifecycle re-derivation. A self-destruct marker is preserved across the
+// clear: a self-destructed account's removal is unconditional (calcFees burns its delayed
+// fee, the read path pins the absence), whereas an EIP-161 touched-empty EOA carries none
+// and must not gain one. deleteAddr still clears the AddressPath so neither is mistaken for
+// a same-tx SD+CREATE2 recreate.
 func (ws *WriteSet) SetEmptyRemoval(addr accounts.Address, version Version) {
+	sd, selfDestructed := ws.GetSelfDestruct(addr)
+	selfDestructed = selfDestructed && sd.Val
 	ws.deleteAddr(addr)
-	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
-		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version},
-		Val:         true,
-	})
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: version, valStatus: ValueDeleted},
 	})
+	if selfDestructed {
+		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version},
+			Val:         true,
+		})
+	}
 }
 
 func (ws *WriteSet) deleteAddr(addr accounts.Address) {
@@ -1668,11 +1687,13 @@ func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[acc
 	return maps.All(ws.codeHash)
 }
 
-// StoragesChanged has nothing to filter: a plain WriteSet carries no version map
+// StorageChanges has nothing to filter: a plain WriteSet carries no version map
 // to compare a write against, so its writes are already the changed ones.
-func (ws *WriteSet) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+func (ws *WriteSet) StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return ws.Storages()
 }
+
+func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws) }
 
 func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if ws == nil {

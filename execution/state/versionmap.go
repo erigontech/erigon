@@ -1119,7 +1119,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // flushAllNoOp reports whether every write this tx made to addr is already present, so the
 // per-tx flush can be skipped without taking the write lock (and thus without parking the
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
-// is omitted from the BAL and folded away by StoragesChanged, so it is never materialized and
+// is omitted from the BAL and folded away by StorageChanges, so it is never materialized and
 // counts as already-present. Lifecycle transitions and the putCell-only paths (which never
 // no-bump) force the slow path. Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
@@ -1247,7 +1247,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 			}
 			for key, vw := range inner {
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
-				// StoragesChanged, so it is never materialized here (nor sealed below). A reader
+				// StorageChanges, so it is never materialized here (nor sealed below). A reader
 				// resolves the floor, which already holds this unchanged value.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
 					continue

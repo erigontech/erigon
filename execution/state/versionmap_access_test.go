@@ -82,11 +82,11 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 	require.True(t, vm.WritesAtTxIndex(99, false).IsEmpty())
 }
 
-// TestTxAccessList_StoragesChangedMatchesWriteSet pins the B→C equivalence: the
+// TestTxAccessList_StorageChangesMatchesWriteSet pins the B→C equivalence: the
 // key-only access-list view and a retained-write-set view produce the same
-// StoragesChanged result (net-zero ValueUnchanged writes filtered) because the
+// StorageChanges result (net-zero ValueUnchanged writes filtered) because the
 // status is read from the version map cell, not the key-set.
-func TestTxAccessList_StoragesChangedMatchesWriteSet(t *testing.T) {
+func TestTxAccessList_StorageChangesMatchesWriteSet(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xb2})
 	changed := accounts.InternKey([32]byte{0x01})
 	unchanged := accounts.InternKey([32]byte{0x02})
@@ -119,7 +119,7 @@ func TestTxAccessList_StoragesChangedMatchesWriteSet(t *testing.T) {
 		return got
 	}
 	changedSeq := func(v WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-		return v.StoragesChanged()
+		return v.StorageChanges()
 	}
 	allSeq := func(v WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 		return v.Storages()
@@ -128,7 +128,7 @@ func TestTxAccessList_StoragesChangedMatchesWriteSet(t *testing.T) {
 	wsView := NewVersionMapWriteView(ws, vm, txIdx)
 	alView := vm.WritesAtTxIndex(txIdx, false)
 
-	require.Equal(t, collect(wsView, changedSeq), collect(alView, changedSeq), "StoragesChanged must match across view backings")
+	require.Equal(t, collect(wsView, changedSeq), collect(alView, changedSeq), "StorageChanges must match across view backings")
 	require.Len(t, collect(alView, changedSeq), 1, "ValueUnchanged write must be filtered")
 	require.Equal(t, collect(wsView, allSeq), collect(alView, allSeq), "Storages (unfiltered) must match across view backings")
 	require.Len(t, collect(alView, allSeq), 2, "unfiltered view keeps both writes")

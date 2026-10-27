@@ -47,7 +47,7 @@ const (
 // the tx publishes and never mutated afterwards, so its enumeration needs no lock.
 // storage retains each written slot's valStatus (the one byte decided at write
 // time from the tx's own lifecycle-aware prior read): a BAL block never materializes
-// a net-zero cell and StoragesChanged filters before reading one, so the status
+// a net-zero cell and StorageChanges filters before reading one, so the status
 // cannot be recovered from the map. Non-storage paths read their status from the
 // cell, which always carries it.
 type txAccessList struct {
@@ -125,11 +125,13 @@ func (t *txAccessList) Storages() iter.Seq2[accounts.Address, map[accounts.Stora
 	return t.storageSeq()
 }
 
-// StoragesChanged carries each slot's valStatus; the net-zero filtering is applied by
+// StorageChanges carries each slot's valStatus; the net-zero filtering is applied by
 // the versionMapWriteView that wraps the access list before the domain/commitment read.
-func (t *txAccessList) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+func (t *txAccessList) StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return t.storageSeq()
 }
+
+func (t *txAccessList) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(t) }
 
 func (t *txAccessList) IsEmpty() bool { return t == nil || t.count == 0 }
 
@@ -146,6 +148,7 @@ var _ WriteSetView = (*txAccessList)(nil)
 // TxIndex -1), so a global txNum maps to the block-relative TxIndex the access list
 // is keyed by: txNum = baseTxNum + TxIndex + 1.
 func (vm *VersionMap) SetBaseTxNum(baseTxNum uint64) { vm.baseTxNum.Store(baseTxNum) }
+func (vm *VersionMap) BaseTxNum() uint64             { return vm.baseTxNum.Load() }
 
 // blockTxIndex maps a global txNum to the block-relative TxIndex the access list is
 // keyed by, using the map's base.
@@ -162,6 +165,65 @@ func (vm *VersionMap) blockTxIndex(txNum uint64) int {
 func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base AccountBaseReader) (accounts.Account, bool) {
 	txIdx := int(txNum - vm.baseTxNum.Load())
 	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
+}
+
+// VersionMapView is a post-seal, data-only read over the version map pinned at a
+// global txNum. It composes each account/slot from the map cells, falling back to base
+// for fields no cell covers, and carries no lifecycle or EIP reasoning — the add/remove
+// verdict is read straight off the sealed state. It is a pure access class: construct
+// one for a txNum, then read by address/key. Execution does not use it; exec reads the
+// live, lifecycle-aware map mid-block.
+type VersionMapView struct {
+	vm    *VersionMap
+	txNum uint64
+	base  AccountBaseReader
+}
+
+// View pins a read of vm at the given global txNum. base is the cascade tail —
+// predecessor version maps then the shared domain — supplying fields no cell covers.
+func (vm *VersionMap) View(txNum uint64, base AccountBaseReader) *VersionMapView {
+	return &VersionMapView{vm: vm, txNum: txNum, base: base}
+}
+
+func (view *VersionMapView) txIdx() int {
+	return int(view.txNum - view.vm.baseTxNum.Load())
+}
+
+// GetAccount composes addr's final account at the view's txNum from the version map
+// cells over base and reports whether it belongs in the trie. The add/remove verdict is
+// read straight off the state: a ValueDeleted balance cell is a removal — exec already
+// resolved a self-destruct burn or an EIP-161 empty into it, the same value it flushes
+// to the base domain as a delete — and an account with no live cell here that the base
+// also reports absent does not exist (in a cross-block batch the touched union carries
+// accounts removed in an earlier block; the base resolves them as absent). Otherwise the
+// composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
+// the read; it is the why-free add/remove projection.
+func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account, bool) {
+	txIdx := view.txIdx()
+	if _, balRes, balOk := view.vm.ReadBalance(addr, txIdx); balOk && balRes.ValStatus() == ValueDeleted {
+		return accounts.Account{}, false
+	}
+	acc := NewVersionedAccountView(addr, txIdx, view.vm, view.base).AccountForCommitment()
+	if acc == nil {
+		return accounts.Account{}, false
+	}
+	return *acc, true
+}
+
+// GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok
+// with a zero value is a slot cleared to zero (a leaf-removing delete), false ok means no
+// value resolves. A slot with no cell in this map falls back to base — a cross-block
+// batch's touched union spans earlier blocks whose storage writes are not in this map.
+func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	if val, res, ok := view.vm.ReadStorage(addr, key, view.txIdx()); ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	if sr, ok := view.base.(StorageBaseReader); ok && sr != nil {
+		if val, ok, err := sr.ReadStorage(addr, key); err == nil && ok {
+			return val, true
+		}
+	}
+	return uint256.Int{}, false
 }
 
 // SeedEmptyRemovals encodes the EIP-161 empty-account removal as a write-side data
@@ -218,20 +280,6 @@ func balMaxChangeIndex(ac *types.AccountChanges) uint32 {
 // zero nonce, and empty (or nil) code hash.
 func isEmptyForEIP161(balance uint256.Int, nonce uint64, codeHash accounts.CodeHash) bool {
 	return balance.IsZero() && nonce == 0 && (codeHash == accounts.EmptyCodeHash || codeHash == accounts.CodeHash{})
-}
-
-// GetStorage returns addr's slot value composed at the given global txNum — including
-// the writes of the tx at that txNum — and whether a cell is materialized there, in
-// comma-ok form. It is the storage counterpart to GetAccount for the post-seal
-// commitment projection: a true ok with a zero value is a slot cleared to zero
-// (a leaf-removing delete), false ok means no write materialized at or below txNum.
-func (vm *VersionMap) GetStorage(addr accounts.Address, key accounts.StorageKey, txNum uint64) (uint256.Int, bool) {
-	txIdx := int(txNum - vm.baseTxNum.Load())
-	val, res, ok := vm.ReadStorage(addr, key, txIdx)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return uint256.Int{}, false
 }
 
 // txAccessKey addresses the per-tx access list. The block-end task's execution

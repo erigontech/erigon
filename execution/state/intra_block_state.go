@@ -1939,9 +1939,10 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	} else {
 		ibs.recordWriteBalanceDeleted(addr)
 	}
-	// Nonce and code hash are not written here — extraction drops them for a
-	// self-destructed account, and explicit zero cells would make a same-tx
-	// re-creation abort on a phantom collision.
+	// Nonce and code hash are not written here: Snapshot (finalize) drops them for a
+	// self-destructed account, and a balance-preserving destruct re-stamps the cleared
+	// values there so the version map carries the full codeless-EOA state. Explicit
+	// cells here would also make a same-tx re-creation abort on a phantom collision.
 	return true, nil
 }
 
@@ -2766,9 +2767,6 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
 		}
-		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
-			continue
-		}
 		view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
 		if err := view.Err(); err != nil {
 			// A failed base read zeroes the composed fields, which would read as
@@ -2827,7 +2825,12 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 				continue
 			}
 		}
-		writes.deleteAddr(addr)
+		// Stamp the uniform removal rather than silently dropping the writes: the
+		// during-tx exec cells already live in the version map, so a bare deleteAddr
+		// here leaves the commitment reading the created-empty account as present. A
+		// balance ValueDeleted at the finalize index removes the leaf, matching the
+		// domain delete.
+		writes.SetEmptyRemoval(addr, ibs.Version())
 	}
 }
 
