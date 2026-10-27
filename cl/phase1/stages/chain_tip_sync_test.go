@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -121,7 +123,8 @@ func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t
 }
 
 // ChainTipSync can wait a slot or longer for the next block, and validators attest to the head the beacon API serves
-// meanwhile, so a fork choice head imported by ForwardSync or ChainTipSync must be published first.
+// meanwhile, so a fork choice head imported by ForwardSync or ChainTipSync, or one that changed when the slot started
+// (proposer boost expiry), must be published first.
 func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	behind := Args{hasDownloaded: true, peers: 1, seenSlot: 65, seenEpoch: 2, targetSlot: 68, targetEpoch: 1}
 	unpublished := behind
@@ -130,15 +133,18 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	noPeers.peers = 0
 	atTip := unpublished
 	atTip.seenSlot = 68
+	atTipPublished := atTip
+	atTipPublished.headUnpublished = false
 	epochsBehind := unpublished
 	epochsBehind.seenSlot, epochsBehind.seenEpoch, epochsBehind.targetEpoch = 3, 0, 1
 
 	tests := []struct {
-		name  string
-		stage string
-		args  Args
-		err   error
-		want  string
+		name              string
+		stage             string
+		args              Args
+		err               error
+		forkChoiceRerunAt time.Time
+		want              string
 	}{
 		{name: "forward sync, head unpublished", stage: ForwardSync, args: unpublished, want: ForkChoice},
 		{name: "forward sync, no peers, head unpublished", stage: ForwardSync, args: noPeers, want: ForkChoice},
@@ -148,15 +154,60 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "chain tip timeout, head unpublished", stage: ChainTipSync, args: unpublished, err: context.DeadlineExceeded, want: ForkChoice},
 		{name: "chain tip timeout, head published", stage: ChainTipSync, args: behind, err: context.DeadlineExceeded, want: ChainTipSync},
 		{name: "chain tip reached the target", stage: ChainTipSync, args: atTip, want: ForkChoice},
+		{name: "sleep ended at the slot start, head unpublished", stage: SleepForSlot, args: unpublished, want: ForkChoice},
 		// ForkChoice may fail to publish; going straight back to ForkChoice would stop fetching blocks.
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
+		// CleanupAndPruning reruns ForkChoice for a block that gossip imported during either stage.
+		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: CleanupAndPruning},
+		{name: "cleanup and pruning at tip, head unpublished", stage: CleanupAndPruning, args: atTip, want: ForkChoice},
+		{name: "cleanup and pruning at tip, head published", stage: CleanupAndPruning, args: atTipPublished, want: SleepForSlot},
+		{name: "cleanup and pruning, no peers, head unpublished", stage: CleanupAndPruning, args: noPeers, want: SleepForSlot},
+		{name: "cleanup and pruning at tip, rerun just happened", stage: CleanupAndPruning, args: atTip, forkChoiceRerunAt: time.Now(), want: SleepForSlot},
 	}
 	stages := ConsensusClStages().Stages
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, stages[tt.stage].TransitionFunc(&Cfg{}, tt.args, tt.err))
+			cfg := &Cfg{forkChoiceRerunAt: tt.forkChoiceRerunAt}
+			require.Equal(t, tt.want, stages[tt.stage].TransitionFunc(cfg, tt.args, tt.err))
 		})
 	}
+}
+
+// A publish that keeps failing at the tip must not rerun ForkChoice back to back.
+func TestCleanupAndPruningRerunsForkChoiceOncePerInterval(t *testing.T) {
+	atTip := Args{hasDownloaded: true, peers: 1, seenSlot: 68, seenEpoch: 2, targetSlot: 68, targetEpoch: 1, headUnpublished: true}
+	transition := ConsensusClStages().Stages[CleanupAndPruning].TransitionFunc
+	cfg := &Cfg{}
+
+	require.Equal(t, ForkChoice, transition(cfg, atTip, nil))
+	require.Equal(t, SleepForSlot, transition(cfg, atTip, nil))
+}
+
+// The proposer boost expires when a slot starts, so the head can move without a block. The stage args must tick fork
+// choice to the slot they target, even before the fork choice clock ticker reaches it.
+func TestStageArgsTickForkChoiceToTheTargetSlot(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	const anchorSlot = 100
+	genesisTime := uint64(time.Now().Unix()) - (anchorSlot+1)*beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
+	anchorState := state.New(&beaconCfg)
+	anchorState.SetGenesisTime(genesisTime)
+	require.NoError(t, anchorState.SetSlot(anchorSlot))
+	anchorState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: anchorSlot})
+	syncedData := synced_data.NewSyncedDataManager(&beaconCfg, true)
+	store := newAnchorForkChoiceStore(t, &beaconCfg, anchorState, nil)
+	require.Equal(t, uint64(anchorSlot), store.Slot())
+	cfg := &Cfg{
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock),
+		ethClock:   clock,
+		beaconCfg:  &beaconCfg,
+		forkChoice: store,
+		syncedData: syncedData,
+	}
+
+	args := ConsensusClStages().ArgsFunc(t.Context(), cfg)
+
+	require.Equal(t, args.targetSlot, store.Slot())
 }
 
 func TestCfgCloseClosesBlockCollector(t *testing.T) {

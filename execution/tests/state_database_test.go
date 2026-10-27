@@ -31,11 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -816,19 +812,6 @@ func TestReorgOverStateChange(t *testing.T) {
 	require.NoError(t, err)
 }
 
-type BucketsStats struct {
-	Accounts     uint64
-	Storage      uint64
-	ChangeSetHAT uint64
-	ChangeSetHST uint64
-	HAT          uint64
-	HST          uint64
-}
-
-func (b BucketsStats) Size() uint64 {
-	return b.ChangeSetHST + b.ChangeSetHAT + b.HST + b.Storage + b.HAT + b.Accounts
-}
-
 func TestCreateOnExistingStorage(t *testing.T) {
 	t.Skip("Alex Sharov: seems it's not useful property in reality")
 
@@ -1595,18 +1578,4 @@ func TestTxLookupUnwind(t *testing.T) {
 	if count != 0 {
 		t.Errorf("txlookup record expected to be deleted, got %d", count)
 	}
-}
-
-func newTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
-	tb.Helper()
-	dirs := datadir.New(tb.TempDir())
-	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(16))
-	tb.Cleanup(db.Close)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(tb, err)
-	tb.Cleanup(tx.Rollback)
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	require.NoError(tb, err)
-	tb.Cleanup(domains.Close)
-	return db, tx, domains
 }
