@@ -71,10 +71,14 @@ type execEnv struct {
 
 func newExecEnv(t *testing.T, eezl2Code []byte, systemBalance uint64) *execEnv {
 	t.Helper()
-	cfg := eezChainConfig()
+	return newExecEnvFor(t, eezChainConfig(), eezl2Addr, eezl2Code, systemBalance)
+}
+
+func newExecEnvFor(t *testing.T, cfg *chain.Config, eezl2 accounts.Address, eezl2Code []byte, systemBalance uint64) *execEnv {
+	t.Helper()
 	ibs := state.New(state.NewNoopReader())
 	t.Cleanup(ibs.Close)
-	require.NoError(t, ibs.SetCode(eezl2Addr, eezl2Code, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(eezl2, eezl2Code, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.AddBalance(sysAddr, *uint256.NewInt(systemBalance), tracing.BalanceChangeUnspecified))
 	blockCtx := evmtypes.BlockContext{
 		CanTransfer: execprotocol.CanTransfer,

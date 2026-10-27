@@ -68,8 +68,8 @@ func Register() {
 }
 
 // Transaction is a type-0x76 transaction. It has no signature and no gas
-// fields: the sender is protocol.SystemAddress, the gas limit
-// protocol.SystemTxGasLimit and every fee zero.
+// fields: the sender is protocol.SystemAddress, the gas limit the one its
+// EEZL2 implies and every fee zero.
 type Transaction struct {
 	types.TransactionMisc
 
@@ -79,9 +79,10 @@ type Transaction struct {
 
 var _ types.Transaction = (*Transaction)(nil)
 
-// New returns the transaction with the given body, which must target EEZL2.
+// New returns the transaction with the given body, which must target the
+// EEZL2 of a rule set.
 func New(body protocol.SystemTx) (*Transaction, error) {
-	if body.To != protocol.EEZL2Address {
+	if !protocol.IsEEZL2(body.To) {
 		return nil, fmt.Errorf("%w: target %v is not EEZL2", protocol.ErrSystemTx, body.To)
 	}
 	return &Transaction{body: body}, nil
@@ -96,7 +97,7 @@ func (tx *Transaction) GetNonce() uint64                         { return tx.bod
 func (tx *Transaction) GetTipCap() *uint256.Int                  { return new(uint256.Int) }
 func (tx *Transaction) GetFeeCap() *uint256.Int                  { return new(uint256.Int) }
 func (tx *Transaction) GetBlobHashes() []common.Hash             { return nil }
-func (tx *Transaction) GetGasLimit() uint64                      { return protocol.SystemTxGasLimit }
+func (tx *Transaction) GetGasLimit() uint64                      { return tx.body.GasLimit() }
 func (tx *Transaction) GetBlobGas() uint64                       { return 0 }
 func (tx *Transaction) GetValue() *uint256.Int                   { return &tx.body.Value }
 func (tx *Transaction) GetData() []byte                          { return tx.body.Input }
@@ -139,12 +140,16 @@ func (tx *Transaction) Sender(sg types.Signer) (accounts.Address, error) {
 }
 
 // AsMessage returns a fee-free message from protocol.SystemAddress whose
-// value is minted before execution. The nonce is checked; the EIP-3607 sender
-// check and the EIP-7825 gas cap are not. Outside an EEZ chain the type is
-// not supported.
+// value is minted before execution; under rollupX it takes its gas from the
+// block. The nonce is checked; the EIP-3607 sender check and the EIP-7825 gas
+// cap are not. Outside an EEZ chain the type is not supported, and the target
+// must be the chain's EEZL2.
 func (tx *Transaction) AsMessage(s types.Signer, _ *uint256.Int, rules *chain.Rules) (*types.Message, error) {
-	if rules == nil || rules.L2Version < config.Rollup0 {
+	if rules == nil || (rules.L2Version != config.Rollup0 && rules.L2Version != config.RollupX) {
 		return nil, fmt.Errorf("%w: 0x%x outside an EEZ chain", types.ErrTxTypeNotSupported, protocol.SystemTxType)
+	}
+	if eezl2 := config.EEZL2(rules.L2Version); tx.body.To != eezl2 {
+		return nil, fmt.Errorf("%w: target %v is not the chain's EEZL2 %v", protocol.ErrSystemTx, tx.body.To, eezl2)
 	}
 	from, err := tx.Sender(s)
 	if err != nil {
@@ -152,9 +157,10 @@ func (tx *Transaction) AsMessage(s types.Signer, _ *uint256.Int, rules *chain.Ru
 	}
 	var zero uint256.Int
 	msg := types.NewMessage(from, accounts.InternAddress(tx.body.To), tx.body.Nonce, &tx.body.Value,
-		protocol.SystemTxGasLimit, &zero, &zero, &zero, tx.body.Input, nil,
+		tx.body.GasLimit(), &zero, &zero, &zero, tx.body.Input, nil,
 		true /* checkNonce */, false /* checkTransaction */, false /* checkGas */, true /* isFree */, nil)
 	msg.SetTxType(protocol.SystemTxType)
+	msg.SetGasFromBlock(rules.L2Version == config.RollupX)
 	return msg, nil
 }
 
@@ -256,7 +262,7 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 	if err := s.ListEnd(); err != nil {
 		return err
 	}
-	if body.To != protocol.EEZL2Address {
+	if !protocol.IsEEZL2(body.To) {
 		return fmt.Errorf("%w: target %v is not EEZL2", protocol.ErrSystemTx, body.To)
 	}
 	tx.body = body
@@ -291,7 +297,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 		To:      tx.GetTo(),
 		Value:   (*hexutil.U256)(&tx.body.Value),
 		Input:   &input,
-		Gas:     hexutil.Uint64(protocol.SystemTxGasLimit),
+		Gas:     hexutil.Uint64(tx.body.GasLimit()),
 	})
 }
 
@@ -312,7 +318,7 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 		Value:   uint256.Int(*dec.Value),
 		Input:   *dec.Input,
 	}
-	if body.To != protocol.EEZL2Address {
+	if !protocol.IsEEZL2(body.To) {
 		return fmt.Errorf("%w: target %v is not EEZL2", protocol.ErrSystemTx, body.To)
 	}
 	tx.body = body
