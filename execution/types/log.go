@@ -472,26 +472,11 @@ func decodeHashListTo(s *rlp.Stream, dst []common.Hash) ([]common.Hash, error) {
 //
 // Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
-	fields, err := viewList(s)
+	fields, err := s.ViewList()
 	if err != nil {
 		return err
 	}
 	return (*Log)(l).decodeStoredFields(fields)
-}
-
-// viewList returns the content of the next list, aliasing the input when the stream
-// allows it and copying otherwise.
-func viewList(s *rlp.Stream) ([]byte, error) {
-	content, ok, err := s.ViewList()
-	if ok || err != nil {
-		return content, err
-	}
-	raw, err := s.Raw()
-	if err != nil {
-		return nil, err
-	}
-	content, _, err = rlp.SplitList(raw)
-	return content, err
 }
 
 // decodeStoredFields decodes the fields of a stored log from the content of its list.

@@ -470,7 +470,7 @@ func (s *storedReceiptScratch) release() {
 }
 
 func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
-	content, err := viewList(s)
+	content, err := s.ViewList()
 	if err != nil {
 		return nil, err
 	}

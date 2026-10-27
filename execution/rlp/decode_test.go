@@ -510,9 +510,9 @@ func TestStreamViewList(t *testing.T) {
 
 	s := NewBytesStream(input)
 	defer PutStream(s)
-	b, ok, err := s.ViewList()
-	if err != nil || !ok {
-		t.Fatalf("ok=%v err=%v", ok, err)
+	b, err := s.ViewList()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if want := unhex("8301020483050607"); !bytes.Equal(b, want) {
 		t.Fatalf("content mismatch: got %x, want %x", b, want)
@@ -534,9 +534,9 @@ func TestStreamViewListInsideList(t *testing.T) {
 	if _, err := s.List(); err != nil {
 		t.Fatal(err)
 	}
-	b, ok, err := s.ViewList()
-	if err != nil || !ok {
-		t.Fatalf("ok=%v err=%v", ok, err)
+	b, err := s.ViewList()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !bytes.Equal(b, unhex("010203")) {
 		t.Fatalf("got %x, want 010203", b)
@@ -553,15 +553,17 @@ func TestStreamViewListInsideList(t *testing.T) {
 	}
 }
 
-// TestStreamViewListOtherReader pins that a stream not from NewBytesStream reads
-// nothing, so the caller can still decode the list from the stream.
 func TestStreamViewListOtherReader(t *testing.T) {
-	s := NewStream(bytes.NewReader(unhex("C3010203")), 0)
-	if _, ok, err := s.ViewList(); ok || err != nil {
-		t.Fatalf("ok=%v err=%v, want false, nil", ok, err)
+	s := NewStream(bytes.NewReader(unhex("C301020305")), 0)
+	b, err := s.ViewList()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if size, err := s.List(); err != nil || size != 3 {
-		t.Fatalf("list after ViewList: size=%d err=%v", size, err)
+	if !bytes.Equal(b, unhex("010203")) {
+		t.Fatalf("got %x, want 010203", b)
+	}
+	if v, err := s.Bytes(); err != nil || !bytes.Equal(v, []byte{5}) {
+		t.Fatalf("value after the list: v=%x err=%v", v, err)
 	}
 }
 
@@ -586,7 +588,7 @@ func TestStreamViewListErrors(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, _, err := s.ViewList(); !errors.Is(err, tt.wantErr) {
+			if _, err := s.ViewList(); !errors.Is(err, tt.wantErr) {
 				t.Fatalf("got %v, want %v", err, tt.wantErr)
 			}
 		})
