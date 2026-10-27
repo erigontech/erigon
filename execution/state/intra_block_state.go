@@ -3650,6 +3650,7 @@ func (ibs *IntraBlockState) PublishOrigins() {
 			}
 		}
 	})
+	ws.ReleaseAndReset()
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
