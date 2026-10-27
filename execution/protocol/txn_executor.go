@@ -96,6 +96,7 @@ type TxnExecutor struct {
 	state                 *state.IntraBlockState
 	evm                   *vm.EVM
 	mintsValue            bool
+	gas                   uint64
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
@@ -146,7 +147,18 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		data:       msg.Data(),
 		state:      evm.IntraBlockState(),
 		mintsValue: mintsValue(msg),
+		gas:        executionGas(msg, gp),
 	}
+}
+
+// executionGas returns the gas msg executes with: its gas limit or, when it
+// takes its gas from the block, what the block has left up to that limit.
+func executionGas(msg Message, gp *GasPool) uint64 {
+	fromBlock, ok := msg.(interface{ GasFromBlock() bool })
+	if !ok || !fromBlock.GasFromBlock() || gp == nil {
+		return msg.Gas()
+	}
+	return min(msg.Gas(), gp.ExecutionGasAvailable())
 }
 
 // mintsValue reports whether msg has a registered type whose value the outer
@@ -236,7 +248,7 @@ func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 	}
 
 	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{}, mdgas.MdGas{Execution: st.msg.Gas()}, tracing.GasChangeTxInitialBalance)
+		tracer.EmitGasChange(mdgas.MdGas{}, mdgas.MdGas{Execution: st.gas}, tracing.GasChangeTxInitialBalance)
 	}
 
 	return nil
@@ -302,7 +314,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	gas := st.msg.Gas()
+	gas := st.gas
 	blobGas := st.msg.BlobGas()
 	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam, st.msg.SkipExecutionGasCap())
 	if err := CheckBlockGasInclusion(st.gp, executionContribution, stateContribution, blobGas); err != nil {
@@ -465,8 +477,8 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		return nil, ErrGasUintOverflow
 	}
 	intrinsicGas := intrinsicGasResult.ExecutionGas
-	if st.msg.Gas() < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
+	if st.gas < intrinsicGas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, intrinsicGas)
 	}
 
 	if contractCreation {
@@ -481,7 +493,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.gas, intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
@@ -617,10 +629,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.gas, intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 
 	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
+		tracer.EmitGasChange(mdgas.MdGas{Execution: st.gas}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
 	}
 
 	// The value debit is part of the sender charge applied at validation.
@@ -734,7 +746,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxRefunds)
 		}
 	}
-	st.txnGasUsed = st.msg.Gas() - gasLeft.Total()
+	st.txnGasUsed = st.gas - gasLeft.Total()
 	if st.txnGasUsed < intrinsicGasResult.FloorGasCost && (rules.IsAmsterdam || (rules.IsPrague && applyRefunds)) {
 		var old mdgas.MdGas
 		if gasTracing {
@@ -760,7 +772,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			}
 		}
 	} else if !rules.IsAmsterdam {
-		st.blockExecutionGasUsed = st.msg.Gas()
+		st.blockExecutionGasUsed = st.gas
 	}
 	// EIP-8037: deduct the actual per-dimension usage from the block pool.
 	// Pre-Amsterdam only the execution dimension exists.
