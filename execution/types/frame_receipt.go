@@ -98,10 +98,5 @@ func (r *FrameReceipt) UnmarshalJSON(input []byte) error {
 }
 
 func (receipts FrameReceipts) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	data, err := json.Marshal(receipts)
-	if err != nil {
-		return err
-	}
-	s.WriteRawBytes(data)
-	return nil
+	return jsonstream.WriteReflected(s, receipts)
 }

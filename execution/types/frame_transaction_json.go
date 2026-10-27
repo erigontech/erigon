@@ -151,28 +151,13 @@ func (keys *FrameNonceKeys) UnmarshalJSON(input []byte) error {
 }
 
 func (keys FrameNonceKeys) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	data, err := keys.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	s.WriteRawBytes(data)
-	return nil
+	return jsonstream.WriteReflected(s, keys)
 }
 
 func (frames Frames) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	data, err := json.Marshal(frames)
-	if err != nil {
-		return err
-	}
-	s.WriteRawBytes(data)
-	return nil
+	return jsonstream.WriteReflected(s, frames)
 }
 
 func (signatures FrameSignatures) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	data, err := json.Marshal(signatures)
-	if err != nil {
-		return err
-	}
-	s.WriteRawBytes(data)
-	return nil
+	return jsonstream.WriteReflected(s, signatures)
 }

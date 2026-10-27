@@ -77,16 +77,3 @@ func (tx *FrameTxWrapper) validateSidecarShape() error {
 	}
 	return nil
 }
-
-func (tx *FrameTxWrapper) ValidateBlobTransactionWrapper() error {
-	if err := tx.validateSidecarShape(); err != nil {
-		return err
-	}
-	for i, hash := range tx.BlobVersionedHashes {
-		if tx.Commitments[i].ComputeVersionedHash() != hash {
-			return errors.New("frame blob commitment does not match versioned hash")
-		}
-	}
-	sidecar := BlobTxWrapper{WrapperVersion: 1, Blobs: tx.Blobs, Commitments: tx.Commitments, Proofs: tx.Proofs}
-	return sidecar.VerifyProofs()
-}

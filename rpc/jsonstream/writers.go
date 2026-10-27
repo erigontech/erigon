@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding"
+	"encoding/json"
 	"slices"
 	"strconv"
 
@@ -25,6 +26,16 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 )
+
+// WriteReflected writes v with encoding/json.
+func WriteReflected(s *Stream, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(b)
+	return nil
+}
 
 type textPtr[T any] interface {
 	*T

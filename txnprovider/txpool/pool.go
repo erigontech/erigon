@@ -398,12 +398,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
 	if oldGasLimit != stateChanges.BlockGasLimit {
 		p.all.ascendAll(func(mt *metaTxn) bool {
-			limits, err := protocol.TransactionGasLimits(mt.TxnSlot.Txn, p.isAmsterdam())
-			if err == nil && limits.Execution <= stateChanges.BlockGasLimit && limits.State <= stateChanges.BlockGasLimit {
-				mt.subPool |= NotTooMuchGas
-			} else {
-				mt.subPool &^= NotTooMuchGas
-			}
+			p.updateGasLimitMarker(mt, stateChanges.BlockGasLimit)
 			p.updateInSubPool(mt)
 			return true
 		})
@@ -2289,6 +2284,14 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	return nil
 }
 
+func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
+	limits, err := protocol.TransactionGasLimits(mt.TxnSlot.Txn, p.isAmsterdam())
+	mt.subPool &^= NotTooMuchGas
+	if err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
+		mt.subPool |= NotTooMuchGas
+	}
+}
+
 // onSenderStateChange is the function that recalculates ephemeral fields of transactions and determines
 // which sub pool they will need to go to. Since this depends on other transactions from the same sender by with lower
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
@@ -2313,11 +2316,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			}
 			mt.nonceDistance, mt.cumulativeBalanceDistance = 0, 0
 			mt.subPool |= NoNonceGaps | EnoughBalance
-			mt.subPool &^= NotTooMuchGas
-			_, _, limits, err := frame.GasLimits()
-			if err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
-				mt.subPool |= NotTooMuchGas
-			}
+			p.updateGasLimitMarker(mt, blockGasLimit)
 			p.updateInSubPool(mt)
 			return true
 		}
@@ -2395,15 +2394,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			}
 		}
 
-		mt.subPool &^= NotTooMuchGas
-		fits := mt.TxnSlot.GetGas() <= blockGasLimit
-		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
-			_, _, limits, err := frame.GasLimits()
-			fits = err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit
-		}
-		if fits {
-			mt.subPool |= NotTooMuchGas
-		}
+		p.updateGasLimitMarker(mt, blockGasLimit)
 
 		if mt.TxnSlot.Traced {
 			logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
