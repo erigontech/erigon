@@ -19,6 +19,7 @@ package vm
 import (
 	"bytes"
 	"hash/maphash"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -40,7 +41,7 @@ var (
 
 	precompileSeed, precompileCheckSeed = maphash.MakeSeed(), maphash.MakeSeed()
 	precompileResults                   = cache.NewByteLRU(8*datasize.MB, func(_ uint64, r precompileResult) int64 {
-		return int64(len(r.output) + 64)
+		return int64(unsafe.Sizeof(r)) + int64(len(r.output)) + cache.ByteLRUEntryOverheadBytes
 	})
 )
 

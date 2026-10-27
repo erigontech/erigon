@@ -651,8 +651,36 @@ func TestPrecompileCacheKeyNormalizes(t *testing.T) {
 
 	header := make([]byte, 96)
 	header[31], header[63], header[95] = 1, 1, 1
-	declared := append(header, 2, 3, 5)
+	declared := slices.Concat(header, []byte{2, 3, 5})
 	key, ok = modExpKey(append(bytes.Clone(declared), 7, 7, 7))
 	require.True(t, ok)
 	require.Equal(t, declared, key, "bytes past the declared operands must not split entries")
+}
+
+func TestCachedPrecompileMatchesNativeVectors(t *testing.T) {
+	for hexAddr, fixture := range precompileSuccessVectors {
+		addr := common.HexToAddress(hexAddr)
+		p := allPrecompiles[addr]
+		c := cachePrecompile(p, forkOsaka, addr)
+		if c == p {
+			continue
+		}
+		tests, err := loadJson(fixture)
+		require.NoError(t, err)
+		for _, test := range tests {
+			in := common.Hex2Bytes(test.Input)
+			// The padded input is the same call for precompiles that ignore a suffix and a rejected length for the rest.
+			for _, input := range [][]byte{in, slices.Concat(in, make([]byte, 64))} {
+				want, wantErr := p.Run(input)
+				for range 2 { // miss, then hit
+					got, err := c.Run(input)
+					require.Equal(t, wantErr == nil, err == nil, "%s %s", p.Name(), test.Name)
+					if wantErr != nil {
+						require.Equal(t, wantErr.Error(), err.Error(), "%s %s", p.Name(), test.Name)
+					}
+					require.Equal(t, want, got, "%s %s", p.Name(), test.Name)
+				}
+			}
+		}
+	}
 }
