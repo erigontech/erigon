@@ -386,6 +386,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 				if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
 					peersRefreshedAt = chainLen
 					peers = newPeersContext(connected)
+					clear(rangeFailed)
 					peerId, err = peers.nextAvailablePeer()
 				}
 			}

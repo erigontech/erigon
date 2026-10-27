@@ -397,3 +397,37 @@ func TestBackwardBlockDownloader_HeaderWalkGivesUpOnStalledRanges(t *testing.T) 
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
 	require.Zero(t, fetcher.rangeRetries.Load())
 }
+
+type firstRangeFailingFetcher struct {
+	chainServingBbdFetcher
+	failHashCall int64
+	hashCalls    atomic.Int64
+	rangeCalls   atomic.Int64
+}
+
+func (s *firstRangeFailingFetcher) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	if s.rangeCalls.Add(1) == 1 {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.chainServingBbdFetcher.FetchHeaders(ctx, start, end, peerId, opts...)
+}
+
+func (s *firstRangeFailingFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	if amount > 1 && s.hashCalls.Add(1) == s.failHashCall {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func TestBackwardBlockDownloader_HeaderWalkRefreshGivesRangesBackToPeersWhoseRangeFailed(t *testing.T) {
+	headers := headerWalkChain(2501)
+	fetcher := &firstRangeFailingFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}, failHashCall: 2}
+	bbd := newTestBbd(t, fetcher)
+	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
+	defer collector.Close()
+
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), defaultBbdRequestConfig)
+	require.NoError(t, err)
+	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
+	require.Greater(t, fetcher.rangeCalls.Load(), int64(1))
+}
