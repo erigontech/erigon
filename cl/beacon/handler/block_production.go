@@ -348,8 +348,8 @@ func preparedGrabOffset(due time.Duration) time.Duration {
 	return due - payloadPublicationMargin(due)
 }
 
-// Gloas preparation stands down on a FULL parent, the usual case, so the builder starts only with the
-// proposal; collecting at a third of the window leaves two thirds for the block to reach attesters.
+// The unprepared Gloas collection target leaves two thirds of the attestation window for
+// block processing, signing, and gossip.
 func unpreparedGrabOffset(due time.Duration, stateVersion clparams.StateVersion) time.Duration {
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		return due / gloasPayloadCollectionDivisor

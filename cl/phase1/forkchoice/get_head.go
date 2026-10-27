@@ -120,10 +120,10 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return head.Root, slot, err
 }
 
-// GetHeadWithSyncedHeadState reads the synced head state while holding the fork-choice lock, so callers must not hold a synced-data lock.
-func (f *ForkChoiceStore) GetHeadWithSyncedHeadState() (common.Hash, uint64, error) {
-	head, slot, err := f.getHeadNode(f.syncedDataManager.ViewHeadState)
-	return head.Root, slot, err
+// GetHeadWithSyncedHeadState resolves the head using the synced head state when needed.
+// Callers must not hold a synced-data lock: the fork-choice lock must come first.
+func (f *ForkChoiceStore) GetHeadWithSyncedHeadState() (ForkChoiceNode, uint64, error) {
+	return f.getHeadNode(f.syncedDataManager.ViewHeadState)
 }
 
 func (f *ForkChoiceStore) getHeadNode(viewAuxiliaryState auxiliaryStateView) (ForkChoiceNode, uint64, error) {
