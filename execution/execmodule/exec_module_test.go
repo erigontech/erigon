@@ -4084,8 +4084,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 }
 
 // Same-sender txs that send value, revert with value and read the sender's
-// balance must reach the state root of serial execution when parallel exec
-// charges the sender at validation.
+// balance must reach the state root of serial execution, whether parallel exec
+// charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true
@@ -4144,6 +4144,7 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
 		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
 		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas above balance", feeCap: *uint256.NewInt(100_000 * common.GWei), wantErr: protocol.ErrInsufficientFunds},
 		{name: "gas limit times fee cap overflows", feeCap: *new(uint256.Int).SetAllOne(), wantErr: protocol.ErrInsufficientFunds},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
