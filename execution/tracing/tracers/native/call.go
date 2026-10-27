@@ -267,6 +267,8 @@ func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, fro
 	t.frameTx, _ = tx.Unwrap().(*types.FrameTransaction)
 	t.topDepth = 0
 	if t.frameTx != nil {
+		// Each transaction frame is a top-level operation beneath the synthetic
+		// root, so OnlyTopCall must retain those children too.
 		t.topDepth = 1
 	}
 }
@@ -291,6 +293,8 @@ func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasU
 		t.callstack[0].GasRefund = toHexUint64Ptr(txnGasUsage.GasRefund)
 	}
 	if t.frameTx != nil {
+		// A later frame can refill an earlier frame's state gas. Use final receipts
+		// instead of the gas usage observed when each individual call exited.
 		for i := range min(len(receipt.FrameReceipts), len(t.callstack[0].Calls)) {
 			frame, call := &receipt.FrameReceipts[i], &t.callstack[0].Calls[i]
 			call.Gas = hexutil.Uint64(t.frameTx.Frames[i].Limits.Total())

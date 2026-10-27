@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// FrameEntryPoint supplies the protocol caller for DEFAULT and VERIFY frames.
+// Frames enter their targets directly, without executing an entry-point contract.
 var FrameEntryPoint = accounts.InternAddress(common.HexToAddress("0xaa"))
 
 var ErrFrameContext = errors.New("opcode requires a frame transaction")
@@ -49,9 +51,12 @@ func opApprove(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if err := evm.ApproveFrame(call.Address(), scope.Uint64()); err != nil {
 		return pc, nil, err
 	}
+	// Successful approval also returns from the current EVM call.
 	return pc, evm.output(&call.Memory, offset, length), errStopToken
 }
 
+// ApproveFrame is shared by the APPROVE opcode and default EOA verification so
+// both paths enforce the same approval scopes and payment side effects.
 func (evm *EVM) ApproveFrame(address accounts.Address, scope uint64) error {
 	ctx := evm.FrameContext
 	if ctx == nil {
@@ -154,6 +159,9 @@ func (evm *EVM) consumeFrameNonce() error {
 	return nil
 }
 
+// ExecuteTransactionFrame enters one frame with its caller and gas budgets.
+// Nested calls share its state-gas pool; the protocol executor owns frame rollback
+// and transaction-level sequencing, receipts and fee settlement.
 func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err error) {
 	ctx := evm.FrameContext
 	tx := ctx.Transaction

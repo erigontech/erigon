@@ -32,6 +32,9 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
+// FrameValidation describes a successful pool simulation at one state snapshot.
+// It supplies payer reservations and dependencies for invalidating that result;
+// it does not guarantee that the transaction's execution frames will succeed.
 type FrameValidation struct {
 	Payer        common.Address
 	MaxCost      uint256.Int
@@ -41,6 +44,8 @@ type FrameValidation struct {
 	Dependencies []common.Address
 }
 
+// frameValidationTracer enforces pool-only restrictions through EVM hooks, so
+// simulation shares the consensus executor without restricting mined transactions.
 type frameValidationTracer struct {
 	FrameValidation
 	evm          *vm.EVM
@@ -94,6 +99,9 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	return &validation.FrameValidation, nil
 }
 
+// frameValidationPrefix recognizes optional expiry and deployment frames followed by
+// sender approval and, if separate, payer approval. Restricting this prefix
+// bounds unpaid validation work; execution frames after it are not simulated.
 func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, error) {
 	invalid := errors.New("unrecognized frame validation prefix")
 	if len(tx.Frames) == 0 {
@@ -160,6 +168,8 @@ func (v *frameValidationTracer) fail(err error) {
 	}
 }
 
+// checkTarget records code dependencies, including a sender's delegated code.
+// A change to either account can invalidate an otherwise unchanged sender's approval.
 func (v *frameValidationTracer) checkTarget(address accounts.Address, top bool) {
 	if v.err != nil {
 		return
@@ -196,6 +206,8 @@ func (v *frameValidationTracer) beforeFrame() error {
 	target := accounts.InternAddress(f.ResolvedTarget(ctx.Transaction.SenderAddress))
 	v.checkTarget(target, true)
 	if ctx.Index == v.end {
+		// APPROVE debits MaxCost. Reservations need the payer's balance before
+		// that debit so the same transaction is not counted twice.
 		var err error
 		v.PayerBalance, err = v.evm.IntraBlockState().GetBalance(target)
 		if err != nil {

@@ -541,4 +541,6 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 
 func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
 
+// FrameTransaction retains the full envelope because the single-call message
+// fields cannot represent approval frames, signatures and per-frame gas budgets.
 func (m *Message) FrameTransaction() *FrameTransaction { return m.frameTransaction }

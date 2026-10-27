@@ -203,6 +203,8 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(env.Coinbase)
 	if frameTx, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+		// Capture direct targets before any frame runs; earlier frames may change
+		// the account state or delegation that a later frame will observe.
 		for _, frame := range frameTx.Frames {
 			target := accounts.InternAddress(frame.ResolvedTarget(frameTx.SenderAddress))
 			t.lookupAccount(target)

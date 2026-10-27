@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
+// frameReservation prevents pooled transactions from promising the same payer
+// balance more than once. Reservations are protected by the pool lock.
 type frameReservation struct {
 	cost       uint256.Int
 	paymasters uint64
@@ -45,6 +47,8 @@ type frameValidationResult struct {
 
 var errFrameStateChanged = errors.New("frame validation state changed")
 
+// One deadline covers the whole batch, including waits for the simulation gate.
+// A fresh timeout per transaction would let large batches hold up admission.
 const frameValidationTimeout = 5 * time.Second
 
 func (tx *TxnSlot) hasKeyedNonce() bool {
@@ -57,6 +61,7 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardRea
 		return txpoolcfg.TypeNotActivated, nil
 	}
 	frame := txn.Txn.(*types.FrameTransaction)
+	// Bound validation work before checking attacker-supplied signatures.
 	if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
 		return txpoolcfg.InvalidFrame, nil
 	}
@@ -76,6 +81,9 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardRea
 	return txpoolcfg.Success, nil
 }
 
+// prepareFrames checks pool policy under the lock, then simulates against the
+// captured head without holding the lock. The caller must check the returned
+// generation under the lock before admitting transactions with these results.
 func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) (uint64, map[*TxnSlot]frameValidationResult) {
 	results := make(map[*TxnSlot]frameValidationResult)
 	p.lock.Lock()
@@ -100,6 +108,8 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) (uint64, map[
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, stateBlockHash common.Hash) frameValidationResult {
 	validation, err := p.simulateFrame(ctx, txn, stateBlockHash)
 	if err != nil {
+		// Backend failures do not establish invalidity. A retryable per-transaction
+		// discard lets the rest of the batch or block update continue.
 		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
 		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
 	}
@@ -113,6 +123,8 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash
 	if p.ethBackend == nil {
 		return nil, errors.New("frame validation backend is unavailable")
 	}
+	// Serialize expensive simulations across admission and revalidation without
+	// blocking access to the pool. Waiting here consumes the batch deadline too.
 	select {
 	case p.frameValidationGate <- struct{}{}:
 		defer func() { <-p.frameValidationGate }()
@@ -154,6 +166,8 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash
 	return v, nil
 }
 
+// checkFrameReservation requires the pool lock. Replacements and revalidation
+// reuse the previous reservation, so only their net change counts against balance.
 func (p *TxPool) checkFrameReservation(v, previous *protocol.FrameValidation) txpoolcfg.DiscardReason {
 	reserved := p.frameReservations[v.Payer]
 	if previous != nil && previous.Payer == v.Payer {
@@ -162,6 +176,8 @@ func (p *TxPool) checkFrameReservation(v, previous *protocol.FrameValidation) tx
 			reserved.paymasters--
 		}
 	}
+	// All coded paymasters use the non-canonical pool policy: one pending frame
+	// transaction per paymaster, even when its balance could cover more.
 	if v.Paymaster && reserved.paymasters != 0 {
 		return txpoolcfg.InvalidFrame
 	}
@@ -203,6 +219,8 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	}
 }
 
+// invalidateFrames parks transactions whose validation results may be stale.
+// The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
 	touched := make(map[common.Address]struct{})
 	nonceSlots := make(map[common.Hash]struct{})
@@ -228,9 +246,12 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		keyedNonce := !frame.UsesLegacyNonce()
 		first := &frame.Frames[0]
+		// Expiry and blob costs can change with the block context even when none
+		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || first.Target != nil && *first.Target == types.FrameExpiryVerifier || frame.GetBlobGas() != 0
 		for _, dependency := range previous.Dependencies {
-			// The sender's validation can read any of its own storage.
+			// Storage-only changes to the nonce manager need only the selected slots
+			// checked below. If the manager is the sender, validation can read all its storage.
 			if dependency == types.FrameNonceManager && keyedNonce && frame.SenderAddress != types.FrameNonceManager && !nonceManagerAccountChanged {
 				continue
 			}
@@ -258,6 +279,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	return pending
 }
 
+// revalidateFrames simulates parked transactions outside the pool lock. Results
+// apply only while both the state generation and the pooled entry still match.
 func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, generation uint64, stateBlockHash common.Hash) {
 	if len(pending) == 0 {
 		return
@@ -268,6 +291,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 		result := p.simulateFrameResult(ctx, mt.TxnSlot, stateBlockHash)
 		p.lock.Lock()
 		if generation != p.stateGeneration {
+			// The newer block update also picks up parked transactions.
 			p.lock.Unlock()
 			return
 		}
@@ -307,6 +331,8 @@ func frameReplacementFee(previous, replacement *uint256.Int, bump uint64) bool {
 	if replacement.Cmp(previous) <= 0 {
 		return false
 	}
+	// Cross-products preserve the full percentage bump without division rounding
+	// or overflow at the uint256 boundary.
 	percent := new(big.Int).Add(new(big.Int).SetUint64(bump), big.NewInt(100))
 	required := new(big.Int).Mul(previous.ToBig(), percent)
 	offered := new(big.Int).Mul(replacement.ToBig(), big.NewInt(100))

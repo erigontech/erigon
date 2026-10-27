@@ -24,8 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// FrameContext journals approvals and state-gas charges with their state changes.
-// Call, frame and atomic-batch rollbacks undo both; execution gas remains charged.
+// FrameContext shares transaction-wide approvals and gas accounting across frames
+// and their nested calls. Approvals and state-gas charges follow the state journal:
+// call, frame and atomic-batch rollbacks undo them, while execution gas remains charged.
 type FrameContext struct {
 	Transaction    *types.FrameTransaction
 	Receipts       []types.FrameReceipt
@@ -39,7 +40,7 @@ type FrameContext struct {
 	GasBailout     bool
 	journal        *journal
 	undo           journalExtra
-	storageOwners  map[frameStorageSlot]uint8
+	storageOwners  map[frameStorageSlot]uint8 // Charging frame index plus one; zero means no outstanding charge.
 }
 
 type frameStorageSlot struct {
@@ -54,6 +55,8 @@ func (ibs *IntraBlockState) NewFrameContext(tx *types.FrameTransaction, maxCost 
 	return ctx
 }
 
+// ResetFrameTransientStorage isolates transient storage between transaction frames.
+// The reset is journaled so an enclosing batch or transaction rollback can undo it.
 func (ibs *IntraBlockState) ResetFrameTransientStorage() {
 	if len(ibs.transientStorage) == 0 {
 		return

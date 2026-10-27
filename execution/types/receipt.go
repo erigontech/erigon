@@ -159,6 +159,7 @@ func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 
 // SetLogs preserves frame boundaries and shares log objects between the combined
 // log list and frame receipts, so metadata updates apply to both.
+// The input must keep the existing per-frame log counts and order.
 func (r *Receipt) SetLogs(logs Logs) {
 	r.Logs = logs
 	for i := range r.FrameReceipts {

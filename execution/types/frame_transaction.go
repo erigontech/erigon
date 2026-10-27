@@ -65,6 +65,8 @@ var FrameExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c5
 
 var FrameNonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
 
+// Frame is a call with its own caller mode, approval scope and gas budgets.
+// A nil target denotes the transaction sender; creation happens inside a frame call.
 type Frame struct {
 	Mode   uint8
 	Flags  uint8
@@ -74,6 +76,8 @@ type Frame struct {
 	Data   []byte
 }
 
+// FrameSignature supplies a verified signature claim, or opaque data for contract
+// validation. Verifying a signature alone does not authorize execution or payment.
 type FrameSignature struct {
 	Scheme    uint8
 	Signer    []byte
@@ -87,6 +91,10 @@ type FrameFees struct {
 	BlobFeeCap uint256.Int
 }
 
+// FrameTransaction carries an explicit sender and a sequence of calls that
+// authorize execution, select a payer and perform the requested work.
+// Its format combines EIP-8141 frames with EIP-8250 nonce keys:
+// https://eips.ethereum.org/EIPS/eip-8141 and https://eips.ethereum.org/EIPS/eip-8250.
 type FrameTransaction struct {
 	TransactionMisc     `rlp:"-"`
 	ChainID             uint256.Int
@@ -172,6 +180,8 @@ func (sig *FrameSignature) validate(sender common.Address, hash common.Hash) boo
 	}
 }
 
+// Validate checks structure, gas limits and cryptographic signatures without state.
+// Authorization, nonce consumption and payment are checked during frame execution.
 func (tx *FrameTransaction) Validate() error {
 	if err := tx.validateNonceKeys(); err != nil {
 		return err
@@ -277,6 +287,9 @@ func (tx *FrameTransaction) GetGasLimit() uint64 {
 	return limits.Total()
 }
 
+// GasLimits includes transaction overhead in the execution limit and sums state
+// limits separately. The calldata floor raises only the execution limit; neither
+// dimension can borrow capacity from the other.
 func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.MdGas, err error) {
 	args := mdgas.FrameIntrinsicGasCalcArgs{FramesLen: uint64(len(tx.Frames))}
 	if !tx.UsesLegacyNonce() {
@@ -331,6 +344,8 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 
 func (tx *FrameTransaction) GetValue() *uint256.Int { return new(uint256.Int) }
 
+// GetTo has no single destination to return. Use IsContractDeploy to distinguish
+// contract creation from transactions whose destinations are in their frames.
 func (tx *FrameTransaction) GetTo() *common.Address { return nil }
 
 func (tx *FrameTransaction) GetData() []byte { return nil }
@@ -414,6 +429,8 @@ func (tx *FrameTransaction) validateNonceKeys() error {
 	return nil
 }
 
+// UsesLegacyNonce identifies the [0] key set, which consumes the sender's account
+// nonce. Other key sets share Nonce as their sequence in FrameNonceManager storage.
 func (tx *FrameTransaction) UsesLegacyNonce() bool {
 	return len(tx.NonceKeys) == 1 && tx.NonceKeys[0].IsZero()
 }
@@ -425,6 +442,8 @@ func FrameNonceSlot(sender common.Address, key uint256.Int) common.Hash {
 	return crypto.Keccak256Hash(input[:])
 }
 
+// NonceKeysHash uses fixed-width words for the count and keys, as required by
+// transaction introspection. This commitment is distinct from the RLP encoding.
 func (tx *FrameTransaction) NonceKeysHash() common.Hash {
 	input := make([]byte, 32*(1+len(tx.NonceKeys)))
 	uint256.NewInt(uint64(len(tx.NonceKeys))).PutUint256(input[:32])

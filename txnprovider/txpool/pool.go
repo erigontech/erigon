@@ -2904,6 +2904,8 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 	err := p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
 		return p.fromDBLocked(tx, coreTx, cacheView, &frames)
 	})
+	// Validation results and payer reservations are not persisted. Restored
+	// frames must pass admission against the current head, outside the pool lock.
 	if err == nil && len(frames.Txns) > 0 {
 		_, err = p.addNewTxns(ctx, frames, false)
 	}

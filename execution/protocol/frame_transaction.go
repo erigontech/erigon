@@ -33,6 +33,10 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+// executeFrameTransaction owns transaction validity, frame sequencing, rollback
+// boundaries and fee settlement; the EVM executes each individual frame.
+// A non-nil validation tracer limits execution to the pool's validation prefix
+// and causes all simulated changes to be reverted.
 func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds, gasBailout bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
 	if !rules.IsBogota {
@@ -87,6 +91,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if tx.GetBlobGas() > 0 && !skipBlobCheck && tx.Fees.BlobFeeCap.Lt(&st.evm.Context.BlobBaseFee) {
 		return nil, ErrMaxFeePerBlobGas
 	}
+	// Execution and state gas are reserved at the fee cap; blob gas uses the
+	// current blob base fee. Approval debits this budget, and settlement returns
+	// unused gas and the difference from the effective execution gas price.
 	maxCost, overflow := u256.MulOverflow(u256.U64(limits.Total()), tx.Fees.FeeCap)
 	if overflow {
 		return nil, ErrInsufficientFunds
@@ -131,6 +138,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}()
 	st.evm.BlobHashes = tx.BlobVersionedHashes
 	st.evm.GasPrice = *st.msg.GasPrice()
+	// Tracers need one transaction root with frames as ordered children. This
+	// synthetic call emits hooks only; it does not execute code or add EVM depth.
 	if tracer := st.evm.Config().Tracer; tracer.HasEnterHook() || tracer.HasExitHook() {
 		tracer.EmitEnter(0, byte(vm.CALL), sender, vm.FrameEntryPoint, false, nil, limits, uint256.Int{}, nil)
 		defer func() {
@@ -185,6 +194,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			ctx.Receipts[i].Logs = st.state.LogsSince(logStart)
 		} else {
 			lastErr = frameErr
+			// A failed VERIFY rejects the transaction. Other frame failures remain
+			// receipt outcomes and allow later frames to run, subject to atomic batches.
 			if frame.Mode == types.FrameVerify {
 				return nil, fmt.Errorf("verification frame %d failed: %w", i, frameErr)
 			}

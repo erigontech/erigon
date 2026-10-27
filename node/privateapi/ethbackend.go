@@ -494,6 +494,9 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
+// FrameValidation evaluates the pool validation prefix against the published head,
+// including state announced before database commit. It returns the payer and state
+// dependencies needed for admission and later revalidation.
 func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 	txn, err := types.DecodeTransaction(req.Transaction)
 	if err != nil {
@@ -567,6 +570,8 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	rejectBlockHash := func(uint64) (common.Hash, error) {
 		return common.Hash{}, errors.New("BLOCKHASH is not allowed in frame validation")
 	}
+	// State comes from the published head, but inclusion would happen in the next
+	// block. Its context must account for fee changes and fork activation.
 	blockContext := protocol.NewEVMBlockContext(header, rejectBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
 	blockContext.BlockNumber++
 	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))

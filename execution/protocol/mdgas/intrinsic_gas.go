@@ -58,6 +58,9 @@ type FrameIntrinsicGasCalcArgs struct {
 	DataNonZeroLen    uint64
 }
 
+// CalcFrameIntrinsicGas charges transaction overhead before any frame executes.
+// Keyed-nonce reads and writes are prepaid here; first-use storage creation is
+// charged separately to the state-gas budget of the frame that approves payment.
 func CalcFrameIntrinsicGas(args FrameIntrinsicGasCalcArgs) IntrinsicGasCalcResult {
 	base := params.FrameIntrinsicGas + params.FrameOverheadGas*args.FramesLen
 	base += args.KeyedNoncesLen * (params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038)

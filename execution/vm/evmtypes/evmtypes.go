@@ -95,6 +95,8 @@ func (result *ExecutionResult) Unwrap() error {
 // Failed returns the indicator whether the execution is successful or not
 func (result *ExecutionResult) Failed() bool { return result.Err != nil }
 
+// ReceiptForTracing supplies final gas and frame outcomes to transaction-end hooks
+// before a full receipt is built. Block metadata and combined logs are added later.
 func (result *ExecutionResult) ReceiptForTracing() *types.Receipt {
 	status := uint64(types.ReceiptStatusSuccessful)
 	if result.Failed() {

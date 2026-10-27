@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
+// Frame receipts encode per-frame outcomes. The aggregate status, logs and bloom
+// are derived from them rather than included in the consensus payload.
 type frameReceiptRLP struct {
 	CumulativeGasUsed uint64
 	Payer             *common.Address

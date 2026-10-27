@@ -87,6 +87,8 @@ func opFrameParam(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error
 	}
 	i, p := index.Uint64(), param.Uint64()
 	frame := &ctx.Transaction.Frames[i]
+	// Outcome selectors are only available for earlier frames. The current and
+	// future frames do not yet have a completed execution result.
 	if (p == 5 || p == 10 || p == 11) && i >= uint64(ctx.Index) {
 		return pc, nil, ErrFrameParameter
 	}

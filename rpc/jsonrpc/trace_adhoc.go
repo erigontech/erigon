@@ -435,6 +435,8 @@ func (ot *OeTracer) OnTxEndV2(receipt *types.Receipt, usage mdgas.TxnGasUsage, e
 	if ot.frameTx == nil || err != nil {
 		return
 	}
+	// Frame exit hooks precede cross-frame refills and final fee settlement.
+	// Receipt gas is authoritative once all frames have finished.
 	for _, trace := range ot.r.Trace {
 		switch len(trace.TraceAddress) {
 		case 0:
@@ -576,9 +578,12 @@ func (ot *OeTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to acc
 		ot.frameHasCode = len(code) > 0 || precompile
 	}
 	if frameEntry && ot.r.VmTrace != nil {
+		// Frames are siblings under the synthetic root. Do not attach a new frame
+		// to the preceding frame's last opcode or reuse its memory offsets.
 		ot.lastVmOp, ot.lastOffStack = nil, nil
 		ot.lastMemOff, ot.lastMemLen, ot.callMemOff, ot.callMemLen = 0, 0, 0, 0
 		if ot.frameHasCode {
+			// The root has no bytecode: Pc identifies a frame, and Op stays unset.
 			op := &VmTraceOp{Pc: ot.traceStack[0].Subtraces, Cost: int(gas.Total()), Ex: &VmTraceEx{Push: []string{}}}
 			ot.r.VmTrace.Ops = append(ot.r.VmTrace.Ops, op)
 			ot.lastVmOp = op

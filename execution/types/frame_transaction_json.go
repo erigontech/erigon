@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
+// Preserve empty target, signer and message fields in the JSON forms. Resolving
+// their defaults here would change the signed RLP payload on a round trip.
 type frameJSON struct {
 	Mode          hexutil.Uint64  `json:"mode"`
 	Flags         hexutil.Uint64  `json:"flags"`

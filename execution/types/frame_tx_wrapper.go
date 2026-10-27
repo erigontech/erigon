@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
+// FrameTxWrapper carries blob sidecars for pool and network transport. Hashing
+// and execution use the embedded transaction; sidecars are outside its signed payload.
 type FrameTxWrapper struct {
 	*FrameTransaction
 	WrapperVersion byte
