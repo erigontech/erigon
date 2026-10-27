@@ -48,13 +48,18 @@ func newMerkleHasher() *merkleHasher {
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit uint64) (err error) {
-	chunks := uint64(len(leaves) / 32)
+	chunks := uint64(len(leaves)+31) / 32
 	if chunks > limit {
 		return fmt.Errorf("merkleize: %d chunks exceed limit %d", chunks, limit)
 	}
 	if chunks == 0 {
 		copy(out, ZeroHashes[GetDepth(limit)][:])
 		return nil
+	}
+	if len(leaves)%32 != 0 {
+		padded := make([]byte, chunks*32)
+		copy(padded, leaves)
+		leaves = padded
 	}
 	return m.merkleizeTrieLeavesFlatWithStart(leaves, out, limit, 0)
 }

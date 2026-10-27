@@ -135,3 +135,30 @@ func TestMerkleRootFromFlatLeavesWithLimitEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestMerkleRootFromFlatLeavesWithLimitUnbalanced(t *testing.T) {
+	var root [32]byte
+	require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit([]byte{1, 2, 3, 4, 5}, root[:], 4))
+
+	padded := make([]byte, 32)
+	copy(padded, []byte{1, 2, 3, 4, 5})
+	var want [32]byte
+	require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(padded, want[:], 4))
+	require.Equal(t, want, root)
+
+	require.Error(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(make([]byte, 4*32+1), root[:], 4))
+}
+
+func TestBitlistRootWithLimitRejectsOverLimit(t *testing.T) {
+	_, err := merkle_tree.BitlistRootWithLimit([]byte{0x04}, 1)
+	require.Error(t, err, "2 bits, limit 1")
+
+	bits := make([]byte, 38)
+	bits[0] = 0xff
+	bits[37] = 0x01
+	_, err = merkle_tree.BitlistRootWithLimit(bits, 256)
+	require.Error(t, err, "296 bits, limit 256")
+
+	_, err = merkle_tree.BitlistRootWithLimit(bits, 296)
+	require.NoError(t, err, "296 bits, limit 296")
+}

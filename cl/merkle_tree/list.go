@@ -61,6 +61,9 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 		size          uint64
 	)
 	unpackedRoots, size = parseBitlist(unpackedRoots, bits)
+	if size > limit {
+		return [32]byte{}, fmt.Errorf("bitlist: %d bits exceed limit %d", size, limit)
+	}
 
 	roots := packBits(unpackedRoots)
 	base, err := MerkleizeVector(roots, (limit+255)/256)
