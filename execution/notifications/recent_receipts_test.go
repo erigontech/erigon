@@ -186,11 +186,12 @@ func TestRecentReceiptsNotifiesAddedBlocksInOrder(t *testing.T) {
 
 	require.Len(t, notifier.logBatches, 1)
 	require.Len(t, notifier.logBatches[0], blockCount)
-	require.Len(t, notifier.receiptBatches, blockCount)
+	require.Len(t, notifier.receiptBatches, 1)
+	require.Len(t, notifier.receiptBatches[0], blockCount)
 	for i := range blockCount {
 		blockNum := uint64(i + 1)
 		require.Equal(t, blockNum, uint64(notifier.logBatches[0][i].Log.BlockNumber))
-		require.Equal(t, blockNum, notifier.receiptBatches[i][0].Header.Number.Uint64())
+		require.Equal(t, blockNum, notifier.receiptBatches[0][i].Header.Number.Uint64())
 	}
 }
 

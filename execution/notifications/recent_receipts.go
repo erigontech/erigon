@@ -156,7 +156,7 @@ func (r *RecentReceipts) Add(receipts types.Receipts, txs []types.Transaction, h
 	}
 }
 
-// NotifyReceipts sends added receipts in ascending block order for [from,to).
+// NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to).
 func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 	if !n.HasReceiptSubscriptions() {
 		return
@@ -164,6 +164,7 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	var reply []*ReceiptNotification
 	for _, blockNum := range slices.Sorted(maps.Keys(r.receipts)) {
 		if blockNum+r.limit < from { // evict old
 			delete(r.receipts, blockNum)
@@ -182,7 +183,6 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 			continue
 		}
 
-		var reply []*ReceiptNotification
 		for _, receipt := range receipts {
 			if receipt == nil {
 				continue
@@ -197,10 +197,9 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 				Header:  header,
 			})
 		}
-
-		if len(reply) > 0 {
-			n.OnReceipts(reply)
-		}
+	}
+	if len(reply) > 0 {
+		n.OnReceipts(reply)
 	}
 }
 

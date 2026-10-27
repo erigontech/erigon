@@ -107,6 +107,8 @@ var reorgCases = []reorgCase{
 	{name: "HigherHeadViaForkchoiceOnly", forkLen: 2, newPayload: false},
 	{name: "EightBlockForkViaNewPayload", forkLen: 8, newPayload: true},
 	{name: "EightBlockForkViaForkchoiceOnly", forkLen: 8, newPayload: false},
+	{name: "NineBlockForkViaNewPayload", forkLen: 9, newPayload: true},
+	{name: "NineBlockForkViaForkchoiceOnly", forkLen: 9, newPayload: false},
 }
 
 func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
