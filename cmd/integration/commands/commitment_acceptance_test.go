@@ -108,7 +108,8 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
 	selectPBTCommandSuite(t)
-	reopened := execmoduletester.New(t,
+	reopened := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -164,7 +165,8 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	require.True(t, wideRange, "the reopened aggregator must merge a range wider than one step")
 	reopened.Close()
 	selectPBTCommandSuite(t)
-	merged := execmoduletester.New(t,
+	merged := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -210,7 +212,8 @@ func TestPBTAttachSkipVerifyAcceptanceAtConversionPoint(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
 	selectPBTCommandSuite(t)
-	reopened := execmoduletester.New(t,
+	reopened := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -295,32 +298,6 @@ func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
 	require.Equal(t, uint64(7), txNum)
 }
 
-func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
-	selectPBTCommandSuite(t)
-	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
-	require.NoError(t, err)
-	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFilesAt(t, node, 7)
-	resetPBTAcceptanceExecution(t, node)
-	node.Tester.Close()
-	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
-	require.NoError(t, err)
-	copyPBTStateSalt(t, node, source)
-	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
-	buildPBTAcceptanceFiles(t, source)
-	source.Tester.Close()
-	selectPBTCommandSuite(t)
-	published := filepath.Join(t.TempDir(), "published")
-	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	rewritePBTAttachManifest(t, published, func(manifest *dbstate.PBTManifest) {
-		manifest.PBTRoot = common.Hash{0xaa}.Hex()
-	})
-	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "published binary root record")
-	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
-}
-
 func TestPBTAttachSkipVerifyRefusesPostForkPoint(t *testing.T) {
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
@@ -350,7 +327,7 @@ func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	require.NoError(t, corruptPBTOutputRow(t.Context(), datadir.Open(published)))
+	require.NoError(t, corruptPBTDomain(t.Context(), datadir.Open(published), kv.CommitmentBinDomain))
 	setExecutionProgress(t, source.Chaindata, 1)
 	before := snapshotTree(t, source.DataDir)
 	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
@@ -358,12 +335,20 @@ func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
-func TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation(t *testing.T) {
+type pbtAttachRejectFixture struct {
+	node      *execmoduletester.PBTAcceptanceChain
+	published string
+}
+
+func newPBTAttachRejectFixture(t *testing.T, resetExecution bool) pbtAttachRejectFixture {
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
+	if resetExecution {
+		resetPBTAcceptanceExecution(t, node)
+	}
 	node.Tester.Close()
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
@@ -374,14 +359,59 @@ func TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "node checkpoint is block")
-	require.NotContains(t, err.Error(), "stage_exec")
-	require.ErrorContains(t, err, "cannot be loaded by integration")
-	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
-	resetPBTAcceptanceExecution(t, node)
-	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
+	return pbtAttachRejectFixture{node: node, published: published}
+}
+
+func TestPBTAttachRejectsWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		resetExecution bool
+		check          func(*testing.T, *execmoduletester.PBTAcceptanceChain, string)
+	}{
+		{
+			name:           "TestPBTAttachRejectsPublishedRootMismatchWithoutMutation",
+			resetExecution: true,
+			check: func(t *testing.T, node *execmoduletester.PBTAcceptanceChain, published string) {
+				rewritePBTAttachManifest(t, published, func(manifest *dbstate.PBTManifest) {
+					manifest.PBTRoot = common.Hash{0xaa}.Hex()
+				})
+				before := snapshotTree(t, node.Tester.Dirs.DataDir)
+				err := attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+				require.ErrorContains(t, err, "published binary root record")
+				require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+			},
+		},
+		{
+			name: "TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation",
+			check: func(t *testing.T, node *execmoduletester.PBTAcceptanceChain, published string) {
+				before := snapshotTree(t, node.Tester.Dirs.DataDir)
+				err := attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+				require.ErrorContains(t, err, "node checkpoint is block")
+				require.NotContains(t, err.Error(), "stage_exec")
+				require.ErrorContains(t, err, "cannot be loaded by integration")
+				require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+				resetPBTAcceptanceExecution(t, node)
+				require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
+			},
+		},
+		{
+			name:           "TestPBTAttachRejectsNodeCheckpointMismatchWithoutMutation",
+			resetExecution: true,
+			check: func(t *testing.T, node *execmoduletester.PBTAcceptanceChain, published string) {
+				overwritePBTImportHexCheckpoint(t, node.Tester.Dirs.DataDir, 1, 6, 8)
+				before := snapshotTree(t, node.Tester.Dirs.DataDir)
+				err := attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, node.Tester.ChainConfig.ChainName, log.New())
+				require.ErrorContains(t, err, "behind conversion point")
+				require.ErrorContains(t, err, "txNum 6")
+				require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newPBTAttachRejectFixture(t, test.resetExecution)
+			test.check(t, fixture.node, fixture.published)
+		})
+	}
 }
 
 func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
@@ -407,7 +437,8 @@ func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
 	_, conversionTx, ok, err := settings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -442,7 +473,8 @@ func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
 	dual, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
 	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
-	reopened := execmoduletester.New(t,
+	reopened := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -496,31 +528,6 @@ func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
 	require.ErrorContains(t, err, "published hex root")
-	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
-}
-
-func TestPBTAttachRejectsNodeCheckpointMismatchWithoutMutation(t *testing.T) {
-	selectPBTCommandSuite(t)
-	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
-	require.NoError(t, err)
-	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFilesAt(t, node, 7)
-	resetPBTAcceptanceExecution(t, node)
-	node.Tester.Close()
-	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
-	require.NoError(t, err)
-	copyPBTStateSalt(t, node, source)
-	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
-	buildPBTAcceptanceFiles(t, source)
-	source.Tester.Close()
-	selectPBTCommandSuite(t)
-	published := filepath.Join(t.TempDir(), "published")
-	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	overwritePBTImportHexCheckpoint(t, node.Tester.Dirs.DataDir, 1, 6, 8)
-	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, node.Tester.ChainConfig.ChainName, log.New())
-	require.ErrorContains(t, err, "behind conversion point")
-	require.ErrorContains(t, err, "txNum 6")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 
@@ -642,7 +649,8 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	require.NoError(t, source.Tester.InsertChain(source.Chain))
 	buildPBTAcceptanceFilesAt(t, source, 9)
 	source.Tester.Close()
-	resetNode := execmoduletester.New(t,
+	resetNode := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -672,7 +680,8 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
 	selectPBTCommandSuite(t)
-	reopened := execmoduletester.New(t,
+	reopened := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -783,7 +792,8 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 
 	selectPBTCommandSuite(t)
-	reopened := execmoduletester.New(t,
+	reopened := execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
 		execmoduletester.WithGenesisSpec(node.Genesis),
 		execmoduletester.WithKey(node.Key),
@@ -930,7 +940,8 @@ func buildPBTAcceptanceFilesAtWithMerge(t *testing.T, fixture *execmoduletester.
 	agg.Close()
 	rawDB.Close()
 	if lastBlock != 0 {
-		reopened := execmoduletester.New(t,
+		reopened := execmoduletester.New(
+			t,
 			execmoduletester.WithExistingDataDir(dirs),
 			execmoduletester.WithGenesisSpec(fixture.Genesis),
 			execmoduletester.WithKey(fixture.Key),

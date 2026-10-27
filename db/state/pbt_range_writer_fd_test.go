@@ -34,7 +34,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestPBinR08SixRangesFit256Descriptors(t *testing.T) {
+func TestPBinSixRangesFit256Descriptors(t *testing.T) {
 	selectPBinRangeWriterHash(t)
 	db, agg := commitmenttemporal.Open(t, 8)
 	writePBinRangeWriterAccounts(t, db, 56)

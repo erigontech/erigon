@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -30,8 +31,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -49,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
@@ -339,7 +339,7 @@ func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {
 	source, wantRoot := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	require.NoError(t, corruptPBTOutputRow(t.Context(), datadir.Open(published)))
+	require.NoError(t, corruptPBTDomain(t.Context(), datadir.Open(published), kv.CommitmentBinDomain))
 	setExecutionProgress(t, source.Chaindata, 1)
 	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: true}
 	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks))
@@ -493,22 +493,11 @@ func pbtAttachManifestStateFile(t *testing.T, published string) string {
 
 func snapshotTreeDigest(t *testing.T, root string) map[string][32]byte {
 	t.Helper()
-	got := map[string][32]byte{}
-	require.NoError(t, filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		got[rel] = sha256.Sum256(data)
-		return nil
-	}))
+	tree := snapshotTree(t, root)
+	got := make(map[string][32]byte, len(tree))
+	for path, data := range tree {
+		got[path] = sha256.Sum256([]byte(data))
+	}
 	return got
 }
 
@@ -716,7 +705,8 @@ func runPBTOfflineCommandWithEnv(t *testing.T, environment []string, binary stri
 	require.NoError(t, err)
 	if binary == "integration" && len(args) > 0 && args[0] == "stage_exec" {
 		command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPBTAttachRemedyHelperProcess$")
-		command.Env = append(os.Environ(),
+		command.Env = append(
+			os.Environ(),
 			"GO_WANT_HELPER_PROCESS=1",
 			"PBT_REMEDY_ARGS="+strings.Join(args[1:], "\x1f"),
 		)
@@ -1227,4 +1217,67 @@ func newPBTAttachFileTrees(t *testing.T, both bool) (datadir.Dirs, datadir.Dirs)
 		require.NoError(t, os.WriteFile(filepath.Join(published.SnapDomain, name), []byte("published"), 0o644))
 	}
 	return node, published
+}
+
+func TestAttachPBTResumeRejectsReplacedManifest(t *testing.T) {
+	for _, skip := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip=%t", skip), func(t *testing.T) {
+			selectPBTCommandSuite(t)
+			source, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 0, []byte{0x60, 0x01})
+			published := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+			setExecutionProgress(t, source.Chaindata, 1)
+			hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: skip, step: func(step string) error {
+				if step == "marker" {
+					return errors.New("interrupted attach")
+				}
+				return nil
+			}}
+			require.ErrorContains(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks), "interrupted attach")
+			replacement, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 1, []byte{0x60, 0x01})
+			replacementPublished := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBT(t.Context(), replacement.DataDir, replacementPublished, true, "", log.New()))
+			require.NoError(t, os.Rename(published, published+".old"))
+			require.NoError(t, os.Rename(replacementPublished, published))
+			_, root, end, fork, _, err := pbtAttachBlockEnd(t.Context(), source.Dirs, 1, 7)
+			require.NoError(t, err)
+			require.True(t, end)
+			require.True(t, fork)
+			manifest, err := state.ReadPBTManifest(filepath.Join(datadir.Open(published).Snap, "pbt-manifest.toml"))
+			require.NoError(t, err)
+			require.NotEqual(t, common.HexToHash(manifest.PBTRoot), root)
+			var steps []string
+			hooks.step = func(step string) error { steps = append(steps, step); return nil }
+			err = attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks)
+			require.Error(t, err, "resume accepted replacement manifest with mismatched post-fork root: err=%v steps=%v", err, steps)
+			require.Empty(t, steps)
+		})
+	}
+}
+
+func TestAttachPBTResumeAfterCommitmentRemoval(t *testing.T) {
+	selectPBTCommandSuite(t)
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	setExecutionProgress(t, source.Chaindata, 1)
+	db := dbCfg(dbcfg.ChainDB, source.Chaindata).MustOpen()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.ClearTable(kv.TblCommitmentVals) }))
+	db.Close()
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, step: func(step string) error {
+		if step == "marker" {
+			return errors.New("interrupted attach")
+		}
+		return nil
+	}}
+	require.ErrorContains(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks), "interrupted attach")
+	marker, err := state.ReadPBTAttachMarker(source.Dirs)
+	require.NoError(t, err)
+	require.NotNil(t, marker)
+	digest, err := state.PBTManifestDigest(filepath.Join(datadir.Open(published).Snap, "pbt-manifest.toml"))
+	require.NoError(t, err)
+	require.Equal(t, digest, marker.ManifestBlake3)
+	require.NoError(t, removePBTFiles(source.Dirs, pbtAttachAdoptsFile))
+	err = attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
+	require.NoError(t, err, "same-manifest resume after interrupted file removal must finish: got %v", err)
 }

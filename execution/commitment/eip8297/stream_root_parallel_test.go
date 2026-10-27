@@ -18,9 +18,11 @@ package eip8297
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math/rand"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -215,19 +217,22 @@ func parallelStreamRootLongShardEntries(batches int) []Entry {
 func parallelStreamRootCorpora() [][]Entry {
 	return [][]Entry{
 		nil,
-		parallelStreamRootAccountEntries(1),
-		parallelStreamRootAccountEntries(2),
+		parallelStreamRootEntries(1, nil, 1),
+		parallelStreamRootEntries(2, nil, 1),
 		parallelStreamRootZoneEntries(),
-		parallelStreamRootPrefixEntries(),
+		parallelStreamRootEntries(8, []byte{0x12, 0x30}, 0),
 	}
 }
 
-func parallelStreamRootAccountEntries(count int) []Entry {
+func parallelStreamRootEntries(count int, prefix []byte, positionStart byte) []Entry {
 	entries := make([]Entry, count)
 	for i := range entries {
 		position := make([]byte, 32)
-		position[0] = 0x12
-		position[31] = byte(i + 1)
+		if len(prefix) == 0 {
+			prefix = []byte{0x12}
+		}
+		copy(position, prefix)
+		position[31] = byte(i) + positionStart
 		entries[i] = Entry{Key: TreeKey(AccountZone, position, byte(i)), Value: streamRootValue(byte(i + 1))}
 	}
 	return entries
@@ -239,18 +244,6 @@ func parallelStreamRootZoneEntries() []Entry {
 	storage := TreeKey(StorageZone, bytes.Repeat([]byte{0x56}, 64), 0)
 	entries := []Entry{{Key: account, Value: streamRootValue(1)}, {Key: code, Value: streamRootValue(2)}, {Key: storage, Value: streamRootValue(3)}}
 	return sortStreamEntries(entries)
-}
-
-func parallelStreamRootPrefixEntries() []Entry {
-	entries := make([]Entry, 8)
-	for i := range entries {
-		position := make([]byte, 32)
-		position[0] = 0x12
-		position[1] = 0x30
-		position[31] = byte(i)
-		entries[i] = Entry{Key: TreeKey(AccountZone, position, byte(i)), Value: streamRootValue(byte(i + 1))}
-	}
-	return entries
 }
 
 func randomParallelStreamRootEntries(rnd *rand.Rand) []Entry {
@@ -279,4 +272,65 @@ func randomParallelStreamRootEntries(rnd *rand.Rand) []Entry {
 	}
 	slices.SortFunc(entries, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
 	return entries
+}
+
+func TestParallelRejectsCrossShardPrefix(t *testing.T) {
+	serial, err := NewStreamRootBuilder(streamRootHash(HashKeccak))
+	require.NoError(t, err)
+	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 2)
+	require.NoError(t, err)
+	value := streamRootValue(1)
+	require.NoError(t, serial.Add([]byte{0x12}, value))
+	require.ErrorContains(t, serial.Add([]byte{0x12, 0x80}, value), "not prefix-free")
+	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12}, value))
+	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12, 0x80}, value))
+	root, err := parallel.RootHash()
+	require.Error(t, err, "parallel accepted prefix-related keys 12 and 1280: root=%x, err=%v", root, err)
+}
+
+func TestParallelBufferReuse(t *testing.T) {
+	entries := parallelStreamRootEntries(2, nil, 1)
+	sum := streamRootHash(HashKeccak)
+	serial, err := NewStreamRootBuilder(sum)
+	require.NoError(t, err)
+	for _, e := range entries {
+		require.NoError(t, serial.Add(e.Key, e.Value))
+	}
+	want, err := serial.RootHash()
+	require.NoError(t, err)
+	parallel, err := NewParallelStreamRoot(sum, 1)
+	require.NoError(t, err)
+	require.NoError(t, parallel.AddContext(t.Context(), entries[0].Key, entries[0].Value))
+	require.NoError(t, parallel.AddContext(t.Context(), entries[1].Key, entries[1].Value))
+	entries[1].Value[0] = 0x7f
+	got, err := parallel.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, want, got, "root changed after reuse of a buffer passed to Add")
+}
+
+func TestParallelStreamRootWorkerErrorReachesProducer(t *testing.T) {
+	builder, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	key := []byte{0, 0}
+	value := streamRootValue(1)
+	if err := builder.AddContext(ctx, key, value); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.AddContext(ctx, key, value); err != nil {
+		t.Fatal(err)
+	}
+	for shard := 1; shard < 10; shard++ {
+		err = builder.AddContext(ctx, []byte{0, byte(shard << 4)}, value)
+		if err != nil {
+			break
+		}
+	}
+	_, rootErr := builder.RootHash()
+	if err == nil || !strings.Contains(err.Error(), "strictly ascending") {
+		t.Fatalf("worker ordering error must reach producer; AddContext=%v, RootHash=%v", err, rootErr)
+	}
 }

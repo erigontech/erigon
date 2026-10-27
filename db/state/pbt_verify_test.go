@@ -21,8 +21,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/internal/commitmenttest/temporal"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
@@ -301,4 +300,93 @@ func pbinUnreferencedRowAboveChainDepth(t *testing.T, rows map[string][]byte) ([
 	}
 	t.Fatal("no deterministic row candidate above chain depth")
 	return nil, nil
+}
+
+func TestPBinVerifyCountsActualRootPointReads(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 1024)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg,
+		SourceTx:         sourceTx,
+		TargetAggregator: agg,
+		TargetTx:         targetTx,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         7,
+		Hash:             eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+	verifyTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer verifyTx.Rollback()
+	counted := &pbinCountingTx{TemporalTx: verifyTx}
+	stats := new(pbt.VerifyStats)
+	_, err = state.VerifyPBinDomainRootWithStats(t.Context(), counted, agg, kv.CommitmentDomain, stats)
+	require.NoError(t, err)
+	require.Zero(t, len(counted.reads), "C-d made point reads of %x while stats reported %d", counted.reads, stats.PointLookups.Load())
+}
+
+type pbinCountingTx struct {
+	kv.TemporalTx
+	reads [][]byte
+}
+
+func (tx *pbinCountingTx) Pin() kv.TemporalFilesPin {
+	return tx.TemporalTx.(interface{ Pin() kv.TemporalFilesPin }).Pin()
+}
+
+func (tx *pbinCountingTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.CommitmentDomain && bytes.Equal(key, pbt.GlobalRootKey()) {
+		tx.reads = append(tx.reads, bytes.Clone(key))
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestPBinVerifyStorageRowsStayBounded(t *testing.T) {
+	const (
+		maxLiveRows  = 1024
+		maxLiveBytes = 1 << 20
+	)
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 4096)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg,
+		SourceTx:         sourceTx,
+		TargetAggregator: agg,
+		TargetTx:         targetTx,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         7,
+		Hash:             eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+	verifyTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer verifyTx.Rollback()
+	stats := new(pbt.VerifyStats)
+	_, err = state.VerifyPBinDomainRootWithStats(t.Context(), verifyTx, agg, kv.CommitmentDomain, stats)
+	require.NoError(t, err)
+	require.Greater(t, stats.RangeRows.Load(), uint64(1))
+	require.Less(t, stats.PeakRows.Load(), uint64(maxLiveRows),
+		"verification retained too many rows: peak=%d bound=%d", stats.PeakRows.Load(), maxLiveRows)
+	require.Less(t, stats.PeakBytes.Load(), uint64(maxLiveBytes),
+		"verification retained too many bytes: peak=%d bound=%d", stats.PeakBytes.Load(), maxLiveBytes)
 }

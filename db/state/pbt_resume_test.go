@@ -18,16 +18,21 @@ package state_test
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPBinResumeMatchesFreshConversion(t *testing.T) {
@@ -82,7 +87,7 @@ func TestPBinResumeMatchesFreshConversion(t *testing.T) {
 	requireResumeStateFile(t, targetAgg, 16, 24)
 }
 
-func convertPBinBetween(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64) common.Hash {
+func convertPBin(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, configure func(*state.PBinConvertOptions)) common.Hash {
 	t.Helper()
 	sourceTx, err := sourceDB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -90,18 +95,56 @@ func convertPBinBetween(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state
 	targetTx, err := targetDB.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer targetTx.Rollback()
-	root, err := state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+	options := state.PBinConvertOptions{
 		SourceAggregator: sourceAgg,
 		SourceTx:         sourceTx,
 		TargetAggregator: targetAgg,
 		TargetTx:         targetTx,
-		TargetDB:         targetDB,
 		TargetDomain:     kv.CommitmentDomain,
 		EndTxNum:         endTxNum,
 		Hash:             eip8297.HashBytes,
-	})
+	}
+	if configure != nil {
+		configure(&options)
+	}
+	root, err := state.ConvertPBin(t.Context(), options)
 	require.NoError(t, err)
 	return root
+}
+
+func convertPBinBetween(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64) common.Hash {
+	return convertPBin(t, sourceDB, sourceAgg, targetDB, targetAgg, endTxNum, func(options *state.PBinConvertOptions) {
+		options.TargetDB = targetDB
+	})
+}
+
+func convertPBinAt(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, endTxNum uint64) common.Hash {
+	return convertPBin(t, db, agg, db, agg, endTxNum, nil)
+}
+
+func resumePBinAtWithRanges(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, sourceRanges [][2]uint64) common.Hash {
+	return convertPBin(t, sourceDB, sourceAgg, targetDB, targetAgg, endTxNum, func(options *state.PBinConvertOptions) {
+		options.TargetDB = targetDB
+		options.Workers = 4
+		options.Resume = &state.PBinResumeOptions{BaseTxNum: 8, SourceRanges: sourceRanges, SourceTxNum: endTxNum, Workers: 4, PostCancun: true}
+	})
+}
+
+func resumePBinAtWithAbsent(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, probe state.PBinAbsentProbeFunc) common.Hash {
+	return convertPBin(t, sourceDB, sourceAgg, targetDB, targetAgg, endTxNum, func(options *state.PBinConvertOptions) {
+		options.TargetDB = targetDB
+		options.RangeWriterLimits = &state.PBinRangeWriterLimits{AbsentProbe: probe}
+		options.Workers = 4
+		options.Resume = &state.PBinResumeOptions{BaseTxNum: 8, SourceTxNum: endTxNum, Workers: 4, PostCancun: true}
+	})
+}
+
+func resumePBinAtWithBase(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, baseTxNum, endTxNum uint64, sourceRanges [][2]uint64) common.Hash {
+	return convertPBin(t, sourceDB, sourceAgg, targetDB, targetAgg, endTxNum, func(options *state.PBinConvertOptions) {
+		options.TargetDB = targetDB
+		options.Workers = 4
+		options.Resume = &state.PBinResumeOptions{BaseTxNum: baseTxNum, SourceRanges: sourceRanges, SourceTxNum: endTxNum, Workers: 4, PostCancun: true}
+	})
 }
 
 func TestPBinResumeEmptyGapKeepsBaseRoot(t *testing.T) {
@@ -174,53 +217,8 @@ func TestPBinResumeDeletedSubtreeKeepsTombstones(t *testing.T) {
 	}
 }
 
-func convertPBinAt(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, endTxNum uint64) common.Hash {
-	t.Helper()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	root, err := state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         endTxNum,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	return root
-}
-
 func resumePBinAt(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64) common.Hash {
 	return resumePBinAtWithRanges(t, sourceDB, sourceAgg, targetDB, targetAgg, endTxNum, nil)
-}
-
-func resumePBinAtWithRanges(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, sourceRanges [][2]uint64) common.Hash {
-	t.Helper()
-	sourceTx, err := sourceDB.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := targetDB.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	root, err := state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: sourceAgg,
-		SourceTx:         sourceTx,
-		TargetAggregator: targetAgg,
-		TargetTx:         targetTx,
-		TargetDB:         targetDB,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         endTxNum,
-		Hash:             eip8297.HashBytes,
-		Workers:          4,
-		Resume:           &state.PBinResumeOptions{BaseTxNum: 8, SourceRanges: sourceRanges, SourceTxNum: endTxNum, Workers: 4, PostCancun: true},
-	})
-	require.NoError(t, err)
-	return root
 }
 
 func pbinCommitmentRows(t *testing.T, agg *state.Aggregator) map[string][]byte {
@@ -278,4 +276,290 @@ func requireResumeStateFile(t *testing.T, agg *state.Aggregator, wantStart, want
 	require.Equal(t, wantStart, start)
 	require.Equal(t, wantEnd, end)
 	require.NotEmpty(t, value)
+}
+
+func TestPBinResumeRejectsBasePastY(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	baseDB, baseAgg := testDbAndAggregatorv3(t, 8)
+	targetDB, targetAgg := testDbAndAggregatorv3(t, 8)
+	initial := []pbinLeafStreamAccount{{address: append(make([]byte, 19), 1), nonce: 1, balance: 1}}
+	writePBinLeafStreamRange(t, baseDB, 0, 8, initial)
+	require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, 1, unboundedFinalityCtx, false))
+	baseAgg.WaitForFiles()
+	writePBinLeafStreamRange(t, targetDB, 0, 32, initial)
+	require.NoError(t, targetAgg.BuildFiles2(t.Context(), targetDB, 0, 4, unboundedFinalityCtx, false))
+	targetAgg.WaitForFiles()
+	convertPBinBetween(t, baseDB, baseAgg, targetDB, targetAgg, 8)
+	resumePBinAt(t, baseDB, baseAgg, targetDB, targetAgg, 24)
+	sourceTx, err := baseDB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := targetDB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	root, err := state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: baseAgg,
+		SourceTx:         sourceTx,
+		TargetAggregator: targetAgg,
+		TargetTx:         targetTx,
+		TargetDB:         targetDB,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         16,
+		Hash:             eip8297.HashBytes,
+		Workers:          4,
+		Resume:           &state.PBinResumeOptions{BaseTxNum: 8, SourceTxNum: 16, PostCancun: true, Workers: 4},
+	})
+	require.Error(t, err, "resume accepted base state at 24 beyond Y=16: err=%v root=%x", err, root)
+}
+
+func TestPBinResumeConsultsBaseRowsForAbsent(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	baseDB, baseAgg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	sourceDB, sourceAgg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	targetDB, targetAgg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	base := []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1},
+		{address: pbinLeafStreamAddress(0x22), nonce: 1, balance: 1},
+		{address: pbinLeafStreamAddress(0x33), nonce: 1, balance: 1},
+	}
+	updated := []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x11), nonce: 2, balance: 2},
+		{address: pbinLeafStreamAddress(0x22), nonce: 2, balance: 2},
+		{address: pbinLeafStreamAddress(0x44), nonce: 1, balance: 1},
+	}
+	writePBinLeafStreamRange(t, baseDB, 0, 8, base)
+	require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, 1, unboundedFinalityCtx, false))
+	baseAgg.WaitForFiles()
+	writePBinLeafStreamRange(t, sourceDB, 0, 8, base)
+	writePBinLeafStreamStates(t, sourceDB, 8, updated)
+	require.NoError(t, sourceAgg.BuildFiles2(t.Context(), sourceDB, 0, 2, unboundedFinalityCtx, false))
+	sourceAgg.WaitForFiles()
+	writePBinLeafStreamRange(t, targetDB, 0, 8, base)
+	writePBinLeafStreamStates(t, targetDB, 8, updated)
+	writePBinLeafStreamStates(t, targetDB, 16, updated)
+	require.NoError(t, targetAgg.BuildFiles2(t.Context(), targetDB, 0, 3, unboundedFinalityCtx, false))
+	targetAgg.WaitForFiles()
+	convertPBinBetween(t, baseDB, baseAgg, targetDB, targetAgg, 8)
+	rows := pbinCommitmentRows(t, targetAgg)
+	var baseKey []byte
+	for key := range rows {
+		if key != string(commitment.KeyCommitmentState) {
+			baseKey = []byte(key)
+			break
+		}
+	}
+	require.NotEmpty(t, baseKey)
+	var result atomic.Int32
+	probe := func(isAbsent func([]byte) bool) {
+		if isAbsent(baseKey) {
+			result.Store(1)
+			return
+		}
+		result.Store(2)
+	}
+	resumePBinAtWithAbsent(t, sourceDB, sourceAgg, targetDB, targetAgg, 16, probe)
+	require.Equal(t, int32(2), result.Load(), "resume must consult an existing base row through Absent")
+}
+
+func TestPBinResumeRejectsFilesPastBase(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	baseDB, baseAgg := testDbAndAggregatorv3(t, 8)
+	targetDB, targetAgg := testDbAndAggregatorv3(t, 8)
+	initial := []pbinLeafStreamAccount{{address: pbinLeafStreamAddress(1), nonce: 1, balance: 1}}
+	writePBinLeafStreamRange(t, baseDB, 0, 24, initial)
+	require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, 3, unboundedFinalityCtx, false))
+	baseAgg.WaitForFiles()
+	writePBinLeafStreamRange(t, targetDB, 0, 48, initial)
+	require.NoError(t, targetAgg.BuildFiles2(t.Context(), targetDB, 0, 6, unboundedFinalityCtx, false))
+	targetAgg.WaitForFiles()
+	convertPBinBetween(t, baseDB, baseAgg, targetDB, targetAgg, 24)
+	var files []string
+	require.NoError(t, filepath.WalkDir(targetAgg.Dirs().Snap, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.Contains(entry.Name(), "commitment.3-4.") {
+			files = append(files, path)
+		}
+		return nil
+	}))
+	require.NotEmpty(t, files)
+	for _, file := range files {
+		destination := strings.Replace(file, "commitment.3-4.", "commitment.4-5.", 1)
+		require.NoError(t, dir.RemoveAll(destination))
+		require.NoError(t, os.Link(file, destination))
+	}
+	require.NoError(t, targetAgg.ReloadFiles())
+	at := targetAgg.BeginFilesRo()
+	var future bool
+	for _, file := range at.Files(kv.CommitmentDomain) {
+		if file.StartRootNum() == 32 && file.EndRootNum() == 40 {
+			future = true
+		}
+	}
+	at.Close()
+	require.True(t, future, "the target must expose the extra binary file [32,40)")
+	require.NotEmpty(t, pbinRangeRows(t, targetAgg, 32, 40), "the file past X must contain rows")
+	_, err := state.NewPBinRangeWriterForResume(targetAgg, kv.CommitmentDomain, 24, 48)
+	require.Error(t, err, "resume accepted binary file [32,40) past base X=24 because it is before Y=48; got %v", err)
+}
+
+func TestPBinResumeRejectsCopiedFilesPastBase(t *testing.T) {
+	for _, baseTx := range []uint64{23, 24} {
+		t.Run(fmt.Sprint(baseTx), func(t *testing.T) {
+			fromStep := baseTx / 8
+			baseRange := fmt.Sprintf("commitment.%d-%d.", fromStep, fromStep+1)
+			futureRange := fmt.Sprintf("commitment.%d-%d.", fromStep+1, fromStep+2)
+			futureStart, futureEnd := (fromStep+1)*8, (fromStep+2)*8
+			selectPBinLeafStreamHash(t)
+			baseDB, baseAgg := testDbAndAggregatorv3(t, 8)
+			targetDB, targetAgg := testDbAndAggregatorv3(t, 8)
+			initial := []pbinLeafStreamAccount{{address: pbinLeafStreamAddress(1), nonce: 1, balance: 1}}
+			writePBinLeafStreamRange(t, baseDB, 0, 24, initial)
+			require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, 3, unboundedFinalityCtx, false))
+			baseAgg.WaitForFiles()
+			writePBinLeafStreamRange(t, targetDB, 0, 48, initial)
+			require.NoError(t, targetAgg.BuildFiles2(t.Context(), targetDB, 0, 6, unboundedFinalityCtx, false))
+			targetAgg.WaitForFiles()
+			convertPBinBetween(t, baseDB, baseAgg, targetDB, targetAgg, baseTx)
+			var files []string
+			require.NoError(t, filepath.WalkDir(targetAgg.Dirs().Snap, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !entry.IsDir() && strings.Contains(entry.Name(), baseRange) {
+					files = append(files, path)
+				}
+				return nil
+			}))
+			require.NotEmpty(t, files)
+			for _, file := range files {
+				destination := strings.Replace(file, baseRange, futureRange, 1)
+				require.NoError(t, dir.RemoveAll(destination))
+				data, err := os.ReadFile(file)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(destination, data, 0o644))
+			}
+			require.NoError(t, targetAgg.ReloadFiles())
+			at := targetAgg.BeginFilesRo()
+			var future bool
+			for _, file := range at.Files(kv.CommitmentDomain) {
+				if file.StartRootNum() == futureStart && file.EndRootNum() == futureEnd {
+					future = true
+				}
+			}
+			at.Close()
+			require.True(t, future, "the target must expose the extra binary file [%d,%d)", futureStart, futureEnd)
+			require.NotEmpty(t, pbinRangeRows(t, targetAgg, futureStart, futureEnd), "the file past X must contain rows")
+			_, err := state.NewPBinRangeWriterForResume(targetAgg, kv.CommitmentDomain, baseTx, 48)
+			require.Error(t, err, "resume accepted copied binary file [%d,%d) past base X=%d; got %v", futureStart, futureEnd, baseTx, err)
+		})
+	}
+}
+
+func TestPBinResumeZeroStartPreservesUntouchedBaseRows(t *testing.T) {
+	pbinCheckResumeRows(t, 8, 0, 8, 16, [][2]uint64{{0, 16}, {16, 24}}, nil)
+}
+
+func TestPBinResumeNonzeroSpanPreservesUntouchedBaseRows(t *testing.T) {
+	pbinCheckResumeRows(t, 1, 8, 16, 24, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 12}, {12, 16}})
+}
+
+func TestPBinResumeAtRangeLastStamp(t *testing.T) {
+	pbinCheckResumeRows(t, 1, 8, 23, 24, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 24}})
+}
+
+func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, sourceRanges, baseMerges [][2]uint64) {
+	t.Helper()
+	selectPBinLeafStreamHash(t)
+	baseDB, baseAgg := testDbAndAggregatorv3(t, step)
+	sourceDB, sourceAgg := testDbAndAggregatorv3(t, step)
+	targetDB, targetAgg := testDbAndAggregatorv3(t, step)
+	freshDB, freshAgg := testDbAndAggregatorv3(t, step)
+	initial := []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1, slots: map[string][]byte{string([]byte{1}): {1}}},
+		{address: pbinLeafStreamAddress(0x22), nonce: 1, balance: 1},
+		{address: pbinLeafStreamAddress(0x33), nonce: 3, balance: 3},
+	}
+	updated := []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x11), nonce: 2, balance: 2, slots: map[string][]byte{string([]byte{1}): {2}}},
+		{address: pbinLeafStreamAddress(0x22), nonce: 2, balance: 2},
+	}
+	for _, db := range []kv.TemporalRwDB{baseDB, sourceDB, targetDB, freshDB} {
+		writePBinLeafStreamRange(t, db, initialFrom, initialFrom+8, initial)
+	}
+	for _, db := range []kv.TemporalRwDB{sourceDB, targetDB, freshDB} {
+		writePBinLeafStreamStates(t, db, baseTx, updated)
+	}
+	writePBinLeafStreamStates(t, targetDB, endTx, updated)
+	require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, kv.Step(baseTx/step), unboundedFinalityCtx, false))
+	require.NoError(t, sourceAgg.BuildFiles2(t.Context(), sourceDB, 0, kv.Step(endTx/step), unboundedFinalityCtx, false))
+	require.NoError(t, freshAgg.BuildFiles2(t.Context(), freshDB, 0, kv.Step(endTx/step), unboundedFinalityCtx, false))
+	require.NoError(t, targetAgg.BuildFiles2(t.Context(), targetDB, 0, kv.Step(sourceRanges[len(sourceRanges)-1][1]/step), unboundedFinalityCtx, false))
+	baseAgg.WaitForFiles()
+	sourceAgg.WaitForFiles()
+	freshAgg.WaitForFiles()
+	targetAgg.WaitForFiles()
+	convertPBinBetween(t, baseDB, baseAgg, targetDB, targetAgg, baseTx)
+	for _, bounds := range baseMerges {
+		require.NoError(t, targetAgg.MergePBinRange(t.Context(), kv.CommitmentDomain, bounds[0], bounds[1]))
+	}
+	freshRoot := convertPBinAt(t, freshDB, freshAgg, endTx)
+	resumeRoot := resumePBinAtWithBase(t, sourceDB, sourceAgg, targetDB, targetAgg, baseTx, endTx, sourceRanges)
+	resumeRows := pbinCommitmentRows(t, targetAgg)
+	freshRows := pbinCommitmentRows(t, freshAgg)
+	delete(resumeRows, string(commitment.KeyCommitmentState))
+	delete(freshRows, string(commitment.KeyCommitmentState))
+	require.Equal(t, freshRoot, resumeRoot)
+	require.Equal(t, len(freshRows), len(resumeRows), "resume spanning range must preserve untouched base rows")
+	require.Equal(t, freshRows, resumeRows)
+}
+
+func TestPBinResumeZeroStartDropsDeletionTombstones(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	baseDB, baseAgg := testDbAndAggregatorv3(t, 8)
+	sourceDB, sourceAgg := testDbAndAggregatorv3(t, 8)
+	targetDB, targetAgg := testDbAndAggregatorv3(t, 8)
+	freshDB, freshAgg := testDbAndAggregatorv3(t, 8)
+	initial := []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1, slots: map[string][]byte{string([]byte{1}): {1}}},
+		{address: pbinLeafStreamAddress(0x22), nonce: 1, balance: 1},
+		{address: pbinLeafStreamAddress(0x33), nonce: 1, balance: 1},
+	}
+	updated := []pbinLeafStreamAccount{
+		{address: initial[1].address, nonce: 2, balance: 2},
+		{address: initial[2].address, nonce: 2, balance: 2},
+	}
+	for _, db := range []kv.TemporalRwDB{baseDB, sourceDB, targetDB, freshDB} {
+		writePBinLeafStreamRange(t, db, 0, 8, initial)
+		deletePBinResumeKey(t, db, kv.AccountsDomain, initial[2].address, 7)
+	}
+	for _, db := range []kv.TemporalRwDB{sourceDB, freshDB} {
+		deletePBinResumeKey(t, db, kv.AccountsDomain, initial[0].address, 8)
+		deletePBinResumeKey(t, db, kv.StorageDomain, append(bytes.Clone(initial[0].address), 1), 8)
+		writePBinLeafStreamStates(t, db, 8, updated)
+	}
+	writePBinLeafStreamStates(t, targetDB, 8, updated)
+	writePBinLeafStreamStates(t, targetDB, 16, updated)
+	require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, 1, unboundedFinalityCtx, false))
+	require.NoError(t, sourceAgg.BuildFiles2(t.Context(), sourceDB, 0, 2, unboundedFinalityCtx, false))
+	require.NoError(t, freshAgg.BuildFiles2(t.Context(), freshDB, 0, 2, unboundedFinalityCtx, false))
+	require.NoError(t, targetAgg.BuildFiles2(t.Context(), targetDB, 0, 3, unboundedFinalityCtx, false))
+	targetAgg.WaitForFiles()
+	convertPBinBetween(t, baseDB, baseAgg, targetDB, targetAgg, 8)
+	resumeRoot := resumePBinAtWithRanges(t, sourceDB, sourceAgg, targetDB, targetAgg, 16, [][2]uint64{{0, 16}, {16, 24}})
+	freshRoot := convertPBinAt(t, freshDB, freshAgg, 16)
+	require.Equal(t, freshRoot, resumeRoot)
+	got, want := pbinCommitmentRows(t, targetAgg), pbinCommitmentRows(t, freshAgg)
+	delete(got, string(commitment.KeyCommitmentState))
+	delete(want, string(commitment.KeyCommitmentState))
+	require.Equal(t, want, got, "deletion, update and recreation must match fresh conversion")
+	requireResumeStateFile(t, targetAgg, 16, 24)
+	var tombstones int
+	for _, value := range pbinRangeRows(t, targetAgg, 0, 16) {
+		if len(value) == 0 {
+			tombstones++
+		}
+	}
+	require.Zero(t, tombstones, "zero-start output must drop deletion tombstones after merging base rows")
 }

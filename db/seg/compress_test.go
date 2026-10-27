@@ -27,9 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
@@ -536,4 +535,19 @@ func TestParseFileCompression(t *testing.T) {
 	}
 	_, err := ParseFileCompression("zstd")
 	require.Error(t, err)
+}
+
+func TestCompressorProgressCountsEmptyWords(t *testing.T) {
+	tmp := t.TempDir()
+	c, err := NewCompressor(t.Context(), t.Name(), filepath.Join(tmp, "data.kv"), tmp, DefaultCfg, log.LvlTrace, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	words := [][]byte{[]byte("key"), nil, []byte("other"), []byte("value")}
+	for _, word := range words {
+		require.NoError(t, c.AddUncompressedWord(word))
+	}
+	var done uint64
+	c.SetProgress(func(n uint64) { done += n })
+	require.NoError(t, c.Compress())
+	require.EqualValues(t, c.Count(), done, "successful compression must report every word, including empty values; done=%d total=%d", done, c.Count())
 }

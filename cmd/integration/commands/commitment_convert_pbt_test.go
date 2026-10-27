@@ -27,15 +27,14 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-	"lukechampine.com/blake3"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -66,6 +65,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"lukechampine.com/blake3"
 )
 
 func convertPBTWithOutputTestHook(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hook func() error) error {
@@ -81,7 +84,7 @@ func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 }
 
 func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
-	source, baseOutput := pbtR15ResumeFixture(t, 1, false, false)
+	source, baseOutput := pbtResumeFixture(t, 1, false, false)
 	freshOutput := filepath.Join(t.TempDir(), "fresh-output")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New()))
 	require.NotEqual(t, readPBTBinRows(t, baseOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata))
@@ -121,7 +124,8 @@ func TestConvertPBTResumeRejectsUntouchedStateDifference(t *testing.T) {
 	require.NoError(t, err)
 	source.Tester.Close()
 	copyPBTStateSalt(t, base, source)
-	source.Tester = execmoduletester.New(t,
+	source.Tester = execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
 		execmoduletester.WithGenesisSpec(source.Genesis),
 		execmoduletester.WithKey(source.Key),
@@ -151,7 +155,8 @@ func TestConvertPBTResumeRejectsUntouchedStateDifferenceBeforeBinaryFork(t *test
 	require.NoError(t, err)
 	source.Tester.Close()
 	copyPBTStateSalt(t, base, source)
-	source.Tester = execmoduletester.New(t,
+	source.Tester = execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
 		execmoduletester.WithGenesisSpec(source.Genesis),
 		execmoduletester.WithKey(source.Key),
@@ -231,7 +236,8 @@ func runPBTResumeFromStoppedHexBinSourceWithConfig(t *testing.T, stepsInFrozenFi
 	require.NoError(t, err)
 	base.Tester.Close()
 	require.NoError(t, os.WriteFile(filepath.Join(base.Tester.Dirs.Snap, "salt-state.txt"), sourceSalt, 0o644))
-	base.Tester = execmoduletester.New(t,
+	base.Tester = execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(base.Tester.Dirs),
 		execmoduletester.WithGenesisSpec(base.Genesis),
 		execmoduletester.WithKey(base.Key),
@@ -243,7 +249,8 @@ func runPBTResumeFromStoppedHexBinSourceWithConfig(t *testing.T, stepsInFrozenFi
 	base.Tester.Close()
 	baseEnd := pbtAcceptanceLastTxNumRaw(t, base.Tester.Dirs.Chaindata)
 	buildPBTResumeFiles(t, base, baseEnd, baseMerge)
-	source.Tester = execmoduletester.New(t,
+	source.Tester = execmoduletester.New(
+		t,
 		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
 		execmoduletester.WithGenesisSpec(source.Genesis),
 		execmoduletester.WithKey(source.Key),
@@ -1031,7 +1038,7 @@ func TestConvertPBTVerifiesCorruptedWrittenRows(t *testing.T) {
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
 	hook := func(dirs datadir.Dirs) error {
-		return corruptPBTOutputRow(t.Context(), dirs)
+		return corruptPBTDomain(t.Context(), dirs, kv.CommitmentBinDomain)
 	}
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBTWithStandaloneTestHook(t.Context(), source.DataDir, output, true, "", log.New(), hook)
@@ -1049,7 +1056,7 @@ func TestConvertPBTSkipVerifySkipsWrittenRowsCheck(t *testing.T) {
 	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
 	output := filepath.Join(t.TempDir(), "output")
 	hooks := pbtConvertHooks{skipVerify: true, standalone: func(dirs datadir.Dirs) error {
-		return corruptPBTOutputRow(t.Context(), dirs)
+		return corruptPBTDomain(t.Context(), dirs, kv.CommitmentBinDomain)
 	}}
 	require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), hooks))
 	for _, check := range []string{"C-a", "C-d", "C-e"} {
@@ -1135,7 +1142,7 @@ func TestConvertPBTCRejectsChangedStateRecord(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{afterOutput: func() error {
-		return corruptPBTSourceHexState(t.Context(), source.Dirs)
+		return corruptPBTDomain(t.Context(), source.Dirs, kv.CommitmentDomain)
 	}})
 	require.ErrorContains(t, err, "C-e commitment state")
 }
@@ -1187,13 +1194,25 @@ func addPBTSourcePastPointFile(t *testing.T, source pbtConversionSource, address
 	rawDB.Close()
 }
 
-func corruptPBTSourceHexState(ctx context.Context, dirs datadir.Dirs) error {
-	settings, err := dbstate.ReadErigonDBSettings(dirs)
-	if err != nil {
+func corruptPBTDomain(ctx context.Context, dirs datadir.Dirs, domain kv.Domain) error {
+	refs := false
+	variant := dbstate.TrieVariantHexBin
+	hash := commitment.PBinHashBlake3
+	settings := &dbstate.ErigonDBSettings{StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant, TrieHash: &hash}
+	if existing, readErr := dbstate.ReadErigonDBSettings(dirs); readErr == nil {
+		settings = existing
+		settings.TrieVariant = &variant
+		settings.TrieHash = &hash
+	}
+	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
 		return err
 	}
 	configurePBTSourceVariant(settings)
-	rawPath, err := os.MkdirTemp("", "convert-pbt-corrupt-state-chaindata-")
+	prefix := "convert-pbt-corrupt-chaindata-"
+	if domain == kv.CommitmentDomain {
+		prefix = "convert-pbt-corrupt-state-chaindata-"
+	}
+	rawPath, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		return err
 	}
@@ -1222,7 +1241,7 @@ func corruptPBTSourceHexState(ctx context.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	at := agg.BeginFilesRo()
-	it, err := at.DebugRangeLatestFromFiles(kv.CommitmentDomain, nil, nil, kv.Unlim)
+	it, err := at.DebugRangeLatestFromFiles(domain, nil, nil, kv.Unlim)
 	if err != nil {
 		at.Close()
 		agg.Close()
@@ -1243,163 +1262,48 @@ func corruptPBTSourceHexState(ctx context.Context, dirs datadir.Dirs) error {
 			rawDB.Close()
 			return nextErr
 		}
+		stamp := uint64(7)
+		if domain == kv.CommitmentDomain {
+			stamp = iter.Stamp()
+		}
 		rows = append(rows, struct {
 			key, value []byte
 			stamp      uint64
-		}{key: bytes.Clone(key), value: bytes.Clone(value), stamp: iter.Stamp()})
+		}{key: bytes.Clone(key), value: bytes.Clone(value), stamp: stamp})
 	}
 	iter.Close()
 	at.Close()
 	agg.Close()
 	rawDB.Close()
-	if err := removePBTOutputDomainFilesForHook(dirs, kv.CommitmentDomain.String()); err != nil {
-		return err
-	}
-	state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), 1, 6, nil)
-	if err != nil {
-		return err
-	}
-	changed := false
-	for i := range rows {
-		if bytes.Equal(rows[i].key, commitment.KeyCommitmentV3State) {
-			rows[i].value = state
-			changed = true
-		}
-	}
-	if !changed {
-		return errors.New("commitment state record is missing")
-	}
-	rawDB, err = mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer rawDB.Close()
-	agg, err = dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	if err := agg.OpenFolder(rawDB); err != nil {
-		return err
-	}
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantCommitmentV3
-	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentDomain), execctx.WithoutCommitmentSeek())
-	if err != nil {
-		return err
-	}
-	defer domains.Close()
-	for _, row := range rows {
-		if err := domains.DomainPut(kv.CommitmentDomain, tx, row.key, row.value, row.stamp, nil); err != nil {
+	if domain == kv.CommitmentDomain {
+		state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), 1, 6, nil)
+		if err != nil {
 			return err
 		}
-	}
-	if err := domains.Flush(ctx, tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return agg.BuildFiles2(ctx, db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false)
-}
-
-func TestRequirePBinSourceFilesEnd(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-1.kv"), nil, 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-receipt.1-2.kv"), nil, 0o644))
-	require.NoError(t, requirePBinSourceFilesEnd(dirs, 8, 7))
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-storage.1-2.kv"), nil, 0o644))
-	require.ErrorContains(t, requirePBinSourceFilesEnd(dirs, 8, 7), "state files from step 1 hold writes past conversion txNum 7")
-}
-
-func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
-	refs := false
-	variant := dbstate.TrieVariantHexBin
-	hash := commitment.PBinHashBlake3
-	settings := &dbstate.ErigonDBSettings{StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant, TrieHash: &hash}
-	if existing, readErr := dbstate.ReadErigonDBSettings(dirs); readErr == nil {
-		settings = existing
-		settings.TrieVariant = &variant
-		settings.TrieHash = &hash
-	}
-	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
-		return err
-	}
-	configurePBTSourceVariant(settings)
-	rawPath, err := os.MkdirTemp("", "convert-pbt-corrupt-chaindata-")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dir.RemoveAll(rawPath) }()
-	rawDB, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer rawDB.Close()
-	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
-		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
-			return err
+		changed := false
+		for i := range rows {
+			if bytes.Equal(rows[i].key, commitment.KeyCommitmentV3State) {
+				rows[i].value = state
+				changed = true
+			}
 		}
-		return rawdbv3.TxNums.Append(tx, 1, 7)
-	}); err != nil {
-		return err
-	}
-	agg, err := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).Open(ctx)
-	if err != nil {
-		return err
-	}
-	if err := agg.OpenFolder(rawDB); err != nil {
-		agg.Close()
-		return err
-	}
-	at := agg.BeginFilesRo()
-	it, err := at.DebugRangeLatestFromFiles(kv.CommitmentBinDomain, nil, nil, kv.Unlim)
-	if err != nil {
-		at.Close()
-		agg.Close()
-		return err
-	}
-	rows := make([]struct{ key, value []byte }, 0)
-	for it.HasNext() {
-		candidateKey, candidateValue, nextErr := it.Next()
-		if nextErr != nil {
-			it.Close()
-			at.Close()
-			return nextErr
+		if !changed {
+			return errors.New("commitment state record is missing")
 		}
-		rows = append(rows, struct{ key, value []byte }{bytes.Clone(candidateKey), bytes.Clone(candidateValue)})
-	}
-	it.Close()
-	at.Close()
-	agg.Close()
-	rawDB.Close()
-	if len(rows) == 0 {
-		return errors.New("no binary row to corrupt")
-	}
-	corrupted := false
-	for i := range rows {
-		if !commitment.IsCommitmentStateKey(rows[i].key) {
-			rows[i].value[0] ^= 1
-			corrupted = true
-			break
+	} else {
+		changed := false
+		for i := range rows {
+			if !commitment.IsCommitmentStateKey(rows[i].key) {
+				rows[i].value[0] ^= 1
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			return errors.New("no binary row to corrupt")
 		}
 	}
-	if !corrupted {
-		return errors.New("no binary row to corrupt")
-	}
-	if err := removePBTOutputDomainFilesForHook(dirs, kv.CommitmentBinDomain.String()); err != nil {
+	if err := removePBTOutputDomainFilesForHook(dirs, domain.String()); err != nil {
 		return err
 	}
 	rawDB, err = mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
@@ -1427,14 +1331,17 @@ func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
 	defer tx.Rollback()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
+	if domain == kv.CommitmentDomain {
+		cfg.Variant = commitment.VariantCommitmentV3
+	}
 	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return err
 	}
 	defer domains.Close()
 	for _, row := range rows {
-		if err := domains.DomainPut(kv.CommitmentBinDomain, tx, row.key, row.value, 7, nil); err != nil {
+		if err := domains.DomainPut(domain, tx, row.key, row.value, row.stamp, nil); err != nil {
 			return err
 		}
 	}
@@ -1445,6 +1352,16 @@ func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	return agg.BuildFiles2(ctx, db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false)
+}
+
+func TestRequirePBinSourceFilesEnd(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-receipt.1-2.kv"), nil, 0o644))
+	require.NoError(t, requirePBinSourceFilesEnd(dirs, 8, 7))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-storage.1-2.kv"), nil, 0o644))
+	require.ErrorContains(t, requirePBinSourceFilesEnd(dirs, 8, 7), "state files from step 1 hold writes past conversion txNum 7")
 }
 
 func removePBTOutputDomainFilesForHook(dirs datadir.Dirs, domain string) error {
@@ -2250,4 +2167,67 @@ func (r multiConversionIntegrityBlockReader) HeaderByNumber(_ context.Context, _
 
 func (r multiConversionIntegrityBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 	return rawdbv3.TxNums
+}
+
+func TestConvertPBTRejectsMissingAccountsFiles(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBTWithStandaloneTestHook(t.Context(), source.DataDir, output, true, "", log.New(), func(dirs datadir.Dirs) error {
+		files, err := pbtAttachFiles(dirs)
+		if err != nil {
+			return err
+		}
+		removed := 0
+		for _, file := range files {
+			if file.domain != kv.AccountsDomain {
+				continue
+			}
+			if err := dir.RemoveFile(file.path); err != nil {
+				return err
+			}
+			removed++
+		}
+		require.Positive(t, removed)
+		return nil
+	})
+	require.Error(t, err, "C-e accepted output with every accounts file removed; conversion error=%v", err)
+}
+
+func TestPBTFileStagesReportIntermediateProgress(t *testing.T) {
+	configurePBTGoldenSuite(t, commitment.PBinHashBlake3, true)
+	source, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 5000, nil)
+	previousHandler := log.Root().GetHandler()
+	previousInterval := dbstate.PBTProgressInterval
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	dbstate.PBTProgressInterval = time.Nanosecond
+	t.Cleanup(func() {
+		log.Root().SetHandler(previousHandler)
+		dbstate.PBTProgressInterval = previousInterval
+	})
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, filepath.Join(t.TempDir(), "published"), true, "", log.New()))
+	for _, suffix := range []string{".kv", ".idt", ".kvi"} {
+		t.Run(suffix, func(t *testing.T) {
+			phase := "range 0-1 " + suffix
+			pattern := regexp.MustCompile(`phase="` + regexp.QuoteMeta(phase) + `" done=(\d+) .* total=(\d+)`)
+			matches := pattern.FindAllStringSubmatch(logs.String(), -1)
+			require.NotEmpty(t, matches, "missing phase %s", phase)
+			var intermediate int
+			var counts []string
+			for _, match := range matches {
+				done, err := strconv.ParseUint(match[1], 10, 64)
+				require.NoError(t, err)
+				total, err := strconv.ParseUint(match[2], 10, 64)
+				require.NoError(t, err)
+				counts = append(counts, match[1]+"/"+match[2])
+				if done > 0 && done < total {
+					intermediate++
+				}
+			}
+			require.Positive(t, intermediate, "%s must report during its work loop; saw done/total=%v", phase, counts)
+		})
+	}
 }
