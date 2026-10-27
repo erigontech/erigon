@@ -612,13 +612,23 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 // bound rejects, and whose hash names a stored block with an invalid gas limit. Such a block was
 // stored without the cap, for example by a download while its parent was unknown, so it goes
 // through the block validation, which rejects and removes it. Only the stored header decides, as
-// the payload's block hash is not verified yet. Without the chain segment below the block, the
-// bound's answer stands.
+// the payload's block hash is not verified yet. While the execution module stays busy, or without
+// the chain segment below the block, the bound's answer stands.
 func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) (*engine_types.PayloadStatus, error) {
 	number := req.BlockNumber.Uint64()
 	stored := e.chainRW.GetHeader(ctx, req.BlockHash, number)
 	if stored == nil || stored.ParentHash != req.ParentHash || misc.VerifyParentGasLimit(e.config, parent, stored) == nil {
 		return nil, nil
+	}
+	// As on the normal path, wait a while for a busy execution module.
+	readyCtx, cancelReady := context.WithTimeout(ctx, defaultReadinessWait)
+	defer cancelReady()
+	busy, err := waitForResponse(readyCtx, defaultReadinessWait, func() (bool, error) {
+		ready, err := e.chainRW.Ready(readyCtx)
+		return !ready, err
+	})
+	if err != nil || busy {
+		return nil, err
 	}
 	e.lock.Lock()
 	defer e.lock.Unlock()

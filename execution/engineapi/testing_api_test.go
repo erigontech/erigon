@@ -66,6 +66,7 @@ type stubExecutionModule struct {
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 	isValidatedFunc        func(hash common.Hash) bool
+	readyFunc              func(ctx context.Context) (bool, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -179,7 +180,14 @@ func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash comm
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
-func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
+
+func (s *stubExecutionModule) Ready(ctx context.Context) (bool, error) {
+	if s.readyFunc != nil {
+		return s.readyFunc(ctx)
+	}
+	return true, nil
+}
+
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
 }

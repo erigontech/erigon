@@ -572,6 +572,7 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 		storedParent    common.Hash
 		l2              bool
 		validateErr     error
+		busyChecks      int
 		wantValidated   bool
 		wantBad         bool
 		wantErr         string
@@ -580,6 +581,7 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 		{name: "stored block with a valid gas limit", txCount: 5, storedGasLimit: parent.GasLimit, storedParent: parentHash, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "stored block with another parent", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: common.Hash{0xaa}, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "stored block with an invalid gas limit", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, wantValidated: true, wantBad: true, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValid: &parentHash},
+		{name: "stored block with an invalid gas limit, execution module busy at first", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyChecks: 2, wantValidated: true, wantBad: true, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValid: &parentHash},
 		{name: "stored block with an invalid gas limit and a missing chain segment", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, validateErr: execmodule.ErrMissingChainSegment, wantValidated: true, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "L2 chain, above the payload's own gas limit", txCount: 9, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, l2: true, wantErr: "gas limit reached: 9 transactions use at least 16800 gas each"},
 	} {
@@ -616,7 +618,12 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 			payload.BlockHash = storedHash
 
 			var validated bool
+			readinessChecks := 0
 			stub := &stubExecutionModule{
+				readyFunc: func(context.Context) (bool, error) {
+					readinessChecks++
+					return readinessChecks > test.busyChecks, nil
+				},
 				getHeaderFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
 					switch {
 					case hash != nil && *hash == parentHash:
@@ -631,6 +638,9 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 				validateChainFunc: func(_ context.Context, hash common.Hash, number uint64) (execmodule.ValidationResult, error) {
 					require.Equal(t, storedHash, hash)
 					require.Equal(t, uint64(100), number)
+					if test.busyChecks > 0 && readinessChecks <= test.busyChecks {
+						return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusBusy}, nil
+					}
 					validated = true
 					if test.validateErr != nil {
 						return execmodule.ValidationResult{}, test.validateErr
