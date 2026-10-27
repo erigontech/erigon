@@ -66,6 +66,8 @@ type BlobTx struct {
 
 func (btx *BlobTx) Type() byte { return BlobTxType }
 
+func (btx *BlobTx) Unwrap() Transaction { return btx }
+
 // copyData returns a copy of BlobTx where the TransactionMisc cache fields
 // (hash, from) are not copied directly but rebuilt field-by-field, avoiding
 // go vet copylocks warnings on the embedded sync/atomic.Pointer.

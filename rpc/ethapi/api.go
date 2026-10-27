@@ -888,12 +888,7 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 		To:    txn.GetTo(),
 		Value: (*hexutil.U256)(txn.GetValue()),
 	}
-	switch wrapper := txn.(type) {
-	case *types.BlobTxWrapper:
-		txn = &wrapper.Tx
-	case *types.FrameTxWrapper:
-		txn = wrapper.FrameTransaction
-	}
+	txn = txn.Unwrap()
 
 	v, r, s := txn.RawSignatureValues()
 	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);

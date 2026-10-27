@@ -85,12 +85,7 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 		transaction.MaxFeePerGas = txn.GetFeeCap()
 		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
 	}
-	switch wrapper := txn.(type) {
-	case *types.BlobTxWrapper:
-		txn = &wrapper.Tx
-	case *types.FrameTxWrapper:
-		txn = wrapper.FrameTransaction
-	}
+	txn = txn.Unwrap()
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
 	} else if frame, ok := txn.(*types.FrameTransaction); ok {
