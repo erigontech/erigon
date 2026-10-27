@@ -13,8 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/db/rawdb"
 )
 
 func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
@@ -76,23 +75,20 @@ func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	_min = fromTxNum
 	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
 
-	it, err := tx.Debug().TraceKey(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, fromTxNum, toTxNum)
+	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
 	if err != nil {
 		return err
 	}
 	defer it.Close()
 
 	for it.HasNext() {
-		txNum, v, err := it.Next()
+		txNum, r, err := it.Next()
 		if err != nil {
 			return err
 		}
-		if len(v) == 0 {
+
+		if r == nil {
 			continue
-		}
-		cumUsedGas, logIdx, logs, err := decodeRCacheCounters(v)
-		if err != nil {
-			return fmt.Errorf("txNum %d: %w", txNum, err)
 		}
 
 		for txNum > _max {
@@ -103,14 +99,16 @@ func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 			prevCumUsedGas = -1
 		}
 
+		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
 		if !exactLogIdx && txNum <= _max {
 			if err := probs.report(failFast, fmt.Errorf("%w: block %d tx %d (txNum %d, step %d): firstLogIndex=%d, want %d", ErrIntegrity, blockNum, txNum-_min-1, txNum, (txNum+1)/stepSize, logIdx, expectedFirstLogIdx)); err != nil {
 				return err
 			}
 		}
-		expectedFirstLogIdx = logIdx + uint32(logs)
+		expectedFirstLogIdx = logIdx + uint32(len(r.Logs))
 
+		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
 			if err := probs.report(failFast, fmt.Errorf("%w: block %d tx %d (txNum %d, step %d): cumulativeGasUsed=%d, previous tx has %d", ErrIntegrity, blockNum, txNum-_min-1, txNum, (txNum+1)/stepSize, cumUsedGas, prevCumUsedGas)); err != nil {
@@ -129,33 +127,6 @@ func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	}
 
 	return nil
-}
-
-// decodeRCacheCounters reads only the block counters from a types.ReceiptForStorage encoding.
-func decodeRCacheCounters(v []byte) (cumGasUsed uint64, firstLogIdx uint32, logs int, err error) {
-	fields, _, err := rlp.SplitList(v)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	if _, _, fields, err = rlp.Split(fields); err != nil { // Type
-		return 0, 0, 0, err
-	}
-	if _, _, fields, err = rlp.Split(fields); err != nil { // PostState or Status
-		return 0, 0, 0, err
-	}
-	if cumGasUsed, fields, err = rlp.SplitUint64(fields); err != nil {
-		return 0, 0, 0, err
-	}
-	idx, fields, err := rlp.SplitUint64(fields)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	logsList, _, err := rlp.SplitList(fields)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	logs, err = rlp.CountValues(logsList)
-	return cumGasUsed, uint32(idx), logs, err
 }
 
 type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, p *problems) error
