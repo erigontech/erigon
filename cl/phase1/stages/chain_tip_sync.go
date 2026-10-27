@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -21,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -261,9 +259,6 @@ MainLoop:
 }
 
 func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
-	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
-		return false
-	}
 	// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 	envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks)
 	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
@@ -311,10 +306,6 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 
 		if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
-			if err := ensureKnownBlockPersisted(ctx, cfg, blockRoot); err != nil {
-				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "persist accepted block failed", err)
-				return false
-			}
 			if block.Block.Slot >= args.targetSlot {
 				return true
 			}
@@ -372,31 +363,6 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 	}
 	return false
-}
-
-func ensureKnownBlockPersisted(ctx context.Context, cfg *Cfg, blockRoot common.Hash) error {
-	var persisted bool
-	readErr := cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
-		persisted = slot != nil
-		return err
-	})
-	if readErr == nil && persisted {
-		return nil
-	}
-	// The block root excludes its signature, so persist the copy accepted by fork choice.
-	block, ok := cfg.forkChoice.GetBlock(blockRoot)
-	if !ok {
-		if readErr != nil {
-			return readErr
-		}
-		return fmt.Errorf("accepted block %x is unavailable for persistence", blockRoot)
-	}
-	cfg.pendingBlockWrite = block
-	if readErr != nil {
-		return readErr
-	}
-	return retryPendingBlockWrite(ctx, cfg)
 }
 
 // importedSlots is the slot range of the blocks a chain tip batch imported and of the parents whose

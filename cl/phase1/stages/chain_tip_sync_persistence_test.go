@@ -55,47 +55,6 @@ func (db *blockWriteErrorDB) Update(ctx context.Context, fn func(kv.RwTx) error)
 	return db.RwDB.Update(ctx, fn)
 }
 
-func TestChainTipBatchRetriesAcceptedBlockAfterWriteFailure(t *testing.T) {
-	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
-	graph.insertOnAdd = true
-	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
-	cfg.indiciesDB = db
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	seen := make(map[common.Hash]struct{})
-	rejected := make(map[common.Hash]error)
-	args := Args{targetSlot: block.Block.Slot, hasDownloaded: true, peers: 1}
-	batch := []*cltypes.SignedBeaconBlock{block}
-
-	require.False(t, processChainTipBatch(t.Context(), cfg, args, batch, seen, rejected))
-	require.ErrorIs(t, rejected[root], db.err)
-	_, accepted := cfg.forkChoice.GetHeader(root)
-	require.True(t, accepted)
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
-		require.NoError(t, err)
-		require.Nil(t, slot)
-		return nil
-	}))
-
-	require.True(t, processChainTipBatch(t.Context(), cfg, args, batch, seen, rejected))
-	require.Equal(t, 2, db.writes)
-	require.Equal(t, 1, graph.added[root], "retry storage without importing the accepted block again")
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		storedRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, block.Block.StateRoot)
-		require.NoError(t, err)
-		require.Equal(t, common.Hash(root), storedRoot)
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
-		require.NoError(t, err)
-		require.NotNil(t, slot)
-		require.Equal(t, block.Block.Slot, *slot)
-		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, root))
-		require.NoError(t, err)
-		require.NotEmpty(t, body)
-		return nil
-	}))
-}
-
 func TestChainTipListenerRetriesWriteWithoutAnotherBatch(t *testing.T) {
 	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	graph.insertOnAdd = true
@@ -115,13 +74,20 @@ func TestChainTipListenerRetriesWriteWithoutAnotherBatch(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		storedRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, block.Block.StateRoot)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash(root), storedRoot)
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 		require.NoError(t, err)
 		require.NotNil(t, slot, "reaching the target in fork choice must not skip the failed write")
+		require.Equal(t, block.Block.Slot, *slot)
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, root))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
 		return nil
 	}))
 	require.Equal(t, 3, db.writes)
-	require.Equal(t, 1, graph.added[root])
+	require.Equal(t, 1, graph.added[root], "retry storage without importing the accepted block again")
 }
 
 func TestChainTipSyncRetriesWriteAfterStageCancellation(t *testing.T) {
@@ -156,34 +122,6 @@ func TestChainTipSyncRetriesWriteAfterStageCancellation(t *testing.T) {
 	}))
 	require.Equal(t, ForkChoice, stage.TransitionFunc(cfg, args, nil))
 	require.Equal(t, 1, graph.added[root])
-}
-
-func TestChainTipBatchPersistsKnownBlockFromForkChoice(t *testing.T) {
-	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
-	graph.insertOnAdd = true
-	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), block, true, true, false))
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB}
-	cfg.indiciesDB = db
-	duplicate := *block
-	duplicate.Signature[0] ^= 1
-	args := Args{targetSlot: block.Block.Slot}
-	batch := []*cltypes.SignedBeaconBlock{&duplicate}
-
-	require.True(t, processChainTipBatch(t.Context(), cfg, args, batch, make(map[common.Hash]struct{}), make(map[common.Hash]error)))
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
-		require.NoError(t, err)
-		require.NotNil(t, header, "a block accepted by another importer must also be persisted")
-		require.Equal(t, block.Signature, header.Signature, "the block root does not authenticate the duplicate's signature")
-		return nil
-	}))
-	require.Equal(t, 1, graph.added[root])
-	require.Equal(t, 1, db.writes)
-
-	require.True(t, processChainTipBatch(t.Context(), cfg, args, batch, make(map[common.Hash]struct{}), make(map[common.Hash]error)))
-	require.Equal(t, 1, db.writes, "an already persisted block needs no further write")
 }
 
 func TestChainTipSyncRetriesWriteFromForwardSync(t *testing.T) {
