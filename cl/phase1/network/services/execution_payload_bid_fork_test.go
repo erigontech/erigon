@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -57,15 +58,21 @@ func TestExecutionPayloadBidServiceFirstGloasBidDoesNotRequireFuluEnvelope(t *te
 	copy(deposit.Signature[:], key.Sign(signingRoot[:]).Bytes())
 	parent.GetPendingDeposits().Append(deposit)
 	fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = parent
+	expected, err := parent.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expected, msg.Message.Slot))
+	require.Equal(t, clparams.GloasVersion, expected.Version())
+	expectedDomain, err := expected.GetDomain(cfg.DomainBeaconBuilder, state2.Epoch(expected))
+	require.NoError(t, err)
 	bidErr := service.ValidateBid(t.Context(), msg)
 	require.NoError(t, service.ValidateBid(t.Context(), msg))
 	entry, err := service.bidValidationState(msg.Message.ParentBlockRoot, msg.Message.Slot)
 	require.NoError(t, err)
 	require.Equal(t, clparams.FuluVersion, parent.Version())
-	require.Equal(t, clparams.GloasVersion, entry.state.Version())
-	require.Equal(t, 1, entry.state.GetBuilders().Len())
-	require.True(t, state2.IsActiveBuilder(entry.state, 0))
-	require.Equal(t, msg.Message.ParentBlockHash, entry.state.GetLatestExecutionPayloadBid().BlockHash)
+	require.Len(t, entry.view.builders, 1)
+	require.True(t, entry.view.builders[0].active)
+	require.Equal(t, msg.Message.ParentBlockHash, entry.view.latestBidBlockHash)
+	require.Equal(t, common.Hash(expectedDomain), entry.view.domain)
 	require.Empty(t, fc.Envelopes)
 	require.NoError(t, bidErr)
 }

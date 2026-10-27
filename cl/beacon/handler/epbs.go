@@ -1395,6 +1395,9 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 		contents.KZGProofs.Len() != commitments.Len()*int(a.beaconChainCfg.NumberOfColumns) {
 		return errors.New("execution payload envelope blob, proof, and commitment counts do not match")
 	}
+	if commitments.Len() == 0 {
+		return nil
+	}
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
 	bundles := make([]BlobBundle, 0, commitments.Len())
 	for i := 0; i < commitments.Len(); i++ {
