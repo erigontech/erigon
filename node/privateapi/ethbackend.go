@@ -562,7 +562,12 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	}
 	ibs := state.New(reader)
 	defer ibs.Close()
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
+	// The validation hook forbids BLOCKHASH, but cancellation does not stop
+	// the current opcode from calling GetHash.
+	rejectBlockHash := func(uint64) (common.Hash, error) {
+		return common.Hash{}, errors.New("BLOCKHASH is not allowed in frame validation")
+	}
+	blockContext := protocol.NewEVMBlockContext(header, rejectBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
 	blockContext.BlockNumber++
 	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	if header.BaseFee != nil {

@@ -43,6 +43,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
@@ -282,6 +284,31 @@ func TestFrameValidationExpectedHead(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Valid)
 	}
+}
+
+func TestFrameValidationRejectsBlockhash(t *testing.T) {
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	code := program.New().Push0().Op(vm.BLOCKHASH, vm.POP).Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()
+	genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+		sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: code},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	pack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	frame := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+		Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+	require.NoError(t, err)
+	require.False(t, result.Valid)
 }
 
 func TestFrameValidationPendingBlobFee(t *testing.T) {
