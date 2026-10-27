@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -69,6 +71,14 @@ type preparationExecutionClient struct {
 	productionID          []byte
 	collectedID           []byte
 	startPayloadBuildHook func()
+	newPayloadHook        func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error)
+}
+
+func (c *preparationExecutionClient) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, hashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	if c.newPayloadHook != nil {
+		return c.newPayloadHook(ctx, payload, parentRoot, hashes, requests)
+	}
+	return c.ExecutionClientDirect.NewPayload(ctx, payload, parentRoot, hashes, requests)
 }
 
 func (c *preparationExecutionClient) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attrs *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error) {
@@ -334,6 +344,145 @@ func applyGossipIntegrationEnvelope(
 	default:
 		t.Fatal("the gossip service did not accept and announce the envelope")
 	}
+	waitForGossipIntegrationImport(t, store, root, envelope.Message.BuilderIndex)
+	require.True(t, store.HasEnvelope(root))
+}
+
+func waitForGossipIntegrationImport(t *testing.T, store *forkchoice.ForkChoiceStore, root common.Hash, builderIndex uint64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(ctx, root, builderIndex)
+	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+}
+
+func prepareGossipIntegrationEnvelope(
+	t *testing.T,
+	fixture *gloasPreparationIntegrationFixture,
+	block *cltypes.SignedBeaconBlock,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+) (services.ExecutionPayloadService, common.Hash) {
+	t.Helper()
+	require.NoError(t, fixture.handler.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
+	}))
+	require.NoError(t, fixture.store.OnBlock(t.Context(), block, true, false, false))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	blockState, err := fixture.store.GetStateAtBlockRoot(root)
+	require.NoError(t, err)
+	require.NotNil(t, blockState)
+	keyBytes := new(big.Int).SetUint64(block.Block.ProposerIndex + 1).FillBytes(make([]byte, 32))
+	key, err := bls.NewPrivateKeyFromBytes(keyBytes)
+	require.NoError(t, err)
+	signExecutionPayloadEnvelope(t, blockState, block.Block.Slot, envelope, key)
+	return services.NewExecutionPayloadService(t.Context(), fixture.store, blockState.BeaconConfig(), beaconevents.NewEventEmitter(), nil), root
+}
+
+func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	fixture := newGloasPreparationIntegrationFixture(t)
+	_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
+		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+	)
+	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+	service, root := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+	require.Equal(t, childRoot, root)
+	newPayloadCalled := make(chan struct{})
+	fixture.engine.newPayloadHook = func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+		close(newPayloadCalled)
+		return execution_client.PayloadStatusInvalidated, nil
+	}
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
+	select {
+	case <-newPayloadCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("NewPayload was not called")
+	}
+	require.Eventually(t, func() bool {
+		status, ok := fixture.store.GetRecentExecutionPayloadStatus(childEnvelope.Message.Payload.BlockHash)
+		return ok && status == execution_client.PayloadStatusInvalidated
+	}, 5*time.Second, 10*time.Millisecond)
+	waitForGossipIntegrationImport(t, fixture.store, childRoot, childEnvelope.Message.BuilderIndex)
+	require.False(t, fixture.store.HasEnvelope(childRoot))
+}
+
+func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	fixture := newGloasPreparationIntegrationFixture(t)
+	_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
+		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+	)
+	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+	service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+	newPayloadCalled := make(chan struct{})
+	releaseNewPayload := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseNewPayload) }) })
+	fixture.engine.newPayloadHook = func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+		close(newPayloadCalled)
+		<-releaseNewPayload
+		return execution_client.PayloadStatusValidated, nil
+	}
+	verdict := make(chan error, 1)
+	go func() { verdict <- service.ProcessMessage(t.Context(), nil, childEnvelope) }()
+	select {
+	case <-newPayloadCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("NewPayload was not called")
+	}
+
+	select {
+	case err := <-verdict:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("gossip verdict waited for NewPayload")
+	}
+	releaseOnce.Do(func() { close(releaseNewPayload) })
+	waitForGossipIntegrationImport(t, fixture.store, childRoot, childEnvelope.Message.BuilderIndex)
+	require.True(t, fixture.store.HasEnvelope(childRoot))
+}
+
+func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	fixture := newGloasPreparationIntegrationFixture(t)
+	_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
+		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+	)
+	childEnvelope.Message.Payload.PrevRandao[0]++
+	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+	service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
+	require.Eventually(t, func() bool {
+		_, err := fixture.store.TryClaimExecutionPayloadEnvelopeForGossip(childRoot, childEnvelope.Message.BuilderIndex)
+		return errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+	}, 5*time.Second, 10*time.Millisecond)
+	require.False(t, fixture.store.HasEnvelope(childRoot))
+}
+
+func TestGloasGossipRejectsEnvelopeWithBadSignature(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	fixture := newGloasPreparationIntegrationFixture(t)
+	_, childBlock, childEnvelope, _, _, childSlot := produceGloasIntegrationChild(
+		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+	)
+	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+	service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+	childEnvelope.Signature[0]++
+
+	err := service.ProcessMessage(t.Context(), nil, childEnvelope)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, services.ErrIgnore)
 }
 
 func TestGloasCanonicalForkChoiceAdvancesExecutionHeadOverUnverifiedFullHead(t *testing.T) {

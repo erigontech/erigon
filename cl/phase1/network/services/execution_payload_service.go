@@ -71,12 +71,10 @@ const (
 	maxPendingEnvelopeBytes            = 4 * clparams.MaxChunkSize
 )
 
-var (
-	errEnvelopeBlockUnavailable         = errors.New("execution payload envelope block unavailable")
-	errExecutionPayloadProcessingFailed = errors.New("failed to process execution payload")
-)
+var errEnvelopeBlockUnavailable = errors.New("execution payload envelope block unavailable")
 
 type executionPayloadService struct {
+	ctx             context.Context
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	beaconCfg       *clparams.BeaconChainConfig
 	emitters        *beaconevents.EventEmitter
@@ -106,6 +104,7 @@ func NewExecutionPayloadService(
 		panic(err)
 	}
 	s := &executionPayloadService{
+		ctx:                ctx,
 		forkchoiceStore:    forkchoiceStore,
 		beaconCfg:          beaconCfg,
 		emitters:           emitters,
@@ -190,8 +189,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		receivedAt = s.now()
 	}
 	err := s.processMessage(ctx, signedEnvelope, receivedAt, nil)
-	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, errExecutionPayloadProcessingFailed) ||
-		errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, forkchoice.ErrIgnore) ||
 		errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
@@ -208,7 +206,6 @@ func (s *executionPayloadService) processMessage(
 	var (
 		admissionToken forkchoice.ExecutionPayloadEnvelopeAdmissionToken
 		hasAdmission   bool
-		seen           bool
 	)
 	if preclaimedAdmission != nil {
 		admissionToken = *preclaimedAdmission
@@ -216,7 +213,7 @@ func (s *executionPayloadService) processMessage(
 	}
 	defer func() {
 		if hasAdmission {
-			s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, seen)
+			s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, false)
 		}
 	}()
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
@@ -312,58 +309,82 @@ func (s *executionPayloadService) processMessage(
 		hasAdmission = true
 	}
 
-	// Process the execution payload through forkchoice
-	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
-	if store, ok := s.forkchoiceStore.(interface {
-		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
-	}); ok {
-		err = store.OnExecutionPayloadAt(ctx, signedEnvelope, true, true, receivedAt)
-	} else {
-		err = s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
-	}
-	if err != nil {
-		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			s.emitExecutionPayloadGossip(block, envelope)
-			s.seenEnvelopesCache.Add(seenKey, struct{}{})
-			seen = true
-			return nil
+	if err := s.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeStateUnavailable) {
+			s.forkchoiceStore.QueuePendingExecutionPayloadEnvelope(signedEnvelope, receivedAt)
 		}
-		if !errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) &&
-			!errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
-			if errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
-				return fmt.Errorf("failed to process execution payload: %w", err)
-			}
-			return fmt.Errorf("%w: %w", errExecutionPayloadProcessingFailed, err)
+		if errors.Is(err, forkchoice.ErrIgnore) {
+			return err
 		}
+		return fmt.Errorf("%w: %w", forkchoice.ErrInvalidExecutionPayloadEnvelope, err)
 	}
-	finalizedSlot = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
-	if envelope.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Payload.SlotNumber, finalizedSlot)
-	}
-	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
-		if err := s.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
-			return fmt.Errorf("failed to validate execution payload envelope with pending indices: %w", err)
+	s.forkchoiceStore.RecordExecutionPayloadArrival(beaconBlockRoot, envelope.Payload.SlotNumber, receivedAt)
+	finishPendingEnvelope := s.forkchoiceStore.BeginPendingPayloadEnvelope(beaconBlockRoot)
+	s.seenEnvelopesCache.Add(seenKey, struct{}{})
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			s.seenEnvelopesCache.Remove(seenKey)
+			finishPendingEnvelope()
 		}
-	}
-	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+	}()
+	// importEnvelope now owns the admission token, the seen entry and the hold.
+	if preclaimedAdmission != nil {
+		handedOff, hasAdmission = true, false
+		if err := s.importEnvelope(signedEnvelope, receivedAt, seenKey, admissionToken, finishPendingEnvelope); err != nil {
+			return err
+		}
 		s.emitExecutionPayloadGossip(block, envelope)
 		return nil
 	}
-	seen = true
-
-	// Mark as seen AFTER successful validation
-	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
-	s.seenEnvelopesCache.Add(seenKey, struct{}{})
-
 	s.emitExecutionPayloadGossip(block, envelope)
-	if err == nil {
-		log.Trace("Processed execution payload via gossip",
-			"slot", block.Block.Slot,
-			"beaconBlockRoot", beaconBlockRoot,
-			"builderIndex", builderIndex)
-	}
+	handedOff, hasAdmission = true, false
+	go func() {
+		_ = s.importEnvelope(signedEnvelope, receivedAt, seenKey, admissionToken, finishPendingEnvelope)
+	}()
 
 	return nil
+}
+
+func (s *executionPayloadService) importEnvelope(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	receivedAt time.Time,
+	seenKey seenEnvelopeKey,
+	token forkchoice.ExecutionPayloadEnvelopeAdmissionToken,
+	finishPendingEnvelope func(),
+) (importErr error) {
+	keepSeen := false
+	defer func() {
+		if r := recover(); r != nil {
+			log.Warn("Recovered from panicking execution payload envelope import", "beaconBlockRoot", seenKey.beaconBlockRoot, "builderIndex", seenKey.builderIndex, "panic", r)
+			importErr = fmt.Errorf("execution payload envelope import panicked: %v", r)
+		}
+		if !keepSeen {
+			// Pubsub drops identical redeliveries, so transient failures must be unseen for a later copy to retry.
+			s.seenEnvelopesCache.Remove(seenKey)
+		}
+		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(token, keepSeen)
+		finishPendingEnvelope()
+	}()
+	var err error
+	if store, ok := s.forkchoiceStore.(interface {
+		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
+	}); ok {
+		err = store.OnExecutionPayloadAt(s.ctx, signedEnvelope, true, true, receivedAt)
+	} else {
+		err = s.forkchoiceStore.OnExecutionPayload(s.ctx, signedEnvelope, true, true)
+	}
+	keepSeen = err == nil ||
+		errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) ||
+		errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+		s.forkchoiceStore.HasEnvelope(seenKey.beaconBlockRoot)
+	if err != nil {
+		log.Debug("Failed to import execution payload envelope", "beaconBlockRoot", seenKey.beaconBlockRoot, "builderIndex", seenKey.builderIndex, "err", err)
+	}
+	if keepSeen || errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+		return nil
+	}
+	return err
 }
 
 func validateEnvelopeLimits(cfg *clparams.BeaconChainConfig, envelope *cltypes.ExecutionPayloadEnvelope) error {
@@ -504,7 +525,7 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	if err != nil {
 		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
 		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
-			!errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) && !errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+			!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
 			job.processing.Store(false)
 			return pendingJobKeep
 		}

@@ -177,6 +177,8 @@ type ForkChoiceStorageWriter interface {
 	FinishExecutionPayloadEnvelopeForGossip(ExecutionPayloadEnvelopeAdmissionToken, bool)
 	ForgetExecutionPayloadEnvelopeForGossip(common.Hash, uint64)
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time)
+	RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time)
 	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
