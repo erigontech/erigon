@@ -85,9 +85,10 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 }
 
 // ParallelCommitmentReadTxs returns the maximum read transactions held by nested parallel trie workers.
-// One per leased execution context, plus the base trie's own; a parked walker holds no lease.
+// One per leased execution context, plus the base trie's own; a parked walker holds no lease. Sized
+// without the GOMAXPROCS cap: the reservation is made at startup, and a fold under raised Ps runs them all.
 func ParallelCommitmentReadTxs() int {
-	return parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1
+	return defaultParallelCommitmentWorkers + 1
 }
 
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
