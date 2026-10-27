@@ -4,6 +4,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -49,7 +50,20 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 	if l.roTx == nil {
 		return nil, false, nil
 	}
+	if commitmentReadsStateCache && name != kv.CommitmentDomain {
+		if c, isCached := l.sd.(cachedCommittedReader); isCached {
+			if v, txNum, hit := c.CachedCommitted(name, l.roTx, k); hit && txNum < ts {
+				return v, len(v) > 0, nil
+			}
+		}
+	}
 	return l.roTx.GetAsOf(name, k, ts)
+}
+
+var commitmentReadsStateCache = dbg.EnvBool("COMMITMENT_STATE_CACHE", false)
+
+type cachedCommittedReader interface {
+	CachedCommitted(domain kv.Domain, tx kv.TemporalTx, key []byte) ([]byte, uint64, bool)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
