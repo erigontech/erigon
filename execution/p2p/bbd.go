@@ -477,10 +477,6 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	// download from available peers until all batches are downloaded
-	fetcherOpts := []FetcherOption{
-		WithResponseTimeout(config.bodiesBatchFetchTimeout),
-		WithMaxRetries(0),
-	}
 	type batchAssignment struct {
 		peerId     PeerId
 		batchIndex int
@@ -490,7 +486,8 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	balBatches := make([]map[common.Hash]*types.BlockAccessListSidecar, len(availablePeers))
 	pendingBatches := true
 	attempts := 1
-	exhaustedPeersCleared := false
+	var maxRetries uint64
+	lastResort := false
 	for pendingBatches {
 		// assign remaining batches to available peers
 		var peerIndex int
@@ -533,7 +530,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				batchEg, batchCtx := errgroup.WithContext(ctx)
 				batchEg.Go(func() error {
 					var err error
-					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, fetcherOpts...)
+					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, WithResponseTimeout(config.bodiesBatchFetchTimeout), WithMaxRetries(maxRetries))
 					return err
 				})
 				if bbd.balFetcher != nil {
@@ -641,15 +638,15 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			attempts++
 			// recalculate the available peers as some have become exhausted
 			availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
-			if err != nil && !exhaustedPeersCleared {
-				exhaustedPeersCleared = true
+			if err != nil && !lastResort {
+				lastResort = true
 				clear(peers.exhaustedPeers)
 				if config.peerId == nil {
 					if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
 						peers = newPeersContext(connected)
 					}
 				}
-				fetcherOpts = append(fetcherOpts, WithMaxRetries(config.bodiesBatchFetchRetries))
+				maxRetries = config.bodiesBatchFetchRetries
 				availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
 			}
 			if err != nil {

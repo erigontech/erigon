@@ -248,6 +248,21 @@ func drainBbdFeed(ctx context.Context, t *testing.T, feed BbdResultFeed) int {
 	}
 }
 
+func requireBbdDeliversChain(t *testing.T, fetcher Fetcher, headers []*types.Header, peers uint64) {
+	t.Helper()
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	for i := uint64(1); i <= peers; i++ {
+		peerTracker.PeerConnected(PeerIdFromUint64(i))
+	}
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+}
+
 // A persistent full BAL deficit must not fail the download: the blocks are
 // delivered BAL-less for bare execution.
 func TestBackwardBlockDownloader_DeliversBlocksDespitePersistentBALDeficit(t *testing.T) {
@@ -312,17 +327,7 @@ func (s *flakyBodyPeerFetcher) FetchBodies(ctx context.Context, headers []*types
 func TestBackwardBlockDownloader_BodyTimeoutKeepsPeerOutOfLaterWindows(t *testing.T) {
 	headers := newTestHeaderChain(31, nil)
 	fetcher := newFlakyBodyPeerFetcher(headers, 1)
-	logger := testlog.Logger(t, log.LvlCrit)
-	peerTracker := NewPeerTracker(logger, nil)
-	for i := uint64(1); i <= 3; i++ {
-		peerTracker.PeerConnected(PeerIdFromUint64(i))
-	}
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
-	require.NoError(t, err)
-	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+	requireBbdDeliversChain(t, fetcher, headers, 3)
 	require.EqualValues(t, 1, fetcher.requests[*PeerIdFromUint64(1)].Load())
 }
 
@@ -376,15 +381,7 @@ func TestBackwardBlockDownloader_GapAheadOfCurrentHead_FailsFast(t *testing.T) {
 func TestBackwardBlockDownloader_SinglePeerSurvivesBodyTimeout(t *testing.T) {
 	headers := newTestHeaderChain(31, nil)
 	fetcher := newFlakyBodyPeerFetcher(headers, 1)
-	logger := testlog.Logger(t, log.LvlCrit)
-	peerTracker := NewPeerTracker(logger, nil)
-	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
-	require.NoError(t, err)
-	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+	requireBbdDeliversChain(t, fetcher, headers, 1)
 }
 
 // When fewer peers are left than batches, the batches no peer took in a round
@@ -392,17 +389,7 @@ func TestBackwardBlockDownloader_SinglePeerSurvivesBodyTimeout(t *testing.T) {
 func TestBackwardBlockDownloader_DeliversWholeWindowWhenPeersRunShort(t *testing.T) {
 	headers := newTestHeaderChain(31, nil)
 	fetcher := newFlakyBodyPeerFetcher(headers, 1, 2)
-	logger := testlog.Logger(t, log.LvlCrit)
-	peerTracker := NewPeerTracker(logger, nil)
-	for i := uint64(1); i <= 3; i++ {
-		peerTracker.PeerConnected(PeerIdFromUint64(i))
-	}
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
-	require.NoError(t, err)
-	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+	requireBbdDeliversChain(t, fetcher, headers, 3)
 }
 
 // A batch fetched page by page loses every page when one page fails, so the
@@ -411,15 +398,7 @@ func TestBackwardBlockDownloader_LastPeerKeepsPerPageRetry(t *testing.T) {
 	headers := newTestHeaderChain(11, nil)
 	fetcher := newFlakyBodyPeerFetcher(headers, 1)
 	fetcher.pageSize = 5
-	logger := testlog.Logger(t, log.LvlCrit)
-	peerTracker := NewPeerTracker(logger, nil)
-	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
-	require.NoError(t, err)
-	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+	requireBbdDeliversChain(t, fetcher, headers, 1)
 }
 
 type bodyTimeoutFetcher struct {
@@ -458,17 +437,7 @@ func TestBackwardBlockDownloader_LastResortRoundTriesPeersMarkedByOldTimeout(t *
 			return fromNum >= 11 && fromNum <= 20 && timedOutOnce[peerId].CompareAndSwap(false, true)
 		},
 	}
-	logger := testlog.Logger(t, log.LvlCrit)
-	peerTracker := NewPeerTracker(logger, nil)
-	for i := uint64(1); i <= 5; i++ {
-		peerTracker.PeerConnected(PeerIdFromUint64(i))
-	}
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
-	require.NoError(t, err)
-	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+	requireBbdDeliversChain(t, fetcher, headers, 5)
 	for peerId, timedOut := range timedOutOnce {
 		require.True(t, timedOut.Load(), peerId.String())
 	}
