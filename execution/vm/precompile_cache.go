@@ -75,8 +75,7 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
 	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < max(minCachedPrecompileGas, uint64(len(in))) {
-		output, err := c.PrecompiledContract.Run(input)
-		return bytes.Clone(output), err
+		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
 	if r, ok := precompileResults.Get(key); ok && r.domain == c.domain && r.check == check {
@@ -85,7 +84,6 @@ func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	output, err := c.PrecompiledContract.Run(input)
 	if err == nil && len(output) <= 1024 {
 		precompileResults.Add(key, precompileResult{domain: c.domain, check: check, output: bytes.Clone(output)})
-		return bytes.Clone(output), nil
 	}
 	return output, err
 }
