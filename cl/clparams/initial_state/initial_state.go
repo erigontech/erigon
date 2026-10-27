@@ -47,19 +47,19 @@ func downloadGenesisState(ctx context.Context, url string) ([]byte, error) {
 }
 
 //go:embed mainnet.state.ssz.zst
-var mainnetStateSSZ []byte
+var mainnetStateCompressed []byte
 
 //go:embed sepolia.state.ssz.zst
-var sepoliaStateSSZ []byte
+var sepoliaStateCompressed []byte
 
 //go:embed gnosis.state.ssz.zst
-var gnosisStateSSZ []byte
+var gnosisStateCompressed []byte
 
 //go:embed chiado.state.ssz.zst
-var chiadoStateSSZ []byte
+var chiadoStateCompressed []byte
 
 //go:embed bloatnet.state.ssz.zst
-var bloatnetStateSSZ []byte
+var bloatnetStateCompressed []byte
 
 // Return genesis state
 func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.CachingBeaconState, error) {
@@ -70,13 +70,13 @@ func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.
 	version := clparams.Phase0Version
 	switch network {
 	case chainspec.MainnetChainID:
-		compressed = mainnetStateSSZ
+		compressed = mainnetStateCompressed
 	case chainspec.SepoliaChainID:
-		compressed = sepoliaStateSSZ
+		compressed = sepoliaStateCompressed
 	case chainspec.GnosisChainID:
-		compressed = gnosisStateSSZ
+		compressed = gnosisStateCompressed
 	case chainspec.ChiadoChainID:
-		compressed = chiadoStateSSZ
+		compressed = chiadoStateCompressed
 	case chainspec.HoodiChainID:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState(ctx, "https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
@@ -88,7 +88,7 @@ func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.
 		}
 		return returnState, nil
 	case chainspec.BloatnetNetworkID:
-		compressed, version = bloatnetStateSSZ, clparams.ElectraVersion
+		compressed, version = bloatnetStateCompressed, clparams.ElectraVersion
 	default:
 		return nil, nil
 	}
