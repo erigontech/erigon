@@ -567,15 +567,21 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 	parentHash := parent.Hash()
 	for _, test := range []struct {
 		name            string
+		txCount         int
 		storedGasLimit  uint64
 		storedParent    common.Hash
+		l2              bool
+		validateErr     error
 		wantValidated   bool
+		wantBad         bool
 		wantErr         string
 		wantLatestValid *common.Hash
 	}{
-		{name: "stored block with a valid gas limit", storedGasLimit: parent.GasLimit, storedParent: parentHash, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
-		{name: "stored block with another parent", storedGasLimit: 2 * parent.GasLimit, storedParent: common.Hash{0xaa}, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
-		{name: "stored block with an invalid gas limit", storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, wantValidated: true, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValid: &parentHash},
+		{name: "stored block with a valid gas limit", txCount: 5, storedGasLimit: parent.GasLimit, storedParent: parentHash, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "stored block with another parent", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: common.Hash{0xaa}, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "stored block with an invalid gas limit", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, wantValidated: true, wantBad: true, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValid: &parentHash},
+		{name: "stored block with an invalid gas limit and a missing chain segment", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, validateErr: execmodule.ErrMissingChainSegment, wantValidated: true, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "L2 chain, above the payload's own gas limit", txCount: 9, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, l2: true, wantErr: "gas limit reached: 9 transactions use at least 16800 gas each"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -587,7 +593,7 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 			storedHash := stored.Hash()
 
 			to := common.Address{0x1}
-			txs := make(types.Transactions, 5)
+			txs := make(types.Transactions, test.txCount)
 			for i := range txs {
 				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
 			}
@@ -600,6 +606,9 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 			withdrawalsHash := types.DeriveSha(withdrawals)
 			header.WithdrawalsHash = &withdrawalsHash
 			cfg := preCancunChainConfig()
+			if test.l2 {
+				cfg.L2 = testL2Config{}
+			}
 			header.BaseFee = misc.CalcBaseFee(cfg, parent)
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
@@ -623,6 +632,9 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 					require.Equal(t, storedHash, hash)
 					require.Equal(t, uint64(100), number)
 					validated = true
+					if test.validateErr != nil {
+						return execmodule.ValidationResult{}, test.validateErr
+					}
 					return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusBadBlock, LatestValidHash: parentHash, ValidationError: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64"}, nil
 				},
 			}
@@ -637,7 +649,7 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 			require.Equal(t, test.wantLatestValid, status.LatestValidHash)
 			require.Equal(t, test.wantValidated, validated)
 			bad, _, _ := downloader.IsBadHeader(storedHash)
-			require.Equal(t, test.wantValidated, bad)
+			require.Equal(t, test.wantBad, bad)
 		})
 	}
 }

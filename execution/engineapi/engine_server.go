@@ -446,8 +446,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if !e.config.AllowAA {
 		minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 		if uint64(len(req.Transactions)) > gasLimit/minTxBlockGas {
-			if status, err := e.rejectStoredBlockWithInvalidGasLimit(ctx, req, parent); status != nil || err != nil {
-				return status, err
+			if gasLimit < header.GasLimit {
+				if status, err := e.rejectStoredBlockWithInvalidGasLimit(ctx, req, parent); status != nil || err != nil {
+					return status, err
+				}
 			}
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
@@ -606,15 +608,13 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
-// rejectStoredBlockWithInvalidGasLimit handles a payload above the capped transaction bound whose
-// hash names a stored block with an invalid gas limit. Such a block was stored without the capped
-// bound, for example by a download while its parent was unknown, so it goes through the block
-// validation, which rejects and removes it. Only the stored header decides, as the payload's block
-// hash is not verified yet.
+// rejectStoredBlockWithInvalidGasLimit handles a payload that the parent cap of the transaction
+// bound rejects, and whose hash names a stored block with an invalid gas limit. Such a block was
+// stored without the cap, for example by a download while its parent was unknown, so it goes
+// through the block validation, which rejects and removes it. Only the stored header decides, as
+// the payload's block hash is not verified yet. Without the chain segment below the block, the
+// bound's answer stands.
 func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) (*engine_types.PayloadStatus, error) {
-	if parent == nil {
-		return nil, nil
-	}
 	number := req.BlockNumber.Uint64()
 	stored := e.chainRW.GetHeader(ctx, req.BlockHash, number)
 	if stored == nil || stored.ParentHash != req.ParentHash || misc.VerifyParentGasLimit(e.config, parent, stored) == nil {
@@ -623,6 +623,9 @@ func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context,
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, req.BlockHash, number)
+	if errors.Is(err, execmodule.ErrMissingChainSegment) {
+		return nil, nil
+	}
 	if err != nil || status != execmodule.ExecutionStatusBadBlock {
 		return nil, err
 	}
