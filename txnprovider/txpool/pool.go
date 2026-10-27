@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -296,7 +295,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
@@ -318,9 +317,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 		defer poolTx.Rollback()
 	}
-
-	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
-	baseFee := stateChanges.PendingBlockBaseFee
 
 	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
 	// Gaps >10 min are ignored: they indicate the node was paused, restarted, or fast-syncing
@@ -346,28 +342,38 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
+	frames, err := p.applyBlockUpdate(stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView, poolTx)
+	if err != nil {
+		return err
+	}
+	p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash)
+	if len(frames.unwound.Txns) > 0 {
+		_, err = p.addNewTxns(ctx, frames.unwound, false)
+	}
+	return err
+}
+
+// applyBlockUpdate applies the announced state under the pool lock and returns
+// frame transactions that need backend validation after the lock is released.
+func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots,
+	cacheView kvcache.CacheView, poolTx kv.Tx,
+) (frames frameBlockUpdate, err error) {
 	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
+	baseFee := stateChanges.PendingBlockBaseFee
 	p.stateGeneration++
-	generation := p.stateGeneration
+	frames.generation = p.stateGeneration
 	p.stateBlockHash = common.Hash{}
 	if hash := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHash; hash != nil {
 		p.stateBlockHash = gointerfaces.ConvertH256ToHash(hash)
 	}
-	stateBlockHash := p.stateBlockHash
-	var pendingFrames []*metaTxn
-	var unwindFrames TxnSlots
+	frames.blockHash = p.stateBlockHash
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
 			p.lastSeenCond.Broadcast()
-		}
-
-		p.lock.Unlock()
-		if err == nil {
-			p.revalidateFrames(ctx, pendingFrames, generation, stateBlockHash)
-			if len(unwindFrames.Txns) > 0 {
-				_, err = p.addNewTxns(ctx, unwindFrames, false)
-			}
 		}
 	}()
 
@@ -410,7 +416,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 			knownBlobTxn, err := p.getCachedBlobTxnLocked(poolTx, txn.IDHash[:])
 			if err != nil {
-				return err
+				return frames, err
 			}
 			if knownBlobTxn != nil {
 				unwindTxns.Append(knownBlobTxn.TxnSlot, unwindBlobTxns.Senders.At(i), false)
@@ -423,19 +429,19 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	var ordinaryUnwind TxnSlots
 	for i, txn := range unwindTxns.Txns {
 		if txn.TxType() == FrameTxnType {
-			unwindFrames.Append(txn, unwindTxns.Senders.At(i), unwindTxns.IsLocal[i])
+			frames.unwound.Append(txn, unwindTxns.Senders.At(i), unwindTxns.IsLocal[i])
 		} else {
 			ordinaryUnwind.Append(txn, unwindTxns.Senders.At(i), unwindTxns.IsLocal[i])
 		}
 	}
 	unwindTxns = ordinaryUnwind
 	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
-		return err
+		return frames, err
 	}
 
 	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
-		return err
+		return frames, err
 	}
 
 	if dbg.AssertEnabled {
@@ -452,21 +458,21 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
-		return err
+		return frames, err
 	}
 
 	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
-		return err
+		return frames, err
 	}
 
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
 		stateChanges.BlockGasLimit, p.logger)
 	if err != nil {
-		return err
+		return frames, err
 	}
 	p.forgetUnusedSenders(senderIDsOf(&minedTxns))
-	pendingFrames = p.invalidateFrames(stateChanges)
+	frames.parked = p.invalidateFrames(stateChanges)
 
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
@@ -484,7 +490,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	p.publishDepthMetrics()
-	return nil
+	return frames, nil
 }
 
 // publishDepthMetrics republishes the sub-pool depth gauges. Called on every block
@@ -1041,11 +1047,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	if txn.TxType() == types.FrameTxType {
-		reason, err := p.validateFrame(txn, isLocal)
+		reason := p.validateFrame(txn, isLocal)
 		if reason == txpoolcfg.Success && txn.HasBlobs() {
 			return p.validateBlobTxn(txn, isLocal), nil
 		}
-		return reason, err
+		return reason, nil
 	}
 
 	// Use the on-tx authorization list length, not len(AuthAndNonces): per
@@ -1606,32 +1612,13 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 		defer cancel()
 	}
 	for {
-		generation, frames := p.prepareFrames(simulationCtx, newTxns)
+		frames := p.prepareFrames(simulationCtx, newTxns)
 		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
-			if len(frames) > 0 && generation != p.stateGeneration {
-				if simulationCtx.Err() == nil {
-					return errFrameStateChanged
-				}
-				for txn := range frames {
-					frames[txn] = frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
-				}
+			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons)
+			if err != nil {
+				return err
 			}
-			reasons = slices.Clone(precheckReasons)
-			if reasons == nil {
-				reasons = make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
-			}
-			for i, txn := range newTxns.Txns {
-				if result, ok := frames[txn]; ok {
-					if result.reason != txpoolcfg.Success {
-						reasons[i] = result.reason
-						if result.reason == txpoolcfg.FrameValidationUnavailable {
-							p.discardReasonsLRU.Add(string(txn.IDHash[:]), result.reason)
-						}
-					} else {
-						txn.frameValidation = result.validation
-					}
-				}
-			}
+			reasons = preparedReasons
 			var sources []remoteSource
 			if fromRemoteQueue {
 				sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
@@ -1897,84 +1884,14 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	// Find a replacement candidate within the sender's nonce domain.
 	// Account nonces and keyed sequences can have equal values without conflicting.
 	found, _ := p.all.tree.Get(mt)
-	if mt.TxnSlot.TxType() == types.FrameTxType {
-		v := mt.TxnSlot.frameValidation
-		pendingFrame := p.all.senderIDFrameTxn[mt.TxnSlot.SenderID]
-		if v == nil || pendingFrame != nil && pendingFrame != found {
-			return txpoolcfg.InvalidFrame
-		}
-		var previous *protocol.FrameValidation
-		if found != nil {
-			previous = found.TxnSlot.frameValidation
-		}
-		if reason := p.checkFrameReservation(v, previous); reason != txpoolcfg.NotSet {
+	if mt.TxnSlot.TxType() == FrameTxnType {
+		if reason := p.checkFrameAdmission(mt.TxnSlot, found); reason != txpoolcfg.NotSet {
 			return reason
 		}
 	}
 	if found != nil {
-		if mt.TxnSlot.TxType() == FrameTxnType || found.TxnSlot.TxType() == FrameTxnType {
-			previousKeys, replacementKeys := []uint256.Int{{}}, []uint256.Int{{}}
-			if frame, ok := found.TxnSlot.Txn.(*types.FrameTransaction); ok {
-				previousKeys = frame.NonceKeys
-			}
-			if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
-				replacementKeys = frame.NonceKeys
-			}
-			if !slices.Equal(previousKeys, replacementKeys) {
-				return txpoolcfg.InvalidFrame
-			}
-			if !frameReplacementFee(found.TxnSlot.GetTipCap(), mt.TxnSlot.GetTipCap(), p.cfg.PriceBump) || !frameReplacementFee(found.TxnSlot.GetFeeCap(), mt.TxnSlot.GetFeeCap(), p.cfg.PriceBump) {
-				return txpoolcfg.NotReplaced
-			}
-			if mt.TxnSlot.HasBlobs() && found.TxnSlot.HasBlobs() && !frameReplacementFee(found.TxnSlot.GetBlobFeeCap(), mt.TxnSlot.GetBlobFeeCap(), p.cfg.BlobPriceBump) {
-				return txpoolcfg.ReplaceUnderpriced
-			}
-		}
-		if found.TxnSlot.HasBlobs() && !mt.TxnSlot.HasBlobs() {
-			return txpoolcfg.BlobTxReplace
-		}
-		priceBump := p.cfg.PriceBump
-
-		if mt.TxnSlot.HasBlobs() {
-			// Blob txn threshold checks for replace txn
-			if mt.TxnSlot.TxType() != FrameTxnType {
-				priceBump = p.cfg.BlobPriceBump
-			}
-			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
-				found.TxnSlot.GetBlobFeeCap(),
-				uint256.NewInt(100+p.cfg.BlobPriceBump),
-				uint256.NewInt(100),
-			)
-			if mt.TxnSlot.GetBlobFeeCap().Lt(blobFeeThreshold) && !overflow {
-				if bytes.Equal(found.TxnSlot.IDHash[:], mt.TxnSlot.IDHash[:]) {
-					return txpoolcfg.NotSet
-				}
-				return txpoolcfg.ReplaceUnderpriced // TODO: This is the same as NotReplaced
-			}
-		}
-
-		// Regular txn threshold checks
-		tipThreshold := uint256.NewInt(0)
-		tipThreshold = tipThreshold.Mul(found.TxnSlot.GetTipCap(), uint256.NewInt(100+priceBump))
-		tipThreshold.Div(tipThreshold, &u256.N100)
-		feecapThreshold := uint256.NewInt(0)
-		feecapThreshold.Mul(found.TxnSlot.GetFeeCap(), uint256.NewInt(100+priceBump))
-		feecapThreshold.Div(feecapThreshold, &u256.N100)
-
-		if mt.TxnSlot.GetValue().Cmp(found.TxnSlot.GetValue()) > 0 {
-			// Potential latent overdraft attack
-			tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(mt.TxnSlot.SenderID))))
-		}
-		if mt.TxnSlot.GetTipCap().Cmp(tipThreshold) < 0 || mt.TxnSlot.GetFeeCap().Cmp(feecapThreshold) < 0 {
-			// Both tip and feecap need to be larger than previously to replace the transaction
-			// In case if the transition is stuck, "poke" it to rebroadcast
-			if mt.subPool&IsLocal != 0 && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
-				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
-			}
-			if bytes.Equal(found.TxnSlot.IDHash[:], mt.TxnSlot.IDHash[:]) {
-				return txpoolcfg.NotSet
-			}
-			return txpoolcfg.NotReplaced
+		if reason := p.validateReplacement(mt, found, announcements); reason != txpoolcfg.Success {
+			return reason
 		}
 	}
 

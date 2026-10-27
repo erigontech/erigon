@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math/big"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -45,6 +45,22 @@ type frameValidationResult struct {
 	reason     txpoolcfg.DiscardReason
 }
 
+// frameValidationBatch keeps simulation results tied to the state they used.
+// They may only be applied under the pool lock while that generation still matches.
+type frameValidationBatch struct {
+	generation uint64
+	results    map[*TxnSlot]frameValidationResult
+}
+
+// frameBlockUpdate is the validation work left after applying a block update
+// under the pool lock. The backend work runs only after that lock is released.
+type frameBlockUpdate struct {
+	generation uint64
+	blockHash  common.Hash
+	parked     []*metaTxn
+	unwound    TxnSlots
+}
+
 var errFrameStateChanged = errors.New("frame validation state changed")
 
 // One deadline covers the whole batch, including waits for the simulation gate.
@@ -56,53 +72,83 @@ func (tx *TxnSlot) hasKeyedNonce() bool {
 	return ok && !frame.UsesLegacyNonce()
 }
 
-func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) (txpoolcfg.DiscardReason, error) {
+func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
 	if !p.chainConfig.IsBogota(uint64(time.Now().Unix())) {
-		return txpoolcfg.TypeNotActivated, nil
+		return txpoolcfg.TypeNotActivated
 	}
 	frame := txn.Txn.(*types.FrameTransaction)
 	// Bound validation work before checking attacker-supplied signatures.
 	if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
-		return txpoolcfg.InvalidFrame, nil
+		return txpoolcfg.InvalidFrame
 	}
 	if err := frame.Validate(); err != nil {
-		return txpoolcfg.InvalidFrame, nil
+		return txpoolcfg.InvalidFrame
 	}
 	if frame.GetFeeCap().Lt(frame.GetTipCap()) {
-		return txpoolcfg.TipAboveFeeCap, nil
+		return txpoolcfg.TipAboveFeeCap
 	}
 	if !isLocal && frame.GetFeeCap().LtUint64(p.cfg.MinFeeCap) {
-		return txpoolcfg.UnderPriced, nil
+		return txpoolcfg.UnderPriced
 	}
 	_, _, limits, err := frame.GasLimits()
 	if err != nil || limits.Execution > p.blockGasLimit.Load() || limits.State > p.blockGasLimit.Load() {
-		return txpoolcfg.GasLimitTooHigh, nil
+		return txpoolcfg.GasLimitTooHigh
 	}
-	return txpoolcfg.Success, nil
+	return txpoolcfg.Success
 }
 
 // prepareFrames checks pool policy under the lock, then simulates against the
-// captured head without holding the lock. The caller must check the returned
-// generation under the lock before admitting transactions with these results.
-func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) (uint64, map[*TxnSlot]frameValidationResult) {
-	results := make(map[*TxnSlot]frameValidationResult)
+// captured head without holding the lock. applyFrameValidation checks the state
+// generation under the lock before these results can be used for admission.
+func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidationBatch {
 	p.lock.Lock()
-	generation := p.stateGeneration
+	batch := frameValidationBatch{generation: p.stateGeneration, results: make(map[*TxnSlot]frameValidationResult)}
 	stateBlockHash := p.stateBlockHash
 	for i, txn := range txns.Txns {
 		if txn.TxType() != FrameTxnType {
 			continue
 		}
-		reason, _ := p.validateFrame(txn, txns.IsLocal[i])
-		results[txn] = frameValidationResult{reason: reason}
+		batch.results[txn] = frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
 	}
 	p.lock.Unlock()
 	for _, txn := range txns.Txns {
-		if result, ok := results[txn]; ok && result.reason == txpoolcfg.Success {
-			results[txn] = p.simulateFrameResult(ctx, txn, stateBlockHash)
+		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
+			batch.results[txn] = p.simulateFrameResult(ctx, txn, stateBlockHash)
 		}
 	}
-	return generation, results
+	return batch
+}
+
+// applyFrameValidation requires the pool lock. Stale results trigger another
+// simulation while time remains; after the batch deadline, only frame transactions
+// are rejected so unrelated transactions can still be admitted.
+func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason) ([]txpoolcfg.DiscardReason, error) {
+	stale := len(batch.results) > 0 && batch.generation != p.stateGeneration
+	if stale && ctx.Err() == nil {
+		return nil, errFrameStateChanged
+	}
+	reasons := slices.Clone(precheckReasons)
+	if reasons == nil {
+		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
+	}
+	for i, txn := range txns.Txns {
+		result, ok := batch.results[txn]
+		if !ok {
+			continue
+		}
+		if stale {
+			result = frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
+		}
+		if result.reason == txpoolcfg.Success {
+			txn.frameValidation = result.validation
+			continue
+		}
+		reasons[i] = result.reason
+		if result.reason == txpoolcfg.FrameValidationUnavailable {
+			p.discardReasonsLRU.Add(string(txn.IDHash[:]), result.reason)
+		}
+	}
+	return reasons, nil
 }
 
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, stateBlockHash common.Hash) frameValidationResult {
@@ -164,6 +210,21 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash
 		v.Dependencies = append(v.Dependencies, common.BytesToAddress(dependency))
 	}
 	return v, nil
+}
+
+// checkFrameAdmission checks sender exclusivity and payer reservations under the
+// pool lock, after simulation has established the transaction's payer and cost.
+func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
+	v := txn.frameValidation
+	pendingFrame := p.all.senderIDFrameTxn[txn.SenderID]
+	if v == nil || pendingFrame != nil && pendingFrame != found {
+		return txpoolcfg.InvalidFrame
+	}
+	var previous *protocol.FrameValidation
+	if found != nil {
+		previous = found.TxnSlot.frameValidation
+	}
+	return p.checkFrameReservation(v, previous)
 }
 
 // checkFrameReservation requires the pool lock. Replacements and revalidation
@@ -325,16 +386,4 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 		default:
 		}
 	}
-}
-
-func frameReplacementFee(previous, replacement *uint256.Int, bump uint64) bool {
-	if replacement.Cmp(previous) <= 0 {
-		return false
-	}
-	// Cross-products preserve the full percentage bump without division rounding
-	// or overflow at the uint256 boundary.
-	percent := new(big.Int).Add(new(big.Int).SetUint64(bump), big.NewInt(100))
-	required := new(big.Int).Mul(previous.ToBig(), percent)
-	offered := new(big.Int).Mul(replacement.ToBig(), big.NewInt(100))
-	return offered.Cmp(required) >= 0
 }
