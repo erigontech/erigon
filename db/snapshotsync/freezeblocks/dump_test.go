@@ -21,7 +21,6 @@ import (
 	"errors"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -290,56 +289,23 @@ func TestDumpTxsRejectsMalformedStoredTxn(t *testing.T) {
 
 // A failed collect, such as a compressor cancelled during shutdown, must not leave the parsers of
 // later transactions waiting for their turn forever.
-func TestDumpTxsReturnsWhenCollectFails(t *testing.T) {
-	m := createDumpTestKV(t, chain.AllProtocolChanges, 1, 64)
-	errCollect := errors.New("collect failed")
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 2, nil, func(v []byte) error {
-			if v == nil {
-				return nil
-			}
-			return errCollect
-		}, 1, log.LvlInfo, log.New())
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, errCollect)
-	case <-time.After(30 * time.Second):
-		t.Fatal("DumpTxs did not return after collect failed")
-	}
-}
-
 func TestDumpTxsCollectsNothingAfterFailedTx(t *testing.T) {
 	m := createDumpTestKV(t, chain.AllProtocolChanges, 1, 64)
 	errFirst := errors.New("first collect failed")
 	errLater := errors.New("later collect failed")
 
 	var txs, afterFailure int
-	done := make(chan error, 1)
-	go func() {
-		_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 2, nil, func(v []byte) error {
-			if v == nil {
-				return nil
-			}
-			txs++
-			if txs == 1 {
-				return errFirst
-			}
-			afterFailure++
-			return errLater
-		}, 1, log.LvlInfo, log.New())
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, errFirst)
-		require.Zero(t, afterFailure)
-	case <-time.After(30 * time.Second):
-		t.Fatal("DumpTxs did not return after collect failed")
-	}
+	_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 2, nil, func(v []byte) error {
+		if v == nil {
+			return nil
+		}
+		txs++
+		if txs == 1 {
+			return errFirst
+		}
+		afterFailure++
+		return errLater
+	}, 1, log.LvlInfo, log.New())
+	require.ErrorIs(t, err, errFirst)
+	require.Zero(t, afterFailure)
 }
