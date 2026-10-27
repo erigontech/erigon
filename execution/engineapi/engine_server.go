@@ -430,6 +430,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
+	var minTxBlockGas uint64
+	if !e.config.AllowAA {
+		minTxBlockGas = mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
+		if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
+			return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
+		}
+	}
+
 	// The transaction bound uses at most the gas limit the parent allows. The header checks assume a
 	// valid parent, so they run here only against a validated one. An L2 rules engine has its own
 	// header rules.
@@ -442,20 +450,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			headerErr = merge.VerifyHeaderWithParent(e.config, &header, parent)
 		}
 	}
-
-	if !e.config.AllowAA {
-		minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
-		if uint64(len(req.Transactions)) > gasLimit/minTxBlockGas {
-			if gasLimit < header.GasLimit {
-				if status, err := e.rejectStoredBlockWithInvalidGasLimit(ctx, req, parent); status != nil || err != nil {
-					return status, err
-				}
-			}
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
-			}, nil
-		}
+	// A stored block with a gas limit that is invalid for the parent was stored without the cap. It
+	// takes the normal path, which validates and removes it as any stored invalid block.
+	if !e.config.AllowAA && uint64(len(req.Transactions)) > gasLimit/minTxBlockGas && !e.storedWithInvalidGasLimit(ctx, req, parent) {
+		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
 	}
 
 	txs := make([][]byte, len(req.Transactions))
@@ -608,49 +606,19 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
-// rejectStoredBlockWithInvalidGasLimit validates the stored block that a payload above the
-// parent-capped transaction bound names, if the stored gas limit is invalid for the parent, so that
-// the validation rejects and removes it. Only the stored header decides, as the payload's block hash
-// is not verified yet. Unless the validation rejects the block, the bound's answer stands.
-func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) (*engine_types.PayloadStatus, error) {
-	number := req.BlockNumber.Uint64()
-	stored := e.chainRW.GetHeader(ctx, req.BlockHash, number)
-	if stored == nil || stored.ParentHash != req.ParentHash || misc.VerifyParentGasLimit(e.config, parent, stored) == nil {
-		return nil, nil
-	}
-	// The validation does not go beyond the reorg depth.
-	if head := e.chainRW.CurrentHeader(ctx); head == nil || math.AbsoluteDifference(head.Number.Uint64(), number) >= e.maxReorgDepth {
-		return nil, nil
-	}
-	if busy, err := e.waitWhileBusy(ctx, defaultReadinessWait); err != nil || busy {
-		return nil, err
-	}
-	e.lock.Lock()
-	defer e.lock.Unlock()
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, req.BlockHash, number)
-	if errors.Is(err, execmodule.ErrMissingChainSegment) {
-		return nil, nil
-	}
-	if err != nil || status != execmodule.ExecutionStatusBadBlock {
-		return nil, err
-	}
-	e.blockDownloader.ReportBadHeader(req.BlockHash, latestValidHash, common.Deref(validationErr))
-	return &engine_types.PayloadStatus{
-		Status:          engine_types.InvalidStatus,
-		ValidationError: engine_types.NewStringifiedErrorFromString(common.Deref(validationErr)),
-		LatestValidHash: &latestValidHash,
-	}, nil
+// storedWithInvalidGasLimit reports whether the payload's hash names a stored block on the payload's
+// parent with a gas limit that is invalid for that parent. Only the stored header decides, as the
+// payload's block hash is not verified yet.
+func (e *EngineServer) storedWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) bool {
+	stored := e.chainRW.GetHeader(ctx, req.BlockHash, req.BlockNumber.Uint64())
+	return stored != nil && stored.ParentHash == req.ParentHash && misc.VerifyParentGasLimit(e.config, parent, stored) != nil
 }
 
-// waitWhileBusy reports whether the execution module stayed busy for the whole wait.
-func (e *EngineServer) waitWhileBusy(ctx context.Context, wait time.Duration) (bool, error) {
-	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
-	readyCtx, cancel := context.WithTimeout(ctx, wait)
-	defer cancel()
-	return waitForResponse(readyCtx, wait, func() (bool, error) {
-		ready, err := e.chainRW.Ready(readyCtx)
-		return !ready, err
-	})
+func gasLimitReached(txCount int, minTxBlockGas uint64) *engine_types.PayloadStatus {
+	return &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, txCount, minTxBlockGas)),
+	}
 }
 
 // defaultReadinessWait is how long a request waits for a busy execution module before answering
@@ -804,7 +772,13 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := e.waitWhileBusy(ctx, readinessWait)
+	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
+	readyCtx, cancelReady := context.WithTimeout(ctx, readinessWait)
+	defer cancelReady()
+	waitingForExecutionReady, err := waitForResponse(readyCtx, readinessWait, func() (bool, error) {
+		isReady, err := e.chainRW.Ready(readyCtx)
+		return !isReady, err
+	})
 	if err != nil {
 		return nil, err
 	}
