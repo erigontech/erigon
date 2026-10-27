@@ -946,7 +946,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	// The dep-order path flushes an invalidated tx with complete = its validity,
 	// i.e. false (writes stored as Estimate, not Done).
 	const complete = false
-	vm.FlushVersionedWrites(invalidTxWrites, complete, "")
+	vm.FlushVersionedWrites(invalidTxWrites, complete)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.

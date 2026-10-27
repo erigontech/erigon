@@ -40,7 +40,7 @@ func TestVersionedRead_RecordOnce_DirtyReResolveDoesNotOverwrite(t *testing.T) {
 	defer w.Close()
 	w.txIndex = 0
 	require.NoError(t, w.SetState(addr, key, v1))
-	mvhm.FlushVersionedWrites(w.VersionedWrites(), true, "")
+	mvhm.FlushVersionedWrites(w.VersionedWrites(), true)
 
 	// Reader (tx2) first read: sees the committed v1 and records the dependency.
 	r := NewWithVersionMap(reader, mvhm)

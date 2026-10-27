@@ -381,7 +381,7 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			require.NoError(t, destructor.CreateAccount(addr, true))
 			_, err := destructor.Selfdestruct(addr, false)
 			require.NoError(t, err)
-			vm.FlushVersionedWrites(destructor.VersionedWrites(), true, "")
+			vm.FlushVersionedWrites(destructor.VersionedWrites(), true)
 			ibs := NewWithVersionMap(&emptyReader{}, vm)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 3)
@@ -743,7 +743,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 			tt.write(ws, addr, hdr)
 			vm.fieldMissHook = func() {
 				vm.fieldMissHook = nil
-				vm.FlushVersionedWrites(ws, true, "")
+				vm.FlushVersionedWrites(ws, true)
 			}
 
 			got, err := tt.read(ibs, addr)
@@ -781,7 +781,7 @@ func TestVersionedRead_RevivalFlushedAfterAbsentAccountRead(t *testing.T) {
 	vm, revival := creditedDestructAndRevival(addr, revived)
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, true, "")
+		vm.FlushVersionedWrites(revival, true)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -808,7 +808,7 @@ func TestVersionedRead_RecreateFlushedAfterAbsentAccountRead(t *testing.T) {
 	revival.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, false, "")
+		vm.FlushVersionedWrites(revival, false)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -848,7 +848,7 @@ func TestVersionedRead_DestructFlushedAfterMemoIsRecorded(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
 	destruct.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}, valStatus: ValueDeleted}})
 	destruct.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: Version{TxIndex: 1}}})
-	vm.FlushVersionedWrites(destruct, false, "")
+	vm.FlushVersionedWrites(destruct, false)
 	vm.MarkWritesValidated(destruct, nil)
 
 	_, err = ibs.Exist(addr)
@@ -868,7 +868,7 @@ func TestVersionedRead_RevivalWithdrawnDuringReRead(t *testing.T) {
 	vm, revival := creditedDestructAndRevival(addr, &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, false, "")
+		vm.FlushVersionedWrites(revival, false)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -1138,8 +1138,8 @@ func TestVersionedRead_InFlightSelfDestructWithoutWaitRecordsDep(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
 	burn := &WriteSet{}
 	burn.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
-	mvhm.FlushVersionedWrites(destruct, false, "")
-	mvhm.FlushVersionedWrites(burn, true, "")
+	mvhm.FlushVersionedWrites(destruct, false)
+	mvhm.FlushVersionedWrites(burn, true)
 
 	_, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
