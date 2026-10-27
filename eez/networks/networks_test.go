@@ -69,3 +69,39 @@ func TestDevnetRegistered(t *testing.T) {
 	require.Equal(t, cfg.L2.Name(), config.Name)
 	require.Equal(t, l2.BlockGasLimit, spec.Genesis.GasLimit)
 }
+
+// TestRollupXGenesis is T-GEN-1 for the eez-rollupX networks: the hashes and
+// state roots are those the networks serve as block 0, recorded in the
+// deployments' README.md and, for eez-chiado, fixture eezdev-699069.
+func TestRollupXGenesis(t *testing.T) {
+	for _, spec := range []chainspec.Spec{Chiado, ChiadoAsus, Mainnet} {
+		t.Run(spec.Name, func(t *testing.T) {
+			block, ibs, err := genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.New())
+			require.NoError(t, err)
+			require.Equal(t, spec.GenesisHash, block.Hash())
+			require.Equal(t, spec.GenesisStateRoot, block.Root())
+
+			l2 := spec.Config.L2.(*config.L2Config)
+			require.NoError(t, l2.RollupX.CheckGenesis(block.Header()))
+			require.Equal(t, config.RollupXBlockGasLimit, block.GasLimit())
+			require.Equal(t, uint64(1_000_000_000), block.BaseFee().Uint64())
+			require.Equal(t, config.RollupXBaseFeeChangeDenominator, *spec.Config.BaseFeeChangeDenominator)
+			require.Nil(t, spec.Config.FeeCollector)
+
+			codeHash, err := ibs.GetCodeHash(accounts.InternAddress(protocol.RollupXEEZL2Address))
+			require.NoError(t, err)
+			require.False(t, codeHash.IsEmpty())
+		})
+	}
+}
+
+func TestRollupXRegistered(t *testing.T) {
+	Register()
+	for name, id := range map[string]uint64{"eez-chiado": 699069, "eez-chiado-asus": 906969, "eez-mainnet": 696990} {
+		spec, err := chainspec.ChainSpecByName(name)
+		require.NoError(t, err)
+		require.Equal(t, id, spec.Config.ChainID.Uint64())
+		require.Equal(t, name, chainspec.NetworkNameByID[id])
+		require.Equal(t, config.RollupX, spec.Config.L2.(*config.L2Config).RuleSet())
+	}
+}
