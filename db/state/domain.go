@@ -2136,7 +2136,6 @@ func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upp
 	if len(data) > 1 {
 		var group errgroup.Group
 		for fileIndex := range data {
-			fileIndex := fileIndex
 			group.Go(func() error { return scan(fileIndex) })
 		}
 		if err := group.Wait(); err != nil {
@@ -2209,7 +2208,7 @@ func (dt *DomainRoTx) debugVerifyUpperRowsFromDB(roTx kv.Tx, rootKey []byte, upp
 					upperRows[string(baseKey)] = bytes.Clone(value)
 				}
 			}
-			for key != nil && len(key) > 8 && bytes.Equal(key[:len(key)-8], baseKey) {
+			for len(key) > 8 && bytes.Equal(key[:len(key)-8], baseKey) {
 				key, value, err = cursor.Next()
 			}
 		}
