@@ -606,21 +606,31 @@ func attemptsMade(attempts int) string {
 }
 
 const (
-	attestationDataImportWait         = time.Second
+	defaultAttestationDataImportWait  = time.Second
 	attestationDataImportPollInterval = 5 * time.Millisecond
 )
 
-func (a *ApiHandler) waitForSlotImport(ctx context.Context, slot uint64) {
+func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
 	waitedSlot := slot + 1
-	deadline := time.Now().Add(attestationDataImportWait)
-	for a.attestationDataWaitedSlot.Load() != waitedSlot && a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot) {
-		if !time.Now().Before(deadline) {
+	deadline := time.Now().Add(a.attestationDataImportWait)
+	for {
+		waitSpent := a.attestationDataWaitedSlot.Load() == waitedSlot
+		if !waitSpent && !time.Now().Before(deadline) {
 			a.attestationDataWaitedSlot.Store(waitedSlot)
-			return
+			waitSpent = true
+		}
+		importInProgress := a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
+		if !importInProgress || waitSpent {
+			if head, ok := a.forkchoiceStore.TryGetHeadNode(); ok {
+				return head, true
+			}
+			if waitSpent {
+				return forkchoice.ForkChoiceNode{}, false
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return forkchoice.ForkChoiceNode{}, false
 		case <-time.After(attestationDataImportPollInterval):
 		}
 	}
@@ -652,16 +662,17 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
-	a.waitForSlotImport(r.Context(), *slot)
+	head, haveHead := a.waitForAttestationHead(r.Context(), *slot)
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
 
 	var attestationData solid.AttestationData
 	var ok, cached bool
-	if head, _, err := a.forkchoiceStore.GetHeadNode(); err == nil {
+	if haveHead {
 		attestationData, ok = a.forkchoiceStore.AttestationData(head.Root, *slot)
 	}
+	forkChoiceData := ok
 	if !ok {
 		attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot)
 		cached = ok
@@ -728,7 +739,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	// The cached attestation data has CommitteeIndex=0 (shared across all committees for the same slot), but the VC
 	// expects it to match the requested committee_index. In Gloas the field signals payload presence instead.
 	if clversion.AfterOrEqual(clparams.GloasVersion) {
-		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot)
+		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, forkChoiceData)
 		if err != nil {
 			return nil, err
 		}
@@ -748,21 +759,26 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 // gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
 // slot, otherwise 1 if the head's chain has the block FULL and 0 if not. A FULL block whose payload is not verified
 // is optimistic, so it gets a 503 instead, as does a fork-choice head that cannot be read.
-func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint64, error) {
+func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash, head forkchoice.ForkChoiceNode, haveHead bool) (uint64, error) {
 	header, ok := a.forkchoiceStore.GetHeader(root)
 	if !ok || header.Slot == slot {
 		return 0, nil
 	}
-	node, _, err := a.forkchoiceStore.GetHeadNode()
-	if err != nil {
-		return 0, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	if !haveHead {
+		head, haveHead = a.forkchoiceStore.TryGetHeadNode()
+		if !haveHead {
+			return 0, beaconhttp.NewEndpointError(
+				http.StatusServiceUnavailable,
+				errors.New("fork-choice head unavailable"),
+			)
+		}
 	}
 	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
 	// the head's chain gives it.
-	if node.Root != root {
-		node = a.forkchoiceStore.Ancestor(node.Root, header.Slot)
+	if head.Root != root {
+		head = a.forkchoiceStore.Ancestor(head.Root, header.Slot)
 	}
-	if node.Root != root || node.PayloadStatus != cltypes.PayloadStatusFull {
+	if head.Root != root || head.PayloadStatus != cltypes.PayloadStatusFull {
 		return 0, nil
 	}
 	if !a.forkchoiceStore.IsPayloadVerified(root) {

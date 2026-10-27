@@ -254,6 +254,7 @@ type ApiHandler struct {
 	syncMessagePool           sync_contribution_pool.SyncContributionPool
 	committeeSub              committee_subscription.CommitteeSubscribe
 	attestationProducer       attestation_producer.AttestationDataProducer
+	attestationDataImportWait time.Duration
 	attestationDataWaitedSlot atomic.Uint64
 	aggregatePool             aggregation.AggregationPool
 
@@ -385,6 +386,7 @@ func NewApiHandler(
 		columnStorage:                    columnStorage,
 		caplinSnapshots:                  blobSnapshots,
 		attestationProducer:              attestationProducer,
+		attestationDataImportWait:        defaultAttestationDataImportWait,
 		blobBundles:                      blobBundles,
 		engine:                           engine,
 		syncMessagePool:                  syncMessagePool,
