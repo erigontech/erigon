@@ -141,7 +141,6 @@ type TxPool struct {
 	chainConfig             *chain.Config
 	stateGeneration         uint64
 	stateBlockHash          common.Hash
-	frameValidationGate     chan struct{}
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -169,6 +168,7 @@ type TxPool struct {
 	logger                  log.Logger
 	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
 	blobs                   *blobStore
+	frameValidationGate     chan struct{}
 	frameReservations       map[common.Address]frameReservation
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
@@ -254,12 +254,12 @@ func New(
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
-		frameValidationGate:     make(chan struct{}, 1),
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
 		auths:                   make(map[AuthAndNonce]*metaTxn),
 		blobs:                   newBlobStore(),
+		frameValidationGate:     make(chan struct{}, 1),
 		senderLastActivity:      make(map[uint64]uint64),
 	}
 	// Seed the EWMA block time with 12 s (Ethereum mainnet slot time). The tracker adjusts
