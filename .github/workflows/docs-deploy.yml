@@ -53,6 +53,17 @@ jobs:
         run: npm ci
         working-directory: docs/site
 
+      # Same gates as docs-site-build.yml. `docusaurus build` transpiles but
+      # does not type-check, so without these a push straight to the release
+      # branch publishes whatever it carries.
+      - name: Check tsconfig against upstream
+        run: npm run check:tsconfig
+        working-directory: docs/site
+
+      - name: Type-check
+        run: npm run typecheck
+        working-directory: docs/site
+
       - name: Build
         run: npm run build
         working-directory: docs/site
