@@ -51,6 +51,12 @@ The loader test rebuilds the transaction from its fields and requires the mined 
 
 `blob-23507949-0.hex` is the blob the settlement carries, from `/eth/v1/beacon/blob_sidecars/25306518` on `https://rpc-gbc.chiadochain.net` on 2026-10-14. The file holds its first two field elements; the other 4094 are zero. The loader test recomputes the KZG commitment and requires the transaction's versioned hash.
 
+## rollupx/
+
+`eezdev-699069/replay-0-2250.json` is fixture `rollupx/eezdev-699069` of `NethermindEth/nethermind` at `6d2b31d907e86a6cf243e9f0351f45f5918eed23` (`feature/eez-l2-execution`), `src/Nethermind/Nethermind.Eez.Test/Fixtures/rollupx/eezdev-699069/`. Per that repository's fixture README it holds independently recorded public testnet data of eez.dev (L1 Gnosis Chiado; L2 chain id 699069): the first fourteen accepted batches with their L1 headers, logs, posting transactions and the blobs of their beacon slots (trailing zeros trimmed), and the hashes of L2 blocks 0 to 2250. Its `genesis.json` is `eez/networks/chiado-699069-genesis.json`.
+
+License: `LGPL-3.0-only` (nethermind).
+
 ## SHA-256
 
 | File | SHA-256 |
@@ -59,6 +65,7 @@ The loader test rebuilds the transaction from its fields and requires the mined 
 | `chiado/blob-23507949-0.hex` | `384eaae16ad11854a0b1b83c2ff67542b7903b86ecd1ee189444699242b76f40` |
 | `chiado/header-23507949.rlp.hex` | `b6c2ffc4aea6c879093cd6bf111dddf24807997d1b1b6bda485953950b22d373` |
 | `chiado/rollup-created-23413747.json` | `986dbf338aa6ed9b8bae098578d5421665aa298caddc72095ce7aa0cca2a953d` |
+| `rollupx/eezdev-699069/replay-0-2250.json` | `6815ec581ed88eedada5a53e09bb485907139311f7d8a170b7af851314717096` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
 | `windows/captured-devnet-anchor-402/block-397.rlp.hex` | `f7768c77f78a57ee124aceef59fac0a9e6c5a06203cf4c000ea94e6d63f2cb88` |
