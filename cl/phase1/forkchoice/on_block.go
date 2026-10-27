@@ -583,17 +583,29 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 
+	var custodyRequirement uint64
+	updateValidatorsCustody := false
 	if f.peerDas != nil {
 		if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
 			// update the custody requirement whenever we see a new block
-			custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
-			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+			custodyRequirement = state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+			updateValidatorsCustody = true
 		}
 	}
+
+	block.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
+		if err := f.onAttestationLocked(attestation, true, lastProcessedState, blockRoot); err != nil {
+			log.Debug("[OnBlock] block attestation not applied", "slot", block.Block.Slot, "err", err)
+		}
+		return true
+	})
 
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
+	if updateValidatorsCustody {
+		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+	}
 
 	var appliedEnvelope *cltypes.SignedExecutionPayloadEnvelope
 	var appliedEnvelopeLocal, envelopeApplied bool

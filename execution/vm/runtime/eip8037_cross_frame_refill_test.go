@@ -67,7 +67,6 @@ func deployStateGasContracts(t *testing.T, callerCode []byte) (accounts.Address,
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
 	t.Cleanup(statedb.Close)
 
 	deploy := func(at uint16, code []byte) accounts.Address {

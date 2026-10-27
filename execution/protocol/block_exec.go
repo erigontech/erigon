@@ -206,17 +206,15 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
-// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. Only
-// chainConfig survives a call, so there is nothing else to seed.
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse.
 func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
 	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
 }
 
-// SysCallContractWithEVM runs a system call on an EVM the caller owns instead of
-// building one per call. The EVM must belong to the calling goroutine, and the
-// call overwrites its block context, tx context, IntraBlockState and vm.Config,
-// so the caller must not need any of those to survive. A nil EVM, or one built
-// for a different chainConfig, falls back to allocating one.
+// SysCallContractWithEVM runs a system call on an EVM owned by the caller.
+// Reuse preserves cancellation but replaces the block and transaction contexts,
+// intra-block state and VM configuration. The EVM must not execute other calls concurrently.
+// A nil EVM or one with a different chainConfig is replaced for this call.
 func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
@@ -245,7 +243,7 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 	if evm == nil || evm.ChainConfig() != chainConfig {
 		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
-		evm.ResetBetweenBlocks(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
+		evm.ResetForSystemCall(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
 	}
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
@@ -330,7 +328,7 @@ func FinalizeBlockExecution(
 	}
 
 	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
-	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// write-set — the caller applies ba.BalIO() via ApplyWrites after
 	// assembly, so so.data must not also be flushed here. versionMap==nil callers
 	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
 	if !ibs.IsVersioned() {

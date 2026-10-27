@@ -4547,6 +4547,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	require.NoError(t, err)
 	fcu.HeadVal = baseBlockRoot
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	require.NoError(t, m.WaitForTxPool(ctx, elHeadHash))
 
 	beaconBody, execValue, err := h.produceBeaconBody(
 		ctx, baseBlock.Slot, baseBlockRoot, postState, targetSlot,

@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester/txpoolwait"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -104,9 +105,9 @@ type StateChangesClient interface {
 type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
+	Cancel               context.CancelFunc
 	Log                  log.Logger
 	tb                   testing.TB
-	cancel               context.CancelFunc
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               rules.Engine
@@ -128,6 +129,7 @@ type ExecModuleTester struct {
 	Address              common.Address
 	ForkValidator        *execmodule.ForkValidator
 	ExecModule           *execmodule.ExecModule
+	ReadAheader          *exec.BlockReadAheader
 	BlockBuilder         *builder.Builder
 	StateCache           *execmodule.Cache
 	retirementStart      chan bool
@@ -153,7 +155,7 @@ type ExecModuleTester struct {
 }
 
 func (emt *ExecModuleTester) Close() {
-	emt.cancel()
+	emt.Cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
@@ -599,7 +601,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	br := freezeblocks.NewBlockReader(allSnapshots)
 
 	mock := &ExecModuleTester{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, Cancel: ctxCancel, DB: db,
 		tb:                 tb,
 		Log:                logger,
 		Dirs:               dirs,
@@ -726,6 +728,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
+	mock.ReadAheader = readAheader
 	blkBuilder := builder.NewBuilder(
 		mock.DB,
 		&cfg.Builder,
@@ -1031,6 +1034,9 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 }
 
 func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.Parameters) (uint64, error) {
+	if err := emt.WaitForTxPool(ctx, params.ParentHash); err != nil {
+		return 0, err
+	}
 	return retryBusy(ctx, func() (uint64, bool, error) {
 		result, err := emt.ExecModule.AssembleBlock(ctx, params)
 		if err != nil {
@@ -1038,6 +1044,10 @@ func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.
 		}
 		return result.PayloadID, result.Busy, nil
 	})
+}
+
+func (emt *ExecModuleTester) WaitForTxPool(ctx context.Context, parentHash common.Hash) error {
+	return txpoolwait.WaitForParent(ctx, emt.DB, emt.BlockReader, emt.TxPool, parentHash)
 }
 
 func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID uint64) (*types.Block, error) {

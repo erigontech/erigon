@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -245,45 +246,53 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
 }
 
-func TestUpdateForkChoiceRejectsSiblingHashes(t *testing.T) {
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{{"synchronous", false}, {"parallel", true}} {
-		t.Run(mode.name, func(t *testing.T) {
-			for _, field := range []string{"safe", "finalized"} {
-				t.Run(field, func(t *testing.T) {
-					m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(mode.parallel))
-					a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
-						b.SetCoinbase(common.Address{0x81})
-					})
-					require.NoError(t, err)
-					b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
-						b.SetCoinbase(common.Address{0x82})
-					})
-					require.NoError(t, err)
-					_, err = m.InsertBlocks(t.Context(), a.Blocks)
-					require.NoError(t, err)
-					_, err = m.InsertBlocks(t.Context(), b.Blocks)
-					require.NoError(t, err)
-					validation, err := m.ValidateChain(t.Context(), a.Blocks[0].Header())
-					require.NoError(t, err)
-					require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+func TestUpdateForkChoiceRecoversAfterRejectingSiblingHashes(t *testing.T) {
+	forEachFlushingMode(t, func(t *testing.T, parallel bool) {
+		for _, field := range []string{"safe", "finalized"} {
+			t.Run(field, func(t *testing.T) {
+				for _, followUp := range []struct {
+					name     string
+					ancestor bool
+				}{{"zero_hashes", false}, {"ancestor_hashes", true}} {
+					t.Run(followUp.name, func(t *testing.T) {
+						m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(parallel))
+						a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+							b.SetCoinbase(common.Address{0x81})
+						})
+						require.NoError(t, err)
+						b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+							b.SetCoinbase(common.Address{0x82})
+						})
+						require.NoError(t, err)
+						_, err = m.InsertBlocks(t.Context(), a.Blocks)
+						require.NoError(t, err)
+						_, err = m.InsertBlocks(t.Context(), b.Blocks)
+						require.NoError(t, err)
+						requireValid(t, m, a.Blocks[0])
 
-					var safe, finalized common.Hash
-					if field == "safe" {
-						safe = b.Blocks[0].Hash()
-					} else {
-						finalized = b.Blocks[0].Hash()
-					}
-					result, err := m.ExecModule.UpdateForkChoice(t.Context(), a.Blocks[0].Hash(), safe, finalized)
-					require.NoError(t, err)
-					m.ExecModule.WaitIdle(t.Context())
-					require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
-				})
-			}
-		})
-	}
+						var safe, finalized common.Hash
+						if field == "safe" {
+							safe = b.Blocks[0].Hash()
+						} else {
+							finalized = b.Blocks[0].Hash()
+						}
+						bad := updateForkChoice(t, m, a.Blocks[0].Hash(), safe, finalized)
+						require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, bad.Status)
+
+						var h common.Hash
+						if followUp.ancestor {
+							h = m.Genesis.Hash()
+						}
+						result := updateForkChoice(t, m, a.Blocks[0].Hash(), h, h)
+						require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+						require.Equal(t, a.Blocks[0].Hash(), result.LatestValidHash)
+						require.Equal(t, a.Blocks[0].Hash(), headBlockHash(t, m))
+						require.Equal(t, a.Blocks[0].Hash(), canonicalHashAt(t, m, 1))
+					})
+				}
+			})
+		}
+	})
 }
 
 func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
@@ -1068,6 +1077,114 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}
 }
 
+func TestStopWakesBuilderWaitingForMoreTransactions(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+
+	synctest.Test(t, func(t *testing.T) {
+		provider := &observingTxnProvider{TxnProvider: emptyTxnProvider{}, txnCounts: make(chan int, 16)}
+		beaconRoot := randomHash()
+		payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			PrevRandao:            parent.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     provider,
+		}, time.Minute, time.Minute)
+
+		// The provider ran dry, so the build waits before it asks again.
+		<-provider.txnCounts
+		synctest.Wait()
+
+		started := time.Now()
+		result, err := payloadBuilder.Stop(t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, started, time.Now(), "collecting the payload must not wait for the next provider poll")
+	})
+}
+
+// orderedTxnProvider serves txns in a fixed priority order like the txpool's best(), skipping and
+// recording yielded IDs, and reports when it serves want.
+type orderedTxnProvider struct {
+	ordered []types.Transaction
+	want    types.Transaction
+	served  chan struct{}
+}
+
+func (p *orderedTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	o := txnprovider.ApplyProvideOptions(opts...)
+	var out []types.Transaction
+	for _, txn := range p.ordered {
+		if len(out) == o.Amount {
+			break
+		}
+		if o.TxnIdsFilter.Contains(txn.Hash()) {
+			continue
+		}
+		out = append(out, txn)
+		o.TxnIdsFilter.Add(txn.Hash())
+		if txn == p.want {
+			close(p.served)
+		}
+	}
+	return out, nil
+}
+
+func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+
+	signTxn := func(nonce uint64) types.Transaction {
+		txn, err := types.SignTx(
+			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(2*parent.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, err)
+		txn.SetSender(accounts.InternAddress(m.Address))
+		return txn
+	}
+	var ordered []types.Transaction
+	for nonce := uint64(1); nonce <= 150; nonce++ {
+		ordered = append(ordered, signTxn(nonce))
+	}
+	executable := signTxn(0)
+	ordered = append(ordered, executable)
+
+	synctest.Test(t, func(t *testing.T) {
+		provider := &orderedTxnProvider{ordered: ordered, want: executable, served: make(chan struct{})}
+		beaconRoot := randomHash()
+		started := time.Now()
+		payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			PrevRandao:            parent.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     provider,
+		}, time.Minute, time.Minute)
+
+		<-provider.served
+		waited := time.Since(started)
+		result, err := payloadBuilder.Stop(t.Context())
+		require.Zero(t, waited, "the build waited before it asked for the next full batch")
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Block.Transactions())
+		require.Equal(t, executable.Hash(), result.Block.Transactions()[0].Hash())
+	})
+}
+
 // Start building a block, then accept a competing block with the same parent.
 // The original build must still produce a valid block. Also run without the
 // competing commit as a control.
@@ -1192,21 +1309,29 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
-func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
-	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+func txPoolBehindParentFixture(t *testing.T) (
+	m *execmoduletester.ExecModuleTester,
+	parent *types.Block,
+	params *builder.Parameters,
+	provider *rewindingTxnProvider,
+) {
+	t.Helper()
+	m = execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	chainPack, err := m.GenerateChain(2, nil)
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 
-	parent := chainPack.TopBlock
-	provider := &rewindingTxnProvider{
+	parent = chainPack.TopBlock
+	// A synctest bubble would fast-forward this wait past the txpool catching up in real time.
+	require.NoError(t, m.WaitForTxPool(t.Context(), parent.Hash()))
+	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
+	provider = &rewindingTxnProvider{
 		pool:  m.TxPool,
 		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
 		ready: make(chan struct{}),
 	}
 	parentBeaconBlockRoot := randomHash()
-	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
+	params = &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
 		PrevRandao:            parent.Header().MixDigest,
@@ -1215,7 +1340,17 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
-	})
+	}
+	return m, parent, params, provider
+}
+
+// assembleWithTxPoolBehindParent adds two pending transactions to the txpool and starts a build whose
+// transaction selection moves the txpool head back to the block before the parent. It returns once
+// selection has started.
+func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModuleTester, parent *types.Block, payloadID uint64) {
+	t.Helper()
+	m, parent, params, provider := txPoolBehindParentFixture(t)
+	payloadID, err := m.AssembleBlock(t.Context(), params)
 	require.NoError(t, err)
 
 	select {
@@ -1223,6 +1358,12 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
+	return m, parent, payloadID
+}
+
+func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
 
 	requestCtx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -1250,6 +1391,46 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
 	}
 	require.ErrorIs(t, requestErr, context.Canceled)
+}
+
+func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
+
+	// The txpool may never see the parent again.
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Block)
+	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
+}
+
+func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
+	m, parent, params, provider := txPoolBehindParentFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		payloadID, err := m.AssembleBlock(t.Context(), params)
+		require.NoError(t, err)
+		<-provider.ready
+		synctest.Wait()
+
+		type assembled struct {
+			result execmodule.AssembledBlockResult
+			err    error
+		}
+		returned := make(chan assembled, 1)
+		go func() {
+			result, err := m.ExecModule.GetAssembledBlock(t.Context(), payloadID)
+			returned <- assembled{result, err}
+		}()
+		synctest.Wait()
+		require.NoError(t, m.TxPool.OnNewBlock(t.Context(), txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+
+		got := <-returned
+		require.NoError(t, got.err)
+		require.NotNil(t, got.result.Block)
+		require.Len(t, got.result.Block.Block.Transactions(), 2)
+	})
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
@@ -3903,8 +4084,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 }
 
 // Same-sender txs that send value, revert with value and read the sender's
-// balance must reach the state root of serial execution when parallel exec
-// charges the sender at validation.
+// balance must reach the state root of serial execution, whether parallel exec
+// charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true
@@ -3963,6 +4144,7 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
 		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
 		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas above balance", feeCap: *uint256.NewInt(100_000 * common.GWei), wantErr: protocol.ErrInsufficientFunds},
 		{name: "gas limit times fee cap overflows", feeCap: *new(uint256.Int).SetAllOne(), wantErr: protocol.ErrInsufficientFunds},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

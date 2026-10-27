@@ -47,6 +47,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -1305,7 +1306,7 @@ func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T)
 	}
 	serviceCtx, cancelService := context.WithCancel(t.Context())
 	cancelService()
-	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, handler.beaconChainCfg, beaconevents.NewEventEmitter())
+	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, handler.beaconChainCfg, beaconevents.NewEventEmitter(), nil)
 
 	err := p2pService.ProcessMessage(t.Context(), nil, envelope)
 	require.NoError(t, err)
@@ -4041,6 +4042,92 @@ func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostProposerPreferencesRecordsFeeRecipientFromValidPastPreference(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		path           string
+		gloasForkEpoch uint64
+		validatorIndex uint64
+		headAvailable  bool
+		invalidKey     bool
+		want           common.Address
+		wantFound      bool
+	}{
+		{name: "valid signature", validatorIndex: 7, headAvailable: true, want: common.Address{0x42}, wantFound: true},
+		{name: "invalid signature", validatorIndex: 7, headAvailable: true, invalidKey: true},
+		{name: "head unavailable", validatorIndex: 7},
+		{name: "validator outside head state", validatorIndex: 8, headAvailable: true},
+		{name: "beacon pool route", path: "/eth/v1/beacon/pool/proposer_preferences", validatorIndex: 7, headAvailable: true},
+		{name: "before Gloas", gloasForkEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, validatorIndex: 7, headAvailable: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.GloasForkEpoch = test.gloasForkEpoch
+			cfg.InitializeForkSchedule()
+
+			key, err := bls.GenerateKey()
+			require.NoError(t, err)
+			pubkey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
+			genesisValidatorsRoot := common.Hash{0x91}
+			headState := state.New(cfg)
+			headState.SetGenesisValidatorsRoot(genesisValidatorsRoot)
+			for i := range 8 {
+				validatorPubkey := common.Bytes48{}
+				if i == 7 {
+					validatorPubkey = pubkey
+				}
+				require.NoError(t, headState.AddValidator(solid.NewValidatorFromParameters(
+					validatorPubkey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch,
+				), 0))
+			}
+			manager := synced_data.NewSyncedDataManager(cfg, true)
+			if test.headAvailable {
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, common.Hash{0x11}))
+			}
+			handler.syncedData = manager
+			handler.epbsPool = nil
+
+			preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot:   32,
+				ValidatorIndex: test.validatorIndex,
+				FeeRecipient:   common.Address{0x42},
+			}}
+			domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainProposerPreferences, 1, genesisValidatorsRoot)
+			require.NoError(t, err)
+			signingRoot, err := fork.ComputeSigningRoot(preference.Message, domain)
+			require.NoError(t, err)
+			signingKey := key
+			if test.invalidKey {
+				signingKey, err = bls.GenerateKey()
+				require.NoError(t, err)
+			}
+			copy(preference.Signature[:], signingKey.Sign(signingRoot[:]).Bytes())
+
+			service := mock_services.NewMockProposerPreferencesService(gomock.NewController(t))
+			service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(fmt.Errorf("%w: proposal slot already passed", services.ErrIgnore))
+			handler.proposerPreferencesService = service
+			path := test.path
+			if path == "" {
+				path = "/eth/v1/validator/proposer_preferences"
+			}
+			body, err := json.Marshal([]*cltypes.SignedProposerPreferences{preference})
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Equal(t, test.want, handler.feeRecipientForProposal(nil, 64, test.validatorIndex, clparams.GloasVersion))
+			_, found := validatorParams.GetFeeRecipient(test.validatorIndex)
+			require.Equal(t, test.wantFound, found)
+		})
+	}
+}
+
 func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
@@ -4355,4 +4442,91 @@ func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
 	handler.mux.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+}
+
+func TestGetExecutionPayloadEnvelopeBySlotOfHeadBlock(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	head := blocks[len(blocks)-1]
+	root, err := head.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, postState.Slot(), head.Block.Slot)
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = head
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/%d", head.Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+// A skipped slot has no canonical block root, while the head state's block_roots ring repeats the parent root there.
+func TestGetExecutionPayloadEnvelopeBySkippedSlotIsNotFound(t *testing.T) {
+	db, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	parent := blocks[len(blocks)-3]
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	skippedSlot := blocks[len(blocks)-2].Block.Slot
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(skippedSlot))
+	}))
+	require.NoError(t, postState.SetBlockRootAt(int(skippedSlot%handler.beaconChainCfg.SlotsPerHistoricalRoot), parentRoot))
+	require.NoError(t, syncedData.OnHeadState(postState))
+	fcu.Envelopes[parentRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[parentRoot] = parent
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/%d", skippedSlot), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+}
+
+func TestGetExecutionPayloadEnvelopeBySlotBeyondUint32IsNotFound(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	head := blocks[len(blocks)-1]
+	root, err := head.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = head
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/%d", uint64(1)<<32+head.Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopesAcceptsBloblessStatelessContents(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		cfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&cfg)
+	}
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.Hash{3}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BuilderIndex = 3
+	fcu.Blocks = map[common.Hash]*cltypes.SignedBeaconBlock{root: block}
+
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, block.Block.Slot)
+	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	contents.SignedExecutionPayloadEnvelope.Message.BuilderIndex = 3
+	payload := contents.SignedExecutionPayloadEnvelope.Message.Payload
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
+	body, err := json.Marshal(contents)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.OnExecutionPayloadCalled)
+	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
 }
