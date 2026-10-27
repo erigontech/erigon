@@ -110,10 +110,8 @@ type parallelExecutor struct {
 	// bounded by execSem, so extra contexts add memory, not parallelism.
 	mintedWorkers []*exec.WorkerContext
 	mintMu        sync.Mutex
-	// cancelExecLoop publishes the stopCause on execLoopCtx — the signal the exec
-	// loop, calculator and apply loop each read to wind down. Every publish site is
-	// ordered after the exec loop has produced everything up to the coalesce block,
-	// so it never aborts an in-flight block mid-work.
+	// cancelExecLoop publishes the stop cause on execLoopCtx. Normal stops finish
+	// work up to the coalesce block; failures can abort speculative work in progress.
 	cancelExecLoop context.CancelCauseFunc
 	// cancelWorkers stops the OCC worker pool via workersCtx (child of execLoopCtx):
 	// the explicit ordered halt the exec loop calls once it has produced up to the
@@ -693,11 +691,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
 					}
-					// Apply loop is the canonical error-emission point for block-validity
-					// rejections. Record the exec verdict (it wins its block over a commit
-					// wrong-root) and keep draining so an earlier commit wrong-root in
-					// rootResults can still supersede it. No cancel: the exec loop
-					// self-exits, and cancelling would join context.Canceled onto the error.
+					// Keep draining so a commitment failure in an earlier block can
+					// take precedence.
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
@@ -709,13 +704,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							pe.cancelOperational(applyResult.BlockNum, applyResult.Err)
 						} else {
 							fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, applyResult.Err)
+							deliberateCancel()
 						}
 						continue
 					}
-					// failInfra routes an apply-loop infrastructure fault through
-					// failCandidate + cancel and keeps the loop draining. Never
-					// bare-return while the exec loop may sit in a terminal mustDeliver
-					// send on a full applyResults — that strands shutdown and wedges pe.wait.
+					// Keep draining after either an operational failure or an invalid-block
+					// verdict. Exiting the apply loop early can block producers during shutdown.
 					failInfra := func(err error) {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, err)
@@ -825,12 +819,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
-						// Block-validity verdict: route through failCandidate and keep
-						// draining rather than bare-returning (which would wedge pe.wait).
-						// No cancel: mirror the blockResult.Err path.
-						appliedBlocks[applyResult.BlockNum] = struct{}{}
-						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
-						finalized = true
+						failInfra(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						continue
 					}
 
@@ -1233,9 +1222,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 				pe.clearChangesetAccumulator()
 
-				// Block-validity rejection: exit so we don't schedule the next block on
-				// discarded state — the apply loop's Err is the canonical signal. No
-				// cancel: cancelling would join context.Canceled onto the reported error.
+				// Leave failure reporting and cancellation to the apply loop so it can
+				// still select an earlier commitment failure while draining results.
 				if blockResult.Err != nil {
 					return nil
 				}
