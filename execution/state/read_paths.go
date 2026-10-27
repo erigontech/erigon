@@ -672,6 +672,29 @@ reread:
 			}
 		}
 
+		// A slot with no cell after an in-block destruct reads post-wipe zero. Anchor it
+		// as a MapRead at the wipe version {destroyedAt, wipeInc}, matching liveStorage,
+		// so validation agrees by version alone — a bare StorageRead/UnknownVersion would
+		// validate against liveStorage's wipe result, whose default ValueChanged status
+		// rejects the correct zero on every attempt and self-loops. Mirrors the
+		// stale-Done-cell storage branch above.
+		if path == StoragePath && r.life.state != LifecycleLive {
+			if !commited {
+				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
+					Val:        true,
+				})
+				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}},
+					Val:        uint256.Int{},
+				})
+			}
+			r.outcome = outcomeReturnZero
+			r.source = MapRead
+			r.version = r.life.canonicalVer
+			return
+		}
+
 		// A prior tx that bumped Incarnation cleared the old incarnation's storage and
 		// code; read empty when no newer cell exists (a revival writes its own cell,
 		// returned by the version-map read above before reaching here).
