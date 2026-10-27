@@ -61,6 +61,7 @@ With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block 
 | `--eez.enabled` | | Run an EEZ chain, derived from L1 by the follower: the EEZ networks for `--chain`, the `l2` config section, transaction type `0x76` and the EEZ rules. Every other `--eez.*` flag requires it. |
 | `--eez.l1.rpc` | | JSON-RPC endpoint of the L1 node. A running node needs this or `--eez.l1.kv`. |
 | `--eez.l1.kv` | | Private API address of an Erigon L1 node. |
+| `--eez.l1.beacon` | | Beacon API of the L1, which serves the blobs of rollupX batches. |
 | `--eez.l1.poll` | `2s` | Interval between reads of the L1 head. |
 | `--eez.l1.logchunk` | `100000` | Widest block range of one L1 log query; halved when the node refuses it. |
 | `--eez.l1.reorgdepth` | `62` | Deepest L1 reorg the follower survives. |
@@ -85,7 +86,7 @@ The `eez` namespace, enabled with `--http.api=...,eez`:
 - `eez_settlement(blockNumber)`: the L1 settlement that settled an EEZ block, or `null` while none has, or when it predates the follower's start or the latest finalized settlement.
 - `eez_decodeBatch(input)`: a `postAndVerifyBatch` input decoded, with the DA payload it carries.
 
-EEZ system transactions (type `0x76`) render with the fixed gas of `2000000`, a zero gas price and zero signature values, from the system address.
+EEZ system transactions (type `0x76`) render with the gas limit of their rule set, a zero gas price and zero signature values, from the system address. The gas limit is `2000000` on rollup0 networks. On rollupX networks it is the cap of `16777216`: a rollupX system transaction runs with the gas its block has left, up to that cap.
 
 ## Metrics and logs
 
@@ -118,4 +119,42 @@ docker run -v /data/eez:/home/erigon/data erigon-eez \
 |---|---|---|
 | EEZ devnet | `eez-devnet` | The genesis of the reference Kurtosis devnet, registry at `0x5fbdb2315678afecb367f032d93f642f64180aa3`, rollup 1 on L1 chain 7331. |
 | Kurtosis enclave | | Initialise the enclave's `genesis.json` with `init`; deployments rewrite the genesis timestamp. |
-| EEZ Chiado | | Not supported yet: it posts its DA payload in blobs, which the follower does not read. |
+| eez.dev | `eez-chiado` | RollupX, chain 699069 on Chiado. |
+| eez.asuscomm.com | `eez-chiado-asus` | RollupX, chain 906969 on Chiado. |
+| mainnet.eez.dev | `eez-mainnet` | RollupX, chain 696990 on Ethereum. |
+
+## RollupX networks
+
+The Gnosis-hosted networks run eez-rollupX, a rule set derived from eez-rollup0. An `l2` section with a `rollupX` schedule selects it. Its blocks have:
+
+- a 30,000,000 gas limit;
+- a base fee that changes by at most 1/50 per block and is burned;
+- a prevRandao that comes from L1;
+- the EEZL2 manager at `0x4B2760F84B83d6b3829E30A7573B0172B6d6402C`.
+
+At the start of every block, the balances of EEZL2 and the system address are burned. Batches carry their payload in EIP-4844 blobs only.
+
+A follower of these networks needs:
+
+- An L1 archive node that serves logs from the registry's deploy block on.
+- A beacon API, set with `--eez.l1.beacon`, that serves the blobs of every batch the follower derives. The follower recomputes each blob's KZG commitment and accepts only blobs that match the posting transaction's versioned hashes. A blob the beacon node does not serve stops derivation at that batch until it does.
+
+Beacon nodes prune blobs after about 15 days on Chiado and 18 on Ethereum. Deriving a network from its genesis therefore needs a beacon node that kept every blob since the network started, or an archive beacon API. On Chiado, `https://rpc-gbc.chiadochain.net` serves blobs older than that.
+
+For a Chiado L1, run Erigon in archive mode with Caplin and its beacon API. Since Fulu, Caplin serves blobs only with `--caplin.blobs-archive`. Keep blobs from the start of the network:
+
+```bash
+./build/bin/erigon --chain=chiado --datadir=/data/chiado --prune.mode=archive \
+  --beacon.api=beacon,config --beacon.api.addr=127.0.0.1 --beacon.api.port=5555 \
+  --caplin.blobs-archive --caplin.blobs-no-pruning \
+  --http.api=eth --http.port=8545
+
+./build/bin/erigon --eez.enabled --chain=eez-chiado --datadir=/data/eez-chiado \
+  --eez.l1.rpc=http://127.0.0.1:8545 --eez.l1.beacon=http://127.0.0.1:5555 \
+  --http.api=eth,debug,eez --http.port=8546 --authrpc.port=8552 --private.api.addr=127.0.0.1:9091 \
+  --port=30304 --torrent.port=42070
+```
+
+At boot the follower checks that L1 finalized the genesis's L1 reference block with the hash, timestamp and mixHash the genesis records.
+
+The follower rebuilds cross-chain transactions of one call each: deposits and other calls from L1, and L2-to-L1 calls. A batch whose transactions nest calls, read statically or revert a region stops derivation with an explicit error.
