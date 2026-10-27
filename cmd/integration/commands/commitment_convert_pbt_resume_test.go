@@ -76,6 +76,113 @@ func TestPBTResumeRejectsOutputMDBXRows(t *testing.T) {
 	require.Equal(t, before, after, "MDBX-base refusal must leave output file list and bytes unchanged")
 }
 
+func TestPBTResumeLateFailurePreservesPublishedOutput(t *testing.T) {
+	testPBTResumeFailurePreservesPublishedOutput(t, func(hooks *pbtConvertHooks) {
+		hooks.standalone = func(datadir.Dirs) error { return errors.New("late resume failure") }
+	})
+}
+
+func TestPBTResumeEarlyFailurePreservesPublishedOutput(t *testing.T) {
+	testPBTResumeFailurePreservesPublishedOutput(t, func(hooks *pbtConvertHooks) {
+		hooks.afterOutput = func() error { return errors.New("early resume failure") }
+	})
+}
+
+func testPBTResumeFailurePreservesPublishedOutput(t *testing.T, setHook func(*pbtConvertHooks)) {
+	t.Helper()
+	source, output := pbtResumeFixture(t, 1, false, false)
+	wantOutput := filepath.Join(t.TempDir(), "expected-output")
+	copyPBTResumeSnapshot(t, output, wantOutput)
+	before := snapshotTreeDigest(t, datadir.Open(output).Snap)
+	hooks := pbtConvertHooks{resume: true, workers: 1}
+	setHook(&hooks)
+	err := convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), hooks)
+	require.Error(t, err)
+	require.Equal(t, before, snapshotTreeDigest(t, datadir.Open(output).Snap))
+	manifestPath := filepath.Join(datadir.Open(output).Snap, "pbt-manifest.toml")
+	manifest, err := dbstate.ReadPBTManifest(manifestPath)
+	require.NoError(t, err)
+	require.NoError(t, validatePBTAttachManifestFiles(t.Context(), manifest, datadir.Open(output), 1, false, log.New(), "resume failure"))
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, wantOutput, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+	wantManifest, err := dbstate.ReadPBTManifest(filepath.Join(datadir.Open(wantOutput).Snap, "pbt-manifest.toml"))
+	require.NoError(t, err)
+	gotManifest, err := dbstate.ReadPBTManifest(manifestPath)
+	require.NoError(t, err)
+	require.Equal(t, wantManifest, gotManifest)
+}
+
+func copyPBTResumeSnapshot(t *testing.T, source, destination string) {
+	t.Helper()
+	sourceRoot := datadir.Open(source).Snap
+	destinationRoot := datadir.Open(destination).Snap
+	require.NoError(t, filepath.WalkDir(sourceRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(sourceRoot, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destinationRoot, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
+	}))
+}
+
+func TestPBTResumeEmptyOutputFailureLeavesNoFiles(t *testing.T) {
+	source, baseOutput := pbtResumeFixture(t, 1, false, false)
+	output := filepath.Join(t.TempDir(), "empty-output")
+	settings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+	require.NoError(t, removePBTFiles(source.Tester.Dirs, func(file pbtAttachFile) bool { return file.domain == kv.CommitmentBinDomain }))
+	baseDirs := datadir.Open(baseOutput)
+	baseFiles, err := pbtAttachFiles(baseDirs)
+	require.NoError(t, err)
+	for _, file := range baseFiles {
+		if file.domain != kv.CommitmentBinDomain {
+			continue
+		}
+		rel, err := filepath.Rel(baseDirs.Snap, file.path)
+		require.NoError(t, err)
+		destination := filepath.Join(source.Tester.Dirs.Snap, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(destination), 0o755))
+		require.NoError(t, os.Link(file.path, destination))
+	}
+	require.NoError(t, os.MkdirAll(output, 0o755))
+	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{
+		resume:     true,
+		workers:    1,
+		standalone: func(datadir.Dirs) error { return errors.New("empty resume failure") },
+	})
+	require.Error(t, err)
+	hasFiles, err := datadirHasFiles(output)
+	require.NoError(t, err)
+	require.False(t, hasFiles)
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+}
+
+func TestPBTResumeRecoversInterruptedSwap(t *testing.T) {
+	source, output := pbtResumeFixture(t, 1, false, false)
+	outputDirs := datadir.Open(output)
+	backup := pbtResumePublishedPath(outputDirs)
+	require.NoError(t, os.Rename(outputDirs.Snap, backup))
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+	_, err := os.Stat(backup)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestPBTEmptyOutputRefusalPreservesDirectory(t *testing.T) {
 	selectPBTCommandSuite(t)
 	source, _ := newPBTConversionSource(t)

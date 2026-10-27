@@ -122,21 +122,27 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return errors.New("commitment convert-pbt: source and output datadirs are required")
 	}
 	sourceDirs := datadir.Open(sourcePath)
-	outputDirs := datadir.Open(outputPath)
+	publishedOutputDirs := datadir.Open(outputPath)
+	outputDirs := publishedOutputDirs
 	resume := hooks.resume || convertPBTResume
 	if err := checkPBTChainName(ctx, sourceDirs, chainName, "commitment convert-pbt", "source"); err != nil {
 		return err
 	}
-	if nested, overlapErr := pathsOverlap(sourceDirs.DataDir, outputDirs.DataDir); overlapErr != nil {
+	if nested, overlapErr := pathsOverlap(sourceDirs.DataDir, publishedOutputDirs.DataDir); overlapErr != nil {
 		return overlapErr
 	} else if nested {
-		return fmt.Errorf("commitment convert-pbt: output datadir %s overlaps source datadir %s", outputDirs.DataDir, sourceDirs.DataDir)
+		return fmt.Errorf("commitment convert-pbt: output datadir %s overlaps source datadir %s", publishedOutputDirs.DataDir, sourceDirs.DataDir)
+	}
+	if resume {
+		if err := recoverPBTResumeOutput(publishedOutputDirs); err != nil {
+			return err
+		}
 	}
 	var outputHasFiles bool
 	var outputExists bool
-	if _, statErr := os.Stat(outputDirs.DataDir); statErr == nil {
+	if _, statErr := os.Stat(publishedOutputDirs.DataDir); statErr == nil {
 		outputExists = true
-		outputHasFiles, err = datadirHasFiles(outputDirs.DataDir)
+		outputHasFiles, err = datadirHasFiles(publishedOutputDirs.DataDir)
 		if err != nil {
 			return err
 		}
@@ -144,7 +150,22 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return statErr
 	}
 	if outputHasFiles && !resume {
-		return fmt.Errorf("commitment convert-pbt: output datadir %s is not empty", outputDirs.DataDir)
+		return fmt.Errorf("commitment convert-pbt: output datadir %s is not empty", publishedOutputDirs.DataDir)
+	}
+
+	removeOutput := !resume || (!outputHasFiles && !outputExists)
+	defer func() {
+		if removeOutput {
+			_ = dir.RemoveAll(publishedOutputDirs.DataDir)
+		}
+	}()
+	if resume {
+		stagedOutput, stageErr := stagePBTResumeOutput(publishedOutputDirs)
+		if stageErr != nil {
+			return stageErr
+		}
+		outputDirs = stagedOutput
+		defer func() { _ = dir.RemoveAll(outputDirs.DataDir) }()
 	}
 
 	oldBin, oldHexBin, oldV3, oldHash, oldSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema
@@ -152,12 +173,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldHash, oldSchema
 	}()
 
-	removeOutput := !resume || (!outputHasFiles && !outputExists)
-	defer func() {
-		if removeOutput {
-			_ = dir.RemoveAll(outputDirs.DataDir)
-		}
-	}()
 	sourceSettings, err := dbstate.ReadErigonDBSettings(sourceDirs)
 	if errors.Is(err, fs.ErrNotExist) {
 		sourceSettings = nil
@@ -208,7 +223,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 			return fmt.Errorf("commitment convert-pbt: --keep-hex does not match the resume base trie variant %q", resumeBase.settings.TrieVariantName())
 		}
 		if outputHasFiles {
-			if err := pbtResumeRejectOutputMDBXState(ctx, outputDirs); err != nil {
+			if err := pbtResumeRejectOutputMDBXState(ctx, publishedOutputDirs); err != nil {
 				return err
 			}
 		}
@@ -584,7 +599,132 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := writePBTOutputManifest(ctx, outputDirs, point, root, hexRoot, hashName, hooks.skipVerify, hooks.workers, logger); err != nil {
 		return err
 	}
+	if resume {
+		if err := publishPBTResumeOutput(publishedOutputDirs, outputDirs); err != nil {
+			return err
+		}
+	}
 	removeOutput = false
+	return nil
+}
+
+const (
+	pbtResumeStagingDir   = ".pbt-resume-staging"
+	pbtResumePublishedDir = ".pbt-resume-published"
+)
+
+func pbtResumeStagingPath(dirs datadir.Dirs) string {
+	return filepath.Join(dirs.DataDir, pbtResumeStagingDir)
+}
+
+func pbtResumePublishedPath(dirs datadir.Dirs) string {
+	return filepath.Join(dirs.DataDir, pbtResumePublishedDir)
+}
+
+func recoverPBTResumeOutput(dirs datadir.Dirs) error {
+	if err := dir.RemoveAll(pbtResumeStagingPath(dirs)); err != nil {
+		return fmt.Errorf("commitment convert-pbt: remove stale resume staging: %w", err)
+	}
+	_, snapErr := os.Stat(dirs.Snap)
+	if snapErr != nil && !errors.Is(snapErr, fs.ErrNotExist) {
+		return fmt.Errorf("commitment convert-pbt: inspect resume snapshots: %w", snapErr)
+	}
+	backup := pbtResumePublishedPath(dirs)
+	_, backupErr := os.Stat(backup)
+	if backupErr != nil && !errors.Is(backupErr, fs.ErrNotExist) {
+		return fmt.Errorf("commitment convert-pbt: inspect interrupted resume swap: %w", backupErr)
+	}
+	if errors.Is(snapErr, fs.ErrNotExist) && backupErr == nil {
+		if err := os.Rename(backup, dirs.Snap); err != nil {
+			return fmt.Errorf("commitment convert-pbt: recover interrupted resume swap: %w", err)
+		}
+		return nil
+	}
+	if snapErr == nil && backupErr == nil {
+		if err := dir.RemoveAll(backup); err != nil {
+			return fmt.Errorf("commitment convert-pbt: remove completed resume backup: %w", err)
+		}
+	}
+	return nil
+}
+
+func stagePBTResumeOutput(dirs datadir.Dirs) (datadir.Dirs, error) {
+	staged := datadir.Open(pbtResumeStagingPath(dirs))
+	if err := os.MkdirAll(staged.Snap, 0o755); err != nil {
+		return datadir.Dirs{}, fmt.Errorf("commitment convert-pbt: create resume staging: %w", err)
+	}
+	if _, err := os.Stat(dirs.Snap); err == nil {
+		if err := linkPBTResumeSnapshotTree(dirs.Snap, staged.Snap); err != nil {
+			_ = dir.RemoveAll(staged.DataDir)
+			return datadir.Dirs{}, err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		_ = dir.RemoveAll(staged.DataDir)
+		return datadir.Dirs{}, fmt.Errorf("commitment convert-pbt: inspect resume snapshots: %w", err)
+	}
+	if err := os.MkdirAll(staged.Tmp, 0o755); err != nil {
+		_ = dir.RemoveAll(staged.DataDir)
+		return datadir.Dirs{}, fmt.Errorf("commitment convert-pbt: create resume staging temp: %w", err)
+	}
+	return staged, nil
+}
+
+func linkPBTResumeSnapshotTree(source, destination string) error {
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("commitment convert-pbt: resume snapshot %s is not a regular file", path)
+		}
+		if entry.Name() == "salt-state.txt" || entry.Name() == "salt.txt" {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			return os.WriteFile(target, data, info.Mode().Perm())
+		}
+		if err := os.Link(path, target); err != nil {
+			return fmt.Errorf("commitment convert-pbt: link resume snapshot %s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: stage resume snapshots: %w", err)
+	}
+	return nil
+}
+
+func publishPBTResumeOutput(published, staged datadir.Dirs) error {
+	backup := pbtResumePublishedPath(published)
+	if _, err := os.Stat(published.Snap); err == nil {
+		if err := os.Rename(published.Snap, backup); err != nil {
+			return fmt.Errorf("commitment convert-pbt: move published snapshots aside: %w", err)
+		}
+		if err := os.Rename(staged.Snap, published.Snap); err != nil {
+			restoreErr := os.Rename(backup, published.Snap)
+			return errors.Join(fmt.Errorf("commitment convert-pbt: publish staged snapshots: %w", err), restoreErr)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("commitment convert-pbt: inspect published snapshots: %w", err)
+	} else if err := os.Rename(staged.Snap, published.Snap); err != nil {
+		return fmt.Errorf("commitment convert-pbt: publish staged snapshots: %w", err)
+	}
+	if err := dir.RemoveAll(backup); err != nil {
+		return fmt.Errorf("commitment convert-pbt: remove published snapshot backup: %w", err)
+	}
 	return nil
 }
 
