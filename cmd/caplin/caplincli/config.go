@@ -26,6 +26,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -53,13 +54,16 @@ type CaplinCliCfg struct {
 	CustomConfig            string        `json:"custom_config"`
 	CustomGenesisState      string        `json:"custom_genesis_state"`
 	MaxPeerCount            uint64        `json:"max_peer_count"`
+	DisableIPBlockLimits    bool          `json:"disable_ip_block_limits"`
+	TrustedCIDRs            []string      `json:"trusted_cidrs"`
 	JwtSecret               []byte
 
-	AllowedMethods     []string `json:"allowed_methods"`
-	AllowedOrigins     []string `json:"allowed_origins"`
-	AllowCredentials   bool     `json:"allow_credentials"`
-	PreserveGraffiti   bool     `json:"preserve_graffiti"`
-	SubscribeAllTopics bool     `json:"subscribe_all_topics"`
+	AllowedMethods            []string `json:"allowed_methods"`
+	AllowedOrigins            []string `json:"allowed_origins"`
+	AllowCredentials          bool     `json:"allow_credentials"`
+	PreserveGraffiti          bool     `json:"preserve_graffiti"`
+	DisablePayloadPreparation bool     `json:"disable_payload_preparation"`
+	SubscribeAllTopics        bool     `json:"subscribe_all_topics"`
 
 	Dirs datadir.Dirs
 }
@@ -78,9 +82,15 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
+	cfg.DisableIPBlockLimits = ctx.Bool(utils.CaplinIPBlockLimitsDisableFlag.Name)
+	cfg.TrustedCIDRs = ctx.StringSlice(utils.CaplinIPBlockLimitsTrustedCIDRsFlag.Name)
+	if _, err := clp2p.ParseTrustedCIDRs(cfg.TrustedCIDRs); err != nil {
+		return nil, fmt.Errorf("option %s: %w", utils.CaplinIPBlockLimitsTrustedCIDRsFlag.Name, err)
+	}
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.PreserveGraffiti = ctx.Bool(utils.BeaconApiPreserveGraffitiFlag.Name)
+	cfg.DisablePayloadPreparation = ctx.Bool(utils.CaplinPayloadPreparationDisableFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"

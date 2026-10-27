@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -96,8 +97,9 @@ type Domain struct {
 	// by block-access recency across all SharedDomains rather than per-SD.
 	adaptivePinController *commitment.AdaptivePinController
 
-	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
-	_testBuildAccessorHook func(rs *recsplit.RecSplit)
+	// _testBuildAccessorHook - test-only: called with the recsplit and decompressor
+	// before the build loop in buildHashMapAccessor.
+	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 }
 
 type domainVisible struct {
@@ -229,8 +231,17 @@ func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	case slices.Contains(domainExistenceForceRandom, name):
 		return statecfg.ExistenceFilterRandom
 	default:
-		return d.ExistenceFilter
+		return defaultExistenceFilterMode(d.ExistenceFilter, estimate.TotalMemory())
 	}
+}
+
+const smallMemExistenceFilterTotal = 20 << 30
+
+func defaultExistenceFilterMode(mode statecfg.ExistenceFilterMode, total uint64) statecfg.ExistenceFilterMode {
+	if mode == statecfg.ExistenceFilterInMem && total > 0 && total < smallMemExistenceFilterTotal {
+		return statecfg.ExistenceFilterRandom
+	}
+	return mode
 }
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -1210,7 +1221,11 @@ func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, dat
 		NoFsync:    d.noFsync,
 		Workers:    d.BuildAccessorsWorkers,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, d._testBuildAccessorHook)
+	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, func(rs *recsplit.RecSplit) {
+		if d._testBuildAccessorHook != nil {
+			d._testBuildAccessorHook(rs, data)
+		}
+	})
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -1621,12 +1636,24 @@ func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found 
 }
 
 // Returns the first txNum from available history
-func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
+func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) (uint64, error) {
 	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
-		firstTxNumInMdbx := dt.ht.h.minTxNumInDB(tx)
-		return firstTxNumInMdbx
+		return dt.ht.h.minTxNumInDB(tx)
 	}
-	return dt.ht.files[0].startTxNum
+	return dt.ht.files[0].startTxNum, nil
+}
+
+// HistoryCoverageStart returns the first txNum the domain's history covers, as
+// opposed to the first txNum it happens to hold a record for. With history
+// files that is the later start of the values and the index files, since a read
+// needs both. Without them the DB holds every change made after the domain's
+// frozen files, since pruning never reaches past them. This does not hold for a
+// history with snapshots disabled, which is pruned on its own.
+func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
+	if len(dt.ht.files) == 0 || len(dt.ht.iit.files) == 0 {
+		return dt.files.EndTxNum()
+	}
+	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
@@ -2071,16 +2098,12 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 }
 
 func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
-		txTo = min(txTo, dt.files.EndTxNum())
-	}
+	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
-		txTo = min(txTo, dt.files.EndTxNum())
-	}
+	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 

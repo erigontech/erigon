@@ -31,6 +31,13 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+func (e *ExecModule) InclusionList(ctx context.Context) (types.Transactions, error) {
+	if e.inclusionListFunc == nil {
+		return nil, errors.New("inclusion list building is not available")
+	}
+	return e.inclusionListFunc(ctx)
+}
+
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
@@ -179,18 +186,16 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
 	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
 	// discarded with its work still winding down - has to be passed over.
-	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
+	for previousID, previous := range e.builders {
+		if previous != nil && previous.params != nil && previous.params.Timestamp == params.Timestamp && previous.builder != nil &&
 			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
+				e.buildersByTimestamp[params.Timestamp] = previousID
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
 		}
 	}
-	// A superseded builder keeps running to its own deadline. The timestamp index moves to the new
-	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
-	// payload that is still growing.
 	e.evictOldBuilders()
 
 	e.nextPayloadId++

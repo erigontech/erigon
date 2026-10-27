@@ -423,7 +423,7 @@ func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint6
 	return addresses
 }
 
-func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
+func CreateTestGrpcConn(t testing.TB, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)

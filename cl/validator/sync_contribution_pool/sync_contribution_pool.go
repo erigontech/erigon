@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -60,14 +59,6 @@ func NewSyncContributionPool(beaconCfg *clparams.BeaconChainConfig) SyncContribu
 // field of a SyncCommittee contribution (SyncCommitteeSize / SubnetCount / 8).
 func (s *syncContributionPoolImpl) syncAggregationBitsSize() int {
 	return int(s.beaconCfg.SyncCommitteeSize) / int(s.beaconCfg.SyncCommitteeSubnetCount) / 8
-}
-
-func getSyncCommitteeFromState(s *state.CachingBeaconState) *solid.SyncCommittee {
-	cfg := s.BeaconConfig()
-	if cfg.SyncCommitteePeriod(s.Slot()) == cfg.SyncCommitteePeriod(s.Slot()+1) {
-		return s.CurrentSyncCommittee()
-	}
-	return s.NextSyncCommittee()
 }
 
 func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
@@ -117,14 +108,18 @@ func (s *syncContributionPoolImpl) GetSyncContribution(slot, subcommitteeIndex u
 	return contribution.Copy()
 }
 
+// cleanupOldContributions keeps the contributions from the head's slot to one epoch after it: after
+// empty slots the next proposer and aggregators read slots past the head, and a stalled head must
+// not let later slots pile up.
 func (s *syncContributionPoolImpl) cleanupOldContributions(headState *state.CachingBeaconState) {
+	first, last := headState.Slot(), headState.Slot()+s.beaconCfg.SlotsPerEpoch
 	for key := range s.syncContributionPoolForAggregates {
-		if headState.Slot() != key.slot {
+		if key.slot < first || key.slot > last {
 			delete(s.syncContributionPoolForAggregates, key)
 		}
 	}
 	for key := range s.syncContributionPoolForBlocks {
-		if headState.Slot() != key.slot {
+		if key.slot < first || key.slot > last {
 			delete(s.syncContributionPoolForBlocks, key)
 		}
 	}
@@ -162,8 +157,12 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return err
 	}
 
+	syncCommittee, err := state.SyncCommitteeForMessageSlot(headState, message.Slot)
+	if err != nil {
+		return err
+	}
 	signatures := [][]byte{}
-	committee := getSyncCommitteeFromState(headState).GetCommittee()
+	committee := syncCommittee.GetCommittee()
 	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 	startSubCommittee := subCommittee * subCommitteeSize
 	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {

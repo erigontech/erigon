@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -380,7 +379,7 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	// integrateDirtyFiles and dstDir overrides the write path.
 	snapKV := d.kvNewFilePath(0, 1)
 	_, err = os.Stat(snapKV)
-	require.Truef(t, errors.Is(err, fs.ErrNotExist),
+	require.ErrorIsf(t, err, fs.ErrNotExist,
 		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
 
 	// dirtyFiles count is unchanged: integrate=false skips integration.
@@ -3564,7 +3563,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	}
 
 	// Now set up collision forcing for merge
-	d._testBuildAccessorHook = func(rs *recsplit.RecSplit) {
+	d._testBuildAccessorHook = func(rs *recsplit.RecSplit, _ *seg.Decompressor) {
 		rs.ForceCollisionOnce()
 	}
 
@@ -3897,5 +3896,108 @@ func TestDomainDisabledDiscardsWrites(t *testing.T) {
 		n, err := tx.Count(table)
 		require.NoError(t, err)
 		require.Zerof(t, n, "table %s must stay empty", table)
+	}
+}
+
+// TestDomain_HistoryCoverageStart pins that HistoryCoverageStart reports where
+// history coverage begins rather than where the first change happens to be
+// recorded: sparse history held only in the DB covers from txNum 0, while frozen
+// domain files without history files leave the DB covering only what follows them.
+func TestDomain_HistoryCoverageStart(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	t.Run("sparse history in the DB", func(t *testing.T) {
+		t.Parallel()
+		db, d := testDbAndDomain(t, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		dc := d.beginForTests()
+		writer := dc.NewWriter(db)
+		require.NoError(t, writer.PutWithPrev([]byte("key"), []byte("value"), 5, nil))
+		require.NoError(t, writer.Flush(ctx, tx))
+		writer.Close()
+		dc.Close()
+
+		dc = d.beginForTests()
+		defer dc.Close()
+		require.Zero(t, dc.HistoryCoverageStart())
+	})
+
+	t.Run("domain files without history files", func(t *testing.T) {
+		t.Parallel()
+		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		collateAndMerge(t, tx, d, 64)
+		for _, table := range []string{d.History.InvertedIndex.KeysTable, d.History.InvertedIndex.ValuesTable, d.History.ValuesTable} {
+			require.NoError(t, tx.ClearTable(table))
+		}
+
+		dc := d.beginForTests()
+		defer dc.Close()
+		dc.ht.files = nil
+		require.NotZero(t, dc.files.EndTxNum())
+		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
+	})
+
+	t.Run("index files starting after values files", func(t *testing.T) {
+		t.Parallel()
+		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		for step := range kv.Step(2) {
+			require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+		}
+
+		dc := d.beginForTests()
+		defer dc.Close()
+		require.Len(t, dc.ht.iit.files, 2)
+		dc.ht.iit.files = dc.ht.iit.files[1:]
+		require.NotZero(t, dc.ht.iit.files[0].startTxNum)
+		require.Equal(t, dc.ht.iit.files[0].startTxNum, dc.HistoryCoverageStart())
+	})
+
+	t.Run("history values files without index files", func(t *testing.T) {
+		t.Parallel()
+		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		collateAndMerge(t, tx, d, 64)
+		for _, table := range []string{d.History.InvertedIndex.KeysTable, d.History.InvertedIndex.ValuesTable, d.History.ValuesTable} {
+			require.NoError(t, tx.ClearTable(table))
+		}
+
+		dc := d.beginForTests()
+		defer dc.Close()
+		require.NotEmpty(t, dc.ht.files)
+		dc.ht.iit.files = nil
+		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
+	})
+}
+
+func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
+	for _, tc := range []struct {
+		mode  statecfg.ExistenceFilterMode
+		total uint64
+		want  statecfg.ExistenceFilterMode
+	}{
+		{statecfg.ExistenceFilterInMem, 16 << 30, statecfg.ExistenceFilterRandom},
+		{statecfg.ExistenceFilterInMem, 20<<30 - 1, statecfg.ExistenceFilterRandom},
+		{statecfg.ExistenceFilterInMem, 20 << 30, statecfg.ExistenceFilterInMem},
+		{statecfg.ExistenceFilterInMem, 64 << 30, statecfg.ExistenceFilterInMem},
+		{statecfg.ExistenceFilterInMem, 0, statecfg.ExistenceFilterInMem},
+		{statecfg.ExistenceFilterNormal, 16 << 30, statecfg.ExistenceFilterNormal},
+		{statecfg.ExistenceFilterWillNeed, 16 << 30, statecfg.ExistenceFilterWillNeed},
+	} {
+		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
 	}
 }

@@ -18,7 +18,6 @@ package execution_client
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -323,7 +322,11 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 
 func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
-		return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(id))
+		payloadID, err := engine_types.DecodePayloadID(id)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		return cc.chainRW.GetAssembledBlock(ctx, payloadID)
 	}
 
 	// GetPayload versions advance with the response fields introduced by each fork.

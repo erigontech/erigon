@@ -23,8 +23,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -234,4 +237,10 @@ func TestIsDefaultChaindata(t *testing.T) {
 	} {
 		require.Equal(t, tc.want, isDefaultChaindata(tc.chaindata, tc.datadir), "%s in %s", tc.chaindata, tc.datadir)
 	}
+}
+
+func TestRequestDomainsAbsentAccount(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	addr := common.HexToAddress("0xdead")
+	require.NoError(t, requestDomains(db, t.Context(), kv.AccountsDomain.String(), [][]byte{addr[:]}, log.New()))
 }

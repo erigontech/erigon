@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -83,6 +83,11 @@ func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx)
 		return 0, err
 	}
 
+	// Older servers report 1 for an unpruned MDBX range even though genesis
+	// is retained.
+	if reply.BlockNum == 1 {
+		return 0, nil
+	}
 	return reply.BlockNum, nil
 }
 
@@ -281,7 +286,7 @@ func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, b
 	return b.Transactions[i], true, nil
 }
 
-func (r *RemoteBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+func (r *RemoteBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, _ uint64, i int) (common.Hash, bool, error) {
 	txn, ok, err := r.TxnByIdxInBlock(ctx, tx, blockNum, i)
 	if err != nil || !ok {
 		return common.Hash{}, false, err
@@ -480,20 +485,28 @@ func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.Blocks
 // must ask the same generation it reads from, not the live set that may be ahead of it.
 func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
+// MinimumBlockAvailable returns a best-effort block-availability floor from tx's
+// pinned snapshots, falling back to MDBX when the snapshot set is incomplete.
+// If MDBX has no body after genesis, it keeps the bound from the available snapshot
+// types; this does not guarantee that a complete block exists at that height.
+// tx must carry a pinned block-files view, even for MDBX-only reads.
+// A nil tx or a tx without that view causes a panic.
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	view := r.view(tx)
 	var snapshotMin uint64
-	if r.FrozenBlocks() > 0 {
-		// Frozen segments that leave no block complete are not an answer on their own: the
-		// database is what still holds one, where it holds anything at all.
-		segmentsMin, complete := r.sn.SegmentsMin()
-		if complete {
-			return segmentsMin, nil
+	if view.BlocksAvailable() > 0 {
+		complete := true
+		for _, snapType := range snaptype2.BlockSnapshotTypes {
+			segments := view.Segments(snapType)
+			if len(segments) == 0 {
+				complete = false
+				continue
+			}
+			snapshotMin = max(snapshotMin, segments[0].From())
 		}
-		snapshotMin = segmentsMin
-	}
-
-	if tx == nil {
-		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
+		if complete {
+			return snapshotMin, nil
+		}
 	}
 
 	dbMinBlock, found, err := r.findFirstCompleteBlock(tx)
@@ -507,9 +520,8 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is
-// available, and whether there is one: a database holding nothing beyond genesis gives no
-// answer, which is not the same as answering genesis.
+// findFirstCompleteBlock reports the retained MDBX range, including genesis when
+// block 1 is present. Genesis alone gives no answer about the contiguous range.
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
@@ -521,6 +533,9 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	}
 
 	result := binary.BigEndian.Uint64(secondKey[:8])
+	if result == 1 {
+		result = 0
+	}
 	return result, true, nil
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
@@ -1315,6 +1330,9 @@ func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (send
 		return nil, nil
 	}
 	buf, _ = gg.Next(buf[:0])
+	if len(buf) < 1+20 { // a system transaction without data is an empty word
+		return nil, nil
+	}
 	return buf[1 : 1+20], buf[1+20:]
 }
 
@@ -1382,14 +1400,45 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	return txn, true, nil
 }
 
+var txnRlpBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 16*1024); return &b }}
+
 // TxnHashByIdxInBlock is TxnByIdxInBlock that hashes the stored encoding instead of decoding it.
-func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
-	_, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false)
-	if err != nil || txnRlp == nil {
-		return common.Hash{}, false, err
+// txNum must be the txNum of the i-th transaction: for a block in files it alone selects the transaction.
+func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
+	var txnRlp []byte
+	if seg, ok := r.frozenTxnSegment(tx, blockNum, txNum, txIdxInBlock); ok {
+		buf := txnRlpBufPool.Get().(*[]byte)
+		defer txnRlpBufPool.Put(buf)
+		_, txnRlp = txnRlpByID(txNum, seg, *buf)
+	} else {
+		var err error
+		if _, txnRlp, err = r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false); err != nil {
+			return common.Hash{}, false, err
+		}
+	}
+	if txnRlp == nil {
+		return common.Hash{}, false, nil
 	}
 	hash, err := types.TransactionHashFromEncoding(txnRlp)
 	return hash, err == nil, err
+}
+
+// frozenTxnSegment returns the transactions file holding txNum of a frozen block. Block files use
+// the canonical txNum as transaction id, so the transaction is found without reading the body.
+// A negative index (system transaction) keeps the body path.
+func (r *BlockReader) frozenTxnSegment(tx kv.Getter, blockNum, txNum uint64, txIdxInBlock int) (*snapshotsync.VisibleSegment, bool) {
+	if txIdxInBlock < 0 || blockNum == 0 || blockNum > r.FrozenBlocksInView(tx) {
+		return nil, false
+	}
+	seg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockNum)
+	if !ok {
+		return nil, false
+	}
+	idx := seg.Src().Index(snaptype2.Indexes.TxnHash)
+	if idx == nil || txNum < idx.BaseDataID() || txNum >= idx.BaseDataID()+idx.KeyCount() {
+		return nil, false
+	}
+	return seg, true
 }
 
 // txnRlpByIdxInBlock returns the stored sender, nil when there is none, and the stored encoding
@@ -1697,6 +1746,25 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(ctx context.Context, tx kv.Tx, c 
 	r := t.r
 	if ok || r == nil {
 		return
+	}
+	// Only snapshot bodies use canonical txNums. MDBX body IDs also count side forks.
+	if br, local := r.(*BlockReader); local {
+		bodySeg, found := br.viewSingleFile(tx, snaptype2.Bodies, blockNum)
+		if !found {
+			return 0, false, nil
+		}
+		b, _, err := BodyForTxnFromSnapshot(blockNum, bodySeg, nil)
+		if err != nil || b == nil {
+			return 0, false, err
+		}
+		return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, true, nil
+	}
+	frozen, observed := r.FrozenBlocksObserved()
+	if !observed {
+		return 0, false, fmt.Errorf("cannot resolve txNum for block %d: remote frozen range is unknown", blockNum)
+	}
+	if frozen == 0 || blockNum > frozen {
+		return 0, false, nil
 	}
 	b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 	if err != nil {
