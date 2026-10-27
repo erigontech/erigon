@@ -100,6 +100,11 @@ func (s *Span) Encode() []byte {
 	for _, n := range s.TxCounts {
 		out = binary.AppendUvarint(out, uint64(n))
 	}
+	return s.appendColumns(out)
+}
+
+// appendColumns appends the columns after the transaction counts.
+func (s *Span) appendColumns(out []byte) []byte {
 	out = appendRuns(out, s.Beneficiaries, func(a, b common.Address) bool { return a == b }, func(out []byte, a common.Address) []byte {
 		return append(out, a[:]...)
 	})
