@@ -107,6 +107,11 @@ func (so *StateOverrides) sortedAddrs() []accounts.Address {
 }
 
 func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	return so.OverrideTo(ibs, precompiles, rules, nil)
+}
+
+// OverrideTo is Override that also hands the overridden accounts to stateWriter.
+func (so *StateOverrides) OverrideTo(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if precompiles == nil {
 		precompiles = make(vm.PrecompiledContracts)
 	}
@@ -122,13 +127,7 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
-		return err
-	}
-	if ibs.IsVersioned() {
-		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
-	}
-	return nil
+	return EndCallTx(ibs, &overrideRules, stateWriter)
 }
 
 // ActivePrecompiles returns the precompile set of rules with the code overrides and precompile
@@ -180,15 +179,50 @@ func (so *StateOverrides) overridePrecompiles(precompiles vm.PrecompiledContract
 // On the versioned path the writes go to the version map, where the next transaction index
 // reads them; on the materializing path FinalizeTx commits them to the state objects.
 func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	return FinalizeCallTxTo(ibs, rules, nil)
+}
+
+// FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter,
+// as FinalizeTx does for a materialized state; a nil stateWriter takes none.
+func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if !ibs.IsVersioned() {
-		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+		if stateWriter == nil {
+			stateWriter = state.NewNoopWriter()
+		}
+		return ibs.FinalizeTx(rules, stateWriter)
 	}
 	writes, err := ibs.FinalizedWrites(rules)
 	if err != nil {
 		return err
 	}
 	ibs.FlushWritesToVersionMap(writes)
+	if stateWriter != nil {
+		if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+			return err
+		}
+	}
 	ibs.SoftFinalise()
 	ibs.ResetVersionedIO()
 	return nil
+}
+
+// EndCallTx is FinalizeCallTxTo that also moves a versioned state to the next tx index,
+// where the finished tx's writes read back.
+func EndCallTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if err := FinalizeCallTxTo(ibs, rules, stateWriter); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// CommitCallState hands stateWriter the changes not yet handed to it: a versioned
+// state's pending tx, or a materialized state's dirty objects.
+func CommitCallState(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if ibs.IsVersioned() {
+		return FinalizeCallTxTo(ibs, rules, stateWriter)
+	}
+	return ibs.CommitBlock(rules, stateWriter)
 }

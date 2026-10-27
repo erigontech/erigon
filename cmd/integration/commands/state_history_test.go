@@ -242,5 +242,5 @@ func TestIsDefaultChaindata(t *testing.T) {
 func TestRequestDomainsAbsentAccount(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	addr := common.HexToAddress("0xdead")
-	require.NoError(t, requestDomains(db, db, t.Context(), kv.AccountsDomain.String(), [][]byte{addr[:]}, log.New()))
+	require.NoError(t, requestDomains(db, t.Context(), kv.AccountsDomain.String(), [][]byte{addr[:]}, log.New()))
 }
