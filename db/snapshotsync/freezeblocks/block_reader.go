@@ -1320,22 +1320,21 @@ func frozenTxns(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSe
 }
 
 // txnRlpByID returns the sender and the stored encoding of a frozen transaction, or nils when it is missing.
-// Both alias *buf, which keeps the grown buffer.
-func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf *[]byte) (sender, txnRlp []byte) {
+// Both alias grown, the buffer after gg.Next.
+func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (sender, txnRlp, grown []byte) {
 	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.Src().MakeGetter()
 	gg.Reset(offset)
 	if !gg.HasNext() {
-		return nil, nil
+		return nil, nil, buf
 	}
-	*buf, _ = gg.Next((*buf)[:0])
-	word := *buf
-	if len(word) < 1+20 { // a system transaction without data is an empty word
-		return nil, nil
+	buf, _ = gg.Next(buf[:0])
+	if len(buf) < 1+20 { // a system transaction without data is an empty word
+		return nil, nil, buf
 	}
-	return word[1 : 1+20], word[1+20:]
+	return buf[1 : 1+20], buf[1+20:], buf
 }
 
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
@@ -1418,7 +1417,7 @@ func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blo
 				txnRlpBufPool.Put(buf)
 			}
 		}()
-		_, txnRlp = txnRlpByID(txNum, seg, buf)
+		_, txnRlp, *buf = txnRlpByID(txNum, seg, *buf)
 	} else {
 		var err error
 		if _, txnRlp, err = r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false); err != nil {
@@ -1489,7 +1488,7 @@ func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	if !ok {
 		return nil, nil, nil
 	}
-	sender, txnRlp := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, new([]byte))
+	sender, txnRlp, _ := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
 	return sender, txnRlp, nil
 }
 
