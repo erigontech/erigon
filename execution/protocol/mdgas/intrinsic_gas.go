@@ -49,6 +49,26 @@ type IntrinsicGasCalcResult struct {
 	FloorGasCost uint64
 }
 
+type FrameIntrinsicGasCalcArgs struct {
+	FramesLen         uint64
+	KeyedNoncesLen    uint64
+	ValueTransfersLen uint64
+	SignatureGas      uint64
+	DataLen           uint64
+	DataNonZeroLen    uint64
+}
+
+func CalcFrameIntrinsicGas(args FrameIntrinsicGasCalcArgs) IntrinsicGasCalcResult {
+	base := params.FrameIntrinsicGas + params.FrameOverheadGas*args.FramesLen
+	base += args.KeyedNoncesLen * (params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038)
+	base += args.ValueTransfersLen*params.TxValueCostEIP2780 + args.SignatureGas
+	dataGas := (args.DataLen-args.DataNonZeroLen)*params.TxDataZeroGas + args.DataNonZeroLen*params.TxDataNonZeroGasEIP2028
+	return IntrinsicGasCalcResult{
+		ExecutionGas: base + dataGas,
+		FloorGasCost: base + params.TxTotalCostFloorPerTokenEIP7976*params.TxStandardTokensPerByte*args.DataLen,
+	}
+}
+
 // CountNonZeroBytes returns the number of non-zero bytes in data.
 func CountNonZeroBytes(data []byte) int {
 	return len(data) - bytes.Count(data, zeroByte)

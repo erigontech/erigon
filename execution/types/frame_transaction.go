@@ -52,8 +52,6 @@ const (
 	FrameApproveBoth      = 3
 	FrameAtomicBatch      = 4
 	FrameMaxCount         = 64
-	FrameIntrinsicGas     = 12_000
-	FrameOverheadGas      = 475
 	FrameMaxNonceKeys     = 16
 )
 
@@ -114,11 +112,11 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 func (sig *FrameSignature) VerificationGas() uint64 {
 	switch sig.Scheme {
 	case FrameSignatureArbitrary:
-		return 100
+		return params.FrameSignatureArbitraryGas
 	case FrameSignatureSecp256k1:
-		return 2800
+		return params.FrameSignatureSecp256k1Gas
 	case FrameSignatureP256:
-		return 6700
+		return params.FrameSignatureP256Gas
 	default:
 		return 0
 	}
@@ -280,20 +278,13 @@ func (tx *FrameTransaction) GetGasLimit() uint64 {
 }
 
 func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.MdGas, err error) {
-	base := uint64(FrameIntrinsicGas + FrameOverheadGas*len(tx.Frames))
+	args := mdgas.FrameIntrinsicGasCalcArgs{FramesLen: uint64(len(tx.Frames))}
 	if !tx.UsesLegacyNonce() {
-		base += uint64(len(tx.NonceKeys)) * (params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038)
+		args.KeyedNoncesLen = uint64(len(tx.NonceKeys))
 	}
-	var dataGas, dataLen, total uint64
 	addData := func(data []byte) {
-		dataLen += uint64(len(data))
-		for _, b := range data {
-			if b == 0 {
-				dataGas += 4
-			} else {
-				dataGas += 16
-			}
-		}
+		args.DataLen += uint64(len(data))
+		args.DataNonZeroLen += uint64(mdgas.CountNonZeroBytes(data))
 	}
 	nonceData, err := rlp.EncodeToBytes(tx.NonceKeys)
 	if err != nil {
@@ -301,6 +292,7 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 	}
 	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
 	addData(rlp.AppendUint64(nonceData, tx.Nonce))
+	var total uint64
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
 		var overflow bool
@@ -313,19 +305,19 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 		limits.Execution += frame.Limits.Execution
 		limits.State += frame.Limits.State
 		if !frame.Value.IsZero() && frame.ResolvedTarget(tx.SenderAddress) != tx.SenderAddress {
-			base += params.TxValueCostEIP2780
+			args.ValueTransfersLen++
 		}
 		addData(frame.Data)
 	}
 	for i := range tx.Signatures {
 		sig := &tx.Signatures[i]
-		base += sig.VerificationGas()
+		args.SignatureGas += sig.VerificationGas()
 		addData(sig.Signer)
 		addData(sig.Message)
 		addData(sig.Signature)
 	}
-	intrinsic = base + dataGas
-	floor = base + params.TxTotalCostFloorPerTokenEIP7976*params.TxStandardTokensPerByte*dataLen
+	intrinsicGas := mdgas.CalcFrameIntrinsicGas(args)
+	intrinsic, floor = intrinsicGas.ExecutionGas, intrinsicGas.FloorGasCost
 	var overflow bool
 	if limits.Execution, overflow = libmath.SafeAdd(limits.Execution, intrinsic); overflow {
 		return 0, 0, limits, errors.New("frame gas limit overflow")

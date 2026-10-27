@@ -41,6 +41,12 @@ const (
 	TxGasContractCreation uint64 = 53000 // Per transaction that creates a contract. NOTE: Not payable on data of calls between transactions.
 	TxDataZeroGas         uint64 = 4     // Per byte of data attached to a transaction that equals zero. NOTE: Not payable on data of calls between transactions.
 
+	FrameIntrinsicGas          uint64 = 12_000
+	FrameOverheadGas           uint64 = 475
+	FrameSignatureArbitraryGas uint64 = 100
+	FrameSignatureSecp256k1Gas uint64 = 2800
+	FrameSignatureP256Gas      uint64 = 6700
+
 	QuadCoeffDiv uint64 = 512  // Divisor for the quadratic particle of the memory cost equation.
 	LogDataGas   uint64 = 8    // Per byte in a LOG* operation's data.
 	CallStipend  uint64 = 2300 // Free gas given at beginning of call.
