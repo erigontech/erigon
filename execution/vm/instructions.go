@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -76,8 +77,28 @@ func stMul(_ uint64, scope *CallContext) string {
 
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
+	if y[0]&(y[0]-1) == 0 {
+		if n, ok := log2Exact(y); ok {
+			y.Rsh(x, n)
+			return pc, nil, nil
+		}
+	}
 	y.Div(x, y)
 	return pc, nil, nil
+}
+
+// log2Exact returns n and true when y == 2^n. Contracts compiled before SHR
+// divide by 2^n, and uint256.Div runs the full long division for them.
+func log2Exact(y *uint256.Int) (uint, bool) {
+	switch {
+	case y[3] != 0:
+		return 192 + uint(bits.TrailingZeros64(y[3])), y[0]|y[1]|y[2]|y[3]&(y[3]-1) == 0
+	case y[2] != 0:
+		return 128 + uint(bits.TrailingZeros64(y[2])), y[0]|y[1]|y[2]&(y[2]-1) == 0
+	case y[1] != 0:
+		return 64 + uint(bits.TrailingZeros64(y[1])), y[0]|y[1]&(y[1]-1) == 0
+	}
+	return uint(bits.TrailingZeros64(y[0])), y[0] != 0 && y[0]&(y[0]-1) == 0
 }
 
 func stDiv(_ uint64, scope *CallContext) string {
@@ -1167,7 +1188,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1228,7 +1249,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1267,7 +1288,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1312,7 +1333,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 

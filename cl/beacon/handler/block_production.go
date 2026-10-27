@@ -348,8 +348,8 @@ func preparedGrabOffset(due time.Duration) time.Duration {
 	return due - payloadPublicationMargin(due)
 }
 
-// Gloas preparation stands down on a FULL parent, the usual case, so the builder starts only with the
-// proposal; collecting at a third of the window leaves two thirds for the block to reach attesters.
+// The unprepared Gloas collection target leaves two thirds of the attestation window for
+// block processing, signing, and gossip.
 func unpreparedGrabOffset(due time.Duration, stateVersion clparams.StateVersion) time.Duration {
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		return due / gloasPayloadCollectionDivisor
@@ -3159,10 +3159,10 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
-		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) && !errors.Is(err, execution_client.ErrForkChoiceUpdateBusy) {
 			return err
 		}
-		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
+		log.Debug("BlockProduction: forkchoice update deferred while storing block", "root", headRoot, "err", err)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {

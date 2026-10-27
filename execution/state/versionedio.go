@@ -2,6 +2,8 @@ package state
 
 import (
 	"bytes"
+	"cmp"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"iter"
@@ -1700,16 +1702,10 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 		if ws == nil {
 			return
 		}
-		if !eachWriteHeaderOf(ws.address, yield) ||
-			!eachWriteHeaderOf(ws.balance, yield) ||
-			!eachWriteHeaderOf(ws.nonce, yield) ||
-			!eachWriteHeaderOf(ws.incarnation, yield) ||
-			!eachWriteHeaderOf(ws.selfDestruct, yield) ||
-			!eachWriteHeaderOf(ws.createContract, yield) ||
-			!eachWriteHeaderOf(ws.code, yield) ||
-			!eachWriteHeaderOf(ws.codeHash, yield) ||
-			!eachWriteHeaderOf(ws.codeSize, yield) {
-			return
+		for h := range ws.accountHeaders() {
+			if !yield(h) {
+				return
+			}
 		}
 		for _, inner := range ws.storage {
 			for _, vw := range inner {
@@ -1718,6 +1714,24 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 				}
 			}
 		}
+	}
+}
+
+// accountHeaders is AllHeaders without the storage writes.
+func (ws *WriteSet) accountHeaders() iter.Seq[WriteHeader] {
+	return func(yield func(WriteHeader) bool) {
+		if ws == nil {
+			return
+		}
+		_ = eachWriteHeaderOf(ws.address, yield) &&
+			eachWriteHeaderOf(ws.balance, yield) &&
+			eachWriteHeaderOf(ws.nonce, yield) &&
+			eachWriteHeaderOf(ws.incarnation, yield) &&
+			eachWriteHeaderOf(ws.selfDestruct, yield) &&
+			eachWriteHeaderOf(ws.createContract, yield) &&
+			eachWriteHeaderOf(ws.code, yield) &&
+			eachWriteHeaderOf(ws.codeHash, yield) &&
+			eachWriteHeaderOf(ws.codeSize, yield)
 	}
 }
 
@@ -2063,12 +2077,12 @@ func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex i
 	return 0, false
 }
 
-func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
+func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.Code, bool) {
 	val, res, ok := vm.ReadCode(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
-		return val.Bytes, true
+		return val, true
 	}
-	return nil, false
+	return accounts.Code{}, false
 }
 
 func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
@@ -2162,7 +2176,7 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 			return nil, nil
 		}
 		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
-			return code, nil
+			return code.Bytes, nil
 		}
 	}
 
@@ -2187,7 +2201,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 			return 0, nil
 		}
 		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
-			return len(code), nil
+			return len(code.Bytes), nil
 		}
 	}
 
@@ -2850,25 +2864,42 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 
 // Build finalizes the list; the builder must not be used after it.
 func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
-	bal := make(types.BlockAccessList, 0, len(b.ac))
-	for _, account := range b.ac {
-		account.finalize()
-		account.changes.Normalize()
-		bal = append(bal, *account.changes)
+	// Sorting AccountChanges by value moves 144-byte structs and calls
+	// bytes.Compare per step; sort small integer keys instead.
+	type sortKey struct {
+		hi, mid uint64
+		lo      uint32
+		account *accountState
 	}
-
-	slices.SortFunc(bal, func(a, b types.AccountChanges) int {
-		return a.Address.Cmp(b.Address)
+	keys := make([]sortKey, 0, len(b.ac))
+	for _, account := range b.ac {
+		a := &account.changes.Address
+		keys = append(keys, sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account})
+	}
+	slices.SortFunc(keys, func(a, b sortKey) int {
+		if c := cmp.Compare(a.hi, b.hi); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.mid, b.mid); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.lo, b.lo)
 	})
 
+	bal := make(types.BlockAccessList, 0, len(keys))
+	for _, k := range keys {
+		k.account.finalize()
+		k.account.changes.Normalize()
+		bal = append(bal, k.account.changes)
+	}
 	return bal
 }
 
 type accountState struct {
-	changes             *types.AccountChanges
-	balance             *fieldTracker[uint256.Int]
-	nonce               *fieldTracker[uint64]
-	code                *fieldTracker[accounts.Code]
+	changes             types.AccountChanges
+	balance             fieldTracker[uint256.Int]
+	nonce               fieldTracker[uint64]
+	code                fieldTracker[accounts.Code]
 	balanceValue        *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
@@ -2886,9 +2917,9 @@ func (account *accountState) finalize() {
 			account.changes.StorageReads[i] = slot.Value()
 		}
 	}
-	applyToBalance(account.balance, account.changes, account.initialBalanceValue)
-	applyToNonce(account.nonce, account.changes)
-	applyToCode(account.code, account.changes, account.initialCodeEmpty)
+	applyToBalance(&account.balance, &account.changes, account.initialBalanceValue)
+	applyToNonce(&account.nonce, &account.changes)
+	applyToCode(&account.code, &account.changes, account.initialCodeEmpty)
 }
 
 type fieldTracker[T any] struct {
@@ -2897,10 +2928,6 @@ type fieldTracker[T any] struct {
 
 func (ft *fieldTracker[T]) recordWrite(idx uint32, value T) {
 	ft.changes.recordWrite(idx, value)
-}
-
-func newBalanceTracker() *fieldTracker[uint256.Int] {
-	return &fieldTracker[uint256.Int]{}
 }
 
 func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
@@ -2924,10 +2951,6 @@ func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, ini
 	})
 }
 
-func newNonceTracker() *fieldTracker[uint64] {
-	return &fieldTracker[uint64]{}
-}
-
 func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 	nt.changes.apply(func(idx uint32, value uint64) {
 		ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
@@ -2935,10 +2958,6 @@ func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 			Value: value,
 		})
 	})
-}
-
-func newCodeTracker() *fieldTracker[accounts.Code] {
-	return &fieldTracker[accounts.Code]{}
 }
 
 func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, initialCodeEmpty bool) {
@@ -2998,12 +3017,7 @@ func (account *accountState) setBalanceValue(v uint256.Int) {
 }
 
 func newAccountState(addr accounts.Address) *accountState {
-	return &accountState{
-		changes: &types.AccountChanges{Address: addr.Value()},
-		balance: newBalanceTracker(),
-		nonce:   newNonceTracker(),
-		code:    newCodeTracker(),
-	}
+	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
 
 func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
@@ -3136,7 +3150,7 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	account.removeStorageRead(slot)
 
-	ac := account.changes
+	ac := &account.changes
 	if at >= 0 {
 		sc := &ac.StorageChanges[at]
 		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
@@ -3245,15 +3259,56 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	if txFrom == nil {
 		return false
 	}
-	for h := range txFrom.AllHeaders() {
-		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
+	for addr, writes := range txFrom.storage {
+		if anyCommonKey(writes, txTo.storage[addr]) {
 			return true
 		}
-		if h.Path.AffectsAccountLifecycle() && txTo.hasAnyReadAt(h.Address) {
+	}
+	for h := range txFrom.accountHeaders() {
+		if txTo.DependsOn(h) {
 			return true
 		}
 	}
 	return false
+}
+
+// DependsOnAt is HasReadDep for the writes ws makes at addr.
+func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
+	if ws == nil {
+		return false
+	}
+	if anyCommonKey(ws.storage[addr], s.storage[addr]) {
+		return true
+	}
+	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodePath, CodeHashPath, CodeSizePath, CreateContractPath} {
+		h := WriteHeader{Address: addr, Path: p}
+		if ws.hasHeader(h) && s.DependsOn(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// anyCommonKey probes the smaller map's keys in the larger one.
+func anyCommonKey[K comparable, A, B any](a map[K]A, b map[K]B) bool {
+	if len(a) > len(b) {
+		return anyCommonKey(b, a)
+	}
+	for k := range a {
+		if _, ok := b[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// DependsOn reports whether a write of h can invalidate a read in s: a read of the same
+// cell, or any read of the address when h changes the account lifecycle.
+func (s ReadSet) DependsOn(h WriteHeader) bool {
+	if _, ok := s.getHeader(h.Address, h.Path, h.Key); ok {
+		return true
+	}
+	return h.Path.AffectsAccountLifecycle() && s.hasAnyReadAt(h.Address)
 }
 
 func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {

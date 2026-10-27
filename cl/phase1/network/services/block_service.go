@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -1032,13 +1031,6 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 		}
 	}()
 	start := time.Now()
-	block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-		if err := b.forkchoiceStore.OnAttestation(a, true, false); err != nil {
-			log.Debug("bad attestation received", "err", err)
-		}
-
-		return true
-	})
 	block.Block.Body.AttesterSlashings.Range(func(idx int, a *cltypes.AttesterSlashing, total int) bool {
 		if err := b.forkchoiceStore.OnAttesterSlashing(a, false); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
 			log.Debug("bad attester slashing received", "err", err)

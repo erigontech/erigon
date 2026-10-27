@@ -137,7 +137,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 // EthGetLogsInvariants checks that logs found by a block-wide eth_getLogs are also found
 // when the same block is queried by address or by topic. queryLimit is the server's
 // --rpc.logs.querylimit: filters wider than that are split into several requests.
-func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, latest, failFast bool, queryLimit int) error {
+func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, blockFrom, blockTo uint64, failFast bool, queryLimit int) error {
 	setRoutes(erigonURL, gethURL)
 
 	reqGen := &RequestGenerator{}

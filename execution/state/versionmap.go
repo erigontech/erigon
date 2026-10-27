@@ -247,6 +247,9 @@ type VersionMap struct {
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
+	// absentAccountHook runs after an account read found no account, before the
+	// self-destruct and revival probes. Tests set it to land a flush there.
+	absentAccountHook func()
 }
 
 type originStorageKey struct {
@@ -1311,10 +1314,10 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 
 // MarkWritesValidated flips every cell named by writes Estimate->Validated: the tx
 // validated its read-set out-of-order but is not yet sealed, so a reader continues on it
-// (early break) while it stays revertible until the in-order seal. A fee-recipient's
-// Address and Balance cells are left Estimate so readers keep pausing until calcFees
-// finalizes the tip.
-func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(accounts.Address) bool) {
+// (early break) while it stays revertible until the in-order seal. A fee recipient's
+// Address, Balance and SelfDestruct cells are left Estimate: calcFees credits its fee,
+// and may undo its EIP-161 removal, at the same version, so readers keep pausing until the seal.
+func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
@@ -1333,11 +1336,11 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(acc
 		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
 			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
 		}
-		feeAddr := feeEstimate != nil && feeEstimate(addr)
+		feeAddr := isFeeRecipient != nil && isFeeRecipient(addr)
 		if vw, ok := writes.address[addr]; ok && !feeAddr {
 			mark(AddressPath, accounts.NilKey, vw.Version)
 		}
-		if vw, ok := writes.selfDestruct[addr]; ok {
+		if vw, ok := writes.selfDestruct[addr]; ok && !feeAddr {
 			mark(SelfDestructPath, accounts.NilKey, vw.Version)
 		}
 		if vw, ok := writes.balance[addr]; ok && !feeAddr {

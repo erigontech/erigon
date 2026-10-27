@@ -144,7 +144,7 @@ var snapshotCommand = cli.Command{
 			Name: "ls",
 			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
-				return doLS(ctx, c, dirs)
+				return doLS(ctx, dirs)
 			},
 			Usage: "List all files with their words count",
 			Flags: joinFlags([]cli.Flag{
@@ -159,7 +159,7 @@ var snapshotCommand = cli.Command{
 				if _, err := os.Stat(dirs.DataDir); os.IsNotExist(err) {
 					return fmt.Errorf("datadir does not exist: %s", dirs.DataDir)
 				}
-				return doDU(ctx, c, dirs)
+				return doDU(c, dirs)
 			},
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -229,7 +229,7 @@ var snapshotCommand = cli.Command{
 				}
 				defer unlockDatadir(log.Root(), l)
 
-				return doRemoveOverlap(ctx, c, dirs)
+				return doRemoveOverlap(ctx, dirs)
 			},
 			Usage: "remove overlaps from e3 files",
 			Flags: joinFlags([]cli.Flag{
@@ -3041,7 +3041,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	return nil
 }
 
-func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doLS(ctx context.Context, dirs datadir.Dirs) error {
 	return lsDatadir(ctx, dirs, log.Root())
 }
 
@@ -3329,7 +3329,7 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	return nil
 }
 
-func doRemoveOverlap(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doRemoveOverlap(ctx context.Context, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
 
@@ -4323,7 +4323,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
-func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doDU(cliCtx *cli.Command, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
 	// (e.g., DB locked by running node, corrupted/empty chaindata).

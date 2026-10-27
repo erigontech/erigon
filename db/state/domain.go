@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -230,8 +231,17 @@ func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	case slices.Contains(domainExistenceForceRandom, name):
 		return statecfg.ExistenceFilterRandom
 	default:
-		return d.ExistenceFilter
+		return defaultExistenceFilterMode(d.ExistenceFilter, estimate.TotalMemory())
 	}
+}
+
+const smallMemExistenceFilterTotal = 20 << 30
+
+func defaultExistenceFilterMode(mode statecfg.ExistenceFilterMode, total uint64) statecfg.ExistenceFilterMode {
+	if mode == statecfg.ExistenceFilterInMem && total > 0 && total < smallMemExistenceFilterTotal {
+		return statecfg.ExistenceFilterRandom
+	}
+	return mode
 }
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -2088,16 +2098,12 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 }
 
 func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
-		txTo = min(txTo, dt.files.EndTxNum())
-	}
+	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if dt.files.EndTxNum() > 0 {
-		txTo = min(txTo, dt.files.EndTxNum())
-	}
+	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
