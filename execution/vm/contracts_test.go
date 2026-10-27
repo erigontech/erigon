@@ -490,6 +490,8 @@ func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
 
 var cacheTestID atomic.Uint64
 
+func wholeInputKey(input []byte) ([]byte, bool) { return input, true }
+
 type countingPrecompile struct {
 	calls  int
 	output []byte
@@ -497,14 +499,14 @@ type countingPrecompile struct {
 }
 
 func (p *countingPrecompile) Run([]byte) ([]byte, error) { p.calls++; return p.output, p.err }
-func (p *countingPrecompile) RequiredGas([]byte) uint64  { return 100 }
+func (p *countingPrecompile) RequiredGas([]byte) uint64  { return 3000 }
 func (p *countingPrecompile) Name() string               { return "counting" }
 
 func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 	p := &countingPrecompile{output: []byte{1, 2, 3}}
-	c := &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{201}}
+	c := &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{201}}
 	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
-	out, gas, err := RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 150}, nil)
+	out, gas, err := RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil)
 	if err != nil || gas.Execution != 50 {
 		t.Fatalf("gas=%v err=%v", gas, err)
 	}
@@ -512,16 +514,16 @@ func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 	if p.output[0] != 1 {
 		t.Fatal("returned output aliases the precompile result")
 	}
-	out, gas, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 150}, nil)
+	out, gas, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil)
 	if err != nil || gas.Execution != 50 || !bytes.Equal(out, []byte{1, 2, 3}) || p.calls != 1 {
 		t.Fatalf("output=%x gas=%v calls=%d err=%v", out, gas, p.calls, err)
 	}
 	out[1] = 9
-	out, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 100}, nil)
+	out, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3000}, nil)
 	if err != nil || !bytes.Equal(out, []byte{1, 2, 3}) {
 		t.Fatal("cache output was mutated")
 	}
-	_, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 99}, nil)
+	_, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 2999}, nil)
 	if !errors.Is(err, ErrOutOfGas) || p.calls != 1 {
 		t.Fatal("cache hit bypassed gas check")
 	}
@@ -530,8 +532,8 @@ func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
 	p := &countingPrecompile{output: []byte{7}}
-	a := &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{202}}
-	b := &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{203}}
+	a := &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{202}}
+	b := &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{203}}
 	for _, c := range []*cachedPrecompile{a, a, b, b} {
 		if _, err := c.Run(input); err != nil {
 			t.Fatal(err)
@@ -541,7 +543,7 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 		t.Fatalf("different domains shared a result: %d calls", p.calls)
 	}
 	p = &countingPrecompile{err: errors.New("invalid")}
-	c := &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{204}}
+	c := &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{204}}
 	for range 2 {
 		if _, err := c.Run(input); err == nil {
 			t.Fatal("lost error")
@@ -551,7 +553,7 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 		t.Fatal("cached an error")
 	}
 	p = &countingPrecompile{output: []byte{7}}
-	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{205}}
+	c = &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{205}}
 	for range 2 {
 		if _, err := c.Run(make([]byte, 64*1024+1)); err != nil {
 			t.Fatal(err)
@@ -564,22 +566,22 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 		t.Fatal("wrapped custom contract")
 	}
 	p = &countingPrecompile{output: []byte{7}}
-	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{207}}
+	c = &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{207}}
 	precompileResults.Add(maphash.Bytes(precompileSeed, input)^c.domainHash, precompileResult{domain: c.domain, check: maphash.Bytes(precompileCheckSeed, []byte("other")), output: []byte{9}})
 	if out, err := c.Run(input); err != nil || !bytes.Equal(out, []byte{7}) || p.calls != 1 {
 		t.Fatalf("hash collision returned another input's result: %x", out)
 	}
 	p = &countingPrecompile{output: []byte{7}}
-	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{208}}
+	c = &cachedPrecompile{PrecompiledContract: p, normalize: wholeInputKey, domain: [21]byte{208}}
 	for range 2 {
-		if _, err := c.Run(make([]byte, 101)); err != nil {
+		if _, err := c.Run(make([]byte, 3001)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if p.calls != 2 {
 		t.Fatal("hashed an input longer than the call's gas")
 	}
-	pairing := &cachedPrecompile{PrecompiledContract: &bn254PairingIstanbul{}, domain: [21]byte{209}}
+	pairing := &cachedPrecompile{PrecompiledContract: &bn254PairingIstanbul{}, normalize: wholeInputKey, domain: [21]byte{209}}
 	zeroPairs := make([]byte, 342*192)
 	out, err := pairing.Run(zeroPairs)
 	if err != nil {
@@ -592,8 +594,8 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 }
 
 func TestCachedPrecompileParallel(t *testing.T) {
-	c := &cachedPrecompile{PrecompiledContract: &sha256hash{}, domain: [21]byte{206}}
-	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
+	c := &cachedPrecompile{PrecompiledContract: &bn254PairingIstanbul{}, normalize: wholeInputKey, domain: [21]byte{206}}
+	input := make([]byte, 2*192)
 	want, _ := c.PrecompiledContract.Run(input)
 	var wg sync.WaitGroup
 	for range 16 {
@@ -640,4 +642,17 @@ func TestBLSRepeatedPointScalars(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrecompileCacheKeyNormalizes(t *testing.T) {
+	key, ok := zeroPaddedKey(128)(append([]byte{1, 2}, make([]byte, 300)...))
+	require.True(t, ok)
+	require.Equal(t, []byte{1, 2}, key, "trailing zeros and bytes past the read prefix must not split entries")
+
+	header := make([]byte, 96)
+	header[31], header[63], header[95] = 1, 1, 1
+	declared := append(header, 2, 3, 5)
+	key, ok = modExpKey(append(bytes.Clone(declared), 7, 7, 7))
+	require.True(t, ok)
+	require.Equal(t, declared, key, "bytes past the declared operands must not split entries")
 }

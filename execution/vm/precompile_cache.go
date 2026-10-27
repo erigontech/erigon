@@ -21,11 +21,23 @@ import (
 	"hash/maphash"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
+const (
+	// minCachedPrecompileGas keeps calls whose compute is cheaper than a cache lookup out of the cache.
+	minCachedPrecompileGas   = 2000
+	maxCachedPrecompileInput = 64 * 1024
+)
+
 var (
+	precompileCacheEnabled = dbg.EnvBool("PRECOMPILE_CACHE", true)
+
 	precompileSeed, precompileCheckSeed = maphash.MakeSeed(), maphash.MakeSeed()
 	precompileResults                   = cache.NewByteLRU(8*datasize.MB, func(_ uint64, r precompileResult) int64 {
 		return int64(len(r.output) + 64)
@@ -42,35 +54,30 @@ type precompileResult struct {
 
 type cachedPrecompile struct {
 	PrecompiledContract
+	normalize  func(input []byte) ([]byte, bool)
 	domain     [21]byte
 	domainHash uint64
 }
 
 func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Address) PrecompiledContract {
-	switch p.(type) {
-	case *bigModExp, *bn254ScalarMulByzantium, *bn254ScalarMulIstanbul,
-		*bn254PairingByzantium, *bn254PairingIstanbul, *blake2F, *pointEvaluation,
-		*bls12381G1MultiExp, *bls12381G2MultiExp, *bls12381Pairing,
-		*bls12381MapFpToG1, *bls12381MapFp2ToG2, *p256Verify:
-		c := &cachedPrecompile{PrecompiledContract: p}
-		c.domain[0] = byte(tier)
-		copy(c.domain[1:], address[:])
-		c.domainHash = maphash.Bytes(precompileSeed, c.domain[:])
-		return c
-	default:
+	normalize := precompileCacheKey(p)
+	if !precompileCacheEnabled || normalize == nil {
 		return p
 	}
+	c := &cachedPrecompile{PrecompiledContract: p, normalize: normalize}
+	c.domain[0] = byte(tier)
+	copy(c.domain[1:], address[:])
+	c.domainHash = maphash.Bytes(precompileSeed, c.domain[:])
+	return c
 }
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
-	if c.RequiredGas(input) < uint64(len(input)) {
-		return c.PrecompiledContract.Run(input)
-	}
-	if len(input) > 64*1024 {
+	in, ok := c.normalize(input)
+	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < max(minCachedPrecompileGas, uint64(len(in))) {
 		output, err := c.PrecompiledContract.Run(input)
 		return bytes.Clone(output), err
 	}
-	key, check := maphash.Bytes(precompileSeed, input)^c.domainHash, maphash.Bytes(precompileCheckSeed, input)
+	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
 	if r, ok := precompileResults.Get(key); ok && r.domain == c.domain && r.check == check {
 		return bytes.Clone(r.output), nil
 	}
@@ -80,4 +87,84 @@ func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 		return bytes.Clone(output), nil
 	}
 	return output, err
+}
+
+// precompileCacheKey returns how a cached precompile narrows its input to the bytes that decide the
+// result (inputs that narrow alike must run to the same output, and false rejects a length Run fails
+// on), or nil for a precompile that is not cached.
+func precompileCacheKey(p PrecompiledContract) func([]byte) ([]byte, bool) {
+	switch p.(type) {
+	case *ecrecover:
+		return zeroPaddedKey(128)
+	case *bigModExp:
+		return modExpKey
+	case *bn254ScalarMulIstanbul, *bn254ScalarMulByzantium:
+		return zeroPaddedKey(96)
+	case *bn254PairingIstanbul, *bn254PairingByzantium:
+		return func(input []byte) ([]byte, bool) { return input, len(input)%192 == 0 }
+	case *blake2F:
+		return lengthKey(blake2FInputLength)
+	case *bls12381G1MultiExp:
+		return lengthMultipleKey(160)
+	case *bls12381G2MultiExp:
+		return lengthMultipleKey(288)
+	case *bls12381Pairing:
+		return lengthMultipleKey(384)
+	case *bls12381MapFpToG1:
+		return lengthKey(64)
+	case *bls12381MapFp2ToG2:
+		return lengthKey(128)
+	case *p256Verify:
+		return lengthKey(160)
+	case *pointEvaluation:
+		return lengthKey(libkzg.PrecompileInputLength)
+	default:
+		return nil
+	}
+}
+
+func lengthKey(n int) func([]byte) ([]byte, bool) {
+	return func(input []byte) ([]byte, bool) { return input, len(input) == n }
+}
+
+func lengthMultipleKey(n int) func([]byte) ([]byte, bool) {
+	return func(input []byte) ([]byte, bool) { return input, len(input) != 0 && len(input)%n == 0 }
+}
+
+// zeroPaddedKey drops what a precompile that reads a fixed prefix and zero-extends a shorter input
+// never sees: bytes past the prefix and trailing zeros inside it.
+func zeroPaddedKey(prefix int) func([]byte) ([]byte, bool) {
+	return func(input []byte) ([]byte, bool) {
+		input = input[:min(len(input), prefix)]
+		end := len(input)
+		for end > 0 && input[end-1] == 0 {
+			end--
+		}
+		return input[:end], true
+	}
+}
+
+const modExpHeaderLength = 96
+
+// modExpKey drops everything past the operands the header declares.
+func modExpKey(input []byte) ([]byte, bool) {
+	if len(input) <= modExpHeaderLength {
+		return input, true
+	}
+	baseLen := new(uint256.Int).SetBytes(getData(input, 0, 32))
+	expLen := new(uint256.Int).SetBytes(getData(input, 32, 32))
+	modLen := new(uint256.Int).SetBytes(getData(input, 64, 32))
+	if !baseLen.IsUint64() || !expLen.IsUint64() || !modLen.IsUint64() {
+		return nil, false
+	}
+	if baseLen.IsZero() && modLen.IsZero() {
+		return input[:modExpHeaderLength], true
+	}
+	end := new(uint256.Int).AddUint64(baseLen, modExpHeaderLength)
+	end.Add(end, expLen)
+	end.Add(end, modLen)
+	if !end.IsUint64() || end.Uint64() >= uint64(len(input)) {
+		return input, true
+	}
+	return input[:end.Uint64()], true
 }
