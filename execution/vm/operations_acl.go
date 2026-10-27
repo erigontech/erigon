@@ -32,6 +32,26 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// EIP-8141, "State-gas attribution and refills":
+// https://eips.ethereum.org/EIPS/eip-8141#state-gas-attribution-and-refills
+func applySStoreStateGas(evm *EVM, callContext *CallContext, gas int64) bool {
+	if evm.FrameContext == nil {
+		return applyStateGas(evm, callContext, gas)
+	}
+	if gas > 0 {
+		if !applyStateGas(evm, callContext, gas) {
+			return false
+		}
+		// Keep the paying frame as the charge owner for later storage refills.
+		evm.FrameContext.RecordStorageCharge(callContext.Address(), callContext.peekStorageKey(evm))
+	} else {
+		// Refills reduce the owner's state-gas usage. They restore spendable gas
+		// only when the owner is the current transaction frame.
+		evm.FrameContext.RefillStorageGas(callContext.Address(), callContext.peekStorageKey(evm), uint64(-gas))
+	}
+	return true
+}
+
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 		rules := evm.chainRules

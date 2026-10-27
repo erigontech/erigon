@@ -21,6 +21,9 @@ package vm
 
 import (
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // Gas costs
@@ -53,4 +56,12 @@ func callGas(isEip150 bool, availableGas, base uint64, callCost *uint256.Int) (u
 	}
 
 	return callCost.Uint64(), nil
+}
+
+func applyStateGas(_ *EVM, callContext *CallContext, gas int64) bool {
+	if gas > 0 {
+		return callContext.useMdGas(uint64(gas), mdgas.StateGas, nil, tracing.GasChangeIgnored)
+	}
+	callContext.refillStateGas(uint64(-gas), nil, tracing.GasChangeIgnored)
+	return true
 }

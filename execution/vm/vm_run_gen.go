@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // run is runTraced without the tracing code and with the fast path.
@@ -925,20 +924,8 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-				if evm.FrameContext != nil && op == SSTORE {
-					evm.FrameContext.RecordStorageCharge(callContext.Address(), callContext.peekStorageKey(evm))
-				}
-			} else if dynamicCost.State < 0 {
-				if evm.FrameContext != nil && op == SSTORE {
-					evm.FrameContext.RefillStorageGas(callContext.Address(), callContext.peekStorageKey(evm), uint64(-dynamicCost.State))
-				} else {
-					callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
-				}
+			if dynamicCost.State != 0 && !operation.applyStateGas(evm, callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 

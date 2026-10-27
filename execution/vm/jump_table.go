@@ -29,6 +29,7 @@ import (
 type (
 	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
 	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error)
+	stateGasFunc     func(evm *EVM, callContext *CallContext, gas int64) bool
 	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error)
 	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
@@ -41,6 +42,8 @@ type operation struct {
 	execute     executionFunc
 	constantGas uint64
 	dynamicGas  gasFunc
+	// applyStateGas charges or refills nonzero state gas after execution gas is charged.
+	applyStateGas stateGasFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int
@@ -99,12 +102,16 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		if op.memorySize != nil && op.dynamicGas == nil {
 			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
 		}
+		if op.applyStateGas == nil {
+			op.applyStateGas = applyStateGas
+		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
 }
 
 func newBogotaInstructionSet() JumpTable {
 	instructionSet := newAmsterdamInstructionSet()
+	instructionSet[SSTORE].applyStateGas = applySStoreStateGas
 	instructionSet[APPROVE] = operation{execute: opApprove, dynamicGas: gasReturn, memorySize: memoryReturn, numPop: 3}
 	instructionSet[TXPARAM] = operation{execute: opTxParam, constantGas: 2, numPop: 1, numPush: 1}
 	instructionSet[FRAMEDATALOAD] = operation{execute: opFrameDataLoad, constantGas: 3, numPop: 2, numPush: 1}
