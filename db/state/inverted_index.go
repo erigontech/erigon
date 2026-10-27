@@ -684,7 +684,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 			return stream.EmptyU64, nil
 		}
 	} else {
-		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() > uint64(startTxNum)
+		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
 			return stream.EmptyU64, nil
 		}
@@ -881,9 +881,7 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
 func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
-		if iit.files.EndTxNum() > 0 {
-			txTo = min(txTo, iit.files.EndTxNum())
-		}
+		txTo = min(txTo, iit.files.EndTxNum())
 		if !iit.CanPrune(tx, txTo) && valTable == nil /* it's not a history prune */ {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64, Progress: prune.Done}, nil
 		}
@@ -896,9 +894,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 
 func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
-		if iit.files.EndTxNum() > 0 {
-			txTo = min(txTo, iit.files.EndTxNum())
-		}
+		txTo = min(txTo, iit.files.EndTxNum())
 		if !iit.CanHashPrune(tx) {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}
@@ -1310,6 +1306,24 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	}
 
 	return from, to
+}
+
+// HasTxNumsInDB reports whether the DB holds index records for any txNum in
+// [fromTxNum, toTxNum). It seeks the txNum-ordered keys table, so the cost does
+// not grow with the number of keys the index holds.
+func (iit *InvertedIndexRoTx) HasTxNumsInDB(fromTxNum, toTxNum uint64, tx kv.Tx) (bool, error) {
+	c, err := tx.CursorDupSort(iit.ii.KeysTable)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	var from [8]byte
+	binary.BigEndian.PutUint64(from[:], fromTxNum)
+	k, _, err := c.Seek(from[:])
+	if err != nil || k == nil {
+		return false, err
+	}
+	return binary.BigEndian.Uint64(k) < toTxNum, nil
 }
 
 func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
