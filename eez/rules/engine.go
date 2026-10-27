@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/rulesconfig"
@@ -83,6 +84,9 @@ func New(chainConfig *chain.Config) (*Engine, error) {
 	if err := l2.Validate(); err != nil {
 		return nil, err
 	}
+	if err := l2.ValidateChain(chainConfig); err != nil {
+		return nil, err
+	}
 	m := merge.New(ethash.NewFaker())
 	m.SkipConsensusLayer = true
 	return &Engine{Merge: m, l2: l2}, nil
@@ -90,7 +94,8 @@ func New(chainConfig *chain.Config) (*Engine, error) {
 
 // VerifyHeader checks header against its parent. Beyond the post-merge
 // Ethereum rules it requires the configured interval and gas limit, a zero
-// prevRandao and beacon root, no blob gas, and empty withdrawals and requests.
+// beacon root, no blob gas, and empty withdrawals and requests. Under rollup0
+// prevRandao is zero; under rollupX derivation fixes it from L1.
 func (e *Engine) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header, _ bool) error {
 	if !header.Number.IsUint64() {
 		return fmt.Errorf("%w: block number %d beyond uint64", ErrInvalidHeader, &header.Number)
@@ -125,7 +130,7 @@ func (e *Engine) verifyHeader(config *chain.Config, header, parent *types.Header
 		return invalid("difficulty %d", &header.Difficulty)
 	case header.Nonce != (types.BlockNonce{}):
 		return invalid("nonce %x", header.Nonce)
-	case header.MixDigest != (common.Hash{}):
+	case e.l2.RollupX == nil && header.MixDigest != (common.Hash{}):
 		return invalid("prevRandao %x", header.MixDigest)
 	case header.UncleHash != empty.UncleHash:
 		return invalid("uncle hash %x", header.UncleHash)
@@ -151,6 +156,32 @@ func (e *Engine) verifyHeader(config *chain.Config, header, parent *types.Header
 		return invalid("requests hash is not the empty requests hash")
 	case header.SlotNumber != nil || header.BlockAccessListHash != nil:
 		return invalid("Amsterdam fields")
+	}
+	return nil
+}
+
+// Initialize runs the block-start system calls. Under rollupX it then burns
+// the balances of EEZL2 and the system address: EEZL2's is mint its last
+// block did not consume, and the system address only receives.
+func (e *Engine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
+	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
+	if err := e.Merge.Initialize(config, chain, header, ibs, syscall, logger, tracer); err != nil {
+		return err
+	}
+	if e.l2.RollupX == nil {
+		return nil
+	}
+	for _, addr := range []accounts.Address{accounts.InternAddress(e.l2.EEZL2()), systemAddress} {
+		balance, err := ibs.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		if !balance.IsZero() {
+			if err := ibs.SetBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

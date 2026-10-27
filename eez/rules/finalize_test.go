@@ -25,8 +25,10 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -42,7 +44,13 @@ import (
 // devnetBlock1 returns the eez-devnet genesis state and the header of block 1.
 func devnetBlock1(t *testing.T) (*chain.Config, *state.IntraBlockState, *types.Header) {
 	t.Helper()
-	g := networks.Devnet.Genesis
+	return block1(t, networks.Devnet)
+}
+
+// block1 returns the genesis state of spec and the header of block 1.
+func block1(t *testing.T, spec chainspec.Spec) (*chain.Config, *state.IntraBlockState, *types.Header) {
+	t.Helper()
+	g := spec.Genesis
 	ibs := state.New(state.NewNoopReader())
 	t.Cleanup(ibs.Close)
 	for addr, acc := range g.Alloc {
@@ -58,14 +66,15 @@ func devnetBlock1(t *testing.T) (*chain.Config, *state.IntraBlockState, *types.H
 	genesisBlock, _, err := genesiswrite.GenesisToBlock(g, datadir.New(t.TempDir()), log.New())
 	require.NoError(t, err)
 	genesis := genesisBlock.Header()
-	require.Equal(t, networks.Devnet.GenesisHash, genesis.Hash())
+	require.Equal(t, spec.GenesisHash, genesis.Hash())
 
 	var zero uint64
 	header := &types.Header{
 		ParentHash:            genesis.Hash(),
 		UncleHash:             empty.UncleHash,
 		Number:                *uint256.NewInt(1),
-		Time:                  genesis.Time + 2,
+		Time:                  genesis.Time + g.Config.L2.(*config.L2Config).BlockInterval,
+		MixDigest:             genesis.MixDigest,
 		GasLimit:              genesis.GasLimit,
 		BaseFee:               misc.CalcBaseFee(g.Config, genesis),
 		WithdrawalsHash:       &empty.RootHash,
