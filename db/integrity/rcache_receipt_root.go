@@ -176,6 +176,7 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	}
 	var receipts types.Receipts
 	blockMinTxNum, entries := fromTxNum, uint64(0)
+	blooms := bloomCache{}
 
 	verifyAndAdvance := func() error {
 		if want := curMax - blockMinTxNum + 1; blockNum > 0 && entries != want {
@@ -227,7 +228,7 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 
 		entries++
 		if r != nil {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
+			r.Bloom = blooms.receiptBloom(r)
 			receipts = append(receipts, r)
 		}
 
@@ -247,4 +248,31 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	}
 
 	return nil
+}
+
+// bloomCache memoizes blooms of log addresses and event signatures: they repeat across receipts,
+// and their keccak dominates the check otherwise.
+type bloomCache map[string]types.Bloom
+
+func (c bloomCache) receiptBloom(r *types.Receipt) (bin types.Bloom) {
+	for _, l := range r.Logs {
+		c.add(&bin, l.Address[:])
+		for i := range l.Topics {
+			if i == 0 {
+				c.add(&bin, l.Topics[i][:])
+			} else {
+				bin.Add(l.Topics[i][:])
+			}
+		}
+	}
+	return bin
+}
+
+func (c bloomCache) add(bin *types.Bloom, d []byte) {
+	b, ok := c[string(d)]
+	if !ok {
+		b.Add(d)
+		c[string(d)] = b
+	}
+	bin.Or(&b)
 }
