@@ -597,15 +597,6 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	return a.checkFilesDBGap(db)
 }
 
-// btIndexFitsInMem reports whether the .bt files of btInMemDefaultDomains, as they are on disk now, fit the in-memory budget.
-func (a *Aggregator) btIndexFitsInMem() bool {
-	total := estimate.TotalMemory()
-	if total < smallMemExistenceFilterTotal {
-		return false
-	}
-	return btIndexFitsInMem(btIndexFilesSize(a.dirs.SnapDomain, btInMemDefaultDomains), total)
-}
-
 // checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
 // snapshot files end (the hole `rm-state --latest` leaves without a reset — reads
 // below it silently return stale data). Skipped when SkipFilesDBGapCheck is set so

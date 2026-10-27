@@ -31,7 +31,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3985,6 +3984,57 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 	})
 }
 
+// residentBtIndexBytes sums the sizes of the open in-memory .bt indexes of d.
+func residentBtIndexBytes(d *Domain) int64 {
+	var resident int64
+	iter := d.dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		if item := iter.Item(); item.bindex.InMem() {
+			resident += item.bindex.Size()
+		}
+	}
+	return resident
+}
+
+// visibleBtIndexes returns how many visible .bt indexes of d are in memory, the total, and their summed size.
+func visibleBtIndexes(t *testing.T, d *Domain) (inMem, total int, size int64) {
+	t.Helper()
+	dc := d.beginForTests()
+	defer dc.Close()
+	require.NotEmpty(t, dc.files)
+	for _, f := range dc.files {
+		if f.src.bindex.InMem() {
+			inMem++
+		}
+		size += f.src.bindex.Size()
+	}
+	return inMem, len(dc.files), size
+}
+
+func collateAndMergeDomain(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+	t.Helper()
+	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	}))
+}
+
+func TestBtInMemBudget(t *testing.T) {
+	require.Zero(t, newBtInMemBudget(20<<30-1).limit)
+	require.EqualValues(t, int64(32<<30)/btInMemMaxShare, newBtInMemBudget(32<<30).limit)
+
+	b := &btInMemBudget{limit: 100}
+	require.False(t, (&btInMemBudget{}).reserve(1, 0), "a zero limit admits nothing")
+	require.True(t, b.reserve(60, 0))
+	require.False(t, b.reserve(50, 0), "60+50 exceeds the limit")
+	require.True(t, b.reserve(50, 30), "a merge replacing 30 in-memory bytes fits")
+	require.EqualValues(t, 110, b.resident.Load(), "the inputs stay counted until they close")
+	b.release(30)
+	b.release(60)
+	require.EqualValues(t, 20, b.resident.Load())
+}
+
 func TestDomain_BtIndexInMem(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -3994,77 +4044,29 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 
 	db, d, txs := filledDomain(t, log.New())
 	d.btForceInMem, d.btForceMmap = nil, nil
-	d.btIndexFits = func() bool { return true }
-	requireBtIndexesInMem := func() {
-		t.Helper()
-		dc := d.beginForTests()
-		defer dc.Close()
-		require.NotEmpty(t, dc.files)
-		for _, f := range dc.files {
-			require.Truef(t, f.src.bindex.InMem(), "%s", f.src.decompressor.FileName())
-		}
-	}
+	d.btBudget = &btInMemBudget{limit: 1 << 40}
 
-	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
-		collateAndMerge(t, tx, d, txs)
-		return nil
-	})
-	require.NoError(t, err)
-	requireBtIndexesInMem()
+	collateAndMergeDomain(t, db, d, txs)
+	inMem, total, _ := visibleBtIndexes(t, d)
+	require.Equal(t, total, inMem)
+	require.Equal(t, residentBtIndexBytes(d), d.btBudget.resident.Load(), "merged-away indexes must release their bytes")
 	checkHistory(t, db, d, txs)
 
 	d.Close()
+	require.Zero(t, d.btBudget.resident.Load())
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
 	_, err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
-	requireBtIndexesInMem()
+	inMem, total, _ = visibleBtIndexes(t, d)
+	require.Equal(t, total, inMem)
+	require.Equal(t, residentBtIndexBytes(d), d.btBudget.resident.Load())
 	checkHistory(t, db, d, txs)
 }
 
-func TestReadBtIndexInMem(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		enabled     bool
-		inMem, mmap []string
-		want        bool
-	}{
-		{name: "accounts", enabled: true, want: true},
-		{name: "storage", enabled: true, want: true},
-		{name: "code", enabled: true, want: true},
-		{name: "receipt", enabled: true, want: false},
-		{name: "commitment", enabled: true, want: false},
-		{name: "storage", enabled: false, want: false},
-		{name: "storage", enabled: true, mmap: []string{"storage"}, want: false},
-		{name: "accounts", enabled: true, mmap: []string{"storage"}, want: true},
-		{name: "storage", enabled: false, inMem: []string{"storage"}, want: true},
-		{name: "receipt", enabled: false, inMem: []string{"receipt"}, want: true},
-		{name: "storage", enabled: true, inMem: []string{"storage"}, mmap: []string{"storage"}, want: false},
-	} {
-		enabled := func() bool { return tc.enabled }
-		require.Equal(t, tc.want, readBtIndexInMem(tc.name, enabled, tc.inMem, tc.mmap), "%+v", tc)
-	}
-}
-
-func TestBtIndexFitsInMem(t *testing.T) {
-	for _, tc := range []struct {
-		btSize, total uint64
-		want          bool
-	}{
-		{btSize: 3 << 30, total: 64 << 30, want: true},
-		{btSize: 3 << 30, total: 32 << 30, want: true},
-		{btSize: 3 << 30, total: 24 << 30, want: false},
-		{btSize: 1 << 30, total: 20 << 30, want: true},
-		{btSize: 1 << 30, total: 20<<30 - 1, want: false},
-		{btSize: 100 << 20, total: 16 << 30, want: false},
-		{btSize: 7 << 30, total: 64 << 30, want: false},
-		{btSize: 0, total: 0, want: false},
-	} {
-		require.Equal(t, tc.want, btIndexFitsInMem(tc.btSize, tc.total), "%+v", tc)
-	}
-}
-
-func TestDomain_BtIndexInMemChecksBudgetOnBuildAndMerge(t *testing.T) {
+// A merge is budgeted against the in-memory indexes it replaces, which are still open while the merged index opens:
+// with the limit at exactly the resident bytes, the merged index still fits in memory.
+func TestDomain_BtIndexInMemMergeReusesInputsBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -4073,41 +4075,61 @@ func TestDomain_BtIndexInMemChecksBudgetOnBuildAndMerge(t *testing.T) {
 
 	db, d, txs := filledDomain(t, log.New())
 	d.btForceInMem, d.btForceMmap = nil, nil
-	var checks atomic.Int32
-	d.btIndexFits = func() bool {
-		checks.Add(1)
-		return false
-	}
-	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
-		collateAndMerge(t, tx, d, txs)
+	d.btBudget = &btInMemBudget{limit: 1 << 40}
+	ctx := t.Context()
+	require.NoError(t, db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
+			require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+		}
 		return nil
-	})
-	require.NoError(t, err)
+	}))
+	d.btBudget.limit = d.btBudget.resident.Load()
+
 	dc := d.beginForTests()
-	defer dc.Close()
-	require.NotEmpty(t, dc.files)
-	for _, f := range dc.files {
-		require.Falsef(t, f.src.bindex.InMem(), "%s", f.src.decompressor.FileName())
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
+	r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan, maxSpan)
+	require.True(t, r.any())
+	valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
+	for _, item := range valuesOuts {
+		require.True(t, item.bindex.InMem())
 	}
-	require.Greater(t, int(checks.Load()), len(dc.files), "the budget must be checked for every built and merged file")
+	valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
+	dc.Close()
+	require.NoError(t, err)
+	d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+	require.True(t, valuesIn.bindex.InMem(), "the merged index fits in the bytes of the indexes it replaces")
 }
 
-func TestBtIndexFilesSize(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "[node]")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	for name, size := range map[string]int{
-		"v1.1-accounts.0-64.bt":   100,
-		"v1.1-storage.0-64.bt":    50,
-		"v1.1-receipt.0-64.bt":    1000,
-		"v1.1-accounts.0-64.kv":   5000,
-		"v1.1-accounts.0-64.kvei": 7,
-	} {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644))
+func TestDomain_BtIndexOverrides(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
 	}
-	target := filepath.Join(t.TempDir(), "code.bt")
-	require.NoError(t, os.WriteFile(target, make([]byte, 300), 0o644))
-	require.NoError(t, os.Symlink(target, filepath.Join(dir, "v1.1-code.0-64.bt")))
-	require.Equal(t, uint64(450), btIndexFilesSize(dir, btInMemDefaultDomains), "a symlinked .bt counts its target's size")
+
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name               string
+		forceInMem, mmap   []string
+		budget             *btInMemBudget
+		wantInMem, wantAll bool
+	}{
+		{name: "no budget", wantInMem: false},
+		{name: "DOMAIN_BT_MEM without budget", forceInMem: []string{"accounts"}, wantInMem: true},
+		{name: "DOMAIN_BT_MMAP over budget", mmap: []string{"accounts"}, budget: &btInMemBudget{limit: 1 << 40}, wantInMem: false},
+		{name: "DOMAIN_BT_MMAP over DOMAIN_BT_MEM", forceInMem: []string{"accounts"}, mmap: []string{"accounts"}, wantInMem: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, d, txs := filledDomain(t, log.New())
+			d.btForceInMem, d.btForceMmap, d.btBudget = tc.forceInMem, tc.mmap, tc.budget
+			collateAndMergeDomain(t, db, d, txs)
+			inMem, total, _ := visibleBtIndexes(t, d)
+			if tc.wantInMem {
+				require.Equal(t, total, inMem)
+			} else {
+				require.Zero(t, inMem)
+			}
+		})
+	}
 }
 
 func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {

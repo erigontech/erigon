@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -102,7 +103,7 @@ type Domain struct {
 	// before the build loop in buildHashMapAccessor.
 	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 
-	btIndexFits func() bool // set by AggOpts.BtIndexInMem: whether the .bt files of btInMemDefaultDomains fit in memory now
+	btBudget *btInMemBudget // set by AggOpts.BtIndexInMem, shared by the aggregator's domains
 	// DOMAIN_BT_MEM and DOMAIN_BT_MMAP as read at start, kept per domain so tests can clear them locally.
 	btForceInMem, btForceMmap []string
 }
@@ -236,63 +237,67 @@ const btInMemMaxShare = 10
 // the state that block execution reads at the chain tip.
 var btInMemDefaultDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String()}
 
-// btIndexFitsInMem reports whether btSize bytes of .bt files may be read into memory on a node with total bytes of memory.
-// Below smallMemExistenceFilterTotal, where existence filters also leave the heap, they stay memory-mapped.
-func btIndexFitsInMem(btSize, total uint64) bool {
-	return total >= smallMemExistenceFilterTotal && btSize <= total/btInMemMaxShare
+// btInMemBudget counts the bytes of .bt files a node holds in memory, against a share of its memory.
+type btInMemBudget struct {
+	limit    int64
+	resident atomic.Int64
 }
 
-// readBtIndexInMem reports whether a domain reads a .bt file into memory instead of mapping it, so state reads at the
-// chain tip do not wait for index pages the page cache dropped. It costs heap equal to the size of the file.
-// For btInMemDefaultDomains, fits decides at each open, so the files built and merged later stay within the budget.
-// DOMAIN_BT_MMAP and DOMAIN_BT_MEM list the domains that override it; DOMAIN_BT_MMAP wins.
-func readBtIndexInMem(name string, fits func() bool, forceInMem, forceMmap []string) bool {
-	switch {
-	case slices.Contains(forceMmap, name):
-		return false
-	case slices.Contains(forceInMem, name):
-		return true
-	default:
-		return fits != nil && slices.Contains(btInMemDefaultDomains, name) && fits()
+// newBtInMemBudget admits nothing below smallMemExistenceFilterTotal, where existence filters also leave the heap.
+func newBtInMemBudget(totalMemory uint64) *btInMemBudget {
+	if totalMemory < smallMemExistenceFilterTotal {
+		return &btInMemBudget{}
 	}
+	return &btInMemBudget{limit: int64(totalMemory / btInMemMaxShare)}
 }
 
-// btIndexFilesSize sums the sizes of the .bt files of the given domains in dir.
-func btIndexFilesSize(dir string, domains []string) uint64 {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	var size uint64
-	for _, e := range entries {
-		for _, name := range domains {
-			if ok, _ := filepath.Match("*-"+name+".*.bt", e.Name()); !ok {
-				continue
-			}
-			if info, err := os.Stat(filepath.Join(dir, e.Name())); err == nil { // follows symlinks, like the open does
-				size += uint64(info.Size())
-			}
+// reserve admits size more bytes. credit is the in-memory size of the files the new one replaces (merge inputs),
+// which are still open when the merged file is.
+func (b *btInMemBudget) reserve(size, credit int64) bool {
+	for {
+		resident := b.resident.Load()
+		if resident-credit+size > b.limit {
+			return false
+		}
+		if b.resident.CompareAndSwap(resident, resident+size) {
+			return true
 		}
 	}
-	return size
 }
 
-func (d *Domain) btIndexInMem() bool {
-	return readBtIndexInMem(d.Name.String(), d.btIndexFits, d.btForceInMem, d.btForceMmap)
-}
+func (b *btInMemBudget) release(size int64) { b.resident.Add(-size) }
 
-func (d *Domain) openBtIndex(fPath string, r *seg.Reader) (*btindex.BtIndex, error) {
-	if d.btIndexInMem() {
+// openBtIndex reads a .bt file into memory instead of mapping it, so state reads at the chain tip do not wait for
+// index pages the page cache dropped, when DOMAIN_BT_MEM lists the domain, or for btInMemDefaultDomains while
+// the budget admits it. DOMAIN_BT_MMAP keeps a domain mapped and wins over both. credit: see btInMemBudget.reserve.
+func (d *Domain) openBtIndex(fPath string, r *seg.Reader, credit int64) (*btindex.BtIndex, error) {
+	name := d.Name.String()
+	switch {
+	case slices.Contains(d.btForceMmap, name):
+	case slices.Contains(d.btForceInMem, name):
 		return btindex.OpenBtreeIndexInMem(fPath, r)
+	case d.btBudget != nil && slices.Contains(btInMemDefaultDomains, name):
+		st, err := os.Stat(fPath) // follows symlinks, like the open does
+		if err != nil || !d.btBudget.reserve(st.Size(), credit) {
+			break
+		}
+		budget, size := d.btBudget, st.Size()
+		bt, err := btindex.OpenBtreeIndexInMem(fPath, r)
+		if err != nil {
+			budget.release(size)
+			return nil, err
+		}
+		bt.OnClose(func() { budget.release(size) })
+		return bt, nil
 	}
 	return btindex.OpenBtreeIndexWithDecompressor(fPath, r)
 }
 
-func (d *Domain) buildBtIndex(btPath, kveiPath string, r *seg.Reader, salt uint32, ps *background.ProgressSet) (*btindex.BtIndex, error) {
+func (d *Domain) buildBtIndex(btPath, kveiPath string, r *seg.Reader, salt uint32, ps *background.ProgressSet, credit int64) (*btindex.BtIndex, error) {
 	if err := btindex.BuildBtreeIndexWithDecompressor(btPath, kveiPath, r, ps, d.dirs.Tmp, salt, d.logger, d.noFsync, d.Accessors); err != nil {
 		return nil, err
 	}
-	return d.openBtIndex(btPath, r)
+	return d.openBtIndex(btPath, r, credit)
 }
 
 func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
@@ -1144,7 +1149,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
 		kveiPath := d.kvExistenceIdxNewFilePathIn(dstDir, stepFrom, stepTo)
-		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps)
+		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, 0)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1247,7 +1252,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps)
+		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, 0)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}

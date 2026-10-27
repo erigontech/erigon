@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -84,9 +85,10 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 		return nil, err
 	}
 	if opts.btIndexInMem {
+		budget := newBtInMemBudget(estimate.TotalMemory())
 		for _, d := range a.d {
 			if d != nil {
-				d.btIndexFits = a.btIndexFitsInMem
+				d.btBudget = budget
 			}
 		}
 	}

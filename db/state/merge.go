@@ -564,7 +564,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		kveiPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
-		valuesIn.bindex, err = dt.d.buildBtIndex(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps)
+		var credit int64 // the inputs' in-memory indexes are released once the merged file replaces them
+		for _, item := range domainFiles {
+			if item.bindex.InMem() {
+				credit += item.bindex.Size()
+			}
+		}
+		valuesIn.bindex, err = dt.d.buildBtIndex(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, credit)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}

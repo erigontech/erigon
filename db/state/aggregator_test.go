@@ -919,15 +919,20 @@ func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
 			opts = opts.BtIndexInMem()
 		}
 		agg := opts.MustOpen(t.Context())
+		var budget *btInMemBudget
 		for _, d := range agg.d {
 			if d == nil {
 				continue
 			}
-			d.btForceInMem, d.btForceMmap = nil, nil
-			require.Equal(t, enabled, d.btIndexFits != nil, "enabled=%v domain=%s", enabled, d.Name)
 			if !enabled {
-				require.False(t, d.btIndexInMem(), "domain=%s", d.Name)
+				require.Nil(t, d.btBudget, "domain=%s", d.Name)
+				continue
 			}
+			require.NotNil(t, d.btBudget, "domain=%s", d.Name)
+			if budget == nil {
+				budget = d.btBudget
+			}
+			require.Same(t, budget, d.btBudget, "one budget for all domains")
 		}
 		agg.Close()
 	}
