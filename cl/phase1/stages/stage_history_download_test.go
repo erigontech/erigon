@@ -88,6 +88,7 @@ type failingHistoryDownloader struct {
 }
 
 func (d *failingHistoryDownloader) Finished() bool                             { return d.finished }
+func (*failingHistoryDownloader) Downloaded() uint64                           { return 0 }
 func (*failingHistoryDownloader) Progress() uint64                             { return 1 }
 func (d *failingHistoryDownloader) RequestMore(context.Context) error          { return d.err }
 func (*failingHistoryDownloader) SetBlockChecker(network.BlockChecker)         {}

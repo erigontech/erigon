@@ -3006,3 +3006,34 @@ func TestEnvelopeHTTPFallbackRejectsPreGloasVersion(t *testing.T) {
 	require.Zero(t, fetched)
 	require.Empty(t, received)
 }
+
+func TestBackwardBeaconDownloaderCountsOnlyProcessedBlocks(t *testing.T) {
+	parent := makeDenebBlock(10)
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child := makeDenebBlock(11)
+	child.Block.ParentRoot = parentRoot
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	b := NewBackwardBeaconDownloader(t.Context(), nil, nil, nil, nil, &clparams.MainnetBeaconConfig)
+	b.SetSlotToDownload(11)
+	b.SetExpectedRoot(childRoot)
+	failNext := true
+	b.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		if failNext {
+			failNext = false
+			return false, errors.New("collector failed")
+		}
+		return false, nil
+	})
+
+	responses := []*cltypes.SignedBeaconBlock{parent, child}
+	require.NoError(t, b.processResponses(t.Context(), responses))
+	require.Zero(t, b.Downloaded(), "a block whose onNewBlock failed is retried, not downloaded")
+	require.Equal(t, uint64(11), b.Progress())
+
+	require.NoError(t, b.processResponses(t.Context(), responses))
+	require.Equal(t, uint64(2), b.Downloaded())
+	require.Equal(t, uint64(9), b.Progress())
+}
