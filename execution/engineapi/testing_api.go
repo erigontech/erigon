@@ -421,26 +421,12 @@ func (t *testingImpl) assembleTestingBlock(
 		return nil, 0, errors.New("execution service is busy, cannot build block")
 	}
 
-	var assembled execmodule.AssembledBlockResult
-	execBusy, err = func() (bool, error) {
-		t.server.lock.Lock()
-		defer t.server.lock.Unlock()
-
-		var err error
-		busy, err := waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
-			assembled, err = t.server.executionService.GetAssembledBlock(ctx, payloadID)
-			if err != nil {
-				return false, err
-			}
-			return assembled.Busy, nil
-		})
-		return busy, err
-	}()
-	if err != nil {
+	if err := t.server.executionService.CompletePayload(ctx, payloadID); err != nil {
 		return nil, 0, err
 	}
-	if execBusy {
-		return nil, 0, errors.New("execution service is busy retrieving assembled block")
+	assembled, err := t.server.executionService.GetAssembledBlock(ctx, payloadID)
+	if err != nil {
+		return nil, 0, err
 	}
 	if assembled.Block == nil {
 		return nil, 0, errors.New("no assembled block data available for payload ID")

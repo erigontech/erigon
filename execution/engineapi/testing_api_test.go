@@ -90,6 +90,10 @@ func (s *stubExecutionModule) GetAssembledBlock(ctx context.Context, payloadID u
 	return execmodule.AssembledBlockResult{}, nil
 }
 
+func (s *stubExecutionModule) CompletePayload(context.Context, uint64) error {
+	return nil
+}
+
 func (s *stubExecutionModule) AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery) {
 	if s.addSendersRecoveryFunc != nil {
 		s.addSendersRecoveryFunc(blockHash, recovery)
@@ -629,26 +633,6 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, err.Error(), "execution service is busy")
 	})
 
-	t.Run("execution service busy on GetAssembledBlock", func(t *testing.T) {
-		t.Parallel()
-		stub := &stubExecutionModule{
-			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-			assembleBlockFunc: func(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
-				return execmodule.AssembleBlockResult{PayloadID: 42, Busy: false}, nil
-			},
-			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-				return execmodule.AssembledBlockResult{Busy: true}, nil
-			},
-		}
-		api := newTestingAPI(shortSlotCfg, stub)
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "execution service is busy retrieving assembled block")
-	})
-
 	t.Run("nil assembled block data", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{
@@ -657,7 +641,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembleBlockResult{PayloadID: 42, Busy: false}, nil
 			},
 			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-				return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
+				return execmodule.AssembledBlockResult{Block: nil}, nil
 			},
 		}
 		api := newTestingAPI(allForksChainConfig(), stub)
@@ -685,7 +669,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 				assert.Equal(t, payloadID, id)
 				blk := makeAssembledBlock(blockHash, parentHash, stateRoot, 101, parentTimestamp+1, []byte("test"), 30_000_000, 21_000, 0, 0)
-				return execmodule.AssembledBlockResult{Block: blk, BlockValue: blockValue, Busy: false}, nil
+				return execmodule.AssembledBlockResult{Block: blk, BlockValue: blockValue}, nil
 			},
 		}
 		api := newTestingAPI(allForksChainConfig(), stub)
@@ -719,7 +703,6 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{
 					Block:      blk,
 					BlockValue: uint256.NewInt(0),
-					Busy:       false,
 				}, nil
 			},
 		}
@@ -744,7 +727,7 @@ func TestBuildBlockV1(t *testing.T) {
 			},
 			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
 				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte{}, 30_000_000, 0, 0, 0)
-				return execmodule.AssembledBlockResult{Block: blk, BlockValue: uint256.NewInt(0), Busy: false}, nil
+				return execmodule.AssembledBlockResult{Block: blk, BlockValue: uint256.NewInt(0)}, nil
 			},
 		}
 		api := newTestingAPI(allForksChainConfig(), stub)
@@ -863,7 +846,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
 				// Returning nil block triggers "no assembled block data available" error,
 				// which is fine — we only care that AssembleBlock was reached.
-				return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
+				return execmodule.AssembledBlockResult{Block: nil}, nil
 			},
 		}
 		api := newTestingAPI(cfg, stub)
@@ -952,7 +935,7 @@ func TestStaticTxnProvider(t *testing.T) {
 // returns a nil block (triggers "no assembled block data" error). Used by tests
 // that only care about what was passed to AssembleBlock, not the assembled result.
 var nilGetAssembledBlock = func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-	return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
+	return execmodule.AssembledBlockResult{Block: nil}, nil
 }
 
 // captureAssembleParams is a helper that returns an assembleBlockFunc which

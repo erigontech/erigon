@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -75,6 +76,41 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.ExecutionRequests)
 	require.Len(t, resp.ExecutionRequests, 0)
+}
+
+func TestGetPayloadDoesNotWaitForTheEngineLock(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 44
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block: minimalPayloadBlock(1, make(types.FlatRequests, 0)),
+			}, nil
+		},
+	}
+
+	srv := newProposingEngineServerForGetPayloadTests(stub)
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
+
+	type response struct {
+		resp any
+		err  error
+	}
+	responded := make(chan response, 1)
+	go func() {
+		resp, err := srv.GetPayloadV4(context.Background(), payloadIDBytes(payloadID))
+		responded <- response{resp, err}
+	}()
+	select {
+	case r := <-responded:
+		require.NoError(t, r.err)
+		require.NotNil(t, r.resp)
+	case <-time.After(5 * time.Second):
+		t.Fatal("getPayload waited for a newPayload or forkchoiceUpdated in progress")
+	}
 }
 
 func TestGetPayloadV4AcceptsMatchingBlobsBundleCounts(t *testing.T) {
@@ -315,6 +351,9 @@ func (s *getPayloadStubModule) AddSendersRecovery(common.Hash, *exec.SendersReco
 
 func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
 	return s.getAssembledBlockFunc(ctx, payloadID)
+}
+func (s *getPayloadStubModule) CompletePayload(context.Context, uint64) error {
+	panic("not implemented")
 }
 func (s *getPayloadStubModule) Ready(_ context.Context) (bool, error) { return true, nil }
 func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block) (execmodule.ExecutionStatus, error) {

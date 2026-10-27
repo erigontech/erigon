@@ -24,9 +24,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // BlockBuilderFunc builds a payload. Its context ends when the payload is discarded, so anything
@@ -38,22 +41,47 @@ type InclusionListFunc func(ctx context.Context) (types.Transactions, error)
 // ErrDiscarded reports that the payload was abandoned before the build completed.
 var ErrDiscarded = errors.New("block builder discarded")
 
-// parentBlockWaitGrace is how long a stopped build still waits for its transaction provider to see
-// the parent block. A getPayload that follows the forkchoice update right away can find the txpool
-// still catching up with the new head. The grace is half the Engine API's one-second getPayload timeout.
-const parentBlockWaitGrace = 500 * time.Millisecond
+// rebuildInterval is how long each rebuild of a BlockBuilder with a fallback payload keeps
+// collecting transactions before it seals its payload.
+const rebuildInterval = time.Second
 
-type stopSignalsKey struct{}
+type stoppedKey struct{}
 
-// stopSignals are closed by a BlockBuilder that is asked for its payload: stopped at once, and
-// parentBlockWaitStopped parentBlockWaitGrace later. Both are nil for a build that runs without one.
-type stopSignals struct {
-	stopped, parentBlockWaitStopped <-chan struct{}
+// stoppedOf returns the channel closed when the running build is asked to wrap up, nil for a build
+// that runs without one.
+func stoppedOf(ctx context.Context) <-chan struct{} {
+	stopped, _ := ctx.Value(stoppedKey{}).(chan struct{})
+	return stopped
 }
 
-func stopSignalsOf(ctx context.Context) stopSignals {
-	signals, _ := ctx.Value(stopSignalsKey{}).(stopSignals)
-	return signals
+// BuildEmpty builds the payload without transactions.
+func BuildEmpty(ctx context.Context, build BlockBuilderFunc, param *Parameters) (*types.BlockWithReceipts, error) {
+	emptyParam := param.Copy()
+	emptyParam.CustomTxnProvider = noTxnProvider{}
+	var interrupt atomic.Bool
+	interrupt.Store(true)
+	return build(ctx, emptyParam, &interrupt)
+}
+
+type noTxnProvider struct{}
+
+func (noTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+// BlockValue computes the expected value received by the fee recipient in wei.
+func BlockValue(br *types.BlockWithReceipts) *uint256.Int {
+	baseFee := br.Block.HeaderNoCopy().BaseFee
+	value := uint256.NewInt(0)
+	txs := br.Block.Transactions()
+	var gas, txValue uint256.Int
+	for i := range txs {
+		gas.SetUint64(br.Receipts[i].GasUsed)
+		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
+		txValue.Mul(&gas, &effectiveTip)
+		value.Add(value, &txValue)
+	}
+	return value
 }
 
 const (
@@ -64,72 +92,40 @@ const (
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining").
 //
-// It answers to two different requests. Interrupting asks for the block it has so far, which is how
-// a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
+// Started with a fallback payload, it rebuilds the payload every rebuildInterval and keeps the most
+// valuable one sealed, so Resolve hands it out at once. Started without one, it builds once and
+// Resolve waits for that build.
+//
+// It answers to two different requests. Stopping asks for the payload it has, which is how a
+// payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
-	interrupt              atomic.Bool
-	stopped                chan struct{}
-	parentBlockWaitStopped chan struct{}
-	stopOnce               sync.Once
-	state                  atomic.Uint32
-	discard                context.CancelFunc
-	mu                     sync.Mutex
-	done                   chan struct{}
-	result                 *types.BlockWithReceipts
-	err                    error
+	interrupt atomic.Bool
+	stopped   chan struct{}
+	stopOnce  sync.Once
+	state     atomic.Uint32
+	discard   context.CancelFunc
+	rebuild   bool
+	mu        sync.Mutex
+	done      chan struct{}
+	result    *types.BlockWithReceipts
+	err       error
 }
 
-// NewBlockBuilder starts a build. maxBuildTime is the budget after which the builder stops itself
-// and keeps the block it has; stopGrace is how long a stopped build may take to finish up - the
-// transaction in flight, the packing tail, payload finalization - before it is taken as stuck and
-// discarded.
-func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
+// NewBlockBuilder starts a build. fallback, when set, is the payload handed out until a rebuild
+// seals a better one. maxBuildTime is the budget after which the builder stops itself and keeps the
+// payload it has; stopGrace is how long a stopped build may take to finish up - the transaction in
+// flight, the packing tail, payload finalization - before it is taken as stuck and discarded.
+func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, fallback *types.BlockWithReceipts, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
 	buildCtx, discard := context.WithCancel(ctx)
 	builder := &BlockBuilder{
-		done:                   make(chan struct{}),
-		stopped:                make(chan struct{}),
-		parentBlockWaitStopped: make(chan struct{}),
-		discard:                discard,
+		done:    make(chan struct{}),
+		stopped: make(chan struct{}),
+		discard: discard,
+		rebuild: fallback != nil,
+		result:  fallback,
 	}
-	buildCtx = context.WithValue(buildCtx, stopSignalsKey{}, stopSignals{
-		stopped:                builder.stopped,
-		parentBlockWaitStopped: builder.parentBlockWaitStopped,
-	})
 
-	go func() {
-		var result *types.BlockWithReceipts
-		var err error
-
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("block builder panic: %+v, trace: %s", rec, dbg.Stack())
-				log.Warn("Block builder panicked", "err", err)
-				result = nil
-			}
-
-			builder.mu.Lock()
-			builder.result = result
-			builder.err = err
-			builder.state.CompareAndSwap(blockBuilderRunning, blockBuilderCompleted)
-			builder.mu.Unlock()
-			close(builder.done)
-			discard()
-		}()
-
-		log.Info("Building block...")
-		t := time.Now()
-		result, err = build(buildCtx, param, &builder.interrupt)
-		if err != nil {
-			if buildCtx.Err() != nil {
-				log.Debug("Block builder discarded", "err", err)
-			} else {
-				log.Warn("Failed to build a block", "err", err)
-			}
-		} else {
-			block := result.Block
-			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gasUsedPct", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
-		}
-	}()
+	go builder.run(buildCtx, build, param)
 
 	go func() {
 		timer := time.NewTimer(maxBuildTime)
@@ -139,8 +135,8 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		case <-builder.done:
 			return
 		}
-		// Ask for the block it has, which is what the budget was for. A build that has not answered
-		// by the end of the grace is treated as unresponsive and discarded.
+		// Ask for the payload it has, which is what the budget was for. A build that has not
+		// answered by the end of the grace is treated as unresponsive and discarded.
 		log.Warn("Stopping block builder due to max build time exceeded")
 		graceCtx, cancelGrace := context.WithTimeout(ctx, stopGrace)
 		defer cancelGrace()
@@ -159,12 +155,113 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 	return builder
 }
 
-func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
+func (b *BlockBuilder) run(ctx context.Context, build BlockBuilderFunc, param *Parameters) {
+	defer func() {
+		b.state.CompareAndSwap(blockBuilderRunning, blockBuilderCompleted)
+		close(b.done)
+		b.discard()
+	}()
+
+	if !b.rebuild {
+		result, err := buildPayload(context.WithValue(ctx, stoppedKey{}, b.stopped), build, param, &b.interrupt)
+		b.mu.Lock()
+		b.result, b.err = result, err
+		b.state.CompareAndSwap(blockBuilderRunning, blockBuilderCompleted)
+		b.mu.Unlock()
+		return
+	}
+
+	for first := true; ; first = false {
+		roundCtx, interrupt, roundStopped := b.startRound(ctx, first)
+		result, err := buildPayload(roundCtx, build, param, interrupt)
+		if err != nil {
+			return
+		}
+		b.offer(result)
+		if !first {
+			<-roundStopped
+		}
+		select {
+		case <-b.stopped:
+			return
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+}
+
+// startRound prepares one rebuild, which wraps up once rebuildInterval passes or the builder is
+// stopped. The first round wraps up as soon as it has drained the transaction provider.
+func (b *BlockBuilder) startRound(ctx context.Context, first bool) (context.Context, *atomic.Bool, <-chan struct{}) {
+	interrupt := new(atomic.Bool)
+	interrupt.Store(first)
+	stopped := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(rebuildInterval)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-b.stopped:
+		case <-ctx.Done():
+		}
+		interrupt.Store(true)
+		close(stopped)
+	}()
+	return context.WithValue(ctx, stoppedKey{}, stopped), interrupt, stopped
+}
+
+func (b *BlockBuilder) offer(result *types.BlockWithReceipts) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.result == nil || BlockValue(result).Cmp(BlockValue(b.result)) >= 0 {
+		b.result = result
+	}
+}
+
+func buildPayload(ctx context.Context, build BlockBuilderFunc, param *Parameters, interrupt *atomic.Bool) (result *types.BlockWithReceipts, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("block builder panic: %+v, trace: %s", rec, dbg.Stack())
+			log.Warn("Block builder panicked", "err", err)
+			result = nil
+		}
+	}()
+
+	log.Info("Building block...")
+	t := time.Now()
+	result, err = build(ctx, param, interrupt)
+	if err != nil {
+		if ctx.Err() != nil {
+			log.Debug("Block builder discarded", "err", err)
+		} else {
+			log.Warn("Failed to build a block", "err", err)
+		}
+		return nil, err
+	}
+	block := result.Block
+	log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gasUsedPct", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
+	return result, nil
+}
+
+func (b *BlockBuilder) stop() {
 	b.interrupt.Store(true)
-	b.stopOnce.Do(func() {
-		close(b.stopped)
-		time.AfterFunc(parentBlockWaitGrace, func() { close(b.parentBlockWaitStopped) })
-	})
+	b.stopOnce.Do(func() { close(b.stopped) })
+}
+
+// Resolve stops the builder and returns the payload it holds. A builder with a fallback payload
+// answers at once with the most valuable payload sealed so far; one without waits for its build.
+func (b *BlockBuilder) Resolve(ctx context.Context) (*types.BlockWithReceipts, error) {
+	if b.rebuild {
+		b.stop()
+		return b.readResult()
+	}
+	return b.Stop(ctx)
+}
+
+// Stop stops the builder and waits for its build to finish, returning the final payload.
+func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
+	b.stop()
 	if b.Discarded() {
 		return b.readResult()
 	}

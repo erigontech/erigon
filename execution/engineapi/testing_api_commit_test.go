@@ -66,7 +66,7 @@ func newCommitStub(parentHdr *types.Header, assembled *types.BlockWithReceipts, 
 			return execmodule.AssembleBlockResult{PayloadID: 7, Busy: false}, nil
 		},
 		getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-			return execmodule.AssembledBlockResult{Block: assembled, BlockValue: uint256.NewInt(0), Busy: false}, nil
+			return execmodule.AssembledBlockResult{Block: assembled, BlockValue: uint256.NewInt(0)}, nil
 		},
 		insertBlocksFunc: func(_ context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
 			rec.inserted = append(rec.inserted, blocks...)

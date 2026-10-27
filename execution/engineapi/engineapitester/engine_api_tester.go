@@ -424,6 +424,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			return txpoolwait.WaitForParent(ctx, ethBackend.ChainDB(), blockReader, pool, parentHash)
 		}
 	}
+	if execModule := ethBackend.ExecutionModule(); execModule != nil {
+		mockCl.completePayload = execModule.CompletePayload
+	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
 		_, err = mockCl.BuildCanonicalBlock(ctx)
