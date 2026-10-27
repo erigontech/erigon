@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
@@ -564,13 +565,20 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		kveiPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
-		var credit int64 // the inputs' in-memory indexes are released once the merged file replaces them
-		for _, item := range domainFiles {
-			if item.bindex.InMem() {
-				credit += item.bindex.Size()
+		if budget := dt.d.btBudget; budget != nil {
+			// The merged index replaces the inputs; their bytes leave the budget when they close.
+			inputs := make([]*btindex.BtIndex, 0, len(domainFiles))
+			for _, item := range domainFiles {
+				inputs = append(inputs, item.bindex)
 			}
+			budget.setRetiring(inputs, true)
+			defer func() {
+				if err != nil {
+					budget.setRetiring(inputs, false)
+				}
+			}()
 		}
-		valuesIn.bindex, err = dt.d.buildBtIndex(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, credit)
+		valuesIn.bindex, err = dt.d.buildBtIndex(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}

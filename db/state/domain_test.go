@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -4020,19 +4021,44 @@ func collateAndMergeDomain(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	}))
 }
 
+func residentBudgetBytes(b *btInMemBudget) (resident, retiring int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.resident, b.retiring
+}
+
 func TestBtInMemBudget(t *testing.T) {
 	require.Zero(t, newBtInMemBudget(20<<30-1).limit)
 	require.EqualValues(t, int64(32<<30)/btInMemMaxShare, newBtInMemBudget(32<<30).limit)
+	require.False(t, (&btInMemBudget{}).reserve(1), "a zero limit admits nothing")
 
 	b := &btInMemBudget{limit: 100}
-	require.False(t, (&btInMemBudget{}).reserve(1, 0), "a zero limit admits nothing")
-	require.True(t, b.reserve(60, 0))
-	require.False(t, b.reserve(50, 0), "60+50 exceeds the limit")
-	require.True(t, b.reserve(50, 30), "a merge replacing 30 in-memory bytes fits")
-	require.EqualValues(t, 110, b.resident.Load(), "the inputs stay counted until they close")
-	b.release(30)
-	b.release(60)
-	require.EqualValues(t, 20, b.resident.Load())
+	a, c := &btindex.BtIndex{}, &btindex.BtIndex{}
+	require.True(t, b.reserve(50))
+	b.admit(a, 50)
+	require.True(t, b.reserve(50))
+	b.admit(c, 50)
+	require.False(t, b.reserve(45), "the limit is reached")
+
+	b.setRetiring([]*btindex.BtIndex{a, c}, true)
+	require.True(t, b.reserve(45), "indexes a merge replaces do not count")
+	require.True(t, b.reserve(45), "nor for the next domain's merge")
+	resident, retiring := residentBudgetBytes(b)
+	require.EqualValues(t, 190, resident)
+	require.EqualValues(t, 100, retiring)
+
+	a.Close()
+	resident, retiring = residentBudgetBytes(b)
+	require.EqualValues(t, 140, resident, "closing a replaced index frees its bytes")
+	require.EqualValues(t, 50, retiring)
+
+	b.setRetiring([]*btindex.BtIndex{c}, false)
+	_, retiring = residentBudgetBytes(b)
+	require.Zero(t, retiring, "a failed merge gives its inputs back")
+	b.release(nil, 90)
+	c.Close()
+	resident, _ = residentBudgetBytes(b)
+	require.Zero(t, resident)
 }
 
 func TestDomain_BtIndexInMem(t *testing.T) {
@@ -4049,23 +4075,59 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 	collateAndMergeDomain(t, db, d, txs)
 	inMem, total, _ := visibleBtIndexes(t, d)
 	require.Equal(t, total, inMem)
-	require.Equal(t, residentBtIndexBytes(d), d.btBudget.resident.Load(), "merged-away indexes must release their bytes")
+	resident, _ := residentBudgetBytes(d.btBudget)
+	require.Equal(t, residentBtIndexBytes(d), resident, "the budget counts exactly the open in-memory indexes")
 	checkHistory(t, db, d, txs)
 
 	d.Close()
-	require.Zero(t, d.btBudget.resident.Load())
+	resident, retiring := residentBudgetBytes(d.btBudget)
+	require.Zero(t, resident)
+	require.Zero(t, retiring)
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
 	_, err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	inMem, total, _ = visibleBtIndexes(t, d)
 	require.Equal(t, total, inMem)
-	require.Equal(t, residentBtIndexBytes(d), d.btBudget.resident.Load())
+	resident, _ = residentBudgetBytes(d.btBudget)
+	require.Equal(t, residentBtIndexBytes(d), resident)
 	checkHistory(t, db, d, txs)
 }
 
-// A merge is budgeted against the in-memory indexes it replaces, which are still open while the merged index opens:
-// with the limit at exactly the resident bytes, the merged index still fits in memory.
+// buildBtIndexSteps builds and integrates the step files of d without merging them.
+func buildBtIndexSteps(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+	t.Helper()
+	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
+			require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+		}
+		return nil
+	}))
+}
+
+// mergeBtIndexOnce runs the first merge of d and integrates its result without closing the inputs, as an
+// aggregator merge does until every domain is merged.
+func mergeBtIndexOnce(t *testing.T, d *Domain) (merged *FilesItem, inputsSize int64) {
+	t.Helper()
+	dc := d.beginForTests()
+	defer dc.Close()
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
+	r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan, maxSpan)
+	require.True(t, r.any())
+	valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
+	for _, item := range valuesOuts {
+		require.True(t, item.bindex.InMem())
+		inputsSize += item.bindex.Size()
+	}
+	valuesIn, indexIn, historyIn, err := dc.mergeFiles(t.Context(), valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
+	require.NoError(t, err)
+	d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+	return valuesIn, inputsSize
+}
+
+// The in-memory indexes a merge replaces stay open while the merged index opens, also across the domains of one
+// aggregator merge. With the limit at the minimum that counts every merge's inputs as replaced, both merged indexes
+// fit in memory; crediting each merge only with its own inputs would leave the second one memory-mapped.
 func TestDomain_BtIndexInMemMergeReusesInputsBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -4073,31 +4135,36 @@ func TestDomain_BtIndexInMemMergeReusesInputsBudget(t *testing.T) {
 
 	t.Parallel()
 
-	db, d, txs := filledDomain(t, log.New())
-	d.btForceInMem, d.btForceMmap = nil, nil
-	d.btBudget = &btInMemBudget{limit: 1 << 40}
-	ctx := t.Context()
-	require.NoError(t, db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
-			require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	buildPair := func(budget *btInMemBudget) []*Domain {
+		var domains []*Domain
+		for range 2 {
+			db, d, txs := filledDomain(t, log.New())
+			d.btForceInMem, d.btForceMmap, d.btBudget = nil, nil, budget
+			buildBtIndexSteps(t, db, d, txs)
+			domains = append(domains, d)
 		}
-		return nil
-	}))
-	d.btBudget.limit = d.btBudget.resident.Load()
-
-	dc := d.beginForTests()
-	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
-	r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan, maxSpan)
-	require.True(t, r.any())
-	valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
-	for _, item := range valuesOuts {
-		require.True(t, item.bindex.InMem())
+		return domains
 	}
-	valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
-	dc.Close()
-	require.NoError(t, err)
-	d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-	require.True(t, valuesIn.bindex.InMem(), "the merged index fits in the bytes of the indexes it replaces")
+
+	// Dry run on the same data: resident bytes after the builds, and the input and merged sizes of each merge.
+	probe := &btInMemBudget{limit: 1 << 40}
+	domains := buildPair(probe)
+	builtSize, _ := residentBudgetBytes(probe)
+	var inputs, merged [2]int64
+	for i, d := range domains {
+		m, in := mergeBtIndexOnce(t, d)
+		inputs[i], merged[i] = in, m.bindex.Size()
+	}
+
+	budget := &btInMemBudget{limit: 1 << 40}
+	domains = buildPair(budget)
+	resident, _ := residentBudgetBytes(budget)
+	require.Equal(t, builtSize, resident, "same data, same files")
+	budget.limit = max(builtSize-inputs[0]+merged[0], builtSize-inputs[0]-inputs[1]+merged[0]+merged[1])
+	for i, d := range domains {
+		m, _ := mergeBtIndexOnce(t, d)
+		require.Truef(t, m.bindex.InMem(), "domain %d: the merged index fits once the replaced indexes are not counted", i)
+	}
 }
 
 func TestDomain_BtIndexOverrides(t *testing.T) {
