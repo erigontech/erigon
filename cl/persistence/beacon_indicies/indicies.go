@@ -18,6 +18,7 @@ package beacon_indicies
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -212,6 +213,15 @@ func WriteExecutionPayloadEnvelopeSignature(tx kv.RwTx, slot uint64, blockRoot c
 	return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, blockRoot), signature[:])
 }
 
+func WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx kv.RwTx, slot uint64, blockRoot common.Hash, signature common.Bytes96) error {
+	if found, err := tx.Has(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, blockRoot)); err != nil || found {
+		return err
+	}
+	return WriteExecutionPayloadEnvelopeSignature(tx, slot, blockRoot, signature)
+}
+
+var ErrInvalidExecutionPayloadEnvelopeSignatureLength = errors.New("invalid execution payload envelope signature length")
+
 func ReadExecutionPayloadEnvelopeSignature(tx kv.Tx, slot uint64, blockRoot common.Hash) (common.Bytes96, bool, error) {
 	key := dbutils.BlockBodyKey(slot, blockRoot)
 	value, err := tx.GetOne(kv.ExecutionPayloadEnvelopeSignatures, key)
@@ -228,7 +238,7 @@ func ReadExecutionPayloadEnvelopeSignature(tx kv.Tx, slot uint64, blockRoot comm
 		}
 	}
 	if len(value) != len(common.Bytes96{}) {
-		return common.Bytes96{}, false, fmt.Errorf("invalid execution payload envelope signature length: %d", len(value))
+		return common.Bytes96{}, false, fmt.Errorf("%w: %d", ErrInvalidExecutionPayloadEnvelopeSignatureLength, len(value))
 	}
 	var signature common.Bytes96
 	copy(signature[:], value)

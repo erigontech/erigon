@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
@@ -137,11 +136,7 @@ func writeDownloadedBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock, envelope
 			return err
 		}
 	}
-	found, err := tx.Has(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
-	if err != nil || found {
-		return err
-	}
-	return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, common.Hash(blockRoot), envelope.Signature)
+	return beacon_indicies.WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx, block.Block.Slot, common.Hash(blockRoot), envelope.Signature)
 }
 
 // clampProgress derives (processed, total) for a backwards download, guarding the

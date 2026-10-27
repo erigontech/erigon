@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
@@ -2498,52 +2499,76 @@ func TestEnsureExecutionPayloadEnvelopeIndicesRepairsMissingSignature(t *testing
 	}
 }
 
-func TestOnExecutionPayloadRedeliveryRepairsMissingSignature(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	blockRoot := common.HexToHash("0x1234")
-	persisted := validIngressEnvelope(cfg, blockRoot)
-	persisted.Message.Payload.SlotNumber = 64
-	persisted.Message.Payload.BlockNumber = 42
-	persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
-	persisted.Signature = common.Bytes96{1, 2, 3}
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, persisted.Message)
-	}))
-	f := &ForkChoiceStore{
-		forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted},
-		beaconCfg: cfg,
-		db:        db,
-	}
+func TestOnExecutionPayloadRedeliveryRepairsMissingOrMalformedSignature(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		stored []byte
+	}{
+		{name: "missing"},
+		{name: "empty", stored: []byte{}},
+		{name: "short", stored: make([]byte, 95)},
+		{name: "long", stored: make([]byte, 97)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &clparams.MainnetBeaconConfig
+			blockRoot := common.HexToHash("0x1234")
+			persisted := validIngressEnvelope(cfg, blockRoot)
+			persisted.Message.Payload.SlotNumber = 64
+			persisted.Message.Payload.BlockNumber = 42
+			persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+			persisted.Signature = common.Bytes96{1, 2, 3}
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, persisted.Message); err != nil {
+					return err
+				}
+				if test.stored != nil {
+					return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(64, blockRoot), test.stored)
+				}
+				return nil
+			}))
+			f := &ForkChoiceStore{
+				forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted},
+				beaconCfg: cfg,
+				db:        db,
+			}
 
-	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), persisted, false, true), ErrIgnore)
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, persisted.Signature, signature)
-		return nil
-	}))
+			require.ErrorIs(t, f.OnExecutionPayload(t.Context(), persisted, false, true), ErrIgnore)
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, persisted.Signature, signature)
+				return nil
+			}))
+			require.Empty(t, f.envelopeIndexRepairs.repairs())
+		})
+	}
 }
 
 func TestPendingEnvelopeRepairsMalformedIndices(t *testing.T) {
+	validBlockNumber := []byte{0, 0, 0, 42}
+	validBlockHash := common.HexToHash("0xabcd")
 	for _, test := range []struct {
 		name        string
 		blockNumber []byte
 		blockHash   []byte
 	}{
-		{name: "short block number", blockNumber: []byte{1}, blockHash: make([]byte, 32)},
-		{name: "oversized block number", blockNumber: make([]byte, 5), blockHash: make([]byte, 32)},
-		{name: "short block hash", blockNumber: make([]byte, 4), blockHash: []byte{1}},
-		{name: "oversized block hash", blockNumber: make([]byte, 4), blockHash: make([]byte, 33)},
-		{name: "well-sized wrong values", blockNumber: []byte{0, 0, 0, 7}, blockHash: bytes.Repeat([]byte{7}, 32)},
+		{name: "short block number", blockNumber: []byte{1}, blockHash: validBlockHash[:]},
+		{name: "oversized block number", blockNumber: make([]byte, 5), blockHash: validBlockHash[:]},
+		{name: "short block hash", blockNumber: validBlockNumber, blockHash: []byte{1}},
+		{name: "oversized block hash", blockNumber: validBlockNumber, blockHash: make([]byte, 33)},
+		{name: "well-sized wrong block number", blockNumber: []byte{0, 0, 0, 7}, blockHash: validBlockHash[:]},
+		{name: "well-sized wrong block hash", blockNumber: validBlockNumber, blockHash: bytes.Repeat([]byte{7}, 32)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			blockRoot := common.HexToHash("0x1234")
 			persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 			persisted.Message.BeaconBlockRoot = blockRoot
+			persisted.Message.Payload.SlotNumber = 64
 			persisted.Message.Payload.BlockNumber = 42
 			persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+			persisted.Signature = common.Bytes96{1, 2, 3}
 			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 			require.NoError(t, err)
 			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
@@ -2554,7 +2579,10 @@ func TestPendingEnvelopeRepairsMalformedIndices(t *testing.T) {
 				if err := tx.Put(kv.BlockRootToBlockNumber, blockRoot[:], test.blockNumber); err != nil {
 					return err
 				}
-				return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], test.blockHash)
+				if err := tx.Put(kv.BlockRootToBlockHash, blockRoot[:], test.blockHash); err != nil {
+					return err
+				}
+				return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, 64, blockRoot, persisted.Signature)
 			}))
 			graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 			f := &ForkChoiceStore{
