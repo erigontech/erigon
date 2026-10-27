@@ -1305,7 +1305,7 @@ func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T)
 	}
 	serviceCtx, cancelService := context.WithCancel(t.Context())
 	cancelService()
-	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, handler.beaconChainCfg, beaconevents.NewEventEmitter())
+	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, handler.beaconChainCfg, beaconevents.NewEventEmitter(), nil)
 
 	err := p2pService.ProcessMessage(t.Context(), nil, envelope)
 	require.NoError(t, err)
@@ -2247,11 +2247,12 @@ func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 	fcu.StateAtBlockRootVal[root] = headState
 	var stateCopies atomic.Int32
-	fcu.GetStateAtBlockRootFn = func(_ common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-		if alwaysCopy {
-			stateCopies.Add(1)
-		}
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		stateCopies.Add(1)
 		return headState, nil
+	}
+	fcu.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		return fn(headState)
 	}
 
 	handler.emitFullHeadV2(block, root)

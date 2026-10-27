@@ -1373,7 +1373,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		pe.blockExecMetrics.BlockCount.Add(1)
 		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe)
 	}
@@ -1730,7 +1729,6 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 		// Already running (or scheduled).
 		return
 	}
-	pe.blockExecMetrics.BlockCount.Add(1)
 	next.execStarted = time.Now()
 	next.scheduleExecution(ctx, pe)
 }
@@ -2276,13 +2274,16 @@ func (e *feeEntry) shapeRecordedIn(ws *state.WriteSet, version state.Version, ad
 }
 
 // feeWritePaths are the account paths a fee credit can occupy — see writeTo.
-var feeWritePaths = [...]state.AccountPath{state.AddressPath, state.BalancePath, state.SelfDestructPath}
+var feeWritePaths = [...]state.AccountPath{state.AddressPath, state.BalancePath, state.SelfDestructPath, state.IncarnationPath}
 
 // hasFeeWrite reports whether ws carries a fee write for addr. The version tells
 // one apart from the worker's own write to the same address: the task version
 // carries a TxNum, a worker's own writes do not.
 func hasFeeWrite(ws *state.WriteSet, version state.Version, addr accounts.Address) bool {
 	if sd, ok := ws.GetSelfDestruct(addr); ok && sd.Version == version {
+		return true
+	}
+	if iw, ok := ws.GetIncarnation(addr); ok && iw.Version == version {
 		return true
 	}
 	if bw, ok := ws.GetBalance(addr); ok && bw.Version == version {
@@ -2320,6 +2321,11 @@ func (e *feeEntry) writeTo(ws *state.WriteSet, version state.Version) {
 		ws.SetSelfDestruct(e.addr, &state.VersionedWrite[bool]{
 			WriteHeader: state.WriteHeader{Address: e.addr, Path: state.SelfDestructPath, Version: version},
 			Val:         true,
+		})
+		// Like the worker's EIP-161 removal: the incarnation write also
+		// invalidates a later tx that read only the account's existence.
+		ws.SetIncarnation(e.addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: e.addr, Path: state.IncarnationPath, Version: version},
 		})
 		return
 	}
@@ -2811,6 +2817,10 @@ func overwriteFeeWrites(dst, tip *state.WriteSet) {
 	}
 	for a, vw := range tip.SelfDestructs() {
 		dst.SetSelfDestruct(a, vw)
+		copied++
+	}
+	for a, vw := range tip.Incarnations() {
+		dst.SetIncarnation(a, vw)
 		copied++
 	}
 	if dbg.AssertEnabled && copied != tip.Count() {

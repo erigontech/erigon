@@ -169,7 +169,7 @@ func TestProcessSlotsCachesPtcWindowAtBoundaryRoot(t *testing.T) {
 	require.Equal(t, root, common.Hash(headerRoot))
 	lookaheadRoot := first.StateRoots().Get(int(boundarySlot % cfg.SlotsPerHistoricalRoot))
 	require.NotEqual(t, common.Hash{}, lookaheadRoot)
-	activeCache, _, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(targetEpoch, lookaheadRoot)
+	activeCache, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(targetEpoch, lookaheadRoot)
 	require.True(t, ok)
 	shuffleCache, ok := caches.LookaheadShuffledIndiciesCacheGlobal.Get(targetEpoch, lookaheadRoot)
 	require.True(t, ok)

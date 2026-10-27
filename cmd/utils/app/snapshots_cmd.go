@@ -565,7 +565,7 @@ var snapshotCommand = cli.Command{
 			Name: "publishable",
 			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				if err := doPublishable(dirs, nil); err != nil {
+				if err := doPublishable(ctx, dirs, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -1680,7 +1680,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.StateProgress:
 			return integrity.CheckStateProgress(ctx, db, blockReader)
 		case integrity.Publishable:
-			return doPublishable(dirs, chainDB)
+			return doPublishable(ctx, dirs, chainDB)
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
@@ -2076,8 +2076,8 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	return integrityErr
 }
 
-func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
-	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool, beaconConfig *clparams.BeaconChainConfig) error {
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, beaconConfig)
 	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	//to := int64(-1)
@@ -2099,6 +2099,9 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 
 	to := int64(-1)
 	for table := range stateSnapTypes.KeyValueGetters {
+		if table == kv.PtcWindowEpochTable {
+			continue
+		}
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
 			checkLastFileTo: to,
 			emptyOk:         emptyOk,
@@ -2106,9 +2109,22 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if err != nil {
 			return err
 		}
-		if !empty {
-			to = int64(uto)
+		if empty {
+			continue
 		}
+		to = int64(uto)
+	}
+
+	ptcWindowEpochRequired := to >= 0 && uint64(to) > stateSnapTypes.GloasForkSlot
+	ptcWindowEpochTo := int64(-1)
+	if ptcWindowEpochRequired {
+		ptcWindowEpochTo = to
+	}
+	if _, _, err := CheckFilesForSchema(caplinSchema.GetState(kv.PtcWindowEpochTable), CheckFilesParams{
+		checkLastFileTo: ptcWindowEpochTo,
+		emptyOk:         !ptcWindowEpochRequired,
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -2241,12 +2257,6 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 }
 
 func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
-	// Read feature flags from DB
-	if chainDB == nil {
-		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-		defer chainDB.Close()
-	}
-
 	var persistReceiptCache, commitmentHistory bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
 		var err error
@@ -2600,7 +2610,12 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	return nil
 }
 
-func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
+func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error {
+	if chainDB == nil {
+		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
+		defer chainDB.Close()
+	}
+
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
@@ -2609,8 +2624,43 @@ func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
 	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
 		return err
 	}
-	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
+	var chainName string
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		if chainConfig != nil {
+			chainName = chainConfig.ChainName
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to read chain config: %w", err)
+	}
+
+	var beaconConfig *clparams.BeaconChainConfig
+	if chainName == "" {
+		log.Warn("[publishable] PtcWindowEpoch content check skipped", "reason", "chain config is missing")
+	} else {
+		_, resolvedBeaconConfig, _, err := clparams.GetConfigsByNetworkName(chainName)
+		if err != nil {
+			log.Warn("[publishable] PtcWindowEpoch content check skipped", "chain", chainName, "err", err)
+		} else {
+			beaconConfig = resolvedBeaconConfig
+		}
+	}
+
+	if err := checkIfCaplinSnapshotsPublishable(dat, true, beaconConfig); err != nil {
 		return err
+	}
+	if beaconConfig != nil {
+		if err := integrity.CheckPtcWindowEpoch(ctx, dat, beaconConfig); err != nil {
+			return err
+		}
 	}
 	// check if salt-state.txt and salt-blocks.txt exist
 	exists, err := dir2.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
@@ -3107,7 +3157,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		}
 		res.CaplinIndexDB = indexDB
 
-		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
+		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, dirs, snTypes, logger)
 		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {

@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
 	"math"
@@ -24,10 +25,18 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -103,8 +112,9 @@ func TestFrozenBlobSegmentsReadsDiskAndPreverifiedLock(t *testing.T) {
 		snaptype.BlobSidecars.FileName(version.V1_0, 30_000, 40_000), snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000))
 	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte(lock), 0o444))
 
-	onDisk, pinned, err := frozenBlobSegments(dirs)
+	onDisk, pinned, lockFound, err := frozenBlobSegments(dirs)
 	require.NoError(t, err)
+	require.True(t, lockFound)
 
 	type seg struct {
 		from, to uint64
@@ -124,8 +134,9 @@ func TestFrozenBlobSegmentsWithoutPreverifiedLock(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	writeSegment(t, dirs, snaptype.BlobSidecars.FileName(version.V1_1, 20_000, 30_000))
 
-	onDisk, pinned, err := frozenBlobSegments(dirs)
+	onDisk, pinned, lockFound, err := frozenBlobSegments(dirs)
 	require.NoError(t, err)
+	require.False(t, lockFound, "a missing %s must be reported", datadir.PreverifiedFileName)
 	require.Len(t, onDisk, 1)
 	require.Empty(t, pinned)
 }
@@ -134,28 +145,67 @@ func TestFrozenBlobSegmentsRejectsAMalformedPreverifiedLock(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("not toml ="), 0o444))
 
-	_, _, err := frozenBlobSegments(dirs)
+	_, _, _, err := frozenBlobSegments(dirs)
 	require.ErrorContains(t, err, datadir.PreverifiedFileName)
 }
 
-func TestRemoveBlobIndexAndTorrents(t *testing.T) {
-	dirs := datadir.New(filepath.Join(t.TempDir(), "dd[1]"))
-	idx := func(v version.Version, from, to uint64) string {
-		return snaptype.IdxFileName(v, from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+func TestOpenFrozenBeaconBlocksIgnoresDamagedBlobSegments(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	blocks, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 20_000, 30_000))
+	require.True(t, ok)
+	c, err := seg.NewCompressor(t.Context(), "test beaconblocks", blocks.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	for range snaptype.CaplinMergeLimit {
+		require.NoError(t, c.AddWord(nil))
 	}
-	seg := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
-	removed := []string{seg + ".torrent", idx(version.V1_1, 30_000, 40_000), idx(version.V1_1, 30_000, 40_000) + ".torrent", idx(version.V1_0, 30_000, 40_000)}
-	kept := []string{
-		seg,
-		snaptype.BlobSidecars.FileName(version.V1_1, 40_000, 50_000) + ".torrent",
-		idx(version.V1_1, 40_000, 50_000),
-		snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000) + ".torrent",
+	require.NoError(t, c.Compress())
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), blocks, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
+	blobSeg := snaptype.BlobSidecars.FileName(version.ZeroVersion, 20_000, 30_000)
+	blobIdx := snaptype.IdxFileName(version.V1_1, 20_000, 30_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	for _, name := range []string{blobSeg, blobIdx} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), bytes.Repeat([]byte{0xff}, 31), 0o644))
 	}
-	for _, name := range append(removed, kept...) {
+
+	csn, frozenBlocks, err := openFrozenBeaconBlocks(&clparams.MainnetBeaconConfig, dirs, "mainnet")
+	require.NoError(t, err)
+	defer csn.Close()
+	require.Equal(t, uint64(30_000), frozenBlocks)
+	require.Zero(t, csn.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum()))
+}
+
+func TestDumpBlobSegmentKeepsOldFilesWhenTheDumpFails(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	segName := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	idxName := snaptype.IdxFileName(version.V1_1, 30_000, 40_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	old := []string{segName, idxName, segName + ".torrent", idxName + ".torrent"}
+	for _, name := range old {
 		writeSegment(t, dirs, name)
 	}
 
-	require.NoError(t, removeBlobIndexAndTorrents(dirs.Snap, 30_000, 40_000))
+	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(uint64) (uint64, error) { return 1, nil })
+	require.ErrorContains(t, err, "count mismatch")
+
+	for _, name := range old {
+		require.FileExists(t, filepath.Join(dirs.Snap, name))
+	}
+}
+
+func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	segName := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	idx := func(v version.Version) string {
+		return snaptype.IdxFileName(v, 30_000, 40_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	}
+	for _, name := range []string{segName, idx(version.V1_1), segName + ".torrent", idx(version.V1_1) + ".torrent", idx(version.V1_0)} {
+		writeSegment(t, dirs, name)
+	}
+
+	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(uint64) (uint64, error) { return 0, nil }))
 
 	entries, err := os.ReadDir(dirs.Snap)
 	require.NoError(t, err)
@@ -165,5 +215,13 @@ func TestRemoveBlobIndexAndTorrents(t *testing.T) {
 			left = append(left, e.Name())
 		}
 	}
-	require.ElementsMatch(t, kept, left)
+	require.ElementsMatch(t, []string{segName, idx(version.V1_1)}, left)
+
+	d, err := seg.NewDecompressor(filepath.Join(dirs.Snap, segName))
+	require.NoError(t, err)
+	defer d.Close()
+	require.Equal(t, int(snaptype.CaplinMergeLimit), d.Count())
+	st, err := os.Stat(filepath.Join(dirs.Snap, idx(version.V1_1)))
+	require.NoError(t, err)
+	require.Greater(t, st.Size(), int64(1))
 }

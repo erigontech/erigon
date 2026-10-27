@@ -18,6 +18,7 @@ package engineapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -153,6 +154,103 @@ func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, engine_types.SyncingStatus, status.Status)
+		})
+	}
+}
+
+func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
+	t.Parallel()
+
+	const gasLimit = 4 * 16_800 // the per-transaction minimum after London
+	for _, test := range []struct {
+		name          string
+		txCount       int
+		txGasLimit    uint64
+		cfg           *chain.Config
+		allowAA       bool
+		noWithdrawals bool
+		nilBlobHashes bool
+		prague        bool
+		amsterdam     bool
+		wantStatus    engine_types.EngineStatus
+		wantErr       string
+		wantErrCode   int
+	}{
+		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached"},
+		{name: "5 txs with AllowAA", txCount: 5, cfg: preCancunChainConfig(), allowAA: true, wantStatus: engine_types.SyncingStatus},
+		{name: "4 txs on Prague", txCount: 4, cfg: preOsakaChainConfig(), prague: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 21000 gas each"},
+		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
+		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
+		{name: "5 txs with null blob hashes", txCount: 5, cfg: prePragueChainConfig(), nilBlobHashes: true, wantErrCode: -32602},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			test.cfg.AllowAA = test.allowAA
+			to := common.Address{0x1}
+			txs := make(types.Transactions, test.txCount)
+			for i := range txs {
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
+			}
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			if test.nilBlobHashes || test.prague || test.amsterdam {
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
+			if test.prague || test.amsterdam {
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+			}
+			if test.amsterdam {
+				balHash := empty.BlockAccessListHash
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+			if test.noWithdrawals {
+				payload.Withdrawals = nil
+			}
+
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, test.cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), test.cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			var status *engine_types.PayloadStatus
+			switch {
+			case test.amsterdam:
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.prague:
+				status, err = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.nilBlobHashes:
+				status, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
+			default:
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			if test.wantErrCode != 0 {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, test.wantErrCode, rpcErr.ErrorCode())
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.wantStatus, status.Status)
+			if test.wantErr != "" {
+				require.EqualError(t, status.ValidationError.Error(), test.wantErr)
+			}
 		})
 	}
 }
@@ -781,4 +879,52 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.NotNil(bodies[1].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes1), *bodies[0].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes2), *bodies[1].BlockAccessList)
+}
+
+// TestQuickStatusHeaderLookup pins how the known-block check looks up its block. A new payload
+// passes its number: a hash-only lookup of a block that is not stored yet searches every header
+// snapshot file before it misses. A forkchoice update does not know its head's number (it passes
+// 0), so it must look the head up by hash only.
+func TestQuickStatusHeaderLookup(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parentHash := parent.Hash()
+	blockHash := common.Hash{0x42}
+	payloadNumber := parent.Number.Uint64() + 1
+
+	for _, test := range []struct {
+		name       string
+		newPayload bool
+		number     uint64
+		forkchoice *engine_types.ForkChoiceState
+		wantNumber *uint64
+	}{
+		{name: "newPayload", newPayload: true, number: payloadNumber, wantNumber: &payloadNumber},
+		{name: "forkchoiceUpdated", forkchoice: &engine_types.ForkChoiceState{HeadHash: blockHash}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var lookups int
+			stub := &stubExecutionModule{
+				getHeaderFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
+					if hash != nil && *hash == blockHash {
+						lookups++
+						require.Equal(t, test.wantNumber, number)
+						return nil, nil
+					}
+					return getHeaderReturning(parentHash, parent)(context.Background(), hash, number)
+				},
+			}
+
+			cfg := preCancunChainConfig()
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
+
+			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, test.forkchoice, test.newPayload, defaultReadinessWait)
+			require.NoError(t, err)
+			require.Equal(t, 1, lookups)
+		})
+	}
 }

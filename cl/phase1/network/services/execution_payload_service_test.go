@@ -27,22 +27,25 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossipmock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/common"
 )
 
 func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_services.ForkChoiceStorageMock) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter(), nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	return service, forkchoiceMock
 }
@@ -255,7 +258,7 @@ func TestExecutionPayloadServiceDoesNotReportQueuedWhenPendingQueueFull(t *testi
 func TestExecutionPayloadServicePreservesIngressTimeWhileWaitingForBlock(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter(), nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	impl := service.(*executionPayloadService)
 	early := time.Unix(1_700_000_000, 250_000_000)
@@ -329,7 +332,7 @@ func TestExecutionPayloadServiceEmitsGossipEvent(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
@@ -339,7 +342,7 @@ func TestExecutionPayloadServiceEmitsGossipEvent(t *testing.T) {
 	stateRoot := common.Hash{2}
 	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7, stateRoot)
 	var stateCopies atomic.Int32
-	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		stateCopies.Add(1)
 		return nil, errors.New("unexpected state copy")
 	}
@@ -356,7 +359,7 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
@@ -381,7 +384,7 @@ func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	stateEvents := make(chan *beaconevents.EventStream, 1)
 	stateSubscription := emitter.State().Subscribe(stateEvents)
@@ -415,7 +418,7 @@ func TestExecutionPayloadServiceDoesNotEmitFullHeadV2AfterStatusChanges(t *testi
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	stateEvents := make(chan *beaconevents.EventStream, 1)
 	stateSubscription := emitter.State().Subscribe(stateEvents)
@@ -449,7 +452,7 @@ func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
@@ -471,7 +474,7 @@ func TestExecutionPayloadServiceProgressesWhileEventFeedIsBlocked(t *testing.T) 
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	slow := make(chan *beaconevents.EventStream)
 	slowSubscription := emitter.Operation().Subscribe(slow)
@@ -1095,7 +1098,7 @@ func TestExecutionPayloadServiceAcceptsValidatedEnvelopeWithIndicesPending(t *te
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
@@ -1130,7 +1133,7 @@ func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
@@ -1163,7 +1166,7 @@ func TestExecutionPayloadServiceIgnoresIndicesPendingWhenRevalidationCrossesFina
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
@@ -1205,7 +1208,7 @@ func TestExecutionPayloadServiceAcceptsPersistenceFailureWithoutMarkingSeen(t *t
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
-	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), fcu, cfg, emitter, nil)
 	service.(*executionPayloadService).pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 2)
 	subscription := emitter.Operation().Subscribe(events)
@@ -1482,6 +1485,45 @@ func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesAfterAdmission(
 	require.Empty(t, calls)
 	require.Zero(t, service.(*executionPayloadService).pending.count.Load())
 	require.Zero(t, service.(*executionPayloadService).pendingBytes.Load())
+}
+
+// The envelope was ignored on gossip while its block was unknown, so it was not
+// forwarded; once it validates from the pending queue it must be published.
+func TestExecutionPayloadServiceRepublishesPendingEnvelopeAfterBlockArrives(t *testing.T) {
+	gossipMock := gossipmock.NewMockGossip(gomock.NewController(t))
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, &clparams.MainnetBeaconConfig, beaconevents.NewEventEmitter(), gossipMock)
+	impl := service.(*executionPayloadService)
+	impl.pending.stopAndWait()
+	blockRoot := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	gossipMock.EXPECT().PublishBackground(gossip.TopicNameExecutionPayload, encoded, gomock.Any()).Return(nil).Times(1)
+	impl.pending.processPending(t.Context())
+
+	require.Zero(t, impl.pending.count.Load())
+}
+
+func TestExecutionPayloadServiceDoesNotRepublishInvalidPendingEnvelope(t *testing.T) {
+	gossipMock := gossipmock.NewMockGossip(gomock.NewController(t))
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, &clparams.MainnetBeaconConfig, beaconevents.NewEventEmitter(), gossipMock)
+	impl := service.(*executionPayloadService)
+	impl.pending.stopAndWait()
+	blockRoot := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrInvalidExecutionPayloadEnvelope
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	impl.pending.processPending(t.Context())
+
+	require.True(t, forkchoiceMock.OnExecutionPayloadCalled)
+	require.Zero(t, impl.pending.count.Load())
 }
 
 func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesBeforeAdmission(t *testing.T) {
