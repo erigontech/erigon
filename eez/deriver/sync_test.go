@@ -82,7 +82,7 @@ func loadWindow468(t *testing.T) *window468 {
 	return r
 }
 
-var ctx468 = protocol.SyncTxContext{ChainID: 6290, RollupID: 1}
+var ctx468 = protocol.SyncTxContext{ChainID: 6290, RollupID: 1, EEZL2: protocol.EEZL2Address}
 
 // TestSyncBlockWindow468 rebuilds the only recorded Sync block with system
 // transactions byte for byte: two outbound pairs and a delivery.

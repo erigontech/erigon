@@ -64,7 +64,7 @@ func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Derive
 		chain:  chain,
 		config: cfg,
 		l2:     l2,
-		sync:   protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID},
+		sync:   protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID, EEZL2: l2.EEZL2()},
 		dir:    dir,
 		logger: logger,
 	}, nil
@@ -410,7 +410,7 @@ func (d *Deriver) checkOutbound(ctx context.Context, b *l1.ScannedBatch, r Range
 	for _, rc := range receipts {
 		logs = append(logs, rc.Logs...)
 	}
-	if err := VerifyOutbound(outbound, logs, d.l2.RollupID); err != nil {
+	if err := VerifyOutbound(outbound, logs, d.l2.RollupID, d.l2.EEZL2()); err != nil {
 		return d.diverged(b, r.To, "%w", err)
 	}
 	return nil

@@ -229,7 +229,7 @@ func (c *Composer) extend(parent *types.Header, span *da.Span, i int, txs [][]by
 }
 
 func (c *Composer) syncTxContext() protocol.SyncTxContext {
-	return protocol.SyncTxContext{ChainID: c.L2.ChainConfig.ChainID.Uint64(), RollupID: c.l2.RollupID}
+	return protocol.SyncTxContext{ChainID: c.L2.ChainConfig.ChainID.Uint64(), RollupID: c.l2.RollupID, EEZL2: c.l2.EEZL2()}
 }
 
 // AppliedAll is the settlement of every entry of b.
