@@ -49,6 +49,12 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 	if l.roTx == nil {
 		return nil, false, nil
 	}
+	// At or past the tx's visible end no history record can follow ts, so the
+	// value as of ts is the latest one; skip the history index seek.
+	if end, ok := l.roTx.Debug().DomainVisibleEnd(name); ok && ts >= end {
+		v, _, err := l.roTx.GetLatest(name, k, kv.GetLatestOptions{})
+		return v, v != nil, err
+	}
 	return l.roTx.GetAsOf(name, k, ts)
 }
 
