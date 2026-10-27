@@ -127,7 +127,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	var pendingMu sync.Mutex
 	var lastBlockIndex int
 
-	errCh := make(chan senderRecoveryError)
+	errCh := make(chan senderRecoveryError, 1)
 	go func() {
 		defer dbg.LogPanic()
 		defer close(errCh)
@@ -246,6 +246,17 @@ Loop:
 		blockIndex := int(blockNumber) - int(s.BlockNumber) - 1
 		if blockIndex < 0 {
 			panic(blockIndex) //uint-underflow
+		}
+
+		if senders, ok := cfg.readAheader.RecoveredSenders(ctx, blockHash); ok {
+			pendingMu.Lock()
+			cfg.readAheader.AddSenders(senders, blockHash)
+			err := collectorSenders.Collect(dbutils.BlockBodyKey(blockNumber, blockHash), senders)
+			pendingMu.Unlock()
+			if err != nil {
+				return err
+			}
+			continue
 		}
 
 		// Register pending block
@@ -386,7 +397,11 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 		} else if err = common.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
-		out <- job
+		select {
+		case out <- job:
+		case <-ctx.Done():
+			return
+		}
 
 		if errors.Is(job.err, common.ErrStopped) {
 			return

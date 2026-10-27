@@ -26,7 +26,7 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//			    false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	                 recordFile stores all eth_call returned with success
 //	                 errorFile stores information when erigon and geth doesn't return same data
 func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
@@ -44,7 +44,7 @@ func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom,
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_estimateGas"}, resultsCh)
+		go writePattern(true, []string{"eth_estimateGas"}, resultsCh)
 	}
 	reqGen := &RequestGenerator{}
 

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -53,10 +54,37 @@ func TestGetHeadWithSyncedHeadStateMatchesAuxiliaryStateHead(t *testing.T) {
 		return err
 	}))
 
-	gotRoot, gotSlot, err := gotStore.GetHeadWithSyncedHeadState()
+	gotHead, gotSlot, err := gotStore.GetHeadWithSyncedHeadState()
 	require.NoError(t, err)
-	require.Equal(t, wantRoot, gotRoot)
+	require.Equal(t, wantRoot, gotHead.Root)
 	require.Equal(t, wantSlot, gotSlot)
+}
+
+func TestGetHeadWithSyncedHeadStatePreservesPayloadStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status cltypes.PayloadStatus
+	}{
+		{"FULL", cltypes.PayloadStatusFull},
+		{"EMPTY", cltypes.PayloadStatusEmpty},
+		{"PENDING", cltypes.PayloadStatusPending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := ForkChoiceNode{Root: common.Hash{0x41}, PayloadStatus: tc.status}
+			store := &ForkChoiceStore{
+				headHash:          want.Root,
+				headSlot:          12,
+				headPayloadStatus: want.PayloadStatus,
+				syncedDataManager: synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true),
+			}
+
+			head, slot, err := store.GetHeadWithSyncedHeadState()
+
+			require.NoError(t, err)
+			require.Equal(t, want, head)
+			require.Equal(t, uint64(12), slot)
+		})
+	}
 }
 
 func TestGetHeadWithSyncedHeadStateDoesNotChangeCacheWhenNotSynced(t *testing.T) {
@@ -175,13 +203,17 @@ type pausingCheckpointStateForkGraph struct {
 	release chan struct{}
 }
 
-func (g *pausingCheckpointStateForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (g *pausingCheckpointStateForkGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g *pausingCheckpointStateForkGraph) ReplayState(root common.Hash) (*state.CachingBeaconState, error) {
 	select {
 	case g.entered <- struct{}{}:
 	default:
 	}
 	<-g.release
-	return g.ForkGraph.GetState(root, alwaysCopy)
+	return g.ForkGraph.ReplayState(root)
 }
 
 type failingCheckpointStateForkGraph struct {
@@ -189,7 +221,11 @@ type failingCheckpointStateForkGraph struct {
 	calls atomic.Int32
 }
 
-func (g *failingCheckpointStateForkGraph) GetState(common.Hash, bool) (*state.CachingBeaconState, error) {
+func (g *failingCheckpointStateForkGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g *failingCheckpointStateForkGraph) ReplayState(common.Hash) (*state.CachingBeaconState, error) {
 	g.calls.Add(1)
 	return nil, errors.New("checkpoint state unavailable")
 }
@@ -224,10 +260,10 @@ func TestGetHeadWithSyncedHeadStateIgnoresCheckpointStateLoadFailure(t *testing.
 	)
 	require.NoError(t, err)
 
-	headRoot, headSlot, err := store.GetHeadWithSyncedHeadState()
+	head, headSlot, err := store.GetHeadWithSyncedHeadState()
 
 	require.NoError(t, err)
-	require.Equal(t, anchorRoot, headRoot)
+	require.Equal(t, anchorRoot, head.Root)
 	require.Equal(t, baseGraph.AnchorSlot(), headSlot)
 	require.Equal(t, int32(1), graph.calls.Load())
 }

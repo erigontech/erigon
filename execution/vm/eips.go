@@ -270,7 +270,7 @@ func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 		hash := evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash[:])
+		idx.SetBytes32(hash[:])
 	} else {
 		idx.Clear()
 	}
@@ -295,15 +295,6 @@ func enable5656(jt *JumpTable) {
 		numPush:     0,
 		memorySize:  memoryMcopy,
 	}
-}
-
-// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
-func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// These values are checked for overflow during memory expansion calculation
-	// (the memorySize function on the opcode).
-	dst, src, length := scope.Stack.pop3()
-	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
-	return pc, nil, nil
 }
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)

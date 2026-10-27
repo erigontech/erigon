@@ -230,8 +230,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return fmt.Errorf("genesis is not traceable")
 	}
 
-	// check pruning to ensure we have the block and the history at this block level
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -251,6 +250,9 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	if txnIndex >= block.Transactions().Len() {
 		return fmt.Errorf("transaction %#x not found", hash)
+	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txnIndex)); err != nil {
+		return err
 	}
 	engine := api.engine()
 
@@ -282,7 +284,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 	}
 
-	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, txnIndex)
 	if err != nil {
 		return err
 	}
@@ -325,7 +327,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return fmt.Errorf("get block number: %w", err)
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
+	postState := config == nil || config.TxIndex == nil || isLatest
+	if postState {
+		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
+	} else {
+		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, dbtx, blockNumber, uint64(*config.TxIndex))
+	}
 	if err != nil {
 		return err
 	}
@@ -336,7 +343,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 
 	var stateReader state.StateReader
-	if config == nil || config.TxIndex == nil || isLatest {
+	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
@@ -436,7 +443,12 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
+	if postState {
+		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
+	} else {
+		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(*simulateContext.TransactionIndex))
+	}
 	if err != nil {
 		return err
 	}
@@ -457,7 +469,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	if simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest {
+	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)

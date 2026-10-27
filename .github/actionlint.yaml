@@ -16,6 +16,7 @@ self-hosted-runner:
     - rpc-latest-erigon
     - rpc-latest-geth
     - rpc-latest-nethermind
+    - rpc-latest-reth
     - rpc-performance
     - RpcSpecific
     - tip-tracking

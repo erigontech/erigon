@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -19,6 +20,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -32,6 +35,29 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	tx, err := apis.eth.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	wantErr := errors.New("commitment history unavailable")
+	view := historyFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.CommitmentDomain: wantErr}}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("commitment_history_%t", enabled), func(t *testing.T) {
+			sim := simulator{txNumReader: apis.eth._txNumReader, commitmentHistory: enabled}
+			reader, _, _, err := sim.newStateReaderForBlock(t.Context(), view, nil, chainInfo.old.num, nil, false)
+			if enabled {
+				require.ErrorIs(t, err, wantErr)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, reader)
+			}
+		})
+	}
+}
 
 type simulateV1TestService struct{}
 
@@ -1230,4 +1256,43 @@ func TestSimulateV1GasCapBudgetTakesReceiptGas(t *testing.T) {
 	require.Len(t, txs, 2)
 	assert.Equal(t, api.GasCap, uint64(txs[0].Gas))
 	assert.Equal(t, api.GasCap-uint64(result[0].Calls[0].GasUsed), uint64(txs[1].Gas))
+}
+
+func TestSimulatedBlockUnmarshalOverrideKeys(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		err   string
+	}{
+		{input: `{"blockOverrides":{"number":"0x1","beaconRoot":"0x0000000000000000000000000000000000000000000000000000000000000001"},"stateOverrides":{"0xc000000000000000000000000000000000000000":{"balance":"0x1","movePrecompileToAddress":"0xc100000000000000000000000000000000000000"}}}`},
+		{input: `{"blockOverrides":null,"stateOverrides":null}`},
+		{input: `{"blockOverrides":{"bogusField":"0x1"}}`, err: `unknown field "bogusField" in block override`},
+		{input: `{"blockOverrides":{"Number":"0x1"}}`},
+		{input: `{"blockOverrides":{"number":"0x1","Number":"0x2"}}`, err: `keys "Number" and "number" in block override name the same field`},
+		{input: `{"stateOverrides":{"0xc100000000000000000000000000000000000000":{"balance":"0x1","bogusField":"0x1"}}}`, err: `unknown field "bogusField" in state override for 0xc100000000000000000000000000000000000000`},
+		{input: `{"stateOverrides":{"0xc000000000000000000000000000000000000000":{"Code":"0x00"}}}`},
+		{input: `{"stateOverrides":{"0xc000000000000000000000000000000000000000":{"code":"0x00","Code":"0x01"}}}`, err: `keys "Code" and "code" in state override for 0xC000000000000000000000000000000000000000 name the same field`},
+	} {
+		var b SimulatedBlock
+		err := json.Unmarshal([]byte(tc.input), &b)
+		if tc.err == "" {
+			assert.NoError(t, err, tc.input)
+		} else {
+			assert.EqualError(t, err, tc.err, tc.input)
+		}
+	}
+}
+
+func TestSimulatedBlockUnmarshalKeepsOverrides(t *testing.T) {
+	var b SimulatedBlock
+	require.NoError(t, json.Unmarshal([]byte(`{"blockOverrides":{"number":"0x7"},"stateOverrides":{"0xc000000000000000000000000000000000000000":{"Code":"0x00","balance":"0x1"}},"calls":[{"to":"0xc000000000000000000000000000000000000000"}]}`), &b))
+	require.NotNil(t, b.BlockOverrides)
+	assert.Equal(t, uint64(7), b.BlockOverrides.Number.Uint64())
+	require.NotNil(t, b.StateOverrides)
+	account, ok := (*b.StateOverrides)[accounts.InternAddress(common.HexToAddress("0xc000000000000000000000000000000000000000"))]
+	require.True(t, ok)
+	require.NotNil(t, account.Code)
+	assert.Equal(t, hexutil.Bytes{0x00}, *account.Code)
+	require.NotNil(t, account.Balance)
+	assert.Equal(t, uint64(1), (*account.Balance).ToInt().Uint64())
+	require.Len(t, b.Calls, 1)
 }
