@@ -296,7 +296,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	return result, false
 }
 
-// MinTxGas is the least intrinsic gas of any non-AA transaction: the cost of a
+// MinTxGas is the least intrinsic gas of any transaction: the cost of a
 // zero-value self-transfer.
 func MinTxGas(isEIP2780 bool) uint64 {
 	if isEIP2780 {

@@ -311,9 +311,8 @@ LOOP:
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
-		// If we don't have enough gas for any further transactions then we're done.
-		// Only the execution dimension bounds this exit: AA txns draw solely on the
-		// execution pool, so a state-gas exit would drop ones that still fit.
+		// Transactions can have a zero state gas limit, so only the execution
+		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
