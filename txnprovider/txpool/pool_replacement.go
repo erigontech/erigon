@@ -28,17 +28,30 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-// validateReplacement requires the pool lock. Success allows replacement;
-// NotSet leaves an identical transaction in place without inserting it again.
-func (p *TxPool) validateReplacement(replacement, previous *metaTxn, announcements *Announcements) txpoolcfg.DiscardReason {
+type replacementOutcome uint8
+
+const (
+	replacementRejected replacementOutcome = iota
+	replacementAccepted
+	replacementUnchanged
+)
+
+type replacementDecision struct {
+	outcome     replacementOutcome
+	reason      txpoolcfg.DiscardReason
+	rebroadcast bool
+}
+
+// checkReplacement requires the pool lock and leaves pool state unchanged.
+func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDecision {
 	newTxn, oldTxn := replacement.TxnSlot, previous.TxnSlot
 	if newTxn.TxType() == FrameTxnType || oldTxn.TxType() == FrameTxnType {
 		if reason := validateFrameReplacement(oldTxn, newTxn, p.cfg.PriceBump, p.cfg.BlobPriceBump); reason != txpoolcfg.Success {
-			return reason
+			return replacementDecision{outcome: replacementRejected, reason: reason}
 		}
 	}
 	if oldTxn.HasBlobs() && !newTxn.HasBlobs() {
-		return txpoolcfg.BlobTxReplace
+		return replacementDecision{outcome: replacementRejected, reason: txpoolcfg.BlobTxReplace}
 	}
 	priceBump := p.cfg.PriceBump
 
@@ -54,9 +67,9 @@ func (p *TxPool) validateReplacement(replacement, previous *metaTxn, announcemen
 		)
 		if newTxn.GetBlobFeeCap().Lt(blobFeeThreshold) && !overflow {
 			if bytes.Equal(oldTxn.IDHash[:], newTxn.IDHash[:]) {
-				return txpoolcfg.NotSet
+				return replacementDecision{outcome: replacementUnchanged}
 			}
-			return txpoolcfg.ReplaceUnderpriced // TODO: This is the same as NotReplaced
+			return replacementDecision{outcome: replacementRejected, reason: txpoolcfg.ReplaceUnderpriced}
 		}
 	}
 
@@ -73,17 +86,17 @@ func (p *TxPool) validateReplacement(replacement, previous *metaTxn, announcemen
 		tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(newTxn.SenderID))))
 	}
 	if newTxn.GetTipCap().Cmp(tipThreshold) < 0 || newTxn.GetFeeCap().Cmp(feecapThreshold) < 0 {
-		// Both tip and feecap need to be larger than previously to replace the transaction
-		// In case if the transition is stuck, "poke" it to rebroadcast
-		if replacement.subPool&IsLocal != 0 && (previous.currentSubPool == PendingSubPool || previous.currentSubPool == BaseFeeSubPool) {
-			announcements.Append(oldTxn.TxType(), oldTxn.Size, oldTxn.IDHash[:])
-		}
+		rebroadcast := replacement.subPool&IsLocal != 0 && (previous.currentSubPool == PendingSubPool || previous.currentSubPool == BaseFeeSubPool)
 		if bytes.Equal(oldTxn.IDHash[:], newTxn.IDHash[:]) {
-			return txpoolcfg.NotSet
+			return replacementDecision{outcome: replacementUnchanged, rebroadcast: rebroadcast}
 		}
-		return txpoolcfg.NotReplaced
+		return replacementDecision{
+			outcome:     replacementRejected,
+			reason:      txpoolcfg.NotReplaced,
+			rebroadcast: rebroadcast,
+		}
 	}
-	return txpoolcfg.Success
+	return replacementDecision{outcome: replacementAccepted}
 }
 
 // Frame replacements must keep the same nonce keys and strictly increase fees,

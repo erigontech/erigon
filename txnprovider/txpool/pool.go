@@ -843,7 +843,15 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			// Skip transactions with very large gas limit
 			continue
 		}
-		limits, err := protocol.TransactionGasLimits(mt.TxnSlot.Txn, isAmsterdam)
+		var limits mdgas.MdGas
+		var intrinsicGasResult mdgas.IntrinsicGasCalcResult
+		var err error
+		frame, isFrame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		if isFrame {
+			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, limits, err = frame.GasLimits()
+		} else {
+			limits, err = protocol.TransactionGasLimits(mt.TxnSlot.Txn, isAmsterdam)
+		}
 		if err != nil {
 			continue
 		}
@@ -887,27 +895,26 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
-		to := mt.TxnSlot.Txn.GetTo()
-		intrinsicGasResult, _ := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-			Data:               make([]byte, mt.TxnSlot.GetDataLen()),
-			DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
-			AuthorizationsLen:  authorizationLen,
-			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
-			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
-			IsContractCreation: mt.TxnSlot.IsCreation(),
-			IsSelfTransfer:     to != nil && *to == sender,
-			HasValue:           !mt.TxnSlot.GetValue().IsZero(),
-			IsEIP2:             true,
-			IsEIP2028:          true,
-			IsEIP3860:          isEIP3860,
-			IsEIP7623:          isEIP7623,
-			IsEIP7976:          isAmsterdam,
-			IsEIP7981:          isAmsterdam,
-			IsEIP2780:          isAmsterdam,
-		})
-		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
-			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, _, _ = frame.GasLimits()
+		if !isFrame {
+			authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
+			to := mt.TxnSlot.Txn.GetTo()
+			intrinsicGasResult, _ = mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+				Data:               make([]byte, mt.TxnSlot.GetDataLen()),
+				DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
+				AuthorizationsLen:  authorizationLen,
+				AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
+				StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
+				IsContractCreation: mt.TxnSlot.IsCreation(),
+				IsSelfTransfer:     to != nil && *to == sender,
+				HasValue:           !mt.TxnSlot.GetValue().IsZero(),
+				IsEIP2:             true,
+				IsEIP2028:          true,
+				IsEIP3860:          isEIP3860,
+				IsEIP7623:          isEIP7623,
+				IsEIP7976:          isAmsterdam,
+				IsEIP7981:          isAmsterdam,
+				IsEIP2780:          isAmsterdam,
+			})
 		}
 		intrinsicGas := intrinsicGasResult.ExecutionGas
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
@@ -1890,8 +1897,16 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		}
 	}
 	if found != nil {
-		if reason := p.validateReplacement(mt, found, announcements); reason != txpoolcfg.Success {
-			return reason
+		decision := p.checkReplacement(mt, found)
+		if decision.rebroadcast {
+			// A local replacement attempt can help the existing transaction propagate.
+			announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
+		}
+		switch decision.outcome {
+		case replacementRejected:
+			return decision.reason
+		case replacementUnchanged:
+			return txpoolcfg.NotSet
 		}
 	}
 
