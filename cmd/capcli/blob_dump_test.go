@@ -194,13 +194,14 @@ func TestDumpBlobSegmentKeepsOldFilesWhenTheDumpFails(t *testing.T) {
 	}
 }
 
-func TestDumpBlobSegmentRemovesOldIndexBeforeCompress(t *testing.T) {
+func TestDumpBlobSegmentKeepsOldFilesWhenCompressFails(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
 	segName := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
 	idxName := snaptype.IdxFileName(version.V1_1, 30_000, 40_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
-	for _, name := range []string{segName, idxName, segName + ".torrent", idxName + ".torrent"} {
+	old := []string{segName, idxName, segName + ".torrent", idxName + ".torrent"}
+	for _, name := range old {
 		writeSegment(t, dirs, name)
 	}
 
@@ -214,10 +215,12 @@ func TestDumpBlobSegmentRemovesOldIndexBeforeCompress(t *testing.T) {
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	require.FileExists(t, filepath.Join(dirs.Snap, segName))
-	for _, name := range []string{idxName, segName + ".torrent", idxName + ".torrent"} {
-		require.NoFileExists(t, filepath.Join(dirs.Snap, name))
+	for _, name := range old {
+		require.FileExists(t, filepath.Join(dirs.Snap, name))
 	}
+	data, err := os.ReadFile(filepath.Join(dirs.Snap, segName))
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, data)
 }
 
 func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
