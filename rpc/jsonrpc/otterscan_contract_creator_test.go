@@ -19,12 +19,15 @@ package jsonrpc
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestGetContractCreator(t *testing.T) {
@@ -70,4 +73,36 @@ func TestGetContractCreator(t *testing.T) {
 		require.NoError(err)
 		require.Nil(results)
 	})
+}
+
+func TestGetContractCreatorAtHistoryBoundary(t *testing.T) {
+	signer := types.LatestSignerForChainID(nil)
+	initCode := common.FromHex("0x60016000f3") // Return a one-byte STOP contract.
+	var creations [3]types.Transaction
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		if i != 0 {
+			return
+		}
+		for index := range creations {
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+			creations[index] = txn
+		}
+	})
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	minTxNum, err := api._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	api.db = historyFloorDB{TemporalRoDB: m.DB, startTxNum: minTxNum + 3}
+
+	creator, err := api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 2))
+	require.NoError(t, err, "the creation transaction's pre-state is retained")
+	require.Equal(t, &ContractCreatorData{Creator: testAddr, Tx: creations[2].Hash()}, creator)
+
+	creator, err = api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 1))
+	require.ErrorIs(t, err, state.ErrPruned, "the preceding creation's pre-state is pruned")
+	require.Nil(t, creator)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -174,7 +176,7 @@ func TestBlockReadAheaderIgnoresNilGetter(t *testing.T) {
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 	bal := types.BlockAccessList{{
 		StorageChanges: make([]types.SlotChanges, 65),
-		StorageReads:   make([]accounts.StorageKey, 3),
+		StorageReads:   make([]common.Hash, 3),
 	}}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
 	require.Equal(t, 2, workers)
@@ -266,7 +268,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	address := accounts.InternAddress(common.Address{19: 1})
-	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]accounts.StorageKey, 65)}
+	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]common.Hash, 65)}
 	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
 	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
@@ -276,7 +278,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 func TestMakeBALWarmupTasksKeepsSmallAccountsTogether(t *testing.T) {
 	bal := types.BlockAccessList{
 		{StorageChanges: make([]types.SlotChanges, 1)},
-		{StorageReads: make([]accounts.StorageKey, 1)},
+		{StorageReads: make([]common.Hash, 1)},
 	}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
 	require.Equal(t, 2, workers)
@@ -750,3 +752,60 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 }
 
 func emptyVisibleEnd(kv.Domain) (uint64, bool) { return 0, true }
+
+func TestStartSendersRecovery(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	txns := make(types.Transactions, 64)
+	want := make([]byte, 0, len(txns)*length.Addr)
+	for i := range txns {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		txns[i], err = types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21_000},
+			GasPrice: *uint256.NewInt(1),
+		}, *signer, key)
+		require.NoError(t, err)
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		want = append(want, addr[:]...)
+	}
+	blockHash := common.HexToHash("0x01")
+	bra := NewBlockReadAheader()
+	bra.AddSendersRecovery(blockHash, StartSendersRecovery(context.Background(), signer, txns))
+
+	senders, ok := bra.RecoveredSenders(context.Background(), blockHash)
+	require.True(t, ok)
+	require.Equal(t, want, senders)
+}
+
+func TestRecoveredSendersMissingOrInvalid(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	bra := NewBlockReadAheader()
+	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
+	require.False(t, ok)
+
+	unsigned := types.Transactions{&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}}
+	bra.AddSendersRecovery(common.HexToHash("0x02"), StartSendersRecovery(context.Background(), signer, unsigned))
+	_, ok = bra.RecoveredSenders(context.Background(), common.HexToHash("0x02"))
+	require.False(t, ok)
+}
+
+func TestStartSendersRecoveryCancelled(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	bra := NewBlockReadAheader()
+	bra.AddSendersRecovery(common.HexToHash("0x01"), StartSendersRecovery(ctx, signer, types.Transactions{txn}))
+	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
+	require.False(t, ok)
+}

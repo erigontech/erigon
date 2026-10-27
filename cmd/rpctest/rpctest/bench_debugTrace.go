@@ -17,23 +17,24 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 )
 
-func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonUrl, gethUrl)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceBlockByNumber"}, resultsCh)
+		go writePattern(true, []string{"debug_traceBlockByNumber"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -53,20 +54,20 @@ func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, b
 	return nil
 }
 
-func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonUrl, gethUrl)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceBlockByHash"}, resultsCh)
+		go writePattern(true, []string{"debug_traceBlockByHash"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -96,7 +97,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 	return nil
 }
 
-func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, additionalParams string, recordFileName string, errorFileName string) error {
+func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, additionalParams string, recordFileName string, errorFileName string) (err error) {
 	fmt.Println("BenchDebugTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo, ", additionalParams:", additionalParams)
 
 	setRoutes(erigonUrl, gethUrl)
@@ -109,13 +110,13 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceTransaction"}, resultsCh)
+		go writePattern(true, []string{"debug_traceTransaction"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -157,20 +158,20 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 	return nil
 }
 
-func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceCall"}, resultsCh)
+		go writePattern(true, []string{"debug_traceCall"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}

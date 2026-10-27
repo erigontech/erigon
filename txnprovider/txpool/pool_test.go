@@ -167,6 +167,100 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	return ctx, pool, poolDB, coreDB, sender
 }
 
+func TestIdHashKnownDiscardReasons(t *testing.T) {
+	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	hash := common.Hash{1}
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		known  bool
+	}{
+		{txpoolcfg.NonceTooDistant, false},
+		{txpoolcfg.NonceTooLow, true},
+		{txpoolcfg.IntrinsicGas, true},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			pool.discardReasonsLRU.Add(string(hash[:]), tc.reason)
+			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+				known, err := pool.IdHashKnown(tx, hash[:])
+				require.NoError(t, err)
+				require.Equal(t, tc.known, known)
+				return nil
+			}))
+		})
+	}
+}
+
+func TestRejectedTransactionsCleanSenderActivity(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.MaxNonceGap = 64
+
+	for range 3 {
+		var txns TxnSlots
+		txn := newTestTxnSlot(65, 0, 1, 2, 21_000)
+		txn.IDHash[0] = 1
+		txns.Append(txn, sender[:], true)
+
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+		require.Empty(t, pool.senders.senderIDs)
+		require.Empty(t, pool.senders.senderID2Addr)
+		require.Empty(t, pool.senderLastActivity)
+
+		_, err = pool.flushNoFsync(ctx)
+		require.NoError(t, err)
+		require.Empty(t, pool.senderLastActivity)
+	}
+}
+
+func TestFlushSenderActivity(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining int
+	}{
+		{"last transaction", 0},
+		{"sender still active", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			var txns TxnSlots
+			for i := 0; i <= tc.remaining; i++ {
+				txn := newTestTxnSlot(uint64(i+1), 0, 1, 2, 21_000)
+				txn.IDHash[0] = byte(i + 1)
+				txns.Append(txn, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			for _, reason := range reasons {
+				require.Equal(t, txpoolcfg.Success, reason)
+			}
+			senderID := txns.Txns[0].SenderID
+			require.Contains(t, pool.senderLastActivity, senderID)
+			lastActivity := pool.senderLastActivity[senderID]
+			mt := pool.byHash[string(txns.Txns[0].IDHash[:])]
+			require.NotNil(t, mt)
+
+			pool.lock.Lock()
+			pool.removeFromSubPool(mt, "test")
+			pool.discardLocked(mt, txpoolcfg.NonceTooLow)
+			pool.lock.Unlock()
+			_, err = pool.flushNoFsync(ctx)
+			require.NoError(t, err)
+
+			if tc.remaining == 0 {
+				require.Empty(t, pool.senders.senderIDs)
+				require.Empty(t, pool.senders.senderID2Addr)
+				require.Empty(t, pool.senderLastActivity)
+			} else {
+				require.Equal(t, senderID, pool.senders.senderIDs[sender])
+				require.Contains(t, pool.senderLastActivity, senderID)
+				require.Equal(t, lastActivity, pool.senderLastActivity[senderID])
+				require.True(t, pool.all.hasTxns(senderID))
+			}
+		})
+	}
+}
+
 func TestAddLocalTxnsRejectsTotalGasAboveCap(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	pool.blockGasLimit.Store(2 * math.MaxUint32)
@@ -334,7 +428,7 @@ func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 }
 
 func TestFromDBSkipsInvalidTransactions(t *testing.T) {
-	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
 	invalidTxn := newTestTxnSlot(0, 0, 2, 1, 21_000)
 	validTxn := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -356,9 +450,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	}))
 
 	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
-			return pool.fromDB(ctx, poolTx, coreTx)
-		})
+		return pool.fromDB(ctx, poolTx)
 	}))
 
 	validHash := validTxn.Txn.Hash()
@@ -556,6 +648,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 		1,
 		&selected,
 		0,
+		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit-1, math.MaxUint64),
 		nil,
 		math.MaxInt,
@@ -584,6 +677,7 @@ func TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam(t *testing.T) {
 		1,
 		&selected,
 		0,
+		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit, math.MaxUint64),
 		nil,
 		math.MaxInt,
@@ -3073,9 +3167,7 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
 	}))
 	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
-			return pool.fromDB(ctx, poolTx, coreTx)
-		})
+		return pool.fromDB(ctx, poolTx)
 	}))
 
 	bundles := pool.GetBlobs(blobHashes)

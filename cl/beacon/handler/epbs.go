@@ -93,6 +93,9 @@ type ptcDutyResponse struct {
 // POST /eth/v1/validator/duties/ptc/{epoch}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
@@ -124,15 +127,9 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		validatorIndices = append(validatorIndices, idx)
 	}
 
-	// PTC duties available for current and next epoch (beacon-APIs PR #592)
 	var dependentRoot common.Hash
 	duties := make([]ptcDutyResponse, 0)
-	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
-		currentEpoch := state.Epoch(s)
-		if epoch < currentEpoch || epoch > currentEpoch+1 {
-			return beaconhttp.NewEndpointError(http.StatusBadRequest,
-				fmt.Errorf("PTC duties only available for current epoch %d and next epoch %d, requested %d", currentEpoch, currentEpoch+1, epoch))
-		}
+	fillDuties := func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		if s.Version() < clparams.GloasVersion {
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
 				fmt.Errorf("PTC duties for fork epoch %d are not available until the head reaches the Gloas fork", epoch))
@@ -185,8 +182,48 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		}
 		dependentRoot = root
 		return nil
+	}
+
+	var (
+		advanced                         *state.CachingBeaconState
+		advancedHeadRoot                 common.Hash
+		advancedHeadSlot, advancedToSlot uint64
+	)
+	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		stateEpoch := state.Epoch(s)
+		clockEpoch := a.ethClock.GetCurrentEpoch()
+		nextEpoch := clockEpoch + 1
+		if epoch < stateEpoch || epoch > nextEpoch {
+			return beaconhttp.NewEndpointError(http.StatusBadRequest,
+				fmt.Errorf("PTC duties only available for epochs %d to %d, requested %d", stateEpoch, nextEpoch, epoch))
+		}
+		if epoch > stateEpoch+2 {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
+				fmt.Errorf("PTC duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
+		}
+		// upgrade_to_gloas computes the fork epoch's PTC after the last Fulu epoch processing has updated effective
+		// balances, so a pre-Gloas head serves it from a copy advanced into the fork, once the clock is there.
+		advanceIntoFork := s.Version() < clparams.GloasVersion && clockEpoch >= epoch
+		if epoch < stateEpoch+2 && !advanceIntoFork {
+			return fillDuties(s, headRoot, headSlot)
+		}
+		// The epoch transition computes the PTC of the requested epoch. The copy is advanced after the head-state view
+		// is released.
+		var err error
+		advanced, err = a.copyHeadStateForDuties(s)
+		advancedHeadRoot, advancedHeadSlot = headRoot, headSlot
+		advancedToSlot = (stateEpoch + 1) * a.beaconChainCfg.SlotsPerEpoch
+		return err
 	}); err != nil {
 		return nil, err
+	}
+	if advanced != nil {
+		if err := transition.DefaultMachine.ProcessSlots(advanced, advancedToSlot); err != nil {
+			return nil, err
+		}
+		if err := fillDuties(advanced, advancedHeadRoot, advancedHeadSlot); err != nil {
+			return nil, err
+		}
 	}
 
 	return newBeaconResponse(duties).
@@ -199,8 +236,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
 	}
 	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
 	if err != nil {
@@ -562,8 +599,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			continue
 		}
 
-		// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
-		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
 		if a.payloadAttestationService == nil {
 			failures = append(failures, poolingFailure{Index: i, Message: "payload attestation validation unavailable"})
 			continue
@@ -596,15 +631,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 	}
 
 	if len(failures) > 0 {
-		errResp := poolingError{
-			Code:     http.StatusBadRequest,
-			Message:  "some failures",
-			Failures: failures,
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
-			a.logger.Warn("failed to encode response", "err", err)
-		}
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -666,6 +693,7 @@ func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter
 	if !ok {
 		return
 	}
+	a.recordPreferredFeeRecipients(reqs)
 	a.postProposerPreferences(w, r, reqs)
 }
 
@@ -733,6 +761,31 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, ca
 	}
 }
 
+// recordPreferredFeeRecipients makes each correctly signed preference the fallback fee recipient
+// once Gloas is active, also when gossip validation ignores it. Before that, prepare_beacon_proposer
+// stays the only source.
+func (a *ApiHandler) recordPreferredFeeRecipients(reqs []*cltypes.SignedProposerPreferences) {
+	if a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch()) < clparams.GloasVersion {
+		return
+	}
+	for _, req := range reqs {
+		if req == nil || req.Message == nil {
+			continue
+		}
+		var pubkey common.Bytes48
+		var genesisValidatorsRoot common.Hash
+		err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			var err error
+			pubkey, err = headState.ValidatorPublicKey(int(req.Message.ValidatorIndex))
+			genesisValidatorsRoot = headState.GenesisValidatorsRoot()
+			return err
+		})
+		if err == nil && clservices.VerifyProposerPreferencesSignature(a.beaconChainCfg, req, pubkey, genesisValidatorsRoot) == nil {
+			a.validatorParams.SetFeeRecipient(req.Message.ValidatorIndex, req.Message.FeeRecipient)
+		}
+	}
+}
+
 func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Request, reqs []*cltypes.SignedProposerPreferences) {
 	if len(reqs) == 0 {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("empty proposer preferences request")).WriteTo(w)
@@ -747,17 +800,17 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-				// Gossip deduplicates by slot and dependent root before checking the signature.
-				// Only the identical signed preference is a successful REST retry.
+				// The service deduplicates by slot and dependent root, so only an identical signed preference is a retry.
+				identicalRetry := false
 				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) && a.epbsPool != nil {
 					stored, ok := a.epbsPool.GetPreference(req.Message.ProposalSlot, req.Message.DependentRoot)
-					if ok && stored != nil && stored.Message != nil &&
-						*stored.Message == *req.Message && stored.Signature == req.Signature {
-						continue
-					}
+					identicalRetry = ok && stored != nil && stored.Message != nil &&
+						*stored.Message == *req.Message && stored.Signature == req.Signature
 				}
-				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
-				continue
+				if !identicalRetry {
+					failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+					continue
+				}
 			}
 		}
 
@@ -782,8 +835,22 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
-			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
+			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, req.Message.ProposalSlot)
+			currentEpoch := a.ethClock.GetCurrentEpoch()
+			// Use the proposal epoch before Gloas; afterwards, use the current digest because some peers join the next one late.
+			digestEpoch := proposalEpoch
+			if a.beaconChainCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+				digestEpoch = currentEpoch
+			}
+			forkDigest, err := a.ethClock.ComputeForkDigest(digestEpoch)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if err := a.gossipManager.PublishToForkDigest(r.Context(), forkDigest, gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
 				a.logger.Debug("[Beacon REST] failed to publish proposer preferences to gossip", "err", err)
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
 			}
 		}
 	}
@@ -1020,10 +1087,15 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
+	// An interrupted validation parks the envelope without persisting it; a re-POST must process it again.
+	validationInterrupted := false
 	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
+		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
+			// The envelope passed every consensus check; only the EL verdict is pending.
+			validationInterrupted = true
 		case canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
@@ -1049,7 +1121,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 				status = http.StatusOK
 			}
 			gossipValidated = true
-		case errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted), errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 			status = http.StatusAccepted
 			gossipValidated = true
@@ -1112,7 +1184,11 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if err := a.publishGossip(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+		// The client may give up while the EL validates; the envelope is still published, within a slot.
+		publishCtx, cancelPublish := context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+		err = a.publishGossip(publishCtx, gossip.TopicNameExecutionPayload, encodedSSZ)
+		cancelPublish()
+		if err != nil {
 			if envelopeRoot, hashErr := signedEnvelope.HashSSZ(); hashErr == nil {
 				a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{
 					EnvelopeRoot: envelopeRoot, GossipRequired: true,
@@ -1126,7 +1202,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		if envelopeRoot, hashErr := signedEnvelope.HashSSZ(); hashErr == nil {
 			a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{EnvelopeRoot: envelopeRoot})
 		}
-	} else {
+	} else if !validationInterrupted {
 		a.clearExecutionPayloadEnvelopeRetry(gossipKey)
 	}
 	if persistenceErr != nil {
@@ -1134,7 +1210,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		return
 	}
 
-	accepted = !contentsIntegrationFailed
+	accepted = !contentsIntegrationFailed && !validationInterrupted
 	w.WriteHeader(status)
 }
 

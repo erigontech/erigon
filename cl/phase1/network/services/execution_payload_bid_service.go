@@ -652,7 +652,7 @@ func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.Execut
 			return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
 		}
 	}
-	headState, err := s.forkchoiceStore.GetStateAtBlockRoot(headRoot, true)
+	headState, err := s.forkchoiceStore.GetStateAtBlockRoot(headRoot)
 	if err != nil || headState == nil {
 		return false, fmt.Errorf("%w: head state unavailable", errBidDependencyUnavailable)
 	}
@@ -716,7 +716,7 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 
 	// Fetch the parent state only on a cache miss; holding entry.mu also
 	// dedups concurrent fetches for the same (parent, slot).
-	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(parentBlockRoot, true)
+	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(parentBlockRoot)
 	if err != nil || parentState == nil {
 		s.removeBidValidationState(cacheKey, entry)
 		return nil, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, parentBlockRoot)

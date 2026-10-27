@@ -83,7 +83,6 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	// trie Trie // storage trie, which becomes non-nil on first access
 	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
@@ -311,10 +310,20 @@ func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
 func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin bool) error {
 	// When using full state override, only the fake storage matters (see also SetStorage)
 	if so.fakeStorage != nil {
-		// First, delete the account to wipe out the original storage
-		err := stateWriter.DeleteAccount(so.address, &so.original)
+		// DeleteAccount also deletes the code, so read it first and write it back after.
+		code, err := so.CodeTyped()
 		if err != nil {
 			return err
+		}
+		// First, delete the account to wipe out the original storage
+		err = stateWriter.DeleteAccount(so.address, &so.original)
+		if err != nil {
+			return err
+		}
+		if len(code.Bytes) > 0 {
+			if err := stateWriter.UpdateAccountCode(so.address, so.data.Incarnation, code.Hash, code.Bytes); err != nil {
+				return err
+			}
 		}
 		// Then, we need to apply the fake storage changes to compute the state root correctly
 		err = so.applyStorageChanges(stateWriter, so.fakeStorage, useBlockOrigin)
@@ -419,8 +428,16 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
+		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok {
+			if !rr.resolved() {
+				// An in-flight cell: storage holds the pre-block code, so wait through the versioned
+				// path. Its result is this read's view, not the object's state, so it is not cached.
+				c, _, _, err := readCode(so.db, so.address)
+				return c, err
+			}
 			so.code = c
+			so.data.CodeHash = c.Hash
+			so.original.CodeHash = c.Hash
 			return c, nil
 		}
 	}
@@ -443,8 +460,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
 	// Trust the committed (CodeHash, bytes) pair rather than re-hashing on every
-	// load; the only case they disagree is codeHash-without-code state (empty
-	// bytes, non-empty hash), reported honestly as empty so SetCode's compare
+	// load; a codeHash-without-code state reports as empty so SetCode's compare
 	// still heals it.
 	var c accounts.Code
 	if len(code) == 0 {
@@ -462,8 +478,8 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, err
 	}
 
-	// bytes.Equal confirm guards the codeHash-without-code case: a matching hash
-	// against empty prev bytes must still heal the CodeDomain, not skip.
+	// bytes.Equal guards the codeHash-without-code case: a matching hash against
+	// empty prev bytes must still heal the CodeDomain, not skip.
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return false, nil
 	}

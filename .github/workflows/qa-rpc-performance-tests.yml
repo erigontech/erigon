@@ -128,6 +128,9 @@ jobs:
           echo "ERIGON_REFERENCE_DIR=${ERIGON_REFERENCE_DIR}" >> $GITHUB_ENV
           echo "ERIGON_REFERENCE_DATA_DIR=${ERIGON_REFERENCE_DIR}/datadir" >> $GITHUB_ENV
 
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
@@ -319,6 +322,12 @@ jobs:
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
 
+            # Erigon is served by a standalone rpcdaemon; other clients run under their own process name
+            process_name_flag=()
+            if [ "$client" == "erigon" ]; then
+              process_name_flag=(--process-name rpcdaemon)
+            fi
+
             # Move to home dir of rpc-tests
             cd ..
             ./build/bin/rpc_perf --blockchain "$network" \
@@ -330,7 +339,7 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
-                                      --process-name rpcdaemon
+                                      "${process_name_flag[@]}"
           
             # Capture test runner script exit status
             perf_exit_status=$?
