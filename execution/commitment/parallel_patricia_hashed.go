@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 	"io"
 	"runtime"
 	"sync"
@@ -31,7 +32,7 @@ import (
 
 const deferredWritesPerWorker = 4096
 
-var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
+var defaultParallelCommitmentWorkers = max(1, dbg.EnvInt("PARALLEL_COMMITMENT_WORKERS", runtime.GOMAXPROCS(0)))
 
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
