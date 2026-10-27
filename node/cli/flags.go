@@ -229,13 +229,6 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
-// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
-//
-// Deprecated: use BuildEthConfig instead.
-func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
-	applyRemainingEthFlags(ctx, cfg, logger)
-}
-
 func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {

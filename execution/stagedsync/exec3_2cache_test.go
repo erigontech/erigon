@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -56,7 +55,7 @@ func setup2CacheTest(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Cleanup(func() { _ = dir.RemoveAll(tmpDir) })
 
 	dirs := datadir.New(tmpDir)
-	rawDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, lgr), dirs.Chaindata).MustOpen()
+	rawDb := mdbx.New(dbcfg.ChainDB, lgr).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(lgr).Open(context.Background())

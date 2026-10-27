@@ -881,9 +881,7 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
 func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
-		if iit.files.EndTxNum() > 0 {
-			txTo = min(txTo, iit.files.EndTxNum())
-		}
+		txTo = min(txTo, iit.files.EndTxNum())
 		if !iit.CanPrune(tx, txTo) && valTable == nil /* it's not a history prune */ {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64, Progress: prune.Done}, nil
 		}
@@ -896,9 +894,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 
 func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
-		if iit.files.EndTxNum() > 0 {
-			txTo = min(txTo, iit.files.EndTxNum())
-		}
+		txTo = min(txTo, iit.files.EndTxNum())
 		if !iit.CanHashPrune(tx) {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}

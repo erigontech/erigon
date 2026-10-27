@@ -290,3 +290,32 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
 	}, reasons)
 }
+
+func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		limit  func(cfg *txpoolcfg.Config)
+		reason txpoolcfg.DiscardReason
+	}{
+		{"total", func(cfg *txpoolcfg.Config) { cfg.TotalBlobPoolLimit = 0 }, txpoolcfg.BlobPoolOverflow},
+		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.Spammer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			pool := seedBlobKZGTestPool(t, ctx)
+			require.NoError(t, pool.start(ctx))
+			tc.limit(&pool.cfg)
+
+			bad := makeBlobSlot(0x80, true)
+			a0 := [20]byte{1}
+			var slots TxnSlots
+			slots.Append(&bad, a0[:], false)
+			pool.AddRemoteTxns(ctx, slots, nil, nil)
+
+			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+		})
+	}
+}
