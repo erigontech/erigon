@@ -240,8 +240,10 @@ func TestProvider_FinalizeUnwind_RegenStripsTorrentAndNotifiesDownloader(t *test
 	require.True(t, os.IsNotExist(err), "stale .torrent sidecar must be removed so the downloader stops policing the regenerated .kv")
 
 	deletes := stub.snapshotDeletes()
-	require.Len(t, deletes, 1, "downloaderClient.Delete must be called exactly once for the regen batch")
-	require.Equal(t, []string{finalName}, deletes[0], "Delete must carry the basename of the regenerated .kv")
+	// Twice: once before the swap so the file stops being servable while its
+	// bytes change, then the post-swap batch below.
+	require.Len(t, deletes, 2, "Delete fires before the swap and again after it")
+	require.Equal(t, []string{finalName}, deletes[len(deletes)-1], "Delete must carry the basename of the regenerated .kv")
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
 }
@@ -641,8 +643,8 @@ func TestProvider_FinalizeUnwind_RegenTruncatedRenameRemovesBroadFile(t *testing
 	require.True(t, os.IsNotExist(err), "broad .torrent must be removed (advertises the retired file)")
 
 	deletes := stub.snapshotDeletes()
-	require.Len(t, deletes, 1, "downloaderClient.Delete must be called once for the regen batch")
-	require.ElementsMatch(t, []string{truncatedName, broadName}, deletes[0],
+	require.Len(t, deletes, 2, "Delete fires before the swap and again after it")
+	require.ElementsMatch(t, []string{truncatedName, broadName}, deletes[len(deletes)-1],
 		"Delete must carry BOTH the new truncated name and the retired broad name")
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
@@ -716,8 +718,8 @@ func TestProvider_FinalizeUnwind_SplitEmitAlignedPlusStub(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "broad .torrent must be removed")
 
 	deletes := stub.snapshotDeletes()
-	require.Len(t, deletes, 1, "downloaderClient.Delete called once for the regen batch")
-	require.ElementsMatch(t, []string{alignedName, stubName, broadName}, deletes[0],
+	require.Len(t, deletes, 2, "Delete fires before the swap and again after it")
+	require.ElementsMatch(t, []string{alignedName, stubName, broadName}, deletes[len(deletes)-1],
 		"Delete must carry aligned + stub new basenames AND the retired broad basename")
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
@@ -802,4 +804,63 @@ func requireNoOrphanSidecars(t *testing.T, dir string) {
 		require.NoError(t, err,
 			"orphaned sidecar %s advertises bytes that are not on disk", e.Name())
 	}
+}
+
+// observingDownloaderClient records what the live file looked like at the
+// moment each Delete landed, so a test can assert the unregister happened
+// before the bytes changed rather than after.
+type observingDownloaderClient struct {
+	recordingDownloaderClient
+	watch        string
+	contentAtDel []string
+}
+
+func (c *observingDownloaderClient) Delete(ctx context.Context, paths []string) error {
+	b, err := os.ReadFile(c.watch)
+	if err != nil {
+		c.contentAtDel = append(c.contentAtDel, "<gone:"+err.Error()+">")
+	} else {
+		c.contentAtDel = append(c.contentAtDel, string(b))
+	}
+	return c.recordingDownloaderClient.Delete(ctx, paths)
+}
+
+// A registered torrent serves piece reads straight out of the file. The regen
+// swap replaces those bytes with shorter content under the same name, so a
+// peer request arriving mid-swap reads the old piece layout against the new
+// file — which the torrent library turns into a panic, not an error:
+//
+//	panic: runtime error: slice bounds out of range [4194304:195638]
+//	  torrent.(*storagePieceReader).ReadAt → servePeerRequest
+//
+// A soak node died that way during a mode_b unwind. Nothing here controls when
+// a peer asks, so the file has to stop being servable before it changes.
+func TestProvider_FinalizeUnwind_RegenUnregistersBeforeTouchingBytes(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	finalName := "v2.1-commitment.272-280.kv"
+	finalPath := filepath.Join(tmpDir, finalName)
+	regenPath := finalPath + ".regen"
+
+	require.NoError(t, os.WriteFile(finalPath, []byte("pre-regen"), 0o600))
+	require.NoError(t, os.WriteFile(regenPath, []byte("regen"), 0o600))
+	require.NoError(t, os.WriteFile(finalPath+".torrent", []byte("stale-torrent"), 0o600))
+
+	stub := &observingDownloaderClient{watch: finalPath}
+	p := &Provider{snapDir: tmpDir, downloaderClient: stub}
+	p.pendingRegen = &pendingRegenState{
+		pairs: []regenPair{{
+			regenPath:    regenPath,
+			finalPath:    finalPath,
+			oldBroadPath: finalPath,
+		}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	require.NotEmpty(t, stub.contentAtDel, "the downloader must be told before the swap, not only after")
+	require.Equal(t, "pre-regen", stub.contentAtDel[0],
+		"the first Delete must land while the original bytes are still in place — "+
+			"after the swap the file is already servable as the wrong content")
 }

@@ -129,6 +129,37 @@ func (p *Provider) FinalizeUnwind() error {
 		// differs when the regen output got a truncated filename to
 		// reflect its actual coverage — see regen_wire.go's
 		// regenPair doc for the two shapes).
+		// Stop serving before touching the bytes. A registered torrent reads
+		// pieces straight out of the file, so a peer request arriving during
+		// the swap below reads the old piece layout against the new, shorter
+		// content — which the torrent library turns into a panic rather than
+		// an error, taking the process down. Nothing here controls when a
+		// peer asks, so the window has to be closed rather than narrowed.
+		// The post-swap Delete still runs: it also cancels in-flight torrents
+		// and clears .part files for the retired broad.
+		if p.downloaderClient != nil {
+			seen := map[string]struct{}{}
+			var preSwap []string
+			for _, pair := range regen.pairs {
+				for _, path := range []string{pair.oldBroadPath, pair.finalPath} {
+					if path == "" {
+						continue
+					}
+					base := filepath.Base(path)
+					if _, dup := seen[base]; dup {
+						continue
+					}
+					seen[base] = struct{}{}
+					preSwap = append(preSwap, base)
+				}
+			}
+			if len(preSwap) > 0 {
+				if err := p.downloaderClient.Delete(context.Background(), preSwap); err != nil && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete before regen swap failed — the file stays servable while it changes", "err", err, "files", len(preSwap))
+				}
+			}
+		}
+
 		var accessorOlds []string
 		for _, pair := range regen.pairs {
 			if pair.oldBroadPath == "" {
