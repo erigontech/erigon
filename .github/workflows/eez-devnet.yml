@@ -1,0 +1,134 @@
+name: EEZ devnet
+
+# T-CI-2: follow the eez-rollup0 Kurtosis devnet with Erigon and require the
+# two L2 chains to agree (eez/tools/devnet/diff.sh), on the images
+# eez-devnet-images.yml built at ROLLUP0_REF. T-CI-5 runs the same against
+# eez-rollup0 main with the images built in the job; it reports and never
+# gates.
+#
+# schedule and workflow_dispatch run the default branch's copy of this file,
+# so main carries a copy; that copy checks out <prefix>/eez.
+
+on:
+  push:
+    branches:
+      - '*/eez'
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      drift:
+        description: "Also run against eez-rollup0 main (T-CI-5)"
+        type: boolean
+        default: false
+
+env:
+  ROLLUP0_REF: 24c71aaf47a9ef1a40182b583255e081102c01f2
+  KURTOSIS_VERSION: 1.22.1
+  FOUNDRY_VERSION: v1.7.1
+  KURTOSIS_ENCLAVE: eez-erigon
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  devnet:
+    name: devnet (${{ matrix.reference }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.reference == 'pinned' && 90 || 180 }}
+    continue-on-error: ${{ matrix.reference == 'main' }}
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        reference: ${{ fromJSON((github.event_name == 'schedule' || inputs.drift) && '["pinned","main"]' || '["pinned"]') }}
+    steps:
+      - name: Check out Erigon
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'canepat/eez' || '' }}
+          persist-credentials: false
+
+      # Not setup-erigon: it checks out github.ref again, main on a schedule.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build erigon and eez
+        run: go build -o build/bin/ ./cmd/erigon ./cmd/eez
+
+      - name: Check out eez-rollup0
+        uses: actions/checkout@v7
+        with:
+          repository: eez-association/eez-rollup0
+          ref: ${{ matrix.reference == 'pinned' && env.ROLLUP0_REF || 'main' }}
+          path: rollup0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+
+      - name: Install Kurtosis
+        run: |
+          echo "deb [trusted=yes] https://sdk.kurtosis.com/kurtosis-cli-release-artifacts/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+          sudo apt-get update
+          sudo apt-get install -y "kurtosis-cli=$KURTOSIS_VERSION" jq
+          kurtosis engine start
+
+      - name: Log in to ghcr.io
+        if: matrix.reference == 'pinned'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ci-args.yaml names the images eez-*:ci.
+      - name: Pull the reference images
+        if: matrix.reference == 'pinned'
+        run: |
+          for image in eez-node eez-proof-signer eez-deploy; do
+            docker pull "ghcr.io/erigontech/$image:$ROLLUP0_REF"
+            docker tag "ghcr.io/erigontech/$image:$ROLLUP0_REF" "$image:ci"
+          done
+
+      - name: Differential run
+        env:
+          ROLLUP0: ${{ github.workspace }}/rollup0
+          ERIGON: ${{ github.workspace }}/build/bin/erigon
+          EEZ: ${{ github.workspace }}/build/bin/eez
+          OUT: ${{ github.workspace }}/devnet
+          SKIP_BUILD: ${{ matrix.reference == 'pinned' && '1' || '0' }}
+        run: |
+          EEZ_SKIP_NODE_BUILD=$SKIP_BUILD EEZ_SKIP_PROOF_SIGNER_BUILD=$SKIP_BUILD EEZ_SKIP_DEPLOY_BUILD=$SKIP_BUILD \
+            bash eez/tools/devnet/diff.sh
+
+      - name: Dump the enclave
+        if: always()
+        run: kurtosis enclave dump "$KURTOSIS_ENCLAVE" devnet/enclave > /dev/null 2>&1 || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eez-devnet-${{ matrix.reference }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            devnet/*.log
+            devnet/*.txt
+            devnet/args.yaml
+            devnet/deployments
+            devnet/enclave
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove the enclave
+        if: always()
+        run: kurtosis enclave rm -f "$KURTOSIS_ENCLAVE" || true
