@@ -452,6 +452,16 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
+	// Signed frame budgets must remain unchanged. Reject before receipt
+	// generation, which can also execute transactions.
+	for _, txn := range replayTransactions {
+		if api.GasCap != 0 && txn.Type() == types.FrameTxType {
+			if gasLimit := txn.GetGasLimit(); gasLimit > api.GasCap {
+				return nil, fmt.Errorf("frame transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+			}
+		}
+	}
+
 	header := block.HeaderNoCopy()
 
 	if header == nil {

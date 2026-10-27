@@ -227,7 +227,7 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
-			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000}},
+			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000, State: 5_000}},
 			{Mode: types.FrameSender, Target: &revertingTarget, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
@@ -240,12 +240,31 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	require.Equal(t, successfulTarget, receipt.Logs[0].Address)
 
 	base := newBaseApiForTest(m)
-	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, NewOtterscanAPI(base, m.DB, 25))
 	blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, nil, nil)
-	require.NoError(t, err)
-	require.Len(t, logs, 1)
-	require.Equal(t, successfulTarget, logs[0].Address)
+	for _, tc := range []struct {
+		name    string
+		gasCap  uint64
+		wantErr bool
+	}{
+		{name: "within cap", gasCap: 1_000_000},
+		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: true},
+		{name: "below declared budget", gasCap: frameTx.GetGasLimit() - 1, wantErr: true},
+		{name: "at declared budget", gasCap: frameTx.GetGasLimit()},
+		{name: "unlimited", gasCap: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
+			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, nil, nil)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "exceeds the RPC gas cap")
+				require.Empty(t, logs)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, logs, 1)
+			require.Equal(t, successfulTarget, logs[0].Address)
+		})
+	}
 }
 
 func newOverlayGetLogsSingleLogSetup(t *testing.T) (overlayGetLogsTestSetup, filters.FilterCriteria) {
