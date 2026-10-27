@@ -2897,7 +2897,7 @@ type blockExecutor struct {
 	// readerByAddr: reverse index (address -> reader task indices) so a published write
 	// re-checks only txs that read its address, not every later task. A per-cell index
 	// costs several map operations per read on the serial execLoop; the exact cell is
-	// checked against the reader's read set instead, once per write.
+	// checked against the reader's read set instead, once per written address.
 	readerByAddr map[accounts.Address][]int
 
 	// revalidate[tx]: since tx last passed validation, a write to a cell it read has

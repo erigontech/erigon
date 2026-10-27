@@ -3280,9 +3280,9 @@ func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
 	if anyCommonKey(ws.storage[addr], s.storage[addr]) {
 		return true
 	}
-	for p := AddressPath; p <= CreateContractPath; p++ {
+	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodePath, CodeHashPath, CodeSizePath, CreateContractPath} {
 		h := WriteHeader{Address: addr, Path: p}
-		if p != StoragePath && ws.hasHeader(h) && s.DependsOn(h) {
+		if ws.hasHeader(h) && s.DependsOn(h) {
 			return true
 		}
 	}
