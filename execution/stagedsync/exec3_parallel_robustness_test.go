@@ -437,6 +437,55 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
+// TestApplyLoopPanicDrainsBlockedProducer reproduces chfast's hang: a panic
+// injected through the BAL sink unwinds the apply loop while the exec loop is
+// blocked on a mustDeliver send into a full applyResults. mustDeliver ignores
+// ctx, so the recover must drain applyResults to EOF to release the producer;
+// without the drain pe.wait() hangs forever.
+func TestApplyLoopPanicDrainsBlockedProducer(t *testing.T) {
+	const buf = 4
+	applyResults := make(chan applyResult, buf)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		for i := range buf * 4 {
+			_ = consumers.publish(ctx, i, true) // mustDeliver: blocks once the buffer fills
+		}
+		consumers.close()
+	}()
+
+	loopErr := func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("apply loop panic: %v", rec)
+				cancel()
+				for range applyResults {
+				}
+			}
+		}()
+		n := 0
+		for range applyResults {
+			if n++; n == 2 {
+				panic("bal sink: injected fault")
+			}
+		}
+		return nil
+	}()
+
+	require.ErrorContains(t, loopErr, "bal sink")
+	select {
+	case <-producerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("producer stranded on a mustDeliver send: apply-loop recover did not drain applyResults")
+	}
+}
+
 // TestExecLoopExitCheckConcurrentReads verifies execLoopExitCheck is
 // safe to call concurrently with map mutations under the lock — guards
 // against future regression if someone removes the RLock.

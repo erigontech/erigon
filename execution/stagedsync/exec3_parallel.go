@@ -454,6 +454,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				if err == nil {
 					err = fmt.Errorf("apply loop panic: %v", rec)
 				}
+				// mustDeliver sends ignore ctx, so the cancel cannot release an exec loop
+				// blocked on a full applyResults. Drain to EOF so it winds down and closes
+				// the channel; else pe.wait() hangs on the stranded send.
+				pe.cancelExecLoop(&stopCause{kind: stopOperational, err: err})
+				for range applyResults {
+				}
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
