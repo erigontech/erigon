@@ -45,7 +45,7 @@ const maxTopicPositions = 4
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
 func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
@@ -61,7 +61,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
+		go writePattern(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -137,7 +137,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 // EthGetLogsInvariants checks that logs found by a block-wide eth_getLogs are also found
 // when the same block is queried by address or by topic. queryLimit is the server's
 // --rpc.logs.querylimit: filters wider than that are split into several requests.
-func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, latest, failFast bool, queryLimit int) error {
+func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, blockFrom, blockTo uint64, failFast bool, queryLimit int) error {
 	setRoutes(erigonURL, gethURL)
 
 	reqGen := &RequestGenerator{}

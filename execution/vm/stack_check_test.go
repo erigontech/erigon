@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"math/rand/v2"
@@ -33,6 +34,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -105,14 +107,8 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	t.Parallel()
 	// DUPs and PUSH3+ are closures, whose code pointers differ by inlining site,
 	// so they are checked by behaviour instead of by function identity.
-	tables := []*JumpTable{
-		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
-		&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
-		&istanbulInstructionSet, &berlinInstructionSet, &londonInstructionSet,
-		&shanghaiInstructionSet, &cancunInstructionSet, &pragueInstructionSet,
-		&osakaInstructionSet, &amsterdamInstructionSet,
-	}
-	for _, jt := range tables {
+	tables := slices.Clone(forkInstructionSets)
+	for _, jt := range forkInstructionSets {
 		for eip := range activators {
 			cp := copyJumpTable(jt)
 			require.NoError(t, EnableEIP(eip, cp))
@@ -122,6 +118,10 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	for i, jt := range tables {
 		for op, w := range fastPathOps {
 			got := &jt[op]
+			if undefined(got) || w.memorySize != nil && got.memorySize == nil {
+				// The op is not in this fork, and the fast path checks for that.
+				continue
+			}
 			if w.execute != nil {
 				require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
 			} else {
@@ -146,11 +146,22 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
 				continue
 			}
-			// Memory that need not grow costs no dynamic gas.
-			require.Equal(t, reflect.ValueOf(pureMemoryGascost).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
+			require.Equal(t, reflect.ValueOf(w.dynamicGas).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
 			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}
+}
+
+var forkInstructionSets = []*JumpTable{
+	&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
+	&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
+	&istanbulInstructionSet, &berlinInstructionSet, &londonInstructionSet,
+	&shanghaiInstructionSet, &cancunInstructionSet, &pragueInstructionSet,
+	&osakaInstructionSet, &amsterdamInstructionSet,
+}
+
+func undefined(op *operation) bool {
+	return reflect.ValueOf(op.execute).Pointer() == reflect.ValueOf(opUndefined).Pointer()
 }
 
 // fastPathWant is one fastPathOps entry, generated with the fast-path switch in vm_run_gen.go.
@@ -159,6 +170,7 @@ type fastPathWant struct {
 	gas             uint64
 	numPop, numPush int
 	memorySize      memorySizeFunc
+	dynamicGas      gasFunc
 }
 
 // TestRunIsGenerated fails when vm_run_gen.go or fast_path_gen_test.go are
@@ -246,8 +258,18 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
-		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		// Distinct context values, so an inlined context op that reads the wrong field shows.
+		block := gasTraceBlockContext()
+		block.Coinbase = accounts.InternAddress(common.HexToAddress("0x0b"))
+		block.GasLimit, block.BlockNumber, block.Time = 21, 22, 23
+		block.Difficulty, block.BaseFee, block.BlobBaseFee = *uint256.NewInt(24), *uint256.NewInt(25), *uint256.NewInt(26)
+		txCtx := evmtypes.TxContext{
+			Origin:     accounts.InternAddress(common.HexToAddress("0x0a")),
+			GasPrice:   *uint256.NewInt(27),
+			BlobHashes: []common.Hash{common.HexToHash("0x28"), common.HexToHash("0x29")},
+		}
+		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
+		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
 		c.Code = code
 		f := evm.run
 		if traced {
@@ -290,6 +312,61 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
 	}
+	// A copy op's dst src len over 64 distinct bytes, returning all of memory. RETURNDATACOPY
+	// copies the 32 bytes the identity precompile returns.
+	copyOp := func(op OpCode, dst, src, length []byte) []byte {
+		lo, hi := make([]byte, 32), make([]byte, 32)
+		for i := range 32 {
+			lo[i], hi[i] = byte(i+1), byte(i+33)
+		}
+		var b []byte
+		b = append(b, byte(PUSH32))
+		b = append(b, lo...)
+		b = append(b, byte(PUSH1), 0, byte(MSTORE), byte(PUSH32))
+		b = append(b, hi...)
+		b = append(b, byte(PUSH1), 32, byte(MSTORE))
+		if op == RETURNDATACOPY {
+			b = append(b, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(POP))
+		}
+		for _, w := range [][]byte{length, src, dst} {
+			b = append(b, byte(PUSH1)+byte(len(w)-1))
+			b = append(b, w...)
+		}
+		return append(b, byte(op), byte(MSIZE), byte(PUSH1), 0, byte(RETURN))
+	}
+	n := func(v int) []byte { return []byte{byte(v)} }
+	// 2^bits + low, as a big-endian push operand.
+	pow2 := func(bits int, low byte) []byte {
+		b := make([]byte, bits/8+1)
+		b[0], b[len(b)-1] = 1, low
+		return b
+	}
+	for name, args := range map[string][3][]byte{
+		"dstend":      {n(32), n(0), n(32)},
+		"dstpastend":  {n(33), n(0), n(32)},
+		"srcend":      {n(0), n(32), n(32)},
+		"srcpastend":  {n(0), n(33), n(32)},
+		"srcfar":      {n(0), n(250), n(16)},
+		"all":         {n(0), n(0), n(64)},
+		"zeroatend":   {n(64), n(64), n(0)},
+		"zeropastend": {n(65), n(65), n(0)},
+		"overlapup":   {n(1), n(0), n(40)},
+		"overlapdown": {n(0), n(1), n(40)},
+		"dsthuge":     {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(1)},
+		"srchuge":     {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(1)},
+		"srchugezero": {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0)},
+		"lenhuge":     {n(0), n(0), {1, 0, 0, 0, 0, 0, 0, 0, 32}},
+		"dst2pow128":  {pow2(128, 0), n(0), n(1)},
+		"dst2pow192":  {pow2(192, 0), n(0), n(1)},
+		"src2pow128":  {n(0), pow2(128, 0), n(1)},
+		"src2pow192":  {n(0), pow2(192, 0), n(1)},
+		"len2pow128":  {n(0), n(0), pow2(128, 32)},
+		"len2pow192":  {n(0), n(0), pow2(192, 32)},
+	} {
+		for _, op := range []OpCode{MCOPY, CODECOPY, CALLDATACOPY, RETURNDATACOPY} {
+			programs[strings.ToLower(op.String())+name] = copyOp(op, args[0], args[1], args[2])
+		}
+	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
 			programs["under"+op.String()] = prog(pushes(w.numPop-1), op)
@@ -299,8 +376,8 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		}
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
-	// GAS, MSIZE and the generic stack ops see whether the fast path stored its registers back.
-	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), GAS, MSIZE, NOT, OR)
+	// The generic MOD and SIGNEXTEND see whether the fast path stored gasLeft back.
+	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), MOD, SIGNEXTEND)
 	for i := range 300 {
 		b := pushes(8)
 		for range 40 {
@@ -343,6 +420,74 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			want, _ := runOnce(code, gas, true)
 			got, _ := runOnce(code, gas, false)
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
+		}
+	}
+}
+
+// TestRunTakesCopyFastPath fails when an allocated copy falls back to the
+// jump table, which the result comparison above cannot see.
+func TestRunTakesCopyFastPath(t *testing.T) {
+	t.Parallel()
+	errJumpTable := errors.New("jump table copy")
+	for _, op := range []OpCode{MCOPY, CODECOPY, CALLDATACOPY, RETURNDATACOPY} {
+		for _, traced := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/traced=%v", op, traced), func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+				jt := *evm.jt
+				jt[op].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
+				evm.jt = &jt
+				length := byte(8)
+				if op == RETURNDATACOPY {
+					length = 0 // there is no return data
+				}
+				c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+				c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), length, byte(PUSH1), 0, byte(PUSH1), 1, byte(op)}
+				f := evm.run
+				if traced {
+					f = evm.runTraced
+				}
+				_, _, _, err := f(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+				if traced {
+					require.ErrorIs(t, err, errJumpTable)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+func TestRunRejectsMcopyBeforeCancun(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.jt = &shanghaiInstructionSet
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 0, byte(MCOPY)}
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	var invalid *ErrInvalidOpCode
+	require.ErrorAs(t, err, &invalid)
+}
+
+func TestRunRejectsFastOpsBeforeTheirFork(t *testing.T) {
+	t.Parallel()
+	for _, jt := range forkInstructionSets {
+		for op := range fastPathOps {
+			if !undefined(&jt[op]) {
+				continue
+			}
+			ibs := state.New(state.NewNoopReader())
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			evm.jt = jt
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c.Code = append(bytes.Repeat([]byte{byte(PUSH1), 1}, 16), byte(op))
+			_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+			ibs.Close()
+			var invalid *ErrInvalidOpCode
+			require.ErrorAs(t, err, &invalid, "%s", op)
 		}
 	}
 }

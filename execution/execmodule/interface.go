@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -131,6 +132,8 @@ type ExecutionModule interface {
 	// rejection (e.g. ExecutionStatusTooFarAway).
 	InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error)
 
+	AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery)
+
 	// --- Chain validation -------------------------------------------------
 
 	// ValidateChain validates the chain ending at the block identified by
@@ -200,6 +203,10 @@ type ExecutionModule interface {
 	// IsCanonicalHash reports whether blockHash belongs to the canonical
 	// chain.
 	IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error)
+
+	// IsValidated reports whether a payload with blockHash already passed
+	// validation.
+	IsValidated(blockHash common.Hash) bool
 
 	// GetHeaderHashNumber returns the block number for blockHash, or nil
 	// when the hash is unknown.

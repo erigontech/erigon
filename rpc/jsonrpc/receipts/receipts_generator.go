@@ -124,10 +124,6 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
-	return g.receiptCache.Get(txNum)
-}
-
 // TryGetCachedReceipt is a fast path that avoids calling TxnByIdxInBlock.
 // TxnByIdxInBlock opens snapshot segments (Bodies + Transactions) or reads MDBX just to obtain
 // the txnHash, which is then used only to key the execution mutex in GetReceipt. When the receipt
@@ -167,7 +163,7 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 	if !PersistedReceiptsServed() {
 		return nil, false, nil
 	}
-	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txIndex)
+	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txNum, txIndex)
 	if err != nil || !ok {
 		return nil, false, err
 	}
@@ -477,9 +473,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 // PostStateCalculated reports whether the receipts of this block carry a post state
 // that has to be computed. The persistent cache does not store that field, so those
-// receipts are re-executed and reach only as far as state history — which is what the
-// RPC availability gates must answer for. The fork check comes first: FrozenBlocks is a
-// backend call on a remote rpcdaemon, and every receipt request reaches this.
+// receipts need state history and, when enabled, commitment history to be re-executed.
+// The fork check comes first: FrozenBlocks is a backend call on a remote rpcdaemon,
+// and every receipt request reaches this.
 func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEnabled bool, blockReader dbservices.FullBlockReader) bool {
 	if cfg.IsByzantium(blockNum) {
 		return false

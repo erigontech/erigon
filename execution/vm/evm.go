@@ -44,6 +44,28 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
+// runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
+func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
+		return RunPrecompiledContract(p, input, gas, tracer)
+	}
+	buf := evm.outputBuffer(evm.depth+1, uint64(len(input)))
+	if buf == nil {
+		return RunPrecompiledContract(p, input, gas, tracer)
+	}
+	gasCost := p.RequiredGas(input)
+	if gas.Execution < gasCost {
+		return nil, gas, ErrOutOfGas
+	}
+	remaining := gas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	}
+	*buf = append((*buf)[:0], input...)
+	return slices.Clip(*buf), remaining, nil
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -67,8 +89,8 @@ type EVM struct {
 	depth int
 	// txOutput receives the top-level frame's output; nil means a fresh copy.
 	txOutput *[]byte
-	// outputs[depth] receives a nested frame's output. Only the parent reads it,
-	// and only until its next call, which is the next frame at that depth.
+	// outputs[depth] receives the output of a nested call at depth, a frame or a
+	// precompile. Only the caller reads it, and only until its next call.
 	outputs *[16][]byte
 
 	// chainConfig contains information about the current chain
@@ -91,139 +113,16 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	// Pointers before counters: interleaving them adds a word of padding.
-	internCache *storageKeyCache
-	addrCache   *addressCache
-	internOps   uint32
-	addrOps     uint32
-
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
 
-// evmSizeClass is the Go allocation size class EVM fills. Growing it from the
-// 448-byte class measured within workload noise: a field added here either
-// packs into existing padding or bumps this const, and bumping it is the
+// evmSizeClass is the Go allocation size class EVM fills. A field added here
+// either packs into existing padding or bumps this const, and bumping it is the
 // expected answer to growth someone meant.
 // TestEVMFitsItsSizeClass is therefore a tripwire for the growth nobody meant,
 // not a budget — a build-time assert would also fire in every package that
 // grows an embedded type such as evmtypes.BlockContext.
-const evmSizeClass = 480
-
-// storageKeyCacheSize must comfortably exceed a contract's live slot count,
-// or conflict misses dominate.
-const storageKeyCacheSize = 1024
-
-// storageKeyCacheMinOps delays the table until interning has cost more than
-// zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
-// cannot win the allocation back however well the keys repeat.
-const storageKeyCacheMinOps = 128
-
-// slotIndex masks rather than divides, so the size has to be a power of two.
-var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
-
-// storageKeyCache memoizes InternKey by the source stack word. Interning is a
-// pure function and a live handle keeps its entry alive, so the cache never
-// goes stale and is never cleared. Words are stored beside the handles because
-// that is cheaper than recovering them via handle.Value(); the pointer-free
-// words go last so the GC scan stops at the handles.
-type storageKeyCache struct {
-	handles [storageKeyCacheSize]accounts.StorageKey
-	words   [storageKeyCacheSize]uint256.Int
-}
-
-// slotIndex mixes all four limbs: keccak-derived slots differ across the whole
-// word, array and scalar slots only in the lowest.
-func slotIndex(word *uint256.Int) uint64 {
-	return (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
-}
-
-// A nil handle marks an unused entry; the zero word is a legitimate key.
-func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey {
-	h := accounts.InternKey(word.Bytes32())
-	c.words[i], c.handles[i] = *word, h
-	return h
-}
-
-// internStorageKey returns word interned as a StorageKey, skipping unique.Make
-// for words seen before. Short-lived EVMs intern uncached: the table only earns
-// back its allocation over a few hundred storage ops.
-func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
-	c := evm.internCache
-	if c == nil {
-		if evm.internOps < storageKeyCacheMinOps {
-			evm.internOps++
-			return accounts.InternKey(word.Bytes32())
-		}
-		c = new(storageKeyCache)
-		evm.internCache = c
-		return c.fill(slotIndex(word), word)
-	}
-	i := slotIndex(word)
-	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
-		return h
-	}
-	return c.fill(i, word)
-}
-
-// Address streams are far narrower than storage-key streams — a handful of
-// routers and tokens dominate — so the address table is a quarter of the size
-// and pays its zeroing back sooner.
-const (
-	addressCacheSize   = 256
-	addressCacheMinOps = 32
-)
-
-// AddressCacheSize lets benchmarks outside this package pin the bucket count
-// their hit/miss tiers were chosen against.
-const AddressCacheSize = addressCacheSize
-
-var _ [0]struct{} = [addressCacheSize & (addressCacheSize - 1)]struct{}{}
-
-// addressCache is storageKeyCache for InternAddress; see that type for why the
-// entries never go stale and why the words sit beside the handles. It differs in
-// its key: a stack word may hold anything above the low 20 bytes, so index,
-// compare and stored word all drop those bits and one entry then serves an
-// address whatever the rest of its word holds.
-type addressCache struct {
-	handles [addressCacheSize]accounts.Address
-	words   [addressCacheSize]uint256.Int
-}
-
-// addrIndex mixes only the limbs Bytes20 reads: 0, 1 and the low half of 2.
-func addrIndex(word *uint256.Int) uint64 {
-	return (word[0] ^ word[1] ^ uint64(uint32(word[2]))) & (addressCacheSize - 1)
-}
-
-// fill stores the word with everything above the address cleared, which is also
-// what lets the probe compare three limbs instead of four.
-func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
-	h := accounts.InternAddress(word.Bytes20())
-	c.words[i] = uint256.Int{word[0], word[1], uint64(uint32(word[2])), 0}
-	c.handles[i] = h
-	return h
-}
-
-// internAddress returns the low 20 bytes of word interned as an Address,
-// skipping unique.Make for addresses seen before. Short-lived EVMs intern
-// uncached: the table only earns back its allocation over a few dozen ops.
-func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
-	c := evm.addrCache
-	if c == nil {
-		if evm.addrOps < addressCacheMinOps {
-			evm.addrOps++
-			return accounts.InternAddress(word.Bytes20())
-		}
-		c = new(addressCache)
-		evm.addrCache = c
-		return c.fill(addrIndex(word), word)
-	}
-	i := addrIndex(word)
-	if h := c.handles[i]; h != accounts.NilAddress && c.words[i][0] == word[0] &&
-		c.words[i][1] == word[1] && c.words[i][2] == uint64(uint32(word[2])) {
-		return h
-	}
-	return c.fill(i, word)
-}
+const evmSizeClass = 448
 
 // ZeroUnpricedBaseFee returns blockCtx with the base fee dropped for a call that
 // skips the fee checks and puts no price on gas, so that its fee cap is never
@@ -413,12 +312,12 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	// Fail if we're trying to transfer more than the available balance.
 	// Skip the check for zero-value calls, matching geth's short-circuit.
-	if !value.IsZero() {
+	if !value.IsZero() && !bailout {
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
 		}
-		if !canTransfer && !bailout {
+		if !canTransfer {
 			return nil, gasRemaining, mdgas.MdGasUsage{}, ErrInsufficientBalance
 		}
 	}
@@ -464,7 +363,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
@@ -539,7 +438,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -598,7 +497,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: callerAddress, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -670,7 +569,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: addr, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, true)
