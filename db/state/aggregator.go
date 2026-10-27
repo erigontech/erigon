@@ -117,8 +117,11 @@ type Aggregator struct {
 	// exposed to SharedDomains via the duck-typed kvmetrics.MetricsCollectorProvider.
 	metricsCollector *kvmetrics.Collector
 
-	onFilesChange kv.OnFilesChange
-	onFilesDelete kv.OnFilesChange
+	onFilesChange       kv.OnFilesChange
+	onFilesDelete       kv.OnFilesChange
+	maintenanceObserver atomic.Pointer[MaintenanceObserver]
+	observerCtx         context.Context
+	observerCancel      context.CancelFunc
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -137,9 +140,12 @@ type Aggregator struct {
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
+	observerCtx, observerCancel := context.WithCancel(ctx)
 	a := &Aggregator{
 		ctx:                ctx,
 		ctxCancel:          ctxCancel,
+		observerCtx:        observerCtx,
+		observerCancel:     observerCancel,
 		onFilesChange:      func(frozenFileNames []string) {},
 		onFilesDelete:      func(frozenFileNames []string) {},
 		dirs:               dirs,
@@ -594,7 +600,7 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 // btIndexFitsInMem reports whether the .bt files of btInMemDefaultDomains, as they are on disk now, fit the in-memory budget.
 func (a *Aggregator) btIndexFitsInMem() bool {
 	total := estimate.TotalMemory()
-	if total < btInMemMinTotalMemory {
+	if total < smallMemExistenceFilterTotal {
 		return false
 	}
 	return btIndexFitsInMem(btIndexFilesSize(a.dirs.SnapDomain, btInMemDefaultDomains), total)
@@ -722,6 +728,7 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.observerCancel()
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
@@ -1027,11 +1034,8 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) error {
-	// Pin worker counts for the duration of buildFiles. The collate/build phases
-	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
-	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
-	// Preset* calls would race with those reads.
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
+	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
@@ -1057,6 +1061,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		)
 		return errStepNotReady
 	}
+	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceBuildStarted, FilesDone: filesDone})
+
 	var (
 		txFrom        = a.FirstTxNumOfStep(step)
 		txTo          = a.FirstTxNumOfStep(step + 1)
@@ -1076,7 +1082,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		}
 	}()
 
-	g, ctx := errgroup.WithContext(ctx)
+	g, workerCtx := errgroup.WithContext(ctx)
 	g.SetLimit(a.workers.getCollateAndBuild())
 
 	ac := a.BeginFilesRo()
@@ -1093,8 +1099,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 		g.Go(func() error {
 			var collation Collation
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
+			if err := db.View(workerCtx, func(tx kv.Tx) (err error) {
+				collation, err = d.collate(workerCtx, step, txFrom, txTo, tx)
 				return err
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
@@ -1103,7 +1109,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			sf, err := d.buildFiles(ctx, step, collation, a.backgroundProgress)
+			sf, err := d.buildFiles(workerCtx, step, collation, a.backgroundProgress)
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -1133,14 +1139,14 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 		g.Go(func() error {
 			var collation InvertedIndexCollation
-			err := db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = ii.collate(ctx, step, tx)
+			err := db.View(workerCtx, func(tx kv.Tx) (err error) {
+				collation, err = ii.collate(workerCtx, step, tx)
 				return err
 			})
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 			}
-			sf, err := ii.buildFiles(ctx, step, collation, a.backgroundProgress)
+			sf, err := ii.buildFiles(workerCtx, step, collation, a.backgroundProgress)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -1157,7 +1163,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	}
 	a.logger.Debug("[agg] collate-build", "step", step, "collate_workers", a.workers.getCollateAndBuild(), "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers, "took", time.Since(stepStartedAt))
 	mxStepTook.ObserveDuration(stepStartedAt)
+	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceFilesBuilt})
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
+	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceFilesPublished})
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
 	return nil
@@ -1233,7 +1241,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, finalityCtx); err != nil {
+			if err := a.buildFiles(ctx, db, step, finalityCtx, nil); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -1772,11 +1780,15 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		var err error
 		finalityCtx, err = pruneFn(tx)
+		if err == nil {
+			a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenancePruneReady, PruneTx: tx})
+		}
 		return err
 	})
 	if err != nil {
 		return false, nil, err
 	}
+	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenancePruneCommitted})
 	finished, started := a.buildFilesInBackground(db, a.EndTxNumMinimax()+a.StepSize(), true, finalityCtx)
 	return started, finished, nil
 }
@@ -2344,7 +2356,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx); err != nil {
+			if err := a.buildFiles(a.ctx, db, step, finalityCtx, fin); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}

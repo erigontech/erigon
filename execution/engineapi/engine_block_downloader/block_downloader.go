@@ -297,9 +297,18 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 			lastValidHash,
 		)
 	}
-	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	fcuStatus, validationErr, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
 	if err != nil {
 		return err
+	}
+	if fcuStatus == execmodule.ExecutionStatusTooFarAway {
+		e.logger.Debug(
+			"[EngineBlockDownloader] continuing block batch download after fork choice answered too far away",
+			"tip", block.Hash(),
+			"latestValidHash", lastValidHash,
+			"err", common.Deref(validationErr),
+		)
+		return nil
 	}
 	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(

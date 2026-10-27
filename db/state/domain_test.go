@@ -4107,3 +4107,21 @@ func TestBtIndexFilesSize(t *testing.T) {
 	require.NoError(t, os.Symlink(target, filepath.Join(dir, "v1.1-code.0-64.bt")))
 	require.Equal(t, uint64(450), btIndexFilesSize(dir, btInMemDefaultDomains), "a symlinked .bt counts its target's size")
 }
+
+func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
+	for _, tc := range []struct {
+		mode  statecfg.ExistenceFilterMode
+		total uint64
+		want  statecfg.ExistenceFilterMode
+	}{
+		{statecfg.ExistenceFilterInMem, 16 << 30, statecfg.ExistenceFilterRandom},
+		{statecfg.ExistenceFilterInMem, 20<<30 - 1, statecfg.ExistenceFilterRandom},
+		{statecfg.ExistenceFilterInMem, 20 << 30, statecfg.ExistenceFilterInMem},
+		{statecfg.ExistenceFilterInMem, 64 << 30, statecfg.ExistenceFilterInMem},
+		{statecfg.ExistenceFilterInMem, 0, statecfg.ExistenceFilterInMem},
+		{statecfg.ExistenceFilterNormal, 16 << 30, statecfg.ExistenceFilterNormal},
+		{statecfg.ExistenceFilterWillNeed, 16 << 30, statecfg.ExistenceFilterWillNeed},
+	} {
+		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
+	}
+}

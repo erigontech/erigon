@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -56,12 +57,16 @@ func (a *ApiHandler) rootFromBlockId(tx kv.Tx, blockId *beaconhttp.SegmentID) (r
 			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
 		}
 	case blockId.GetSlot() != nil:
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.GetSlot())
+		slot := *blockId.GetSlot()
+		if slot > math.MaxUint32 {
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", slot))
+		}
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", *blockId.GetSlot()))
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", slot))
 		}
 	case blockId.GetRoot() != nil:
 		// first check if it exists

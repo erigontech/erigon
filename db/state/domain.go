@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -224,10 +225,6 @@ var (
 	domainBtForceMmap  = dbg.EnvStrings("DOMAIN_BT_MMAP", ",", nil)
 )
 
-// btInMemMinTotalMemory is the memory below which .bt files stay memory-mapped, the same bound
-// below which existence filters leave the heap.
-const btInMemMinTotalMemory = 20 << 30
-
 // btInMemMaxShare caps the .bt files read into memory at this fraction of the total memory.
 const btInMemMaxShare = 10
 
@@ -236,8 +233,9 @@ const btInMemMaxShare = 10
 var btInMemDefaultDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String()}
 
 // btIndexFitsInMem reports whether btSize bytes of .bt files may be read into memory on a node with total bytes of memory.
+// Below smallMemExistenceFilterTotal, where existence filters also leave the heap, they stay memory-mapped.
 func btIndexFitsInMem(btSize, total uint64) bool {
-	return total >= btInMemMinTotalMemory && btSize <= total/btInMemMaxShare
+	return total >= smallMemExistenceFilterTotal && btSize <= total/btInMemMaxShare
 }
 
 // readBtIndexInMem reports whether a domain reads a .bt file into memory instead of mapping it, so state reads at the
@@ -305,8 +303,17 @@ func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	case slices.Contains(domainExistenceForceRandom, name):
 		return statecfg.ExistenceFilterRandom
 	default:
-		return d.ExistenceFilter
+		return defaultExistenceFilterMode(d.ExistenceFilter, estimate.TotalMemory())
 	}
+}
+
+const smallMemExistenceFilterTotal = 20 << 30
+
+func defaultExistenceFilterMode(mode statecfg.ExistenceFilterMode, total uint64) statecfg.ExistenceFilterMode {
+	if mode == statecfg.ExistenceFilterInMem && total > 0 && total < smallMemExistenceFilterTotal {
+		return statecfg.ExistenceFilterRandom
+	}
+	return mode
 }
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {

@@ -247,6 +247,9 @@ type VersionMap struct {
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
+	// absentAccountHook runs after an account read found no account, before the
+	// self-destruct and revival probes. Tests set it to land a flush there.
+	absentAccountHook func()
 }
 
 type originStorageKey struct {

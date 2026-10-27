@@ -376,7 +376,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
 	if oldGasLimit != stateChanges.BlockGasLimit {
 		p.all.ascendAll(func(mt *metaTxn) bool {
-			if mt.TxnSlot.GetGas() < stateChanges.BlockGasLimit {
+			if mt.TxnSlot.GetGas() <= stateChanges.BlockGasLimit {
 				mt.subPool |= NotTooMuchGas
 			} else {
 				mt.subPool &^= NotTooMuchGas
@@ -798,7 +798,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		if mt.TxnSlot.GetGas() >= p.blockGasLimit.Load() {
+		if mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
 		}
@@ -1197,6 +1197,19 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+		}
+		return txpoolcfg.Spammer
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
+	}
+
 	if p.isOsaka() {
 		err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
 		if err != nil {
@@ -1211,18 +1224,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
-		}
-		return txpoolcfg.Spammer
-	}
-	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
-		}
-		return txpoolcfg.BlobPoolOverflow
-	}
 	return txpoolcfg.Success
 }
 
@@ -2233,6 +2234,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
+	followsRemote := false
 	senderHasCode := !senderCodeHash.IsEmpty()
 	senderTxnKept := false
 	var toDel []*metaTxn                       // can't delete items while iterate them
@@ -2277,6 +2279,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			minTip = min(minTip, mt.TxnSlot.GetTipCap().Uint64())
 		}
 		mt.minTip = minTip
+		mt.followsRemote = followsRemote
+		followsRemote = followsRemote || mt.subPool&IsLocal == 0
 
 		mt.nonceDistance = 0
 		if mt.TxnSlot.Nonce > senderNonce { // no uint underflow
@@ -2312,7 +2316,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 
 		mt.subPool &^= NotTooMuchGas
-		if mt.TxnSlot.GetGas() < blockGasLimit {
+		if mt.TxnSlot.GetGas() <= blockGasLimit {
 			mt.subPool |= NotTooMuchGas
 		}
 
