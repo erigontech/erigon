@@ -347,13 +347,31 @@ func TestFrameCallConstructor(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
 	base := newBaseApiForTest(m)
-	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
 	want := []byte{byte(vm.PUSH0), byte(vm.STOP)}
-	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(sender, 0), program.New().ReturnData(want).Bytes())
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, result.Code)
-	require.Equal(t, hexutil.Bytes(want), *result.Code)
+	for _, tc := range []struct {
+		name    string
+		gasCap  uint64
+		wantErr bool
+	}{
+		{name: "within cap", gasCap: 2_000_000},
+		{name: "below consumed gas", gasCap: pack.Receipts[0][0].GasUsed - 1, wantErr: true},
+		{name: "below declared budget", gasCap: frameTx.GetGasLimit() - 1, wantErr: true},
+		{name: "at declared budget", gasCap: frameTx.GetGasLimit()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
+			result, err := api.CallConstructor(m.Ctx, types.CreateAddress(sender, 0), program.New().ReturnData(want).Bytes())
+			if tc.wantErr {
+				require.ErrorContains(t, err, "exceeds the RPC gas cap")
+				require.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, result.Code)
+			require.Equal(t, hexutil.Bytes(want), *result.Code)
+		})
+	}
 }
 
 func TestCallConstructorRejectsNonContract(t *testing.T) {

@@ -156,6 +156,14 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("could not find txn hash")
 	}
 
+	creationTx := block.Transactions()[transactionIndex]
+	// Signed frame budgets cannot be clamped like an ordinary message's gas limit.
+	if api.GasCap != 0 && creationTx.Type() == types.FrameTxType {
+		if gasLimit := creationTx.GetGasLimit(); gasLimit > api.GasCap {
+			return nil, fmt.Errorf("frame transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+		}
+	}
+
 	replayTransactions = block.Transactions()[:transactionIndex]
 
 	err = rpchelper.CheckBlockExecuted(tx, blockNum)
@@ -208,7 +216,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 	}
 
-	creationTx := block.Transactions()[transactionIndex]
 	statedb.SetTxContext(blockNum, transactionIndex)
 
 	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
