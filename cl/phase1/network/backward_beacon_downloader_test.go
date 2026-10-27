@@ -702,6 +702,7 @@ func TestBackwardBeaconDownloaderRequestMoreDoesNotFinishWhenRootFallbackCallbac
 	require.Equal(t, common.Hash(targetRoot), downloader.expectedRoot)
 	require.Equal(t, target.Block.Slot, downloader.Progress())
 	require.Equal(t, 1, callbackAttempts)
+	require.Zero(t, downloader.Processed())
 	require.False(t, downloader.httpPreferred.Load())
 	requestsBeforeRetry := httpRequests.Load()
 	retryCtx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
@@ -717,6 +718,7 @@ func TestBackwardBeaconDownloaderRequestMoreDoesNotFinishWhenRootFallbackCallbac
 	require.True(t, downloader.Finished())
 	require.Equal(t, target.Block.ParentRoot, downloader.expectedRoot)
 	require.Equal(t, target.Block.Slot-1, downloader.Progress())
+	require.Equal(t, uint64(1), downloader.Processed())
 }
 
 func TestBackwardBeaconDownloaderRequestMoreRetainsLookaheadAfterPartialCallbackFailure(t *testing.T) {
@@ -1942,6 +1944,7 @@ func TestBackwardBeaconDownloaderSkipsGloasPayloadProvenEmptyBySuccessor(t *test
 	require.NoError(t, downloader.trySkipToExistingBlock(t.Context()))
 	require.Equal(t, stored.Block.ParentRoot, downloader.expectedRoot)
 	require.Equal(t, stored.Block.Slot-1, downloader.Progress())
+	require.Zero(t, downloader.Processed())
 }
 
 func TestBackwardBeaconDownloaderSkipRetainsDirectGloasSuccessor(t *testing.T) {
@@ -3030,10 +3033,10 @@ func TestBackwardBeaconDownloaderCountsOnlyProcessedBlocks(t *testing.T) {
 
 	responses := []*cltypes.SignedBeaconBlock{parent, child}
 	require.NoError(t, b.processResponses(t.Context(), responses))
-	require.Zero(t, b.Downloaded(), "a block whose onNewBlock failed is retried, not downloaded")
+	require.Zero(t, b.Processed(), "a block whose onNewBlock failed is retried, not processed")
 	require.Equal(t, uint64(11), b.Progress())
 
 	require.NoError(t, b.processResponses(t.Context(), responses))
-	require.Equal(t, uint64(2), b.Downloaded())
+	require.Equal(t, uint64(2), b.Processed())
 	require.Equal(t, uint64(9), b.Progress())
 }
