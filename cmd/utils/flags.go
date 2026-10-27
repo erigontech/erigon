@@ -2178,21 +2178,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		setDevnetEthConfig(ctx, cfg, logger)
 	}
 
-	if path := ctx.String(OverrideGenesisFlag.Name); path != "" {
-		if ctx.IsSet(ChainFlag.Name) {
-			Fatalf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
-		}
-		genesis, err := ReadGenesisFile(path)
-		if err != nil {
-			Fatalf("%v", err)
-		}
-		cfg.Genesis = genesis
-		// The discovery defaults set above belong to the default --chain network,
-		// not to this genesis.
-		if !ctx.IsSet(DNSDiscoveryFlag.Name) && !ctx.Bool(NoDiscoverFlag.Name) {
-			cfg.EthDiscoveryURLs = nil
-		}
-	}
+	setOverrideGenesis(ctx, cfg)
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
 		v := ctx.Uint64(OverrideOsakaFlag.Name)
@@ -2439,6 +2425,30 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
 // no URLs are set.
+// setOverrideGenesis applies --override.genesis. It must run after the --chain
+// defaults are applied, as it replaces the ones that belong to the default
+// --chain network rather than to the given genesis.
+func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) {
+	path := ctx.String(OverrideGenesisFlag.Name)
+	if path == "" {
+		return
+	}
+	if ctx.IsSet(ChainFlag.Name) {
+		Fatalf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
+	}
+	genesis, err := ReadGenesisFile(path)
+	if err != nil {
+		Fatalf("%v", err)
+	}
+	cfg.Genesis = genesis
+	if !ctx.IsSet(NetworkIdFlag.Name) && genesis.Config.ChainID != nil {
+		cfg.NetworkID = genesis.Config.ChainID.Uint64()
+	}
+	if !ctx.IsSet(DNSDiscoveryFlag.Name) && !ctx.Bool(NoDiscoverFlag.Name) {
+		cfg.EthDiscoveryURLs = nil
+	}
+}
+
 func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, spec chainspec.Spec) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
