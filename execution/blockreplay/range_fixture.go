@@ -90,12 +90,21 @@ func (rf *RangeFixture) MergedWitness() *Fixture {
 			}
 		}
 	}
-	// Drop storage for any address with no present account in the merge. SeedDomains
-	// seeds storage unconditionally but skips non-present accounts, so orphan storage
-	// would be written against an account that was never seeded and the replay diverges.
+	// Drop storage and code for any address with no present account in the merge.
+	// SeedDomains seeds both only for a present account, so an orphan entry would be
+	// written against an account that was never seeded and the replay diverges.
+	present := func(a [20]byte) bool {
+		d, ok := m.Accounts[a]
+		return ok && d.Present
+	}
 	for a := range m.Storage {
-		if d, ok := m.Accounts[a]; !ok || !d.Present {
+		if !present(a) {
 			delete(m.Storage, a)
+		}
+	}
+	for a := range m.Code {
+		if !present(a) {
+			delete(m.Code, a)
 		}
 	}
 	m.Outputs = rf.Outputs
