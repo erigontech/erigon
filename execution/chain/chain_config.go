@@ -103,6 +103,10 @@ type Config struct {
 	// credited to it instead. Ignored when BurntContract is set.
 	FeeCollector *common.Address `json:"feeCollector,omitempty"`
 
+	// (Optional) BaseFeeChangeDenominator replaces EIP-1559's
+	// BASE_FEE_MAX_CHANGE_DENOMINATOR of 8. It must be positive.
+	BaseFeeChangeDenominator *uint64 `json:"baseFeeChangeDenominator,omitempty"`
+
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`

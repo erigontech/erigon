@@ -98,6 +98,9 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *uint256.Int {
 		parentGasTargetU256      = uint256.NewInt(parentGasTarget)
 		baseFeeChangeDenominator = uint256.NewInt(params.BaseFeeChangeDenominator)
 	)
+	if config.BaseFeeChangeDenominator != nil {
+		baseFeeChangeDenominator.SetUint64(*config.BaseFeeChangeDenominator)
+	}
 	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
 	if parent.GasUsed == parentGasTarget {
 		return new(uint256.Int).Set(parent.BaseFee)
