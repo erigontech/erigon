@@ -28,10 +28,56 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
+
+func TestPruneRunsForkchoicePipeline(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(4, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+	m.ExecModule.Drain()
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStagePruneProgress(tx, stages.Execution, 0)
+	}))
+	provider, ok := m.DB.(state.HasAgg)
+	require.True(t, ok)
+	agg, ok := provider.Agg().(*state.Aggregator)
+	require.True(t, ok)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var observed []state.MaintenancePoint
+	agg.SetMaintenanceObserver(func(observerCtx context.Context, event state.MaintenanceEvent) {
+		if event.Point != state.MaintenancePruneReady && event.Point != state.MaintenancePruneCommitted {
+			return
+		}
+		observed = append(observed, event.Point)
+		ready, err := m.ExecModule.Ready(t.Context())
+		require.NoError(t, err)
+		require.False(t, ready, "pruning must hold the execution semaphore through commit")
+		cancel()
+		require.NoError(t, observerCtx.Err(), "caller cancellation must not release an active prune barrier")
+	})
+	defer agg.SetMaintenanceObserver(nil)
+
+	finished, err := m.ExecModule.Prune(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, finished)
+	<-finished
+	require.Equal(t, []state.MaintenancePoint{state.MaintenancePruneReady, state.MaintenancePruneCommitted}, observed)
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		progress, err := stages.GetStagePruneProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, chain.TopBlock.NumberU64(), progress, "the full pruning pipeline must run")
+		return nil
+	}))
+	ready, err := m.ExecModule.Ready(t.Context())
+	require.NoError(t, err)
+	require.True(t, ready, "pruning must release the execution semaphore")
+}
 
 func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
 	for _, tc := range []struct {
