@@ -72,7 +72,7 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 
 	if len(path) != 0 {
 		collected := filter.filterFiles(collectFiles(path))
-		results, err := runBlockTestsParallel(ctx, collected, workers, filter)
+		results, err := runBlockTestsParallel(collected, workers, filter)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		results, err := runBlockTest(ctx, fname, filter)
+		results, err := runBlockTest(fname, filter)
 		if err != nil {
 			return err
 		}
@@ -102,9 +102,9 @@ type fileResult struct {
 	err     error
 }
 
-func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+func runBlockTestsParallel(files []string, workers uint64, filter testFilter) ([]testResult, error) {
 	return runTestFilesParallel(files, workers, func(path string) ([]testResult, error) {
-		return runBlockTest(ctx, path, filter)
+		return runBlockTest(path, filter)
 	})
 }
 
@@ -198,7 +198,7 @@ func collectFiles(path string) []string {
 	return out
 }
 
-func runBlockTest(ctx *cli.Command, fname string, filter testFilter) ([]testResult, error) {
+func runBlockTest(fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
