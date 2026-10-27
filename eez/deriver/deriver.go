@@ -51,11 +51,16 @@ type Deriver struct {
 	// seed is the settlement derivation started after; the batches of its
 	// L1 block up to it are behind the cursor.
 	seed *Record
+	// blobs serves the blobs of rollupX batches; sched is the rollupX
+	// schedule, read from the genesis when first needed.
+	blobs l1.BlobSource
+	sched *Schedule
 }
 
 // New returns a deriver extending chain, an EEZ chain configured by cfg,
-// that keeps its checkpoint in dir unless dir is empty.
-func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Deriver, error) {
+// that keeps its checkpoint in dir unless dir is empty. blobs serves the
+// payloads of rollupX batches.
+func New(chain Chain, cfg *chain.Config, dir string, blobs l1.BlobSource, logger log.Logger) (*Deriver, error) {
 	l2, ok := cfg.L2.(*config.L2Config)
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
@@ -66,6 +71,7 @@ func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Derive
 		l2:     l2,
 		sync:   protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID, EEZL2: l2.EEZL2()},
 		dir:    dir,
+		blobs:  blobs,
 		logger: logger,
 	}, nil
 }
@@ -117,6 +123,19 @@ func (d *Deriver) Reconcile(ctx context.Context, batches []l1.ScannedBatch) (err
 			d.seed = nil
 		}
 		if len(b.Settlement.Applied) == 0 || d.index.Contains(b.TxHash) {
+			continue
+		}
+		if d.l2.RollupX != nil {
+			p, err := d.decodeRollupX(ctx, b)
+			if err != nil {
+				return err
+			}
+			r, err := d.reconcileRollupX(ctx, b, p)
+			if err != nil {
+				return err
+			}
+			d.index.Append(r)
+			appended = true
 			continue
 		}
 		p, err := DecodePayload(b.Batch, d.l2.RollupID)
@@ -232,7 +251,7 @@ func (d *Deriver) reconcileBatch(ctx context.Context, b *l1.ScannedBatch, p *Pay
 		return Record{}, err
 	}
 	d.logger.Debug("[eez] batch derived", "l1Block", b.L1Block, "tx", b.TxHash, "from", r.From, "to", r.To, "settled", end, "resumed", r.Resumed)
-	return Record{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, TxHash: b.TxHash, LastL2Block: end}, nil
+	return Record{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, L1Time: b.L1Time, L1MixDigest: b.L1MixDigest, TxHash: b.TxHash, LastL2Block: end}, nil
 }
 
 // reconcileBlocks rebuilds the range r from the payload and returns the

@@ -33,9 +33,14 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// ErrL1ChainID reports an L1 source on another chain than the configured
-// one.
-var ErrL1ChainID = errors.New("L1 source serves another chain")
+var (
+	// ErrL1ChainID reports an L1 source on another chain than the
+	// configured one.
+	ErrL1ChainID = errors.New("L1 source serves another chain")
+	// ErrL1Reference reports an L1 whose canonical block differs from the
+	// rollupX genesis's L1 reference.
+	ErrL1Reference = errors.New("L1 does not hold the genesis's L1 reference")
+)
 
 // Config tunes a Follower.
 type Config struct {
@@ -60,6 +65,9 @@ type Config struct {
 	// read every SequencerPoll, while it descends from the safe block.
 	Sequencer     Sequencer
 	SequencerPoll time.Duration
+	// Blobs serves the blobs of blob-backed batches; without it the
+	// follower cannot derive them.
+	Blobs l1.BlobSource
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -147,11 +155,14 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
 	}
-	d, err := deriver.New(chain, cfg, c.Dir, logger)
+	d, err := deriver.New(chain, cfg, c.Dir, c.Blobs, logger)
 	if err != nil {
 		return nil, err
 	}
 	scanner := l1.NewScanner(reader, l2.Registry, l2.RollupID)
+	if l2.RollupX != nil {
+		scanner.UseRollupX()
+	}
 	if c.LogChunk > 0 {
 		scanner.SetChunk(c.LogChunk)
 	}
@@ -270,6 +281,11 @@ func (f *Follower) boot(ctx context.Context) error {
 	if id != f.l2.L1ChainID {
 		return fmt.Errorf("%w: chain %d, want %d", ErrL1ChainID, id, f.l2.L1ChainID)
 	}
+	if x := f.l2.RollupX; x != nil {
+		if err := f.checkL1Reference(ctx, &x.L1Reference); err != nil {
+			return err
+		}
+	}
 	head, err := f.reader.Head(ctx)
 	if err != nil {
 		return err
@@ -298,8 +314,7 @@ func (f *Follower) resume(ctx context.Context, head uint64) (uint64, error) {
 	}
 	if r != nil {
 		f.logger.Info("[eez] resuming from checkpoint", "l1Block", r.L1Block, "l2Block", r.LastL2Block)
-		f.deriver.Seed(*r)
-		return r.L1Block, nil
+		return r.L1Block, f.seed(ctx, r)
 	}
 	deploy := f.l2.RegistryDeployBlock
 	if r, err = deriver.FindResumePoint(ctx, f.reader, f.l2.Registry, f.l2.RollupID, deploy, head, f.chain.CanonicalNumber); err != nil {
@@ -307,11 +322,44 @@ func (f *Follower) resume(ctx context.Context, head uint64) (uint64, error) {
 	}
 	if r != nil {
 		f.logger.Info("[eez] resuming from local settled block", "l1Block", r.L1Block, "l2Block", r.LastL2Block)
-		f.deriver.Seed(*r)
-		return r.L1Block, nil
+		return r.L1Block, f.seed(ctx, r)
 	}
 	f.logger.Info("[eez] deriving from the registry deploy block", "l1Block", deploy)
 	return max(deploy, 1), nil
+}
+
+// checkL1Reference checks that L1 finalized the rollupX genesis's L1
+// reference: its canonical block at the reference's number has the
+// reference's hash, timestamp and mixHash.
+func (f *Follower) checkL1Reference(ctx context.Context, ref *config.L1Reference) error {
+	if ref.Number > 0 {
+		fin, err := f.reader.Finalized(ctx)
+		if err != nil {
+			return err
+		}
+		if fin.Number < ref.Number {
+			return fmt.Errorf("L1 finalized block %d is below the genesis's L1 reference %d", fin.Number, ref.Number)
+		}
+	}
+	h, err := f.reader.HeaderByNumber(ctx, ref.Number)
+	if err != nil {
+		return err
+	}
+	if h.Hash != ref.Hash || h.Time != ref.Timestamp || h.MixDigest != ref.PrevRandao {
+		return fmt.Errorf("%w: block %d is %x at time %d with mixHash %x", ErrL1Reference, ref.Number, h.Hash, h.Time, h.MixDigest)
+	}
+	return nil
+}
+
+// seed starts the deriver after r, with its L1 block's timestamp and mixHash.
+func (f *Follower) seed(ctx context.Context, r *deriver.Record) error {
+	h, err := f.reader.HeaderByHash(ctx, r.L1BlockHash)
+	if err != nil {
+		return err
+	}
+	r.L1Time, r.L1MixDigest = h.Time, h.MixDigest
+	f.deriver.Seed(*r)
+	return nil
 }
 
 // checkpointSeed returns the checkpoint's settlement when L1 and the local
@@ -442,5 +490,5 @@ func halts(err error) bool {
 	}
 	return errors.Is(err, deriver.ErrDiverged) || errors.Is(err, deriver.ErrFinalizedReorged) ||
 		errors.Is(err, l1.ErrReorgTooDeep) || errors.Is(err, l1.ErrFinalityViolation) ||
-		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, ErrL1ChainID)
+		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference)
 }

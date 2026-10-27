@@ -28,6 +28,10 @@ import (
 type Record struct {
 	L1Block     uint64
 	L1BlockHash common.Hash
+	// L1Time and L1MixDigest are the L1 block's timestamp and mixHash, which
+	// rollupX seeds prevRandao from.
+	L1Time      uint64
+	L1MixDigest common.Hash
 	TxHash      common.Hash
 	LastL2Block uint64
 }

@@ -80,7 +80,7 @@ func followerOn(t *testing.T, chain deriver.Chain) *follower {
 	dir := t.TempDir()
 	logger := log.New()
 	logger.SetHandler(log.DiscardHandler())
-	d, err := deriver.New(counting, derivertest.Config(), dir, logger)
+	d, err := deriver.New(counting, derivertest.Config(), dir, nil, logger)
 	require.NoError(t, err)
 	return &follower{chain: counting, deriver: d, dir: dir}
 }

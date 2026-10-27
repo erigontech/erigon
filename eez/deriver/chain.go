@@ -189,6 +189,7 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 		ParentHash:            parent.Hash(),
 		Timestamp:             in.Time,
 		SuggestedFeeRecipient: in.Coinbase,
+		PrevRandao:            in.MixDigest,
 		TargetGasLimit:        &gasLimit,
 		ExtraData:             extra,
 		CustomTxnProvider:     staticTxns(txs),

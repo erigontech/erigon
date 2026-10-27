@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol/da"
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -65,8 +66,15 @@ func Config() *chain.Config {
 // the Chain derivation drives it through.
 func NewL2(t testing.TB) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
 	t.Helper()
+	return NewL2Of(t, networks.Devnet)
+}
+
+// NewL2Of returns the EEZ network spec at genesis in a fresh execution
+// module, and the Chain derivation drives it through.
+func NewL2Of(t testing.TB, spec chainspec.Spec) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
+	t.Helper()
 	eez.Register()
-	genesis := *networks.Devnet.Genesis
+	genesis := *spec.Genesis
 	engine, err := eezrules.New(genesis.Config)
 	require.NoError(t, err)
 	m := execmoduletester.New(t,
