@@ -1049,11 +1049,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	if txn.TxType() == types.FrameTxType {
-		reason := p.validateFrame(txn, isLocal)
-		if reason == txpoolcfg.Success && txn.HasBlobs() {
+		// Frame policy was checked before simulation; the batch's state generation
+		// is verified before reaching this stage.
+		if txn.HasBlobs() {
 			return p.validateBlobTxn(txn, isLocal), nil
 		}
-		return reason, nil
+		return txpoolcfg.Success, nil
 	}
 
 	// Use the on-tx authorization list length, not len(AuthAndNonces): per

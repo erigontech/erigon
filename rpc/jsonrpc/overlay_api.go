@@ -521,9 +521,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		receipt := receipts[uint64(idx)]
 		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
 		if receipt.Status == types.ReceiptStatusFailed && !hasStateOverrides {
-			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
-
 			if !txn.IsContractDeploy() && txn.Type() != types.FrameTxType {
+				log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
 				statedb.SetTxContext(blockNum, firstTxIndex+idx)
