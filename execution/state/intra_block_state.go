@@ -228,6 +228,12 @@ type IntraBlockState struct {
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
+	// Intern tables survive Reset and the pool on purpose: an idle pooled state keeps ~51 KB of
+	// tables and their unique handles alive, which is the reuse the next call pays for.
+	internCache *storageKeyCache
+	addrCache   *addressCache
+	internOps   uint32
+	addrOps     uint32
 }
 
 type sdProbeEntry struct {
@@ -2861,6 +2867,64 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	}
 	writes.assertNotArena("flush")
 	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+}
+
+// WriteFlushedTo hands the current tx's writes, already flushed to the versionMap, to
+// stateWriter the way FinalizeTx hands a materialized tx's: each account as it reads
+// before and after the tx, each storage slot with its value at tx start.
+func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWriter) error {
+	for addr := range writes.addrs() {
+		before := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
+		original := before.Account()
+		if err := before.Err(); err != nil {
+			return err
+		}
+		if original == nil {
+			original = &accounts.Account{}
+		}
+		after := NewVersionedAccountView(addr, ibs.txIndex+1, ibs.versionMap, ibs.stateReader)
+		account := after.Account()
+		if err := after.Err(); err != nil {
+			return err
+		}
+		if account == nil {
+			if bal, ok := writes.GetBalance(addr); ok && !bal.Deletes() && !bal.Val.IsZero() {
+				// An EIP-8246 SELFDESTRUCT leaves a balance-only account, as updateAccount does.
+				preserved := accounts.NewAccount()
+				preserved.Balance = bal.Val
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
+				if err := stateWriter.UpdateAccountData(addr, original, &preserved); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := stateWriter.DeleteAccount(addr, original); err != nil {
+				return err
+			}
+			continue
+		}
+		if code, ok := writes.GetCode(addr); ok {
+			if err := stateWriter.UpdateAccountCode(addr, account.Incarnation, account.CodeHash, code.Val.Bytes); err != nil {
+				return err
+			}
+		}
+		if created, ok := writes.GetCreateContract(addr); ok && created.Val {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return err
+			}
+		}
+		for key, vw := range writes.storage[addr] {
+			if err := stateWriter.WriteAccountStorage(addr, account.Incarnation, key, vw.orig, vw.Val); err != nil {
+				return err
+			}
+		}
+		if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
