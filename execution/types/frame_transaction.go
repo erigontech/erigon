@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/big"
 	"slices"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -98,6 +99,7 @@ type FrameTransaction struct {
 	Signatures          []FrameSignature
 	Fees                FrameFees
 	BlobVersionedHashes []common.Hash
+	verifiedSignatures  atomic.Pointer[common.Hash] `rlp:"-"`
 }
 
 type frameTransactionRLP FrameTransaction
@@ -223,12 +225,22 @@ func (tx *FrameTransaction) Validate() error {
 	if limits.Execution > params.MaxTxnGasLimit {
 		return errors.New("frame transaction exceeds execution gas cap")
 	}
+	if len(tx.Signatures) == 0 {
+		return nil
+	}
+	// Use fresh contents, including signature bytes: Hash can be cached before
+	// a mutation, and SigningHash omits signatures over the transaction itself.
+	validationHash := prefixedRlpHash(FrameTxType, (*frameTransactionRLP)(tx))
+	if verified := tx.verifiedSignatures.Load(); verified != nil && *verified == validationHash {
+		return nil
+	}
 	hash := tx.SigningHash(nil)
 	for i := range tx.Signatures {
 		if !tx.Signatures[i].validate(tx.SenderAddress, hash) {
 			return fmt.Errorf("invalid frame signature %d", i)
 		}
 	}
+	tx.verifiedSignatures.Store(&validationHash)
 	return nil
 }
 

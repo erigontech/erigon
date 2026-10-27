@@ -144,6 +144,21 @@ func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 	}
 }
 
+func TestFramePoolDirectAdmissionChecksSignatures(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	slot := framePoolSlot(t, sender, 1, 2)
+	frame := slot.Txn.(*types.FrameTransaction)
+	frame.Signatures = []types.FrameSignature{{Signature: []byte{1}}}
+	require.NoError(t, frame.Validate())
+	frame.Signatures = append(frame.Signatures, types.FrameSignature{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)})
+	var txns TxnSlots
+	txns.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+}
+
 func TestFramePoolBudgetDoesNotRestrictMinedTransactions(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

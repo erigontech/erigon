@@ -143,50 +143,100 @@ func TestFrameTransactionConstraints(t *testing.T) {
 	}
 }
 
+func signedFrameTransaction(t testing.TB, scheme uint8) (*FrameTransaction, []byte) {
+	t.Helper()
+	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []Frame{{}}, Signatures: []FrameSignature{{Scheme: scheme}}}
+	var highS []byte
+	if scheme == FrameSignatureSecp256k1 {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		tx.SenderAddress = crypto.PubkeyToAddress(key.PublicKey)
+		hash := tx.SigningHash(nil)
+		sig, err := crypto.Sign(hash[:], key)
+		require.NoError(t, err)
+		tx.Signatures[0].Signature = append([]byte{sig[64]}, sig[:64]...)
+		highS = bytes.Clone(tx.Signatures[0].Signature)
+		new(big.Int).Sub(key.Curve.Params().N, new(big.Int).SetBytes(sig[32:64])).FillBytes(highS[33:])
+	} else {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		pub := make([]byte, 64)
+		key.X.FillBytes(pub[:32])
+		key.Y.FillBytes(pub[32:])
+		tx.SenderAddress = common.BytesToAddress(crypto.Keccak256(pub)[12:])
+		hash := tx.SigningHash(nil)
+		r, s, err := ecdsa.Sign(rand.Reader, key, hash[:])
+		require.NoError(t, err)
+		n := key.Curve.Params().N
+		if s.Cmp(new(big.Int).Rsh(new(big.Int).Set(n), 1)) > 0 {
+			s.Sub(n, s)
+		}
+		sig := make([]byte, 128)
+		r.FillBytes(sig[:32])
+		s.FillBytes(sig[32:64])
+		copy(sig[64:], pub)
+		tx.Signatures[0].Signature = sig
+		highS = bytes.Clone(sig)
+		new(big.Int).Sub(n, s).FillBytes(highS[32:64])
+	}
+	return tx, highS
+}
+
 func TestFrameTransactionSignatureValidation(t *testing.T) {
 	t.Parallel()
 	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1)}
 	for _, scheme := range []uint8{FrameSignatureSecp256k1, FrameSignatureP256} {
 		t.Run(string(rune('0'+scheme)), func(t *testing.T) {
-			tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []Frame{{}}, Signatures: []FrameSignature{{Scheme: scheme}}}
-			var highS []byte
-			if scheme == FrameSignatureSecp256k1 {
-				key, err := crypto.GenerateKey()
-				require.NoError(t, err)
-				tx.SenderAddress = crypto.PubkeyToAddress(key.PublicKey)
-				hash := tx.SigningHash(nil)
-				sig, err := crypto.Sign(hash[:], key)
-				require.NoError(t, err)
-				tx.Signatures[0].Signature = append([]byte{sig[64]}, sig[:64]...)
-				highS = bytes.Clone(tx.Signatures[0].Signature)
-				new(big.Int).Sub(key.Curve.Params().N, new(big.Int).SetBytes(sig[32:64])).FillBytes(highS[33:])
-			} else {
-				key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				require.NoError(t, err)
-				pub := make([]byte, 64)
-				key.X.FillBytes(pub[:32])
-				key.Y.FillBytes(pub[32:])
-				tx.SenderAddress = common.BytesToAddress(crypto.Keccak256(pub)[12:])
-				hash := tx.SigningHash(nil)
-				r, s, err := ecdsa.Sign(rand.Reader, key, hash[:])
-				require.NoError(t, err)
-				n := key.Curve.Params().N
-				if s.Cmp(new(big.Int).Rsh(new(big.Int).Set(n), 1)) > 0 {
-					s.Sub(n, s)
-				}
-				sig := make([]byte, 128)
-				r.FillBytes(sig[:32])
-				s.FillBytes(sig[32:64])
-				copy(sig[64:], pub)
-				tx.Signatures[0].Signature = sig
-				highS = bytes.Clone(sig)
-				new(big.Int).Sub(n, s).FillBytes(highS[32:64])
-			}
+			tx, highS := signedFrameTransaction(t, scheme)
+			tx.Hash()
 			_, err := tx.AsMessage(Signer{}, nil, rules)
 			require.NoError(t, err)
+			valid := tx.Signatures[0].Signature
 			tx.Signatures[0].Signature = highS
 			_, err = tx.AsMessage(Signer{}, nil, rules)
 			require.Error(t, err, "high-s signatures must fail")
+			tx.Signatures[0].Signature = valid
+			_, err = tx.AsMessage(Signer{}, nil, rules)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestFrameTransactionSignatureValidationAfterMutation(t *testing.T) {
+	t.Parallel()
+	for name, mutate := range map[string]func(*FrameTransaction){
+		"nonce":   func(tx *FrameTransaction) { tx.Nonce++ },
+		"data":    func(tx *FrameTransaction) { tx.Frames[0].Data = []byte{1} },
+		"sender":  func(tx *FrameTransaction) { tx.SenderAddress[0] ^= 1 },
+		"signer":  func(tx *FrameTransaction) { tx.Signatures[0].Signer = make([]byte, 20) },
+		"message": func(tx *FrameTransaction) { tx.Signatures[0].Message = bytes.Repeat([]byte{1}, 32) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx, _ := signedFrameTransaction(t, FrameSignatureSecp256k1)
+			tx.Hash()
+			require.NoError(t, tx.Validate())
+			mutate(tx)
+			require.ErrorContains(t, tx.Validate(), "invalid frame signature 0")
+		})
+	}
+}
+
+func TestFrameTransactionConcurrentValidation(t *testing.T) {
+	for _, scheme := range []uint8{FrameSignatureSecp256k1, FrameSignatureP256} {
+		t.Run(string(rune('0'+scheme)), func(t *testing.T) {
+			tx, _ := signedFrameTransaction(t, scheme)
+			for range 8 {
+				t.Run("reader", func(t *testing.T) {
+					t.Parallel()
+					for range 8 {
+						require.NoError(t, tx.Validate())
+						_, err := tx.Sender(*LatestSignerForChainID(&tx.ChainID))
+						require.NoError(t, err)
+						_, err = tx.AsMessage(Signer{}, nil, &chain.Rules{IsBogota: true, ChainID: &tx.ChainID})
+						require.NoError(t, err)
+					}
+				})
+			}
 		})
 	}
 }
