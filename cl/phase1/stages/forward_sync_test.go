@@ -195,7 +195,7 @@ func newForwardSyncTipFixture(t *testing.T) (*Cfg, common.Hash, *cltypes.SignedB
 		envelopeResponse: envelopeResponse.Bytes(),
 	}
 	cfg.ethClock = clock
-	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock, nil)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
 	return cfg, tipRoot, nextBlock, targetSlot, sentinel
 }
 
@@ -212,6 +212,7 @@ func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
 
 	clockAtSlot := func(slot uint64) eth_clock.EthereumClock {
 		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		clock.EXPECT().GenesisTime().Return(uint64(0))
 		clock.EXPECT().GetCurrentSlot().Return(slot)
 		clock.EXPECT().GetCurrentEpoch().Return(slot / cfg.beaconCfg.SlotsPerEpoch)
 		return clock
@@ -242,7 +243,7 @@ func TestForwardSyncRecordsTipSlotWhenEmptyScanCompletes(t *testing.T) {
 		currentSlot.Store(targetSlot + cfg.beaconCfg.SlotsPerEpoch)
 	}
 	cfg.ethClock = clock
-	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock, nil)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
