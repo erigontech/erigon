@@ -593,6 +593,13 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
+	block.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
+		if err := f.onAttestationLocked(attestation, true, lastProcessedState, blockRoot); err != nil {
+			log.Debug("[OnBlock] block attestation not applied", "slot", block.Block.Slot, "err", err)
+		}
+		return true
+	})
+
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()

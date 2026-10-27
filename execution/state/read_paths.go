@@ -141,8 +141,7 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 // (normalised to EmptyCodeHash for an absent or code-less account), without
 // recording an OCC read.
 func (ibs *IntraBlockState) originCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	acc, err := ibs.stateReader.ReadAccountData(addr)
-	ibs.recordStateReadError(err)
+	acc, err := ibs.committedAccount(addr)
 	if err != nil {
 		return accounts.EmptyCodeHash, err
 	}

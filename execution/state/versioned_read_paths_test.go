@@ -757,6 +757,138 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 	}
 }
 
+// creditedDestructAndRevival returns a version map where tx 0 created and destroyed addr, and its
+// fee credit wrote the account record with a balance of 5 at the destruct. It also returns the
+// writes of tx 1's fee credit, which re-create addr with the given account.
+func creditedDestructAndRevival(addr accounts.Address, revived *accounts.Account) (*VersionMap, *WriteSet) {
+	vm := NewVersionMap(nil)
+	credited := &accounts.Account{Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteAddress(addr, Version{TxIndex: 0}, credited, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, credited.Balance, true)
+	revival := &WriteSet{}
+	revival.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 1}}, Val: revived})
+	revival.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: revived.Balance})
+	return vm, revival
+}
+
+// Tx 1's re-creation is flushed after tx 2's account read found no account: the read must return
+// the re-created account and record it, not fall back to the committed state.
+func TestVersionedRead_RevivalFlushedAfterAbsentAccountRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x9a})
+	revived := &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash}
+	vm, revival := creditedDestructAndRevival(addr, revived)
+	vm.absentAccountHook = func() {
+		vm.absentAccountHook = nil
+		vm.FlushVersionedWrites(revival, true, "")
+	}
+
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
+	require.Equal(t, revived, account)
+	recorded, ok := ibs.versionedReads.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: NewAccountView(revived)}, recorded)
+}
+
+// Tx 1 re-creates the account with CreateAccount, which also writes SelfDestruct=false, and its
+// writes are flushed as estimates after tx 2's account read found no account. The in-flight
+// self-destruct cell must not make the read treat the account as never destroyed: the read waits
+// for tx 1 and returns the re-created account.
+func TestVersionedRead_RecreateFlushedAfterAbsentAccountRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x9c})
+	revived := &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash}
+	vm, revival := creditedDestructAndRevival(addr, revived)
+	revival.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}})
+	vm.absentAccountHook = func() {
+		vm.absentAccountHook = nil
+		vm.FlushVersionedWrites(revival, false, "")
+	}
+
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	waits := 0
+	ibs.SetWaitCommit(func(int) bool {
+		waits++
+		vm.MarkWritesComplete(revival)
+		return true
+	})
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
+	require.Equal(t, revived, account)
+	require.Equal(t, 1, waits)
+	recorded, ok := ibs.versionedReads.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: NewAccountView(revived)}, recorded)
+}
+
+// An earlier read of the account filled the self-destruct memo before tx 1's destruct was flushed
+// and validated. The account read must still see the destruct and record it, so that tx 3 fails
+// validation when tx 1's re-execution withdraws the destruct.
+func TestVersionedRead_DestructFlushedAfterMemoIsRecorded(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x9d})
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(109), true)
+	ibs := NewWithVersionMap(newAccountStateReader(addr), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 3)
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+
+	destruct := &WriteSet{}
+	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
+	destruct.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}, valStatus: ValueDeleted}})
+	destruct.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: Version{TxIndex: 1}}})
+	vm.FlushVersionedWrites(destruct, false, "")
+	vm.MarkWritesValidated(destruct, nil)
+
+	_, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	for _, path := range []AccountPath{SelfDestructPath, BalancePath, IncarnationPath} {
+		vm.Delete(addr, path, accounts.NilKey, 1, false)
+	}
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 3))
+}
+
+// Tx 1's re-creation is flushed as an estimate after tx 2's account read found no account, and
+// tx 1's re-execution withdraws it while the read waits on it: the read must return the account
+// that tx 0 left, as if tx 1 had not re-created it.
+func TestVersionedRead_RevivalWithdrawnDuringReRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x9b})
+	vm, revival := creditedDestructAndRevival(addr, &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash})
+	vm.absentAccountHook = func() {
+		vm.absentAccountHook = nil
+		vm.FlushVersionedWrites(revival, false, "")
+	}
+
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	waits := 0
+	ibs.SetWaitCommit(func(int) bool {
+		waits++
+		vm.Delete(addr, AddressPath, accounts.NilKey, 1, false)
+		vm.Delete(addr, BalancePath, accounts.NilKey, 1, false)
+		return true
+	})
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
+	require.NotNil(t, account)
+	require.Equal(t, *uint256.NewInt(5), account.Balance)
+	require.Equal(t, 1, waits)
+}
+
 // storage fallback. Empty reader + no prior writes/reads → falls through
 // to the readStorage callback (returns zero from emptyReader) and records
 // defaultV in readSet.
