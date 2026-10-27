@@ -584,6 +584,26 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 	}
 }
 
+func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
+	ctx := t.Context()
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 40_000_000)
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 200_000,
+		BlockGasLimit:       50_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 0,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, 1, pool.pending.Len())
+
+	change.BlockGasLimit = 40_000_000
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, 1, pool.pending.Len())
+	require.Equal(t, 0, pool.queued.Len())
+}
+
 func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000, 100_000)
 	for _, tc := range []struct {
