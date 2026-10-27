@@ -17,7 +17,6 @@
 package state
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -388,28 +387,26 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 	require.True(t, found, "address must appear in BAL (tx0's write is a real change)")
 }
 
-// TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance is the
-// regression test for the bal-devnet-3 block-91648 BAL hash mismatch.
+// TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance pins that a
+// post-write BalancePath read does not poison the recorded initial balance.
 //
-// Pattern reproduced from the production failure: a single user-tx balance
-// write to an address (the EIP-1559 burnt contract on this devnet — the zero
-// address) followed by a *later* BalancePath read of the same address with
-// the same value. The later read is the one the parallel executor's block-end
+// Pattern: a single user-tx balance write to an address (an EIP-1559 burnt
+// contract) followed by a *later* BalancePath read of the same address with the
+// same value. The later read is the one the parallel executor's block-end
 // finalize emits when it spins up a fresh IntraBlockState — the cached state
 // objects from the per-tx execution aren't shared, so the finalize hits the
 // underlying state and observes the post-write value (or, in the validator
-// path, the value that was pre-populated into the version map from the BAL
-// sidecar).
+// path, the value pre-populated into the version map from the BAL sidecar).
 //
-// Before the fix, updateRead would seed initialBalanceValue from this
-// post-write read; applyToBalance's net-zero filter would then see the very
-// first recorded write equal to "initialBalanceValue" and drop it, producing
-// a BAL hash that disagreed with the header.
+// updateRead must not seed initialBalanceValue from this post-write read:
+// otherwise applyToBalance's net-zero filter sees the first recorded write equal
+// to initialBalanceValue and drops it, producing a BAL hash that disagrees with
+// the header.
 func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000000"))
-	burned := *uint256.NewInt(0x16eaeb76) // value pulled from bal-devnet-3 block 91648
+	burned := *uint256.NewInt(0x16eaeb76)
 
 	io := NewVersionedIO(2)
 
@@ -2119,8 +2116,7 @@ func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
 // TestCreateAccount_RecordsSelfDestructReadForOrdering pins the parallel-executor contract:
 // CreateAccount resolves prior self-destruct state (refreshSelfDestruct), recording a
 // SelfDestructPath read. The dep-wait scheduler needs that dependency so a create orders
-// after a prior-tx SELFDESTRUCT (CREATE2 reincarnation). (Main's serial path recorded no
-// such read — a lean-footprint invariant that does not hold on this branch.)
+// after a prior-tx SELFDESTRUCT (CREATE2 reincarnation).
 func TestCreateAccount_RecordsSelfDestructReadForOrdering(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7E01"))
@@ -2140,22 +2136,17 @@ func TestCreateAccount_RecordsSelfDestructReadForOrdering(t *testing.T) {
 // countingStateReader records how many account reads reached the domain.
 type countingStateReader struct {
 	minimalStateReader
-	acc            *accounts.Account
-	accountReads   int
-	failOnAccounts bool
+	acc          *accounts.Account
+	accountReads int
 }
 
 func (r *countingStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	r.accountReads++
-	if r.failOnAccounts {
-		return nil, errors.New("domain must not be consulted")
-	}
 	return r.acc, nil
 }
 
-// TestVersionedStateReader_UnrecordedAddressReadsDomain pins the complement: with no
-// recorded AddressPath entry, the reader falls through to the domain exactly once and
-// returns its value.
+// TestVersionedStateReader_UnrecordedAddressReadsDomain: with no recorded AddressPath
+// entry, the reader falls through to the domain exactly once and returns its value.
 func TestVersionedStateReader_UnrecordedAddressReadsDomain(t *testing.T) {
 	t.Parallel()
 

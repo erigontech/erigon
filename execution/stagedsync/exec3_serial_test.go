@@ -135,7 +135,7 @@ func (tx failingAccountTemporalTx) AggTx() any { return nil }
 
 // TestSerialFinalizeStateReadErrorPassesThrough pins that a withdrawal-beneficiary read
 // failure during Finalize is an infrastructure failure: it surfaces via ibs.StateReadError()
-// and passes through unwrapped, not as ErrInvalidBlock. Complements the branch's
+// and passes through unwrapped, not as ErrInvalidBlock. Complements
 // TestSerialFinalizeClassifiesRulesEngineError (which covers the invalid-block verdict side).
 func TestSerialFinalizeStateReadErrorPassesThrough(t *testing.T) {
 	se, task := newSerialFinalizeTestExec(t, merge.New(ethash.NewFaker()))

@@ -124,9 +124,9 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 // so the very first lazy-load fires with asOfReader.txNum=0. On a synced-
 // from-genesis chain that's in-window so seekInFiles handles it
 // gracefully; on a snapshot-loaded chain whose visible window starts
-// well past genesis (e.g. perf-devnet-3 starting at txNum~2.9B) it fails
-// hard with `seekInFiles(invIndex=storage,txNum=0) but data before
-// txNum=N not available` and FCU fails on every block.
+// well past genesis it fails hard with `seekInFiles(invIndex=storage,
+// txNum=0) but data before txNum=N not available` and FCU fails on every
+// block.
 //
 // The fix in handleMessage's *txResult branch pins asOfReader.txNum to
 // the current tx's txNum BEFORE ApplyWrites runs. computeAndPublish /

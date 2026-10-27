@@ -97,8 +97,8 @@ func TestVersionedStateReader_PreBlockCodeHashWipedByInRangeDestruct(t *testing.
 	vm := NewVersionMap(nil)
 	destructThenRevive(vm, addr)
 	// A real value-transfer revival re-creates the account record (empty code, nonce 0);
-	// the branch reconstructs the wiped code hash from that AddressPath write rather than
-	// synthesising it over the stale pre-block cell the fall-through still serves.
+	// ReadAccountData reconstructs the wiped code hash from that AddressPath write rather
+	// than synthesising it over the stale pre-block cell the fall-through still serves.
 	empty := accounts.NewAccount()
 	writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 2}, &empty, true)
 	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(1000), true)
@@ -408,8 +408,8 @@ func TestVersionedStateReader_RecordedWipeZeroReadsAbsent(t *testing.T) {
 	val, found, err := vr.ReadAccountStorage(addr, key)
 	require.NoError(t, err)
 	require.True(t, val.IsZero())
-	// The branch serves a recorded read verbatim (found=true, value 0); 0 and absent are
-	// equivalent for an EVM SLOAD, so this is consensus-equivalent to main's found=false.
+	// A recorded read is served verbatim (found=true, value 0); 0 and absent are
+	// equivalent for an EVM SLOAD, so found=true here is consensus-equivalent to found=false.
 	require.True(t, found)
 }
 
@@ -518,8 +518,8 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 			require.NoError(t, fwErr)
 			vm.FlushVersionedWrites(fw, true, "")
 
-			// The destruct's wipe is confirmed by the write-side signals the branch's
-			// ReadAccountData reconstructs from, not by read-side field synthesis: both a burn
+			// The destruct's wipe is confirmed by the write-side signals ReadAccountData
+			// reconstructs from, not by read-side field synthesis: both a burn
 			// and an EIP-8246 preserve leave the account net-absent (nonce and code gone); the
 			// delete/preserve decision rides the balance write's value-status — a burn stamps
 			// it ValueDeleted, EIP-8246 keeps the prior balance unstamped.
@@ -548,7 +548,7 @@ func TestApplySubFieldWrites_BlockBeginCodeHashKeepsOwnIndex(t *testing.T) {
 
 	var acc accounts.Account
 	vm.applySubFieldWrites(addr, 1, &acc)
-	// A destroyed account's code hash is empty; the branch no longer keeps the destroy
-	// tx's own cell (the wipe moved from applySubFieldWrites synthesis to the lifecycle).
+	// A destroyed account's code hash is empty; applySubFieldWrites keeps no destroy-tx
+	// cell — the wipe is resolved by the lifecycle, not by field synthesis.
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "a destroyed account has an empty code hash")
 }

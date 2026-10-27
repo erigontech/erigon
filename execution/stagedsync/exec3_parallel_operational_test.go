@@ -63,7 +63,7 @@ func (r panickingAccountStateReader) ReadAccountData(accounts.Address) (*account
 	panic(r.panicValue)
 }
 
-// rulesEngineWithInitError carries a block-init error (the branch rulesEngineWithErrors only
+// rulesEngineWithInitError carries a block-init error (rulesEngineWithErrors only
 // carries a finalize error).
 type rulesEngineWithInitError struct {
 	rules.Engine
@@ -90,8 +90,8 @@ func (e rulesEngineWithFinalizeBalance) Finalize(_ *chain.Config, _ *types.Heade
 	return nil, ibs.AddBalance(e.beneficiary, *uint256.NewInt(1), tracing.BalanceIncreaseWithdrawal)
 }
 
-// newParallelResultTestBlock builds a single-task blockExecutor directly (the branch's
-// finalize-test idiom), avoiding the scheduler: processRequest only registers an executor
+// newParallelResultTestBlock builds a single-task blockExecutor directly,
+// avoiding the scheduler: processRequest only registers an executor
 // once a block-end task arrives, so a tx-carrying task would leave pe.blockExecutors empty.
 // The taskVersion carries the executor's versionMap so a direct task.Execute writes into the
 // same map nextResult validates against.
