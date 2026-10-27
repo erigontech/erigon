@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/fdlimit"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
@@ -251,11 +252,11 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 // round-trip; extra Ps let runnable work overlap those faults. Worker counts
 // derived from GOMAXPROCS at init keep sizing on the CPU count.
 func raiseGomaxprocsForIO(logger log.Logger) {
-	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", 10)
+	base := runtime.GOMAXPROCS(0)
+	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", (estimate.IOOverlapFactor-1)*base)
 	if extra <= 0 {
 		return
 	}
-	base := runtime.GOMAXPROCS(0)
 	runtime.GOMAXPROCS(base + extra)
 	logger.Info("[gomaxprocs] raised for io overlap", "from", base, "to", base+extra)
 }
