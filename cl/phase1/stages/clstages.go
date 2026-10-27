@@ -89,10 +89,10 @@ type Cfg struct {
 	sleepForSlotHeadChanged      bool
 	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
-	executionHead             common.Hash
-	forkChoiceRerunAt         time.Time
-	chainTipRejections        *chainTipRejections
-	pendingChainTipBlockWrite *cltypes.SignedBeaconBlock
+	executionHead      common.Hash
+	forkChoiceRerunAt  time.Time
+	chainTipRejections *chainTipRejections
+	pendingBlockWrite  *cltypes.SignedBeaconBlock
 }
 
 type Args struct {
@@ -215,7 +215,10 @@ func catchUpPublishingHead(args Args) StageName {
 	return next
 }
 
-func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
+		return err
+	}
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -233,16 +236,45 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 		}
 	}
 
-	return persistAcceptedBlock(ctx, cfg, db, block)
+	if err := persistAcceptedBlock(ctx, cfg, block); err != nil {
+		// Fork choice advances before persistence. Keep the accepted block across stage
+		// transitions and finish its write before importing more blocks or reporting success.
+		cfg.pendingBlockWrite = block
+		return err
+	}
+	return nil
 }
 
-func persistAcceptedBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
+func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
+	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	})
+}
+
+func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
+	block := cfg.pendingBlockWrite
+	if block == nil {
+		return nil
+	}
+	for {
+		err := persistAcceptedBlock(ctx, cfg, block)
+		if err == nil {
+			cfg.pendingBlockWrite = nil
+			if cfg.peerDas != nil {
+				cfg.peerDas.BackfillCustodyColumns(block.Block.Slot, block.Block.Slot)
+			}
+			return nil
+		}
+		log.Warn("[Caplin] failed to persist accepted block, retrying", "slot", block.Block.Slot, "err", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 /*
@@ -393,7 +425,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if cfg.pendingChainTipBlockWrite != nil {
+					if cfg.pendingBlockWrite != nil {
 						return ChainTipSync
 					}
 					if x := catchUpPublishingHead(args); x != "" {

@@ -63,7 +63,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		if err = processBlock(ctx, cfg, block, false, true, false); err != nil {
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
 				if newHighestBlockProcessed == 0 {

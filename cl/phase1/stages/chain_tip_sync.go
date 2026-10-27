@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -20,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -228,7 +230,7 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	rejected := make(map[common.Hash]error)
 MainLoop:
 	for {
-		if err := retryPendingChainTipBlockWrite(ctx, cfg); err != nil {
+		if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 			return err
 		}
 		select {
@@ -259,7 +261,7 @@ MainLoop:
 }
 
 func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
-	if err := retryPendingChainTipBlockWrite(ctx, cfg); err != nil {
+	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 		return false
 	}
 	// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
@@ -309,6 +311,10 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 
 		if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
+			if err := ensureKnownBlockPersisted(ctx, cfg, blockRoot); err != nil {
+				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "persist accepted block failed", err)
+				return false
+			}
 			if block.Block.Slot >= args.targetSlot {
 				return true
 			}
@@ -343,16 +349,13 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 
 		// Process the block without its data; the deferred requestCustodyBackfill fetches it.
-		if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
+		if err := processBlock(ctx, cfg, block, true, true, false); err != nil {
 			if parentEnvelopeUnavailable(cfg, block, envelopes, parentBlockByRoot) {
 				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errParentEnvelopeUnavailable.Error(), errParentEnvelopeUnavailable)
 			} else {
 				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "process block failed", err)
 			}
-			if _, accepted := cfg.forkChoice.GetHeader(blockRoot); accepted {
-				// Fork choice advances before persistence. Keep the accepted block across stage
-				// timeouts and finish its write before processing more blocks or reporting success.
-				cfg.pendingChainTipBlockWrite = block
+			if cfg.pendingBlockWrite != nil {
 				return false
 			}
 			if rememberBlockAfterProcess(err) {
@@ -371,27 +374,29 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 	return false
 }
 
-func retryPendingChainTipBlockWrite(ctx context.Context, cfg *Cfg) error {
-	block := cfg.pendingChainTipBlockWrite
-	if block == nil {
+func ensureKnownBlockPersisted(ctx context.Context, cfg *Cfg, blockRoot common.Hash) error {
+	var persisted bool
+	readErr := cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		persisted = slot != nil
+		return err
+	})
+	if readErr == nil && persisted {
 		return nil
 	}
-	for {
-		err := persistAcceptedBlock(ctx, cfg, cfg.indiciesDB, block)
-		if err == nil {
-			cfg.pendingChainTipBlockWrite = nil
-			var imported importedSlots
-			imported.add(block.Block.Slot)
-			imported.requestCustodyBackfill(cfg)
-			return nil
+	// The block root excludes its signature, so persist the copy accepted by fork choice.
+	block, ok := cfg.forkChoice.GetBlock(blockRoot)
+	if !ok {
+		if readErr != nil {
+			return readErr
 		}
-		log.Warn("[chainTipSync] failed to persist accepted block, retrying", "slot", block.Block.Slot, "err", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(chainTipPollInterval):
-		}
+		return fmt.Errorf("accepted block %x is unavailable for persistence", blockRoot)
 	}
+	cfg.pendingBlockWrite = block
+	if readErr != nil {
+		return readErr
+	}
+	return retryPendingBlockWrite(ctx, cfg)
 }
 
 // importedSlots is the slot range of the blocks a chain tip batch imported and of the parents whose
@@ -1553,7 +1558,7 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-	if err := retryPendingChainTipBlockWrite(ctx, cfg); err != nil {
+	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 		return err
 	}
 	cfg.chainTipRejections.logIfDue(chainTipHeadSlot(cfg))

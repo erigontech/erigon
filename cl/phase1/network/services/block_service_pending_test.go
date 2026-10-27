@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
@@ -204,6 +205,110 @@ func TestPendingGossipFinalizedIndexFailureDoesNotReject(t *testing.T) {
 	require.NoError(t, err)
 	_, queued := service.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, queued)
+}
+
+func TestPendingGossipRetriesAcceptedScheduledBlockAfterExpiry(t *testing.T) {
+	api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
+	service := api.(*blockService)
+	processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
+	service.forkchoiceStore = processing
+	failure := errors.New("database unavailable")
+	db := &blockDBError{RwDB: service.db, updateErr: failure}
+	service.db = db
+
+	service.ScheduleBlockForLaterProcessing(block)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	job := serviceJob(t, service, root)
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
+	require.ErrorIs(t, job.lastAttempt.err, failure)
+	_, accepted := processing.GetHeader(root)
+	require.True(t, accepted)
+
+	processing.headers.Delete(root)
+	db.updateErr = nil
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
+
+	require.NoError(t, job.lastAttempt.err)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, slot, "an accepted block must still be persisted after the validation retry window")
+		require.Equal(t, block.Block.Slot, *slot)
+		storedRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, block.Block.StateRoot)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash(root), storedRoot)
+		return nil
+	}))
+	require.Equal(t, int32(1), processing.calls.Load(), "storage recovery must not reimport the block")
+	_, queued := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, queued)
+}
+
+func TestPendingGossipWriteKeepsAcceptedBlockOnJobReuse(t *testing.T) {
+	api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
+	service := api.(*blockService)
+	service.forkchoiceStore = &onBlockErrorStore{ForkChoiceStorage: fcu}
+	db := &blockDBError{RwDB: service.db, updateErr: errors.New("database unavailable")}
+	service.db = db
+	deferred := *block
+	deferred.Signature[0] ^= 1
+	job, _ := service.scheduleBlockForLaterProcessing(&deferred, nil, false, false)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, block), errBlockStorage)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Same(t, job, serviceJob(t, service, root))
+	db.updateErr = nil
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
+
+	require.NoError(t, job.lastAttempt.err)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, header)
+		require.Equal(t, block.Signature, header.Signature, "retry the accepted copy, not an earlier unvalidated copy with the same block root")
+		return nil
+	}))
+}
+
+func TestPendingGossipWriteSurvivesStoreCompletion(t *testing.T) {
+	for _, storeErr := range []error{nil, forkchoice.ErrBlockInvalid} {
+		t.Run(fmt.Sprint(storeErr), func(t *testing.T) {
+			api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
+			service := api.(*blockService)
+			processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
+			service.forkchoiceStore = processing
+			db := &blockDBError{RwDB: service.db, updateErr: errors.New("database unavailable")}
+			service.db = db
+			calls := 0
+			service.SchedulePublishedBlockForLaterProcessing(block, func(ctx context.Context) error {
+				calls++
+				if calls == 1 {
+					require.ErrorIs(t, service.ProcessMessage(ctx, nil, block), errBlockStorage)
+				}
+				return storeErr
+			})
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			job := serviceJob(t, service, root)
+			service.processScheduledBlock(t.Context(), root, job, time.Now())
+			require.Same(t, job, serviceJob(t, service, root), "a running callback must not discard a new storage retry")
+
+			db.updateErr = nil
+			service.processScheduledBlock(t.Context(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+				require.NoError(t, err)
+				require.NotNil(t, slot)
+				return nil
+			}))
+			require.Equal(t, int32(1), processing.calls.Load())
+			_, queued := service.blocksScheduledForLaterExecution.Load(root)
+			require.False(t, queued)
+		})
+	}
 }
 
 func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {

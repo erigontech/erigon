@@ -447,7 +447,7 @@ func TestBlockServicePreservesStateRootForUnacceptedBlock(t *testing.T) {
 			blockRoot, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 
-			err = service.processAndStoreBlock(t.Context(), block)
+			_, err = service.processAndStoreBlock(t.Context(), block, false)
 			require.ErrorIs(t, err, tc.err)
 
 			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
@@ -1391,7 +1391,7 @@ func TestScheduledBlockKeepsPayloadPreparationBehindRetries(t *testing.T) {
 			return forkchoice.ErrNewPayloadNoStatus
 		}
 		return nil
-	}, true)
+	}, true, false)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
@@ -1411,7 +1411,7 @@ func TestClaimingScheduleUpgradesUnclaimedBlockJob(t *testing.T) {
 	service := &blockService{forkchoiceStore: store}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 10
-	job, _ := service.scheduleBlockForLaterProcessing(block, nil, false)
+	job, _ := service.scheduleBlockForLaterProcessing(block, nil, false, false)
 	service.ScheduleBlockForLaterProcessing(block)
 
 	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), 10, 11)
@@ -1882,7 +1882,7 @@ func TestScheduledBlockRejectsInvalidParentSlotBeforeStateAccess(t *testing.T) {
 			child.Block.Slot = test.blockSlot
 			root, err := child.Block.HashSSZ()
 			require.NoError(t, err)
-			job, _ := service.scheduleBlockForLaterProcessing(child, nil, false)
+			job, _ := service.scheduleBlockForLaterProcessing(child, nil, false, false)
 			store.OnBlockErr = forkchoice.ErrParentEnvelopePending
 
 			stateReads := 0

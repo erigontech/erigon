@@ -157,3 +157,55 @@ func TestChainTipSyncRetriesWriteAfterStageCancellation(t *testing.T) {
 	require.Equal(t, ForkChoice, stage.TransitionFunc(cfg, args, nil))
 	require.Equal(t, 1, graph.added[root])
 }
+
+func TestChainTipBatchPersistsKnownBlockFromForkChoice(t *testing.T) {
+	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), block, true, true, false))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB}
+	cfg.indiciesDB = db
+	duplicate := *block
+	duplicate.Signature[0] ^= 1
+	args := Args{targetSlot: block.Block.Slot}
+	batch := []*cltypes.SignedBeaconBlock{&duplicate}
+
+	require.True(t, processChainTipBatch(t.Context(), cfg, args, batch, make(map[common.Hash]struct{}), make(map[common.Hash]error)))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, header, "a block accepted by another importer must also be persisted")
+		require.Equal(t, block.Signature, header.Signature, "the block root does not authenticate the duplicate's signature")
+		return nil
+	}))
+	require.Equal(t, 1, graph.added[root])
+	require.Equal(t, 1, db.writes)
+
+	require.True(t, processChainTipBatch(t.Context(), cfg, args, batch, make(map[common.Hash]struct{}), make(map[common.Hash]error)))
+	require.Equal(t, 1, db.writes, "an already persisted block needs no further write")
+}
+
+func TestChainTipSyncRetriesWriteFromForwardSync(t *testing.T) {
+	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	graph.insertOnAdd = true
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.indiciesDB = db
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	progress, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, false, []*cltypes.SignedBeaconBlock{block}, nil)
+	require.ErrorIs(t, err, db.err)
+	require.Equal(t, block.Block.Slot-1, progress)
+	args := Args{seenSlot: cfg.forkChoice.HighestSeen(), targetSlot: block.Block.Slot}
+	require.Equal(t, args.targetSlot, args.seenSlot)
+
+	require.NoError(t, chainTipSync(t.Context(), log.Root(), cfg, args))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, slot, "the stage transition must preserve a failed forward-sync write")
+		return nil
+	}))
+	require.Equal(t, 1, graph.added[root])
+}
