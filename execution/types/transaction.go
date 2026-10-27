@@ -198,8 +198,9 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 	return txn, nil
 }
 
-// DecodeWrappedTransaction as similar to DecodeTransaction,
-// but type-3 (blob) transactions are expected to be wrapped with blobs/commitments/proofs.
+// DecodeWrappedTransaction decodes the network form of a transaction.
+// Type-3 transactions require a blob wrapper; frame transactions may be bare
+// or use their version-1 wrapper with blobs, commitments and cell proofs.
 // See https://eips.ethereum.org/EIPS/eip-4844#networking
 func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	blobTxnsAreWrappedWithBlobs := true

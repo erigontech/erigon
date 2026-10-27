@@ -114,10 +114,10 @@ const (
 	InvalidCreateTxn           // EIP-4844 & 7702 transactions cannot have the form of a create transaction
 	NoBlobs                    // Blob transactions must have at least one blob
 	TooManyBlobs               // There's a limit on how many blobs a block (and thus any transaction) may have
-	UnequalBlobTxExt           // blob_versioned_hashes, blobs, commitments and proofs must have equal number
+	UnequalBlobTxExt           // Mismatched blob/hash/commitment counts, or legacy proof counts
 	BlobHashCheckFail          // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
 	UnmatchedBlobTxExt         // KZGcommitments must match the corresponding blobs and proofs
-	BlobTxReplace              // Cannot replace type-3 blob txn with another type of txn
+	BlobTxReplace              // Cannot replace a transaction with blobs by one without blobs
 	BlobPoolOverflow           // The total number of blobs (through blob txns) in the pool has reached its limit
 	NoAuthorizations           // EIP-7702 transactions with an empty authorization list are invalid
 	GasLimitTooHigh            // Gas limit is too high

@@ -1269,8 +1269,10 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 
 var maxUint256 = new(uint256.Int).SetAllOne()
 
-// Sender should have enough balance for: gasLimit x feeCap + blobGas x blobFeeCap + transferred_value
-// See YP, Eq (61) in Section 6.2 "Execution"
+// requiredBalance returns the sender funds needed for pool balance checks.
+// Ordinary transactions need gasLimit*feeCap + blobGas*blobFeeCap + value.
+// Frame transactions return zero: fees use separate payer validation and reservations,
+// and value transfers are checked during execution.
 func requiredBalance(txn *TxnSlot) *uint256.Int {
 	if txn.TxType() == types.FrameTxType {
 		return new(uint256.Int)
@@ -2292,10 +2294,10 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 	}
 }
 
-// onSenderStateChange is the function that recalculates ephemeral fields of transactions and determines
-// which sub pool they will need to go to. Since this depends on other transactions from the same sender by with lower
-// nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
-// for a given senderID
+// onSenderStateChange refreshes pool eligibility and ordering for one sender.
+// Transactions using account nonces depend on earlier nonces and cumulative sender costs.
+// Keyed frames bypass that chain: simulation checks their nonces, and payer
+// reservations cover their fees.
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
@@ -2368,25 +2370,20 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 		needBalance := requiredBalance(mt.TxnSlot)
 
-		// 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for
-		// the sender is M, and there are transactions for all nonces between M and N from the same
-		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
+		// NoNonceGaps requires every account nonce from the sender's current nonce
+		// through this transaction's nonce to be present.
 		mt.subPool &^= NoNonceGaps
 		if noGapsNonce == mt.TxnSlot.Nonce {
 			mt.subPool |= NoNonceGaps
 			noGapsNonce++
 		}
 
-		// 3. Sufficient balance for gas. Set to 1 if the balance of sender's account in the
-		// state is B, nonce of the sender in the state is M, nonce of the transaction is N, and the
-		// sum of feeCap x gasLimit + transferred_value of all transactions from this sender with
-		// nonces N+1 ... M is no more than B. Set to 0 otherwise. In other words, this bit is
-		// set if there is currently a guarantee that the transaction and all its required prior
-		// transactions will be able to pay for gas.
+		// Compare the sender's balance with cumulative costs in account-nonce order.
+		// Frame transactions contribute zero because their funding is checked separately.
 		mt.subPool &^= EnoughBalance
 		mt.cumulativeBalanceDistance = math.MaxUint64
 		if mt.TxnSlot.Nonce >= senderNonce {
-			cumulativeRequiredBalance = cumulativeRequiredBalance.Add(cumulativeRequiredBalance, needBalance) // already deleted all transactions with nonce <= sender.nonce
+			cumulativeRequiredBalance = cumulativeRequiredBalance.Add(cumulativeRequiredBalance, needBalance) // already deleted all transactions with nonce < sender.nonce
 			if senderBalance.Gt(cumulativeRequiredBalance) || senderBalance.Eq(cumulativeRequiredBalance) {
 				mt.subPool |= EnoughBalance
 			} else if cumulativeRequiredBalance.IsUint64() && senderBalance.IsUint64() {

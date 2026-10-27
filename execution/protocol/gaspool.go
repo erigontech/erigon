@@ -254,6 +254,10 @@ func (gp *GasPool) String() string {
 	return fmt.Sprintf("executionGas: %d, stateGas: %d, blobGas: %d", gp.executionGas, gp.stateGas, gp.blobGas)
 }
 
+// TransactionGasLimits returns the execution and state gas reserved for block inclusion.
+// Ordinary transactions reserve their gas limit in each active dimension, with
+// execution capped from Amsterdam onward. Frame transactions reserve separate
+// budgets, including intrinsic gas and the calldata floor in the execution dimension.
 func TransactionGasLimits(tx types.Transaction, isAmsterdam bool) (mdgas.MdGas, error) {
 	if frame, ok := tx.Unwrap().(*types.FrameTransaction); ok {
 		_, _, limits, err := frame.GasLimits()

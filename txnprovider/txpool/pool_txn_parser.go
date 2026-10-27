@@ -221,9 +221,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 3: Decode the transaction using standard types.
-	// For blob wrappers, we parse the wrapper structure manually (zero-copy for
-	// large blob data) and decode only the inner tx_payload_body via the standard
-	// decoder, producing a *types.BlobTx (not *types.BlobTxWrapper).
+	// Parse type-3 and frame wrappers separately to keep large blob data zero-copy.
+	// Only the inner transaction body goes through the standard decoder.
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
 	wrapped := !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs
@@ -387,7 +386,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 5: Store the decoded transaction and compute hash.
 	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
-	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
+	// Wrapped transactions include the type byte and inner body in the hash, but no sidecar.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
 	hashInput := txBytes
@@ -416,9 +415,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// Step 6: Store raw RLP bytes and cache size (Rlp may be nilled later after DB flush).
-	// For wrapped blob txns, store the full wrapper RLP (needed for PooledTransactions gossip),
-	// but Size reflects the full wrapper.
+	// Step 6: Keep the full network encoding for gossip and cache its size,
+	// including any blob sidecar. Rlp may be cleared after flushing to the database.
 	slot.Rlp = txBytes
 	slot.Size = uint32(len(txBytes))
 
@@ -454,11 +452,10 @@ type PoolBlobBundle struct {
 	Proofs     []goethkzg.KZGProof // Can be 1 or more Proofs/CellProofs
 }
 
-// TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
-// Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues.
-// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce).
+// TxnSlot holds an unwrapped transaction and its pool metadata.
+// Txn must be non-nil except in the B-tree search sentinel, which uses SenderID and Nonce.
 type TxnSlot struct {
-	Txn      types.Transaction // The decoded standard transaction (BlobTx, not BlobTxWrapper, for blob txns)
+	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
@@ -466,7 +463,7 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	BlobBundles []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
+	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
 
 	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
 	// Invalid tuples and authorizations for other chains are omitted.
