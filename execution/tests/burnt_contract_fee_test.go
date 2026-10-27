@@ -78,7 +78,7 @@ func TestBurntContractFeeRecipients(t *testing.T) {
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 				b.SetCoinbase(coinbase)
-				b.AddTx(transfer(keys[0], 1_000, 3))
+				b.AddTx(transfer(keys[0], 0, 3))
 				b.AddTx(transfer(keys[1], 2_000, 5))
 			})
 			require.NoError(t, err)
