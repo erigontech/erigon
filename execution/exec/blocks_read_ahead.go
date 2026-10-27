@@ -60,8 +60,6 @@ type BlockReadAheader struct {
 	stateCache *cache.StateCache
 }
 
-// inclusionListCapacity matches the default MaxReorgDepth so the IL of every
-// branch tip within the reorg window stays available.
 const (
 	inclusionListCapacity       = 96
 	inclusionListResultCapacity = 256

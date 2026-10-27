@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -81,12 +82,13 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	if err != nil {
 		return nil, err
 	}
-	historyStartTxNum, err := state.StateHistoryStartTxNum(tx)
+	blockStartTxNum, err := e.blockReader.TxnumReader().Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	if blockEndTxNum < historyStartTxNum {
-		return nil, nil
+	covered, err := e.stateHistoryCovers(ctx, tx, blockNumber, blockStartTxNum, blockEndTxNum+1)
+	if err != nil || !covered {
+		return nil, err
 	}
 
 	header := block.Header()
@@ -109,6 +111,26 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	}
 	e.readAheader.SetInclusionListResult(blockHash, ilHash, *result)
 	return result, nil
+}
+
+func (e *ExecModule) stateHistoryCovers(ctx context.Context, tx kv.TemporalTx, blockNumber, fromTxNum, toTxNum uint64) (bool, error) {
+	err := state.RequireStateHistory(tx.Debug(), fromTxNum, toTxNum)
+	if !errors.Is(err, state.ErrPruned) {
+		return err == nil, err
+	}
+	if overlay, _ := membatchwithdb.ViewOverlay(tx); overlay == nil {
+		return false, nil
+	}
+	dbTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return false, err
+	}
+	defer dbTx.Rollback()
+	committed, err := stages.GetStageProgress(dbTx, stages.Execution)
+	if err != nil {
+		return false, err
+	}
+	return blockNumber > committed, nil
 }
 
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a

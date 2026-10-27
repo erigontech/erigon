@@ -3741,7 +3741,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				if pe.cfg.readAheader != nil {
 					if inclusionList, ilHash, ok := pe.cfg.readAheader.ReadInclusionList(be.blockHash); ok {
-						ilSatisfied, err := protocol.CheckInclusionListTransactions(be.gasPool, tt.Txs, inclusionList, reader, &tt.EvmBlockContext, pe.cfg.chainConfig, pe.cfg.vmConfig)
+						ilReader := state.NewVersionedStateReader(finalVersion.TxIndex, state.ReadSet{}, be.versionMap, reader)
+						ilSatisfied, err := protocol.CheckInclusionListTransactions(be.gasPool, tt.Txs, inclusionList, ilReader, &tt.EvmBlockContext, pe.cfg.chainConfig, pe.cfg.vmConfig)
 						if err != nil {
 							return be.operationalBlockResult(fmt.Errorf("can't check inclusion list for block %d: %w", be.blockNum, err)), nil
 						}
