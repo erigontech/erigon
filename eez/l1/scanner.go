@@ -63,6 +63,7 @@ type Scanner struct {
 	registry common.Address
 	rollupID uint64
 	chunk    uint64
+	rollupX  bool
 }
 
 // NewScanner returns a scanner of the registry's settlements of rollupID.
@@ -72,6 +73,11 @@ func NewScanner(reader ChainReader, registry common.Address, rollupID uint64) *S
 
 // SetChunk sets the widest range the scanner asks for at once.
 func (s *Scanner) SetChunk(n uint64) { s.chunk = max(n, 1) }
+
+// UseRollupX makes the scanner attribute settlements as rollupX does: a
+// batch is the rollup's when its BatchPosted lists it, and it settled the
+// steps of its claimed root chain that L1 emitted.
+func (s *Scanner) UseRollupX() { s.rollupX = true }
 
 // RegistryTopics selects the registry logs a follower reads.
 var RegistryTopics = [][]common.Hash{{
@@ -159,6 +165,17 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 		if l.Topics[0] != protocol.BatchPostedTopic {
 			continue
 		}
+		var listed []uint64
+		if s.rollupX {
+			e, err := protocol.ParseBatchPosted(l)
+			if err != nil {
+				return nil, fmt.Errorf("%w: BatchPosted of transaction %x in block %d: %w", ErrUndecodable, l.TxHash, k.number, err)
+			}
+			if !slices.Contains(e.RollupIDs, s.rollupID) {
+				continue
+			}
+			listed = e.RollupIDs
+		}
 		tx, err := s.reader.TransactionByBlockHashAndIndex(ctx, k.hash, uint64(l.TxIndex))
 		if err != nil {
 			return nil, err
@@ -170,17 +187,24 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 		// when it settled our rollup.
 		batch, err := protocol.DecodePostAndVerifyBatch(tx.GetData())
 		if err != nil {
-			if settledBy[l.TxHash] {
+			if settledBy[l.TxHash] || s.rollupX {
 				return nil, fmt.Errorf("%w: transaction %x of block %d: %w", ErrUndecodable, l.TxHash, k.number, err)
 			}
 			continue
 		}
-		posted = append(posted, protocol.PostedBatch{Batch: batch, TxIndex: uint64(l.TxIndex), LogIndex: uint64(l.Index)})
+		if s.rollupX && !slices.EqualFunc(batch.RollupIDsWithProofSystems, listed, func(r protocol.RollupIDWithProofSystems, id uint64) bool { return r.RollupID == id }) {
+			return nil, fmt.Errorf("%w: transaction %x of block %d verifies other rollups than its BatchPosted lists", ErrUndecodable, l.TxHash, k.number)
+		}
+		posted = append(posted, protocol.PostedBatch{Batch: batch, TxIndex: uint64(l.TxIndex), LogIndex: uint64(l.Index), ListsRollup: listed != nil})
 		txHashes = append(txHashes, l.TxHash)
 		blobHashes = append(blobHashes, tx.GetBlobHashes())
 	}
 
-	settlements, err := protocol.AttributeBlock(posted, logs, s.rollupID)
+	attribute := protocol.AttributeBlock
+	if s.rollupX {
+		attribute = protocol.AttributeRollupXBlock
+	}
+	settlements, err := attribute(posted, logs, s.rollupID)
 	if err != nil {
 		return nil, fmt.Errorf("block %d (%x): %w", k.number, k.hash, err)
 	}

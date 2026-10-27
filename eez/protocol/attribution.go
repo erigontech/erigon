@@ -196,6 +196,9 @@ type PostedBatch struct {
 	TxIndex uint64
 	// LogIndex is the block log index of the batch's BatchPosted.
 	LogIndex uint64
+	// ListsRollup reports that the batch's BatchPosted lists the rollup;
+	// rollupX attribution reads it.
+	ListsRollup bool
 }
 
 // AttributeBlock attributes the registry logs of one L1 block to the batches
