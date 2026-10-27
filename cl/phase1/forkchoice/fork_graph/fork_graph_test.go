@@ -1352,6 +1352,47 @@ func TestConcurrentSameRootEnvelopeDumps(t *testing.T) {
 	require.False(t, tempExists)
 }
 
+func TestConcurrentEnvelopeAndStateDumps(t *testing.T) {
+	f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+	envelopeRoot := common.HexToHash("0x1234")
+	stateRoot := common.HexToHash("0x5678")
+	envelope := testEnvelopeWithTransaction(envelopeRoot, []byte{1, 2, 3})
+	wantEnvelopeRoot, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	addEnvelopeTestBlock(f, envelopeRoot, 1)
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	wantStateRoot, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var envelopeErr, stateErr error
+	wg.Go(func() {
+		<-start
+		envelopeErr = f.DumpEnvelopeOnDisk(envelopeRoot, envelope)
+	})
+	wg.Go(func() {
+		<-start
+		stateErr = f.DumpBeaconStateOnDisk(stateRoot, anchorState, true)
+	})
+	close(start)
+	wg.Wait()
+	require.NoError(t, envelopeErr)
+	require.NoError(t, stateErr)
+
+	persistedEnvelope, err := f.ReadEnvelopeFromDisk(envelopeRoot)
+	require.NoError(t, err)
+	gotEnvelopeRoot, err := persistedEnvelope.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantEnvelopeRoot, gotEnvelopeRoot)
+	persistedState, err := f.readBeaconStateFromDisk(stateRoot)
+	require.NoError(t, err)
+	gotStateRoot, err := persistedState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantStateRoot, gotStateRoot)
+}
+
 func TestDumpEnvelopeRejectsUnsupportedVersion(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
