@@ -215,26 +215,28 @@ func catchUpPublishingHead(args Args) StageName {
 }
 
 func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
-			return err
-		}
-		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
-	}); err != nil {
-		return err
-	}
-
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
 	}
 
 	_, hasHeaderInFCU := cfg.forkChoice.GetHeader(blockRoot)
-	if !checkDataAvaiability && hasHeaderInFCU {
-		return nil
+	if checkDataAvaiability || !hasHeaderInFCU {
+		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability); err != nil {
+			return err
+		}
+		// OnBlock also returns nil for blocks it ignores below the validation horizon.
+		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
+			return nil
+		}
 	}
 
-	return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
+	})
 }
 
 /*

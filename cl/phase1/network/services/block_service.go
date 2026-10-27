@@ -983,8 +983,6 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 
 	_, headerExists := b.forkchoiceStore.GetHeader(blockRoot)
 
-	// A block the fork graph never took can be retried for 30s, so open the
-	// write tx only when the block is not already on disk.
 	var persisted bool
 	if err := b.db.View(ctx, func(tx kv.Tx) error {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -995,6 +993,16 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 			return err
 		}
 		return fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
+	}
+	if !headerExists {
+		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+			return err
+		}
+		// OnBlock also returns nil for blocks it ignores below the validation horizon.
+		if _, accepted := b.forkchoiceStore.GetHeader(blockRoot); !accepted {
+			return nil
+		}
+		go b.importBlockOperations(block)
 	}
 	if !persisted {
 		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
@@ -1007,12 +1015,6 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		}
 	}
 
-	if !headerExists {
-		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
-			return err
-		}
-		go b.importBlockOperations(block)
-	}
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil && !isCallerCancellation(ctx, err) {

@@ -92,7 +92,11 @@ func TestPendingGossipRetainsCanceledDatabaseAttempt(t *testing.T) {
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 			job := serviceJob(t, service, root)
-			require.Zero(t, processing.calls.Load())
+			if operation == "write" {
+				require.Equal(t, int32(1), processing.calls.Load())
+			} else {
+				require.Zero(t, processing.calls.Load())
+			}
 
 			service.processScheduledBlock(ctx, root, job, time.Now())
 			require.ErrorIs(t, job.lastAttempt.err, context.Canceled)
@@ -141,7 +145,11 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 			job := serviceJob(t, service, root)
-			require.Zero(t, processing.calls.Load())
+			if tc.writeFailure {
+				require.Equal(t, int32(1), processing.calls.Load())
+			} else {
+				require.Zero(t, processing.calls.Load())
+			}
 
 			now := time.Now()
 			for _, delay := range []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second} {
@@ -170,7 +178,11 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 			callsBefore := processing.calls.Load()
 			service.processScheduledBlock(t.Context(), root, job, now)
 			require.NoError(t, job.lastAttempt.err)
-			require.Equal(t, callsBefore+1, processing.calls.Load())
+			if tc.writeFailure {
+				require.Equal(t, callsBefore, processing.calls.Load())
+			} else {
+				require.Equal(t, callsBefore+1, processing.calls.Load())
+			}
 			_, queued := service.blocksScheduledForLaterExecution.Load(root)
 			require.False(t, queued)
 		})
