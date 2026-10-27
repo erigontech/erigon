@@ -728,7 +728,7 @@ func (b *BackwardBeaconDownloader) resolveGloasLookahead(ctx context.Context, bl
 }
 
 func blockWithRoot(blocks []*cltypes.SignedBeaconBlock, expectedRoot common.Hash) *cltypes.SignedBeaconBlock {
-	for _, block := range slices.Backward(blocks) {
+	for _, block := range blocks {
 		if block == nil || block.Block == nil {
 			continue
 		}

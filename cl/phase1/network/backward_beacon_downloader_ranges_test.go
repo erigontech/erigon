@@ -161,3 +161,13 @@ func TestBackwardBeaconDownloaderPrefetchesAcrossEmptySlots(t *testing.T) {
 	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
 	require.Greater(t, server.maxInFlight.Load(), int32(1))
 }
+
+func TestBlockWithRootReturnsFirstMatch(t *testing.T) {
+	first := makeDenebBlock(7)
+	second := makeDenebBlock(7)
+	second.Signature[0] = 1
+	root, err := first.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.Same(t, first, blockWithRoot([]*cltypes.SignedBeaconBlock{first, second}, root))
+}
