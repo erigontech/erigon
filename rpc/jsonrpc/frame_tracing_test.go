@@ -259,9 +259,12 @@ func TestFramePrestateTracerKeyedNonce(t *testing.T) {
 	require.Equal(t, common.HexToHash("0x1"), trace[types.FrameNonceManager].Storage[slot])
 }
 
-func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction) (*TraceCallResult, *types.Receipt) {
+func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, traceVM bool) (*TraceCallResult, *types.Receipt) {
 	t.Helper()
-	result := &TraceCallResult{Trace: []*ParityTrace{}, VmTrace: &VmTrace{Ops: []*VmTraceOp{}}}
+	result := &TraceCallResult{Trace: []*ParityTrace{}}
+	if traceVM {
+		result.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
+	}
 	tracer := (&OeTracer{r: result}).Tracer()
 	vmConfig := evm.Config()
 	vmConfig.Tracer = tracer.Hooks
@@ -278,7 +281,7 @@ func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction) (*T
 
 func TestFrameParityTracer(t *testing.T) {
 	evm, tx := frameTraceTestEnv(t)
-	result, receipt := traceParityFrame(t, evm, tx)
+	result, receipt := traceParityFrame(t, evm, tx, true)
 	require.Len(t, result.Trace, 3)
 	require.Equal(t, []int{}, result.Trace[0].TraceAddress)
 	require.Equal(t, []int{0}, result.Trace[1].TraceAddress)
@@ -288,11 +291,15 @@ func TestFrameParityTracer(t *testing.T) {
 	require.Len(t, result.VmTrace.Ops, 2)
 	for i, op := range result.VmTrace.Ops {
 		require.Equal(t, i, op.Pc)
+		require.Empty(t, op.Op, "a synthetic frame operation executes no opcode")
 		require.EqualValues(t, tx.Frames[i].Limits.Total(), op.Cost)
 		require.EqualValues(t, tx.Frames[i].Limits.Total()-receipt.FrameReceipts[i].GasUsed.Total(), op.Ex.GasRemaining)
 		require.NotNil(t, op.Sub)
 		require.NotEmpty(t, op.Sub.Code)
 		require.Nil(t, op.Sub.Ops[len(op.Sub.Ops)-1].Sub)
+		for _, executed := range op.Sub.Ops {
+			require.NotEmpty(t, executed.Op)
+		}
 	}
 }
 
@@ -313,7 +320,7 @@ func TestFrameParityTracerStackResults(t *testing.T) {
 			tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureArbitrary, Signature: []byte{0xdd, 0xee, 0xff}}}
 			target := accounts.InternAddress(*tx.Frames[1].Target)
 			require.NoError(t, evm.IntraBlockState().SetCode(target, tc.code, tracing.CodeChangeUnspecified))
-			result, receipt := traceParityFrame(t, evm, tx)
+			result, receipt := traceParityFrame(t, evm, tx, true)
 			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 			ops := result.VmTrace.Ops[1].Sub.Ops
 			op := ops[len(ops)-2]
@@ -342,7 +349,7 @@ func TestFrameParityTracerMemoryCopies(t *testing.T) {
 			code := program.New().Push(1).Push(4).Push(1).Push(32).Op(tc.op, vm.STOP).Bytes()
 			target := accounts.InternAddress(*tx.Frames[1].Target)
 			require.NoError(t, evm.IntraBlockState().SetCode(target, code, tracing.CodeChangeUnspecified))
-			result, receipt := traceParityFrame(t, evm, tx)
+			result, receipt := traceParityFrame(t, evm, tx, true)
 			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 			ops := result.VmTrace.Ops[1].Sub.Ops
 			op := ops[len(ops)-2]
@@ -358,7 +365,7 @@ func TestFrameParityTracerStateGas(t *testing.T) {
 	target := accounts.InternAddress(*tx.Frames[1].Target)
 	require.NoError(t, evm.IntraBlockState().SetCode(target, program.New().Sstore(0, 1).Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}
-	result, receipt := traceParityFrame(t, evm, tx)
+	result, receipt := traceParityFrame(t, evm, tx, true)
 	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.GetGasLimit())), result.Trace[0].Action.(*CallTraceAction).Gas)
 	child := result.Trace[2]
 	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.Frames[1].Limits.Total())), child.Action.(*CallTraceAction).Gas)
@@ -366,16 +373,48 @@ func TestFrameParityTracerStateGas(t *testing.T) {
 }
 
 func TestFrameParityTracerFailedFrame(t *testing.T) {
-	evm, tx := frameTraceTestEnv(t)
-	target := accounts.InternAddress(*tx.Frames[1].Target)
-	require.NoError(t, evm.IntraBlockState().SetCode(target, []byte{byte(vm.INVALID)}, tracing.CodeChangeUnspecified))
-	result, receipt := traceParityFrame(t, evm, tx)
-	require.EqualValues(t, types.ReceiptStatusFailed, receipt.Status)
-	require.NotEmpty(t, result.Trace[0].Error)
-	require.NotNil(t, result.Trace[0].Result)
-	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), result.Trace[0].Result.(*TraceResult).GasUsed)
-	require.NotEmpty(t, result.Trace[2].Error)
-	require.Nil(t, result.Trace[2].Result)
+	for _, tc := range []struct {
+		name      string
+		code      []byte
+		value     uint64
+		wantError string
+		output    []byte
+		vmFrames  int
+	}{
+		{name: "invalid opcode", code: []byte{byte(vm.INVALID)}, wantError: "Bad instruction", vmFrames: 2},
+		{name: "insufficient balance", code: []byte{byte(vm.STOP)}, value: 10_000_001, wantError: "Reverted", vmFrames: 1},
+		{name: "revert", code: revertInit, wantError: "Reverted", output: common.FromHex("0xdeadbeef"), vmFrames: 2},
+	} {
+		for name, traceVM := range map[string]bool{"trace": false, "trace and vmTrace": true} {
+			t.Run(tc.name+"/"+name, func(t *testing.T) {
+				evm, tx := frameTraceTestEnv(t)
+				target := accounts.InternAddress(*tx.Frames[1].Target)
+				require.NoError(t, evm.IntraBlockState().SetCode(target, tc.code, tracing.CodeChangeUnspecified))
+				tx.Frames[1].Value.SetUint64(tc.value)
+				result, receipt := traceParityFrame(t, evm, tx, traceVM)
+				require.EqualValues(t, types.ReceiptStatusFailed, receipt.Status)
+				require.Len(t, result.Trace, 3)
+				require.NotEmpty(t, result.Trace[0].Error)
+				require.NotNil(t, result.Trace[0].Result)
+				require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), result.Trace[0].Result.(*TraceResult).GasUsed)
+				frame := result.Trace[2]
+				require.Equal(t, []int{1}, frame.TraceAddress)
+				require.Zero(t, frame.Subtraces)
+				require.Equal(t, tc.wantError, frame.Error)
+				if traceVM {
+					require.Len(t, result.VmTrace.Ops, tc.vmFrames)
+				}
+				if tc.output == nil {
+					require.Nil(t, frame.Result)
+				} else {
+					require.IsType(t, &TraceResult{}, frame.Result)
+					reverted := frame.Result.(*TraceResult)
+					require.Equal(t, hexutil.Bytes(tc.output), reverted.Output)
+					require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Total())), reverted.GasUsed)
+				}
+			})
+		}
+	}
 }
 
 func TestFrameParityTracerPrecompileFrame(t *testing.T) {
@@ -383,7 +422,7 @@ func TestFrameParityTracerPrecompileFrame(t *testing.T) {
 	identity := common.HexToAddress("0x4")
 	tx.Frames[1].Target = &identity
 	tx.Frames[1].Data = []byte("hello")
-	result, _ := traceParityFrame(t, evm, tx)
+	result, _ := traceParityFrame(t, evm, tx, true)
 	require.Len(t, result.Trace, 3)
 	require.Equal(t, []int{1}, result.Trace[2].TraceAddress)
 	require.Equal(t, identity, result.Trace[2].Action.(*CallTraceAction).To)

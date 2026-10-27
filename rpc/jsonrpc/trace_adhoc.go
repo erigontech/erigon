@@ -281,6 +281,7 @@ type OeTracer struct {
 	compat       bool // Bug for bug compatibility mode
 	isAmsterdam  bool
 	frameTx      *types.FrameTransaction
+	frameHasCode bool
 	lastVmOp     *VmTraceOp
 	lastOp       vm.OpCode
 	lastMemOff   uint64
@@ -570,15 +571,15 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 }
 
 func (ot *OeTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-	frameEntry := ot.frameTx != nil && depth == 1 && ot.r.VmTrace != nil
+	frameEntry := ot.frameTx != nil && depth == 1
 	if frameEntry {
+		ot.frameHasCode = len(code) > 0 || precompile
+	}
+	if frameEntry && ot.r.VmTrace != nil {
 		ot.lastVmOp, ot.lastOffStack = nil, nil
 		ot.lastMemOff, ot.lastMemLen, ot.callMemOff, ot.callMemLen = 0, 0, 0, 0
-		if len(code) > 0 || precompile {
+		if ot.frameHasCode {
 			op := &VmTraceOp{Pc: ot.traceStack[0].Subtraces, Cost: int(gas.Total()), Ex: &VmTraceEx{Push: []string{}}}
-			if !ot.compat {
-				op.Op = vm.OpCode(typ).String()
-			}
 			ot.r.VmTrace.Ops = append(ot.r.VmTrace.Ops, op)
 			ot.lastVmOp = op
 		}
@@ -625,7 +626,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 	}
 	if err != nil && !ignoreError {
 		topTrace.Error = parityTraceError(err, builtin)
-		if errors.Is(err, vm.ErrExecutionReverted) {
+		// Frame checks can report a revert before execution, with no EVM result.
+		unexecutedFrame := ot.frameTx != nil && len(topTrace.TraceAddress) == 1 && !ot.frameHasCode
+		if errors.Is(err, vm.ErrExecutionReverted) && !unexecutedFrame {
 			// A reverted CREATE deploys nothing, so it reports its revert data as a call does,
 			// without the address it would have occupied.
 			topTrace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(gasUsed.Execution)), Output: bytes.Clone(output)}
