@@ -431,3 +431,44 @@ func TestBackwardBlockDownloader_HeaderWalkRefreshGivesRangesBackToPeersWhoseRan
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
 	require.Greater(t, fetcher.rangeCalls.Load(), int64(1))
 }
+
+type rangeTopFailingFetcher struct {
+	chainServingBbdFetcher
+	failTops     map[uint64]bool
+	failHashCall int64
+	hashCalls    atomic.Int64
+	rangeCalls   atomic.Int64
+}
+
+func (s *rangeTopFailingFetcher) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	s.rangeCalls.Add(1)
+	if s.failTops[end-1] {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.chainServingBbdFetcher.FetchHeaders(ctx, start, end, peerId, opts...)
+}
+
+func (s *rangeTopFailingFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	if s.hashCalls.Add(1) == s.failHashCall {
+		return FetcherResponse[[]*types.Header]{}, context.DeadlineExceeded
+	}
+	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func TestBackwardBlockDownloader_HeaderWalkRangeFailureFromBeforeRefreshKeepsRangesOnItsPeer(t *testing.T) {
+	headers := headerWalkChain(5001)
+	fetcher := &rangeTopFailingFetcher{
+		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
+		failTops:               map[uint64]bool{4000: true, 3500: true},
+		failHashCall:           2,
+	}
+	bbd := newTestBbd(t, fetcher)
+	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
+	defer collector.Close()
+
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), defaultBbdRequestConfig)
+	require.NoError(t, err)
+	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
+	require.EqualValues(t, 9, fetcher.rangeCalls.Load())
+	require.EqualValues(t, 4, fetcher.hashCalls.Load())
+}

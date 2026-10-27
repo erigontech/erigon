@@ -347,6 +347,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			}
 			top := nextRangeTop
 			n := min(top, maxHeadersBatchLen)
+			launchedAt := peersRefreshedAt
 			result := make(chan headerBatchResult, 1)
 			inFlight[top] = result
 			nextRangeTop -= n
@@ -354,7 +355,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 				rangeCtx, cancel := context.WithTimeout(fetchCtx, config.headerChainBatchFetchTimeout)
 				defer cancel()
 				resp, err := bbd.fetcher.FetchHeaders(rangeCtx, top-n+1, top+1, &rangePeer, rangeOpts...)
-				result <- headerBatchResult{headers: resp.Data, peerId: rangePeer, err: err}
+				result <- headerBatchResult{headers: resp.Data, peerId: rangePeer, err: err, peersRefreshedAt: launchedAt}
 			}()
 		}
 
@@ -377,7 +378,9 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 					"peerId", res.peerId.String(),
 					"err", res.err,
 				)
-				rangeFailed[res.peerId] = true
+				if res.peersRefreshedAt == peersRefreshedAt {
+					rangeFailed[res.peerId] = true
+				}
 			}
 		}
 		if headers == nil {
@@ -764,9 +767,10 @@ func newPeersContext(peers []*PeerId) peersContext {
 }
 
 type headerBatchResult struct {
-	headers []*types.Header
-	peerId  PeerId
-	err     error
+	headers          []*types.Header
+	peerId           PeerId
+	err              error
+	peersRefreshedAt uint64
 }
 
 type peersContext struct {
