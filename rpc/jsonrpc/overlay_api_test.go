@@ -159,6 +159,7 @@ func TestOverlayGetLogsReplaysFailedTxWithCodeOverride(t *testing.T) {
 	require.Len(t, logs, 2)
 	require.Equal(t, failedTarget, logs[0].Address, "originally failed transaction should be replayed under the code override and emit one log")
 	require.Equal(t, controlTarget, logs[1].Address, "positive-control transaction should emit one log")
+	require.Equal(t, []hexutil.Uint{0, 1}, []hexutil.Uint{logs[0].TxIndex, logs[1].TxIndex})
 }
 
 // The rules parameter is optional: a request with state overrides and no rules must not crash.
