@@ -1,8 +1,8 @@
 package estimate
 
 import (
-	"runtime/debug"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"github.com/stretchr/testify/require"
