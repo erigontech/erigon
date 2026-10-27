@@ -162,6 +162,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// initialEth1Progress holds the EL block number of the first (highest) beacon block seen.
 	// Used for logging; kept separate to avoid accessing ExecutionPayload on GLOAS blocks.
 	var initialEth1Progress atomic.Int64
+	var downloadedBlocks atomic.Uint64
 
 	destinationSlotForEL := uint64(math.MaxUint64)
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
@@ -178,6 +179,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, fmt.Errorf("invalid downloaded Gloas envelope: %w", err)
 			}
 		}
+		downloadedBlocks.Add(1)
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
 		if err != nil {
 			return false, err
@@ -317,7 +319,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	go func() {
 		startTimeLoop := time.Now()
-		initialProgress := cfg.downloader.Progress()
+		initialDownloaded := downloadedBlocks.Load()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
 		for {
@@ -333,9 +335,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []any{}
 				currProgress := cfg.downloader.Progress()
-				speed := math.Abs(float64(currProgress)-float64(initialProgress)) / time.Since(startTimeLoop).Seconds()
+				downloaded := downloadedBlocks.Load()
+				speed := float64(downloaded-initialDownloaded) / time.Since(startTimeLoop).Seconds()
 				if speed > 1000.0 { // to avoid spamming logs on fast syncs
-					initialProgress = currProgress
+					initialDownloaded = downloaded
 					startTimeLoop = time.Now()
 					continue
 				}
