@@ -1,0 +1,41 @@
+name: EEZ protocol freshness
+
+# T-CI-4: fail when a live EEZ network reports another core protocol commit
+# than the one eez/testdata pins (testfixtures.ProtocolCommit). schedule runs
+# the default branch's copy, which checks out <prefix>/eez.
+
+on:
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Erigon
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'canepat/eez' || '' }}
+          persist-credentials: false
+
+      - name: Compare protocol commits
+        run: |
+          pinned=$(sed -nE 's/^const ProtocolCommit = "([0-9a-f]{40})"$/\1/p' eez/internal/testfixtures/testfixtures.go)
+          [ -n "$pinned" ] || { echo "::error::no ProtocolCommit in eez/internal/testfixtures/testfixtures.go"; exit 1; }
+          status=0
+          for url in https://eez.dev/dashboard/config.json https://mainnet.eez.dev/dashboard/config.json; do
+            live=$(curl -sf --max-time 30 "$url" | jq -r .protocolCommit) || { echo "::error::$url unreachable"; status=1; continue; }
+            if [ "$live" = "$pinned" ]; then
+              echo "$url: $live"
+            else
+              echo "::error::$url reports protocol $live; eez/testdata pins $pinned"
+              status=1
+            fi
+          done
+          exit "$status"
