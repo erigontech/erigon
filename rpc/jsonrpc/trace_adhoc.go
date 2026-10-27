@@ -738,7 +738,8 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				vm.ADD, vm.EXP, vm.CALLER, vm.KECCAK256, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL, vm.CLZ,
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
-				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN:
+				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN,
+				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -749,7 +750,8 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 			// Set the "mem" of the last operation
 			var setMem bool
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY, vm.MCOPY:
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY, vm.MCOPY,
+				vm.FRAMEDATACOPY, vm.SIGDATACOPY:
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
@@ -821,7 +823,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = 1
 			}
-		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.MCOPY:
+		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.MCOPY, vm.FRAMEDATACOPY, vm.SIGDATACOPY:
 			if len(st) > 2 {
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = tracers.StackBack(st, 2).Uint64()

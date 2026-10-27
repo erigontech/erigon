@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,63 @@ func TestFrameParityTracer(t *testing.T) {
 		require.NotNil(t, op.Sub)
 		require.NotEmpty(t, op.Sub.Code)
 		require.Nil(t, op.Sub.Ops[len(op.Sub.Ops)-1].Sub)
+	}
+}
+
+func TestFrameParityTracerStackResults(t *testing.T) {
+	for _, tc := range []struct {
+		op   vm.OpCode
+		code []byte
+		want string
+	}{
+		{vm.TXPARAM, program.New().Push(9).Op(vm.TXPARAM, vm.STOP).Bytes(), "0x2"},
+		{vm.FRAMEPARAM, program.New().Push0().Push(1).Op(vm.FRAMEPARAM, vm.STOP).Bytes(), "0x2000"},
+		{vm.SIGPARAM, program.New().Push(3).Push0().Op(vm.SIGPARAM, vm.STOP).Bytes(), "0x3"},
+		{vm.FRAMEDATALOAD, program.New().Push(1).Push(1).Op(vm.FRAMEDATALOAD, vm.STOP).Bytes(), "0xbbcc" + strings.Repeat("00", 30)},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			evm, tx := frameTraceTestEnv(t)
+			tx.Frames[1].Data = []byte{0xaa, 0xbb, 0xcc}
+			tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureArbitrary, Signature: []byte{0xdd, 0xee, 0xff}}}
+			target := accounts.InternAddress(*tx.Frames[1].Target)
+			require.NoError(t, evm.IntraBlockState().SetCode(target, tc.code, tracing.CodeChangeUnspecified))
+			result, receipt := traceParityFrame(t, evm, tx)
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+			ops := result.VmTrace.Ops[1].Sub.Ops
+			op := ops[len(ops)-2]
+			require.Equal(t, tc.op.String(), op.Op)
+			require.NotNil(t, op.Ex)
+			require.Equal(t, []string{tc.want}, op.Ex.Push)
+		})
+	}
+}
+
+func TestFrameParityTracerMemoryCopies(t *testing.T) {
+	for _, tc := range []struct {
+		op   vm.OpCode
+		want string
+	}{
+		{vm.FRAMEDATACOPY, "0xbbcc0000"},
+		{vm.SIGDATACOPY, "0xeeff0000"},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			evm, tx := frameTraceTestEnv(t)
+			tx.Frames[1].Data = []byte{0xaa, 0xbb, 0xcc}
+			tx.Signatures = []types.FrameSignature{
+				{Scheme: types.FrameSignatureArbitrary, Signature: []byte{0x99}},
+				{Scheme: types.FrameSignatureArbitrary, Signature: []byte{0xdd, 0xee, 0xff}},
+			}
+			code := program.New().Push(1).Push(4).Push(1).Push(32).Op(tc.op, vm.STOP).Bytes()
+			target := accounts.InternAddress(*tx.Frames[1].Target)
+			require.NoError(t, evm.IntraBlockState().SetCode(target, code, tracing.CodeChangeUnspecified))
+			result, receipt := traceParityFrame(t, evm, tx)
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+			ops := result.VmTrace.Ops[1].Sub.Ops
+			op := ops[len(ops)-2]
+			require.Equal(t, tc.op.String(), op.Op)
+			require.NotNil(t, op.Ex)
+			require.Equal(t, &VmTraceMem{Off: 32, Data: tc.want}, op.Ex.Mem)
+		})
 	}
 }
 
