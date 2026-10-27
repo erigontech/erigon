@@ -228,7 +228,8 @@ type IntraBlockState struct {
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
-	// Intern tables survive Reset and the pool: interning is pure, so they never go stale.
+	// Intern tables survive Reset and the pool on purpose: an idle pooled state keeps ~51 KB of
+	// tables and their unique handles alive, which is the reuse the next call pays for.
 	internCache *storageKeyCache
 	addrCache   *addressCache
 	internOps   uint32

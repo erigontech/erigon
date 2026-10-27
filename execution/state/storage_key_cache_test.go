@@ -243,7 +243,8 @@ func TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket(t *testing.T) {
 // pooled or reused state: interning is pure, so a warmed entry stays valid across
 // calls and clearing it would throw away exactly the reuse the table exists for.
 func TestInternAddressSurvivesPooling(t *testing.T) {
-	ibs := New(NewNoopReader())
+	withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
 	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
 	for range addressCacheMinOps + 1 {
 		ibs.InternAddress(&word)
@@ -251,15 +252,19 @@ func TestInternAddressSurvivesPooling(t *testing.T) {
 	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
 	require.Equal(t, 1, poisonEntry(ibs.addrCache.handles[:], accounts.InternAddress(word.Bytes20()), sentinel))
 
-	require.True(t, ibs.resetForPool())
+	ibs.Reset()
+	require.True(t, sentinel == ibs.InternAddress(&word), "a warmed address must still hit after Reset")
 
-	require.NotNil(t, ibs.addrCache, "the memo outlives the call")
-	require.True(t, sentinel == ibs.InternAddress(&word),
-		"a warmed address must still hit in the next call on this state")
+	ReleasePooled(ibs)
+	next := NewPooled(NewNoopReader())
+	require.Same(t, ibs, next)
+	require.True(t, sentinel == next.InternAddress(&word),
+		"a warmed address must still hit in the next call on the pooled state")
 }
 
 func TestInternStorageKeySurvivesPooling(t *testing.T) {
-	ibs := New(NewNoopReader())
+	withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
 	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0x9abcdef0}
 	for range storageKeyCacheMinOps + 1 {
 		ibs.InternStorageKey(&word)
@@ -267,9 +272,12 @@ func TestInternStorageKeySurvivesPooling(t *testing.T) {
 	sentinel := accounts.InternKey(common.HexToHash("0xdeadbeef"))
 	require.Equal(t, 1, poisonEntry(ibs.internCache.handles[:], accounts.InternKey(word.Bytes32()), sentinel))
 
-	require.True(t, ibs.resetForPool())
+	ibs.Reset()
+	require.True(t, sentinel == ibs.InternStorageKey(&word), "a warmed key must still hit after Reset")
 
-	require.NotNil(t, ibs.internCache, "the memo outlives the call")
-	require.True(t, sentinel == ibs.InternStorageKey(&word),
-		"a warmed key must still hit in the next call on this state")
+	ReleasePooled(ibs)
+	next := NewPooled(NewNoopReader())
+	require.Same(t, ibs, next)
+	require.True(t, sentinel == next.InternStorageKey(&word),
+		"a warmed key must still hit in the next call on the pooled state")
 }
