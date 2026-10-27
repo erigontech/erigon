@@ -15,7 +15,8 @@ cd execution/vm && go run ./vmgen -check   # exit 1 and list stale files, write 
 
 ```
 interpreter.go   runTraced (the loop with tracing)  ─┐
-instructions.go  execute funcs of the fast ops      ─┼─> vm_run_gen.go          run: runTraced with anyTrace=false and the fast-path switches
+instructions.go  execute funcs of the fast ops      ─┤
+eips.go          execute funcs of EIP ops (PUSH0..) ─┼─> vm_run_gen.go          run: runTraced with anyTrace=false and the fast-path switches
 vmgen/main.go    fastOps(), coldOps(): inlined ops  ─┘   fast_path_gen_test.go  table of the inlined ops for the tests
 ```
 
