@@ -37,6 +37,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -109,6 +110,7 @@ type Aggregator struct {
 	demoting      atomic.Bool
 	onDemoteCopy  func(ctx context.Context) // test hook
 	coldIO        *coldIOGate
+	demoteLimiter *rate.Limiter // nil: no cap
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
