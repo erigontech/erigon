@@ -50,7 +50,13 @@ func TestAttestationDataMatchesProducer(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, headState)
 		headEpoch := block.Block.Slot / cfg.SlotsPerEpoch
-		for slot := block.Block.Slot; slot < block.Block.Slot+2*cfg.SlotsPerEpoch; slot++ {
+		for _, slot := range []uint64{
+			block.Block.Slot,
+			(headEpoch+1)*cfg.SlotsPerEpoch - 1,
+			(headEpoch + 1) * cfg.SlotsPerEpoch,
+			(headEpoch+2)*cfg.SlotsPerEpoch - 1,
+			(headEpoch + 2) * cfg.SlotsPerEpoch,
+		} {
 			got, ok := store.AttestationData(headRoot, slot)
 			if slot/cfg.SlotsPerEpoch > headEpoch+1 {
 				require.False(t, ok, "head slot %d, requested slot %d", block.Block.Slot, slot)

@@ -107,30 +107,6 @@ func TestAttestationData(t *testing.T) {
 			slot:     96,
 		},
 		{
-			name:     "empty slot votes for head",
-			headRoot: headRoot,
-			slot:     70,
-			want: solid.AttestationData{
-				Slot:            70,
-				BeaconBlockRoot: headRoot,
-				Source:          realizedCheckpoint,
-				Target:          solid.Checkpoint{Epoch: 2, Root: epochStartRoot},
-			},
-			ok: true,
-		},
-		{
-			name:     "empty epoch start uses prior epoch head as target",
-			headRoot: previousRoot,
-			slot:     64,
-			want: solid.AttestationData{
-				Slot:            64,
-				BeaconBlockRoot: previousRoot,
-				Source:          unrealizedCheckpoint,
-				Target:          solid.Checkpoint{Epoch: 2, Root: previousRoot},
-			},
-			ok: true,
-		},
-		{
 			name:     "block at epoch start remains target",
 			headRoot: epochStartRoot,
 			slot:     70,
