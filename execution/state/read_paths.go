@@ -1741,11 +1741,11 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 
 // waitFor parks the run until tx commits. On true the caller re-reads, and the self-destruct
 // probe is invalidated because the committed predecessor may have destructed the account.
-func (s *IntraBlockState) waitFor(tx int) bool {
-	if s.waitCommit == nil || !s.waitCommit(tx) {
+func (ibs *IntraBlockState) waitFor(tx int) bool {
+	if ibs.waitCommit == nil || !ibs.waitCommit(tx) {
 		return false
 	}
-	s.wakeGen++
-	s.sdProbeEpoch++
+	ibs.wakeGen++
+	ibs.sdProbeEpoch++
 	return true
 }
