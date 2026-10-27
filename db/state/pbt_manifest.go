@@ -105,31 +105,7 @@ func WritePBTManifest(path string, manifest PBTManifest) error {
 	if err != nil {
 		return fmt.Errorf("pbt manifest: encode: %w", err)
 	}
-	directory := filepath.Dir(path)
-	temp, err := os.CreateTemp(directory, ".pbt-manifest-*")
-	if err != nil {
-		return fmt.Errorf("pbt manifest: create temporary file: %w", err)
-	}
-	tempPath := temp.Name()
-	defer func() { _ = dir.RemoveFile(tempPath) }()
-	if _, err := temp.Write(data); err != nil {
-		_ = temp.Close()
-		return fmt.Errorf("pbt manifest: write: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return fmt.Errorf("pbt manifest: sync: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("pbt manifest: close: %w", err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("pbt manifest: rename: %w", err)
-	}
-	if err := dir.FsyncDir(directory); err != nil {
-		return fmt.Errorf("pbt manifest: sync directory: %w", err)
-	}
-	return nil
+	return dir.WriteFileAtomic(path, data, 0o600)
 }
 
 func PBTManifestDigest(path string) (string, error) {

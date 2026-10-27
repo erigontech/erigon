@@ -171,6 +171,24 @@ type verifiedChain struct {
 	referencedKeys uint64
 }
 
+func (t *Trie) verifyChain(path eip8297.Bitpath) (chain verifiedChain) {
+	defer t.releaseVerifyRows()
+	chain.err = t.loadVerifyRows(path)
+	if chain.err == nil {
+		chain.row, chain.err = t.loadRow(path)
+	}
+	if chain.err == nil {
+		chain.result, chain.err = t.verifyRow(chain.row)
+	}
+	if chain.err == nil {
+		chain.err = t.verifyRowsComplete()
+	}
+	if chain.err == nil {
+		chain.referencedKeys = t.verifyReferencedKeys
+	}
+	return chain
+}
+
 func (t *Trie) trackBucketKeys() {
 	if t.verifiedBucketKeys != nil {
 		return
@@ -265,21 +283,7 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 			if t.verifiedBucketKeys != nil {
 				worker.verifiedBucketKeys = make(map[string]struct{})
 			}
-			chain := verifiedChain{}
-			chain.err = worker.loadVerifyRows(paths[i])
-			if chain.err == nil {
-				chain.row, chain.err = worker.loadRow(paths[i])
-			}
-			if chain.err == nil {
-				chain.result, chain.err = worker.verifyRow(chain.row)
-			}
-			if chain.err == nil {
-				chain.err = worker.verifyRowsComplete()
-			}
-			if chain.err == nil {
-				chain.referencedKeys = worker.verifyReferencedKeys
-			}
-			worker.releaseVerifyRows()
+			chain := worker.verifyChain(paths[i])
 			if chain.err != nil {
 				return chain.err
 			}
@@ -328,21 +332,7 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 				if t.verifiedBucketKeys != nil {
 					worker.verifiedBucketKeys = make(map[string]struct{})
 				}
-				chain := verifiedChain{}
-				chain.err = worker.loadVerifyRows(paths[i])
-				if chain.err == nil {
-					chain.row, chain.err = worker.loadRow(paths[i])
-				}
-				if chain.err == nil {
-					chain.result, chain.err = worker.verifyRow(chain.row)
-				}
-				if chain.err == nil {
-					chain.err = worker.verifyRowsComplete()
-				}
-				if chain.err == nil {
-					chain.referencedKeys = worker.verifyReferencedKeys
-				}
-				worker.releaseVerifyRows()
+				chain := worker.verifyChain(paths[i])
 				if chain.err != nil {
 					for failed := firstFailed.Load(); int64(i) < failed && !firstFailed.CompareAndSwap(failed, int64(i)); failed = firstFailed.Load() {
 					}

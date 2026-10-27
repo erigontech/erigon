@@ -39,23 +39,7 @@ func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
 	writePBinConvertStateN(t, db, 1024)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         7,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	targetTx.Rollback()
+	convertPBinAt(t, db, agg, 7)
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
@@ -79,23 +63,7 @@ func TestPBinVerifySerialManyStorageSlots(t *testing.T) {
 	writePBinConvertStateManyStorageSlots(t, db)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         7,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	targetTx.Rollback()
+	convertPBinAt(t, db, agg, 7)
 
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -113,23 +81,7 @@ func TestPBinVerifySerialUsesPlannedRangeOffsets(t *testing.T) {
 	writePBinConvertStateN(t, db, 1024)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         7,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	targetTx.Rollback()
+	convertPBinAt(t, db, agg, 7)
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
@@ -169,23 +121,7 @@ func verifyPBinRejectsUnreferencedRow(t *testing.T, selectRow pbinUnreferencedRo
 	writePBinConvertStateN(t, db, 1024)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         7,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	targetTx.Rollback()
+	convertPBinAt(t, db, agg, 7)
 	rows := pbinCommitmentRows(t, agg)
 	extraKey, extraValue := selectRow(t, rows)
 	require.NotEmpty(t, extraKey)
@@ -345,23 +281,7 @@ func TestPBinVerifyCountsActualRootPointReads(t *testing.T) {
 	writePBinConvertStateN(t, db, 1024)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         7,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	targetTx.Rollback()
+	convertPBinAt(t, db, agg, 7)
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
@@ -398,23 +318,7 @@ func TestPBinVerifyStorageRowsStayBounded(t *testing.T) {
 	writePBinConvertStateN(t, db, 4096)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	sourceTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer sourceTx.Rollback()
-	targetTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer targetTx.Rollback()
-	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
-		SourceAggregator: agg,
-		SourceTx:         sourceTx,
-		TargetAggregator: agg,
-		TargetTx:         targetTx,
-		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         7,
-		Hash:             eip8297.HashBytes,
-	})
-	require.NoError(t, err)
-	targetTx.Rollback()
+	convertPBinAt(t, db, agg, 7)
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer verifyTx.Rollback()

@@ -644,23 +644,7 @@ func TestConvertPBTFileRangesMatchWorkers(t *testing.T) {
 }
 
 func pbtCommitmentBinFileBytes(t *testing.T, output string) (map[string][]byte, map[string][]byte) {
-	t.Helper()
-	snapDomain := datadir.Open(output).SnapDomain
-	read := func(suffix string) map[string][]byte {
-		names, err := dir.ListFiles(snapDomain, suffix)
-		require.NoError(t, err)
-		files := make(map[string][]byte)
-		for _, name := range names {
-			if !strings.Contains(filepath.Base(name), kv.CommitmentBinDomain.String()) {
-				continue
-			}
-			data, err := os.ReadFile(name)
-			require.NoError(t, err)
-			files[filepath.Base(name)] = data
-		}
-		return files
-	}
-	return read(".kv"), read(".kvi")
+	return pbtCommitmentBinFiles(t, output, ".kv"), pbtCommitmentBinFiles(t, output, ".kvi")
 }
 
 func TestConvertPBTSourceWalkWorkersMatchSerial(t *testing.T) {

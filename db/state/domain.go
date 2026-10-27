@@ -1067,9 +1067,7 @@ func (d *Domain) buildFileRangeWithWorkers(ctx context.Context, stepFrom, stepTo
 		}
 	}
 	err = valuesComp.Compress()
-	if idtProgress != nil {
-		idtProgress.Done()
-	}
+	idtProgress.Done()
 	if err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
 	}
@@ -1092,14 +1090,10 @@ func (d *Domain) buildFileRangeWithWorkers(ctx context.Context, stepFrom, stepTo
 		}
 		idxPath := d.kviAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
 		if err = d.buildHashMapAccessorAtWithWorkers(ctx, idxPath, valuesDecomp, ps, kviProgress, accessorWorkers); err != nil {
-			if kviProgress != nil {
-				kviProgress.Done()
-			}
+			kviProgress.Done()
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
-		if kviProgress != nil {
-			kviProgress.Done()
-		}
+		kviProgress.Done()
 		valuesIdx, err = d.openHashMapAccessor(idxPath)
 		if err != nil {
 			return StaticFiles{}, err
@@ -1402,9 +1396,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 					return fmt.Errorf("add idx key [%x]: %w", word, err)
 				}
 			}
-			if pbtProgress != nil {
-				pbtProgress.Add(1)
-			}
+			pbtProgress.Add(1)
 
 			// Skip value
 			keyPos, _ = g.Skip()
@@ -1415,9 +1407,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 				if err := rs.ResetNextSalt(); err != nil {
 					return err
 				}
-				if pbtProgress != nil {
-					pbtProgress.Reset()
-				}
+				pbtProgress.Reset()
 			} else {
 				return fmt.Errorf("build idx: %w", err)
 			}
@@ -2046,7 +2036,7 @@ func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upp
 		end           uint64
 	}
 	data := make([]fileData, len(dt.files))
-	scan := func(fileIndex int) error {
+	scan := func(fileIndex int) {
 		reader := dt.dataReader(dt.files[fileIndex].src.decompressor)
 		reader.Reset(0)
 		result := fileData{prefixOffsets: make(map[uint64]uint64), upperRows: make(map[string][]byte)}
@@ -2079,21 +2069,12 @@ func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upp
 		}
 		result.end = offset
 		data[fileIndex] = result
-		return nil
 	}
-	if len(data) > 1 {
-		var group errgroup.Group
-		for fileIndex := range data {
-			group.Go(func() error { return scan(fileIndex) })
-		}
-		if err := group.Wait(); err != nil {
-			return nil, nil, nil, err
-		}
-	} else if len(data) == 1 {
-		if err := scan(0); err != nil {
-			return nil, nil, nil, err
-		}
+	var group sync.WaitGroup
+	for fileIndex := range data {
+		group.Go(func() { scan(fileIndex) })
 	}
+	group.Wait()
 	prefixOffsets := make(map[uint64][]uint64)
 	fileEnds := make([]uint64, len(data))
 	upperRows := make(map[string][]byte)
