@@ -49,12 +49,12 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	decisionRoot, lookaheadRoot, ok := b.shufflingDecisionRoots(epoch)
 	if ok {
-		if cachedIndicies, _, hit := caches.ActiveValidatorsCacheGlobal.Get(epoch, decisionRoot); hit && len(cachedIndicies) > 0 {
+		if cachedIndicies, hit := caches.ActiveValidatorsCacheGlobal.Get(epoch, decisionRoot); hit && len(cachedIndicies) > 0 {
 			b.activeValidatorsCache.Add(epoch, cachedIndicies)
 			return cachedIndicies
 		}
 		if lookaheadRoot != (common.Hash{}) {
-			if cachedIndicies, _, hit := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot); hit && len(cachedIndicies) > 0 {
+			if cachedIndicies, hit := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot); hit && len(cachedIndicies) > 0 {
 				b.activeValidatorsCache.Add(epoch, cachedIndicies)
 				return cachedIndicies
 			}
@@ -71,7 +71,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	b.activeValidatorsCache.Add(epoch, indicies)
 	if lookaheadRoot != (common.Hash{}) {
-		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indicies, 0)
+		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indicies)
 	}
 
 	return indicies
@@ -196,17 +196,11 @@ func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, e
 
 // GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
 func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
-	epoch := slot / b.BeaconConfig().SlotsPerEpoch
-
-	if b.Version() >= clparams.FuluVersion {
-		stateEpoch := b.Slot() / b.BeaconConfig().SlotsPerEpoch
-		if epoch >= stateEpoch && epoch <= stateEpoch+b.BeaconConfig().MinSeedLookahead {
-			p := b.GetProposerLookahead()
-			index := int((epoch-stateEpoch)*b.BeaconConfig().SlotsPerEpoch + slot%b.BeaconConfig().SlotsPerEpoch)
-			return p.Get(index), nil
-		}
+	if proposer, ok := b.ProposerIndexFromLookahead(slot); ok {
+		return proposer, nil
 	}
 
+	epoch := slot / b.BeaconConfig().SlotsPerEpoch
 	hash := sha256.New()
 	beaconConfig := b.BeaconConfig()
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
@@ -234,6 +228,20 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 		return shuffling.ComputeUnslashedBalanceWeightedProposerIndex(b.BeaconState, indices, seedArray)
 	}
 	return shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
+}
+
+// ProposerIndexFromLookahead returns the proposer of slot from proposer_lookahead when its epoch is in the lookahead window.
+func (b *CachingBeaconState) ProposerIndexFromLookahead(slot uint64) (uint64, bool) {
+	if b.Version() < clparams.FuluVersion {
+		return 0, false
+	}
+	epoch := slot / b.BeaconConfig().SlotsPerEpoch
+	stateEpoch := b.Slot() / b.BeaconConfig().SlotsPerEpoch
+	if epoch < stateEpoch || epoch-stateEpoch > b.BeaconConfig().MinSeedLookahead {
+		return 0, false
+	}
+	index := int((epoch-stateEpoch)*b.BeaconConfig().SlotsPerEpoch + slot%b.BeaconConfig().SlotsPerEpoch)
+	return b.GetProposerLookahead().Get(index), true
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.

@@ -21,10 +21,29 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 )
+
+type progressiveUint64List interface {
+	HashSSZProgressive() ([32]byte, error)
+	SetProgressiveHashing(bool)
+}
+
+func hashUint64ListProgressive(list solid.Uint64ListSSZ) ([32]byte, error) {
+	if list, ok := list.(progressiveUint64List); ok {
+		return list.HashSSZProgressive()
+	}
+	return merkle_tree.ProgressiveBasicListRoot(list.Bytes(), uint64(list.Length()))
+}
+
+func setUint64ListProgressiveHashing(list solid.Uint64ListSSZ, enabled bool) {
+	if list, ok := list.(progressiveUint64List); ok {
+		list.SetProgressiveHashing(enabled)
+	}
+}
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	b.mu.Lock()
@@ -62,6 +81,8 @@ func (b *BeaconState) PrintLeaves() {
 }
 
 func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if err := b.computeDirtyLeaves(); err != nil {
 		return nil, err
 	}
@@ -92,6 +113,8 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 }
 
 func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if err := b.computeDirtyLeaves(); err != nil {
 		return nil, err
 	}
@@ -121,6 +144,8 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 }
 
 func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if err := b.computeDirtyLeaves(); err != nil {
 		return nil, err
 	}
@@ -237,7 +262,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	if b.version >= clparams.GloasVersion {
 		beaconStateHasher.addHash(ValidatorsLeafIndex, b.validators.HashSSZProgressive)
 		beaconStateHasher.addHash(BalancesLeafIndex, func() ([32]byte, error) {
-			return merkle_tree.ProgressiveBasicListRoot(b.balances.Bytes(), uint64(b.balances.Length()))
+			return hashUint64ListProgressive(b.balances)
 		})
 	} else {
 		beaconStateHasher.add(ValidatorsLeafIndex, b.validators)
@@ -271,7 +296,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		// Altair fields
 		if b.version >= clparams.GloasVersion {
 			beaconStateHasher.addHash(InactivityScoresLeafIndex, func() ([32]byte, error) {
-				return merkle_tree.ProgressiveBasicListRoot(b.inactivityScores.Bytes(), uint64(b.inactivityScores.Length()))
+				return hashUint64ListProgressive(b.inactivityScores)
 			})
 		} else {
 			beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)

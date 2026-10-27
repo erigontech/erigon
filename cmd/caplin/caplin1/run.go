@@ -83,10 +83,8 @@ import (
 )
 
 func OpenCaplinDatabase(ctx context.Context,
-	beaconConfig *clparams.BeaconChainConfig,
 	dbPath string,
 	blobDir string,
-	engine execution_client.ExecutionEngine,
 	wipeout bool,
 ) (kv.RwDB, blob_storage.BlobStorage, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
@@ -301,7 +299,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
-	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false)
+	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, dirs.CaplinIndexing, dirs.CaplinBlobs, false)
 	if err != nil {
 		return err
 	}
@@ -493,7 +491,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	gossipManager.SetLocalNodeID(localNode.ID())
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
 	forkChoice.InitPeerDas(peerDas)   // hack init
@@ -512,8 +510,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
-	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters, gossipManager)
+	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters, batchSignatureVerifier)
 	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
@@ -595,7 +593,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
+	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
@@ -663,6 +661,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			proposerPreferencesService,
 		)
 		apiHandler.StartPayloadPreparation(ctx)
+		apiHandler.StartPayloadAttributes(ctx)
 		go func() {
 			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
 				ArchiveApi: apiHandler,

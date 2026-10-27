@@ -15,13 +15,8 @@ type activeValidatorsCacheKey struct {
 	root  common.Hash
 }
 
-type activeValidatorsCacheVal struct {
-	activeValidators   []uint64
-	totalActiveBalance uint64
-}
-
 type ActiveValidatorsCache struct {
-	cache *lru.Cache[activeValidatorsCacheKey, activeValidatorsCacheVal]
+	cache *lru.Cache[activeValidatorsCacheKey, []uint64]
 }
 
 var (
@@ -30,7 +25,7 @@ var (
 )
 
 func NewActiveValidatorsCache(name string, size int) *ActiveValidatorsCache {
-	cache, err := lru.New[activeValidatorsCacheKey, activeValidatorsCacheVal](name, size)
+	cache, err := lru.New[activeValidatorsCacheKey, []uint64](name, size)
 	if err != nil {
 		panic(err)
 	}
@@ -39,17 +34,10 @@ func NewActiveValidatorsCache(name string, size int) *ActiveValidatorsCache {
 	}
 }
 
-func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, uint64, bool) {
-	val, ok := c.cache.Get(activeValidatorsCacheKey{epoch: epoch, root: root})
-	if !ok {
-		return nil, 0, false
-	}
-	return val.activeValidators, val.totalActiveBalance, true
+func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, bool) {
+	return c.cache.Get(activeValidatorsCacheKey{epoch: epoch, root: root})
 }
 
-func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64, totalActiveBalance uint64) {
-	c.cache.Add(activeValidatorsCacheKey{epoch: epoch, root: root}, activeValidatorsCacheVal{
-		activeValidators:   activeValidators,
-		totalActiveBalance: totalActiveBalance,
-	})
+func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64) {
+	c.cache.Add(activeValidatorsCacheKey{epoch: epoch, root: root}, activeValidators)
 }

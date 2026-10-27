@@ -693,6 +693,7 @@ func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter
 	if !ok {
 		return
 	}
+	a.recordPreferredFeeRecipients(reqs)
 	a.postProposerPreferences(w, r, reqs)
 }
 
@@ -757,6 +758,31 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, ca
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
 			fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))).WriteTo(w)
 		return nil, false
+	}
+}
+
+// recordPreferredFeeRecipients makes each correctly signed preference the fallback fee recipient
+// once Gloas is active, also when gossip validation ignores it. Before that, prepare_beacon_proposer
+// stays the only source.
+func (a *ApiHandler) recordPreferredFeeRecipients(reqs []*cltypes.SignedProposerPreferences) {
+	if a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch()) < clparams.GloasVersion {
+		return
+	}
+	for _, req := range reqs {
+		if req == nil || req.Message == nil {
+			continue
+		}
+		var pubkey common.Bytes48
+		var genesisValidatorsRoot common.Hash
+		err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			var err error
+			pubkey, err = headState.ValidatorPublicKey(int(req.Message.ValidatorIndex))
+			genesisValidatorsRoot = headState.GenesisValidatorsRoot()
+			return err
+		})
+		if err == nil && clservices.VerifyProposerPreferencesSignature(a.beaconChainCfg, req, pubkey, genesisValidatorsRoot) == nil {
+			a.validatorParams.SetFeeRecipient(req.Message.ValidatorIndex, req.Message.FeeRecipient)
+		}
 	}
 }
 
@@ -1361,6 +1387,9 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 	if contents.Blobs == nil || contents.KZGProofs == nil || contents.Blobs.Len() != commitments.Len() ||
 		contents.KZGProofs.Len() != commitments.Len()*int(a.beaconChainCfg.NumberOfColumns) {
 		return errors.New("execution payload envelope blob, proof, and commitment counts do not match")
+	}
+	if commitments.Len() == 0 {
+		return nil
 	}
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
 	bundles := make([]BlobBundle, 0, commitments.Len())
