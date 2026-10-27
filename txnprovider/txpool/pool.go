@@ -140,7 +140,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
-	stateBlockHash          common.Hash
+	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -417,6 +417,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
+	// A reorg can invalidate frame approvals and payer reservations. Frame
+	// transactions therefore go through normal admission against the new head,
+	// after releasing the pool lock so backend EVM simulation does not block the pool.
 	var ordinaryUnwind TxnSlots
 	for i, txn := range unwindTxns.Txns {
 		if txn.TxType() == FrameTxnType {
