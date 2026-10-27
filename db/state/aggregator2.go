@@ -10,9 +10,12 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/time/rate"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -27,6 +30,7 @@ type AggOpts struct { //nolint:gocritic
 	commitmentHotMaxMergeSteps      uint64
 	demoteColdDir                   string
 	coldMergeNoPause                bool
+	coldIOMaxMBps                   uint64
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
 	genSaltIfNeed       bool
@@ -96,6 +100,10 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 			a.Close()
 			return nil, err
 		}
+		if opts.coldIOMaxMBps > 0 {
+			a.coldIOLimiter = rate.NewLimiter(rate.Limit(opts.coldIOMaxMBps<<20), 1<<20)
+			a.d[kv.CommitmentDomain].coldIOLimiter = a.coldIOLimiter
+		}
 		if opts.coldMergeNoPause {
 			a.disableColdMergePause()
 		}
@@ -136,6 +144,12 @@ func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //no
 
 func (opts AggOpts) CommitmentHotMaxMergeSteps(steps uint64) AggOpts { //nolint:gocritic
 	opts.commitmentHotMaxMergeSteps = steps
+	return opts
+}
+
+// ColdIOMaxMBps caps the HDD traffic of demotion copies and cold merges together; 0 = no cap.
+func (opts AggOpts) ColdIOMaxMBps(mbps uint64) AggOpts { //nolint:gocritic
+	opts.coldIOMaxMBps = mbps
 	return opts
 }
 

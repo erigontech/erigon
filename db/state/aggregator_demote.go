@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -59,7 +61,7 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 	if a.onDemoteCopy != nil {
 		a.onDemoteCopy(ctx)
 	}
-	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO); err != nil {
+	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO, a.coldIOLimiter); err != nil {
 		return fmt.Errorf("DemoteFile: copy %s: %w", ssdPath, err)
 	}
 	copyBytesPerSec := float64(size) / time.Since(start).Seconds()
@@ -129,7 +131,7 @@ func (a *Aggregator) dirtyDomainFile(d *Domain, from, to kv.Step) (item *FilesIt
 }
 
 // copyToCold skips the copy when dst already has the size of src (a demotion interrupted after the copy).
-func copyToCold(ctx context.Context, src, dst string, gate *coldIOGate) error {
+func copyToCold(ctx context.Context, src, dst string, gate *coldIOGate, lim *rate.Limiter) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -150,7 +152,7 @@ func copyToCold(ctx context.Context, src, dst string, gate *coldIOGate) error {
 	if err != nil {
 		return err
 	}
-	if err := copyWithCancel(ctx, out, in, gate); err != nil {
+	if err := copyWithCancel(ctx, out, in, gate, lim); err != nil {
 		_ = out.Close()
 		_ = dir.RemoveFile(tmp)
 		return err
@@ -170,7 +172,7 @@ func copyToCold(ctx context.Context, src, dst string, gate *coldIOGate) error {
 
 // copyWithCancel copies in chunks so cancel and pause act between them; io.CopyN keeps the copy_file_range fast
 // path. Each chunk's writeback is started at once, so a pause also stops the disk writes, not only the copy.
-func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldIOGate) error {
+func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldIOGate, lim *rate.Limiter) error {
 	const chunk = 1 << 20
 	var off int64
 	for {
@@ -179,6 +181,9 @@ func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldI
 			return err
 		}
 		mxDemotionPausedSeconds.Add(time.Since(waitStart).Seconds())
+		if err := waitColdIOBytes(ctx, lim, chunk); err != nil {
+			return err
+		}
 		n, err := io.CopyN(dst, src, chunk)
 		if n > 0 {
 			if werr := dir.WriteBack(dst, off, n, chunk); werr != nil {

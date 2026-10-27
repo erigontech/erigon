@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
@@ -398,4 +399,22 @@ func TestAggregatorDemoteInBackgroundSkipsOnlyColdResidentFiles(t *testing.T) {
 	waitDemotionIdle(t, agg)
 	require.True(t, isSymlink(t, notLinked))
 	require.False(t, agg.DemoteInBackground(3*agg.StepSize()))
+}
+
+func TestCopyToColdKeepsRateCap(t *testing.T) {
+	t.Parallel()
+	src := filepath.Join(t.TempDir(), "src.kv")
+	data := make([]byte, 4<<20)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	require.NoError(t, os.WriteFile(src, data, 0o644))
+	dst := filepath.Join(t.TempDir(), "dst.kv")
+
+	start := time.Now()
+	require.NoError(t, copyToCold(t.Context(), src, dst, newColdIOGate(), rate.NewLimiter(rate.Limit(8<<20), 1<<20)))
+	require.GreaterOrEqual(t, time.Since(start), 300*time.Millisecond) // 4 MB at 8 MB/s with a 1 MB burst: >= 375 ms
+	got, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
 }

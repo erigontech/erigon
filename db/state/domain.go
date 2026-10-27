@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -74,8 +75,9 @@ type Domain struct {
 	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
 
-	coldDir string // resolved demotion target; see isColdResident
-	coldIO  *coldIOGate
+	coldDir       string // resolved demotion target; see isColdResident
+	coldIO        *coldIOGate
+	coldIOLimiter *rate.Limiter // nil: no cap
 
 	// Schema:
 	//  - .kv - key -> value

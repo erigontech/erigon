@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 )
@@ -58,13 +60,31 @@ func removeColdMergeLink(link string) {
 	_ = dir.RemoveFile(link)
 }
 
-func (d *Domain) waitColdMerge(ctx context.Context) error {
+// waitColdMerge waits while cold IO is paused, then for the rate cap to allow n more bytes.
+func (d *Domain) waitColdMerge(ctx context.Context, n int) error {
 	start := time.Now()
 	mxColdMergePaused.Set(1)
 	err := d.coldIO.Wait(ctx)
 	mxColdMergePaused.Set(0)
 	mxColdMergePausedSeconds.Add(time.Since(start).Seconds())
-	return err
+	if err != nil {
+		return err
+	}
+	return waitColdIOBytes(ctx, d.coldIOLimiter, n)
+}
+
+func waitColdIOBytes(ctx context.Context, lim *rate.Limiter, n int) error {
+	if lim == nil {
+		return nil
+	}
+	for n > 0 {
+		k := min(n, lim.Burst())
+		if err := lim.WaitN(ctx, k); err != nil {
+			return err
+		}
+		n -= k
+	}
+	return nil
 }
 
 func (d *Domain) logColdMerge(r MergeRange, inputs []*FilesItem, out *FilesItem, start time.Time) {
