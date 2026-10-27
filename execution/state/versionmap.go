@@ -103,6 +103,11 @@ func (p AccountPath) AffectsAccountLifecycle() bool {
 	}
 }
 
+// BALSeeded reports whether a block access list pre-populates cells of path p.
+func (p AccountPath) BALSeeded() bool {
+	return p == BalancePath || p == NoncePath || p == CodePath || p == StoragePath
+}
+
 // AccountKey is a (Path, Key) pair used as a field selector within an AddressEntry
 // and as a debug-printable identifier.
 type AccountKey struct {
@@ -227,7 +232,8 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 
-	// Origin layer: the pre-block committed base (state before any tx in the block). Immutable and
+	// Origin layer: the committed base before the first unpublished tx (published txs are already
+	// folded into it); every reader of it has a higher tx index. Immutable and
 	// write-once, so it lives in lock-free sync.Maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
@@ -241,6 +247,9 @@ type VersionMap struct {
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
+	// absentAccountHook runs after an account read found no account, before the
+	// self-destruct and revival probes. Tests set it to land a flush there.
+	absentAccountHook func()
 }
 
 type originStorageKey struct {
@@ -248,12 +257,12 @@ type originStorageKey struct {
 	key  accounts.StorageKey
 }
 
-// StoreOriginAccount records the pre-block committed account write-once (idempotent across txs).
+// StoreOriginAccount records the committed base account write-once (idempotent across txs).
 func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Account) {
 	vm.originAccounts.LoadOrStore(addr, acc)
 }
 
-// LoadOriginAccount returns the pre-block committed account and whether it was seeded.
+// LoadOriginAccount returns the committed base account and whether it was seeded.
 func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Account, bool) {
 	if v, ok := vm.originAccounts.Load(addr); ok {
 		acc, _ := v.(*accounts.Account)
@@ -262,12 +271,12 @@ func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Accoun
 	return nil, false
 }
 
-// StoreOriginStorage records the pre-block committed slot value write-once.
+// StoreOriginStorage records the committed base slot value write-once.
 func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
 	vm.originStorage.LoadOrStore(originStorageKey{addr, key}, val)
 }
 
-// LoadOriginStorage returns the pre-block committed slot value and whether it was seeded.
+// LoadOriginStorage returns the committed base slot value and whether it was seeded.
 func (vm *VersionMap) LoadOriginStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
 	if v, ok := vm.originStorage.Load(originStorageKey{addr, key}); ok {
 		return v.(uint256.Int), true
@@ -1305,10 +1314,10 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 
 // MarkWritesValidated flips every cell named by writes Estimate->Validated: the tx
 // validated its read-set out-of-order but is not yet sealed, so a reader continues on it
-// (early break) while it stays revertible until the in-order seal. A fee-recipient's
-// Address and Balance cells are left Estimate so readers keep pausing until calcFees
-// finalizes the tip.
-func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(accounts.Address) bool) {
+// (early break) while it stays revertible until the in-order seal. A fee recipient's
+// Address, Balance and SelfDestruct cells are left Estimate: calcFees credits its fee,
+// and may undo its EIP-161 removal, at the same version, so readers keep pausing until the seal.
+func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
@@ -1327,11 +1336,11 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(acc
 		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
 			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
 		}
-		feeAddr := feeEstimate != nil && feeEstimate(addr)
+		feeAddr := isFeeRecipient != nil && isFeeRecipient(addr)
 		if vw, ok := writes.address[addr]; ok && !feeAddr {
 			mark(AddressPath, accounts.NilKey, vw.Version)
 		}
-		if vw, ok := writes.selfDestruct[addr]; ok {
+		if vw, ok := writes.selfDestruct[addr]; ok && !feeAddr {
 			mark(SelfDestructPath, accounts.NilKey, vw.Version)
 		}
 		if vw, ok := writes.balance[addr]; ok && !feeAddr {
@@ -1676,9 +1685,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry a
 			// storage read saw is a BAL no-op and stays valid; other paths mean a real
 			// concurrent change and must invalidate.
-			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
-				path == CodePath || path == StoragePath
-			if !vm.HasBAL || !isBALPrePopulatedPath {
+			if !vm.HasBAL || !path.BALSeeded() {
 				switch {
 				case recursive && matchesLive == nil:
 					// Synthetic cross-validate probe with no recorded value of its own —
@@ -2085,6 +2092,24 @@ func (res ReadResult) Status() int {
 	}
 
 	return MVReadResultNone
+}
+
+// accountLiveAt reports whether any field cell below txIdx makes the account
+// EIP-161-non-empty. Unresolved cells cannot prove death and count as live.
+func (vm *VersionMap) accountLiveAt(addr accounts.Address, txIdx int) bool {
+	if bal, rr, ok := vm.ReadBalance(addr, txIdx); ok && (!rr.resolved() || !bal.IsZero()) {
+		return true
+	}
+	if nonce, rr, ok := vm.ReadNonce(addr, txIdx); ok && (!rr.resolved() || nonce != 0) {
+		return true
+	}
+	if ch, rr, ok := vm.ReadCodeHash(addr, txIdx); ok && (!rr.resolved() || !(ch.IsEmpty() || ch.IsZero())) {
+		return true
+	}
+	if c, rr, ok := vm.ReadCode(addr, txIdx); ok && (!rr.resolved() || len(c.Bytes) > 0) {
+		return true
+	}
+	return false
 }
 
 // resolved reports whether the floor holds a value at a known version: Done (sealed) or

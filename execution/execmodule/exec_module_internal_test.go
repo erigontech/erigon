@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -89,6 +90,29 @@ func TestDrainWaitsForInFlightExecution(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("drain did not return after execution became idle")
 	}
+}
+
+func TestPruneWaitsForExecution(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		defer module.semaphore.Release(1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		result := make(chan error, 1)
+		go func() {
+			_, err := module.Prune(ctx)
+			result <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-result:
+			t.Fatalf("prune returned while execution was still active: %v", err)
+		default:
+		}
+		cancel()
+		require.ErrorIs(t, <-result, context.Canceled)
+	})
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {

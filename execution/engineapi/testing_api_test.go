@@ -1707,7 +1707,3 @@ func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
 		})
 	}
 }
-
-func ptrUint64(v uint64) *uint64 {
-	return &v
-}

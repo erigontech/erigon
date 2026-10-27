@@ -22,17 +22,21 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func Create(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
-	bal := txIO.AsBlockAccessList()
+// Create finishes b, which may hold a prefix of the block's txs or be nil, with the rest of txIO.
+func Create(blockNum uint64, b *state.BlockAccessListBuilder, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
+	if b == nil {
+		b = state.NewBlockAccessListBuilder()
+	}
+	b.AddRemaining(txIO)
+	bal := b.Build()
 	if dbg.TraceBlockAccessLists {
 		writeBALToFile(bal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
 	}
@@ -58,8 +62,9 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 // Process derives the block's access list from the executed VersionedIO and,
 // once Amsterdam is active, cross-checks it against the header commitment. It
 // returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
-// path, where the header carries no BAL hash) can capture it.
-func Process(tx kv.Getter, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+// path, where the header carries no BAL hash) can capture it. blockBalBytes is
+// the stored BAL sidecar, nil when absent.
+func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessListBuilder, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
 		return nil, nil
 	}
@@ -68,7 +73,7 @@ func Process(tx kv.Getter, h *types.Header, vio *state.VersionedIO, isEIP7928 bo
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := Create(blockNum, vio, dataDir, logger)
+	computedBlockBal := Create(blockNum, built, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
@@ -84,26 +89,13 @@ func Process(tx kv.Getter, h *types.Header, vio *state.VersionedIO, isEIP7928 bo
 		return nil, fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	blockBalHash := *h.BlockAccessListHash
-	blockBalBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
-	if err != nil {
-		return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-	}
 	// A stored BAL sidecar may be absent, so cross-check it only when present.
-	var blockBal types.BlockAccessList
+	// The stored bytes are canonical RLP, so their Keccak is the BAL hash.
 	if blockBalBytes != nil {
-		blockBal, err = types.DecodeBlockAccessListBytes(blockBalBytes)
-		if err != nil {
-			return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-		}
-		if err = blockBal.Validate(); err != nil {
-			return nil, fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
-		}
-		if err = blockBal.ValidateMaxItems(h.GasLimit); err != nil {
-			return nil, fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
-		}
-		if blockBalHash != blockBal.Hash() {
+		if storedHash := crypto.Keccak256Hash(blockBalBytes); storedHash != blockBalHash {
+			blockBal, _ := types.DecodeBlockAccessListBytes(blockBalBytes)
 			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
-			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, blockBal.Hash(), blockBalHash)
+			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, storedHash, blockBalHash)
 		}
 	}
 	// Always validate computed BAL against header. The BalancePath cross-check
@@ -111,6 +103,10 @@ func Process(tx kv.Getter, h *types.Header, vio *state.VersionedIO, isEIP7928 bo
 	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
+		var blockBal types.BlockAccessList
+		if blockBalBytes != nil {
+			blockBal, _ = types.DecodeBlockAccessListBytes(blockBalBytes)
+		}
 		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
 		return nil, fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
 			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)

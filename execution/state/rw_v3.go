@@ -172,11 +172,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			return bytes.Compare(av[:], bv[:])
 		})
 
-		getLatestAcct := func(k []byte) ([]byte, error) {
-			v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, k)
-			return v, err
-		}
-
 		for _, addr := range addrs {
 			d := perAddr[addr]
 			address := addr.Value()
@@ -229,15 +224,14 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
-					if vw, ok := writes.(*versionMapWriteView); ok {
-						// Compose the pre-tx account from the versionMap (seeded origin
-						// plus prior txs' field cells); every account written this block
-						// has a seeded origin, so the compose is complete.
-						if base := NewVersionedAccountView(addr, vw.txIdx, vw.vm, nil).Account(); base != nil {
-							acc = *base
+					v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+					if err != nil {
+						return err
+					}
+					if len(v) > 0 {
+						if err := accounts.DeserialiseV3(&acc, v); err != nil {
+							return err
 						}
-					} else if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
-						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
 				}
 				if d.balance != nil {
@@ -322,8 +316,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		// Incarnation==0 guard: see the account-write EIP-161 site above.
-		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && acc.Incarnation == 0 {
+		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
 				return err
 			}

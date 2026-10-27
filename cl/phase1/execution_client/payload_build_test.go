@@ -39,10 +39,11 @@ import (
 
 type payloadBuildModuleStub struct {
 	execmodule.ExecutionModule
-	forkChoice      execmodule.ForkChoiceState
-	assembled       execmodule.AssembleBlockResult
-	assembleCalls   int
-	forkChoiceCalls int
+	forkChoice       execmodule.ForkChoiceState
+	forkChoiceResult execmodule.ForkChoiceResult
+	assembled        execmodule.AssembleBlockResult
+	assembleCalls    int
+	forkChoiceCalls  int
 }
 
 func (s *payloadBuildModuleStub) GetForkChoice(context.Context) (execmodule.ForkChoiceState, error) {
@@ -51,7 +52,7 @@ func (s *payloadBuildModuleStub) GetForkChoice(context.Context) (execmodule.Fork
 
 func (s *payloadBuildModuleStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
 	s.forkChoiceCalls++
-	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, nil
+	return s.forkChoiceResult, nil
 }
 
 func (s *payloadBuildModuleStub) AssembleBlock(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
@@ -78,6 +79,57 @@ func TestDirectStartPayloadBuildDoesNotUpdateForkChoice(t *testing.T) {
 	require.Equal(t, want, id)
 	require.Equal(t, 1, module.assembleCalls)
 	require.Zero(t, module.forkChoiceCalls)
+}
+
+func TestDirectForkChoiceUpdateReportsBusyWhenUpdateWasNotStarted(t *testing.T) {
+	module := &payloadBuildModuleStub{
+		forkChoiceResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy},
+	}
+	client, err := NewExecutionClientDirect(
+		chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+	)
+	require.NoError(t, err)
+
+	_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, ErrForkChoiceUpdateBusy)
+}
+
+func TestDirectForkChoiceUpdateAllowsBusyUpdateInProgress(t *testing.T) {
+	module := &payloadBuildModuleStub{
+		forkChoiceResult: execmodule.ForkChoiceResult{
+			Status:           execmodule.ExecutionStatusBusy,
+			UpdateInProgress: true,
+		},
+	}
+	client, err := NewExecutionClientDirect(
+		chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+	)
+	require.NoError(t, err)
+
+	id, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
+
+	require.NoError(t, err)
+	require.Nil(t, id)
+}
+
+func TestDirectForkChoiceUpdateKeepsBuildingAfterBusyWithAttributes(t *testing.T) {
+	module := &payloadBuildModuleStub{
+		forkChoiceResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy},
+		assembled:        execmodule.AssembleBlockResult{PayloadID: 42},
+	}
+	client, err := NewExecutionClientDirect(
+		chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+	)
+	require.NoError(t, err)
+
+	id, err := client.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, encodeDirectPayloadID(42), id)
+	require.Equal(t, 1, module.assembleCalls)
 }
 
 func TestStartPayloadBuildRequiresMatchingExecutionHead(t *testing.T) {
@@ -111,10 +163,11 @@ func TestDirectPreparationAndForkChoiceReuseTheSameExecutionBuild(t *testing.T) 
 	client, err := NewExecutionClientDirect(chainRW, nil)
 	require.NoError(t, err)
 	head := chainPack.TopBlock.Hash()
-	_, err = client.ForkChoiceUpdate(t.Context(), head, head, head, nil, clparams.ElectraVersion)
-	require.NoError(t, err)
 	// Parallel state flushing can outlive a successful fork-choice response. Wait for the setup work
 	// so this test isolates build reuse from expected execution-module contention.
+	module.ExecModule.WaitIdle(t.Context())
+	_, err = client.ForkChoiceUpdate(t.Context(), head, head, head, nil, clparams.ElectraVersion)
+	require.NoError(t, err)
 	module.ExecModule.WaitIdle(t.Context())
 
 	timestamp := hexutil.Uint64(time.Now().Add(12 * time.Second).Unix())

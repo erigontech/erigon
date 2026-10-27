@@ -1336,6 +1336,91 @@ func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
 	require.Equal(t, VersionInvalid, valid)
 }
 
+// An address is destroyed twice, with a re-creation after each destruct. Reads
+// of its wiped slots are anchored on the later destruct, so removing that
+// destruct invalidates the read of the slot written between the two destructs.
+func TestValidateRead_WipedSlotReadInvalidatedWhenLaterDestructGoes(t *testing.T) {
+	addr := getAddress(231)
+	keyA := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+	keyB := accounts.InternKey(common.BigToHash(big.NewInt(2)))
+	val := *uint256.NewInt(7)
+	newVM := func(withSecondDestruct bool) *VersionMap {
+		vm := NewVersionMap(nil)
+		vm.WriteStorage(addr, keyB, Version{TxIndex: 5}, val, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 10}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 10}, 1, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 11}, false, true)
+		vm.WriteAddress(addr, Version{TxIndex: 11}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteNonce(addr, Version{TxIndex: 11}, 1, true)
+		vm.WriteStorage(addr, keyA, Version{TxIndex: 15}, val, true)
+		if withSecondDestruct {
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 20}, true, true)
+			vm.WriteIncarnation(addr, Version{TxIndex: 20}, 2, true)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 21}, false, true)
+			vm.WriteAddress(addr, Version{TxIndex: 21}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
+			vm.WriteNonce(addr, Version{TxIndex: 21}, 1, true)
+		}
+		return vm
+	}
+	vm := newVM(true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 30)
+	ibs.SetVersion(0)
+	a, err := ibs.GetState(addr, keyA)
+	require.NoError(t, err)
+	require.True(t, a.IsZero(), "slot A was wiped by the tx20 destruct")
+	b, err := ibs.GetState(addr, keyB)
+	require.NoError(t, err)
+	require.True(t, b.IsZero(), "slot B was wiped by both destructs")
+	ibs.PublishOrigins()
+	reads := ibs.VersionedReads()
+	for _, key := range []accounts.StorageKey{keyA, keyB} {
+		read, ok := reads.GetStorage(addr, key)
+		require.True(t, ok)
+		require.Equal(t, 20, read.Version.TxIndex, "the read is anchored on the later destruct")
+	}
+	io := NewVersionedIO(31)
+	io.RecordReads(Version{TxIndex: 30, Incarnation: 0}, reads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(30, io, validateEqualVersion, false, ""))
+
+	readA, _ := reads.GetStorage(addr, keyA)
+	onlyA := ReadSet{}
+	onlyA.SetStorage(addr, keyA, readA)
+	ioA := NewVersionedIO(31)
+	ioA.RecordReads(Version{TxIndex: 30, Incarnation: 0}, onlyA)
+	require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, ioA, validateEqualVersion, false, ""),
+		"slot A reads 7 once the tx20 destruct is gone")
+}
+
+// A nonce read with no nonce cell is validated against the account record: a
+// later record with a different nonce, or one still being written, invalidates it.
+func TestValidateRead_FoldedNonceChangedOrEstimateInvalidates(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xee, 0x2d})
+	newIO := func() *VersionedIO {
+		io := NewVersionedIO(100)
+		rs := ReadSet{}
+		rs.SetNonce(addr, VersionedRead[uint64]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 4}},
+			Val:        69,
+		})
+		io.RecordReads(Version{TxIndex: 99}, rs)
+		return io
+	}
+	t.Run("changed nonce in a later record invalidates", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteAddress(addr, Version{TxIndex: 4}, &accounts.Account{Nonce: 69, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteAddress(addr, Version{TxIndex: 98}, &accounts.Account{Nonce: 70, Balance: *uint256.NewInt(123), CodeHash: accounts.EmptyCodeHash}, true)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(99, newIO(), validateEqualVersion, false, ""))
+	})
+	t.Run("estimate record cannot prove equality", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteAddress(addr, Version{TxIndex: 4}, &accounts.Account{Nonce: 69, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteAddress(addr, Version{TxIndex: 98}, nil, false)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(99, newIO(), validateEqualVersion, false, ""))
+	})
+}
+
 // A balance-only revival writes no nonce or code cells, so a committed read of
 // those fields taken before the destruct has no cell to version-mismatch
 // against. The destruct wiped them, so the non-empty committed values are stale.
