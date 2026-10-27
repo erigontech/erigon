@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,14 +24,10 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestGetContractCreator(t *testing.T) {
@@ -80,64 +75,34 @@ func TestGetContractCreator(t *testing.T) {
 	})
 }
 
-func TestGetContractCreatorGenesisAlloc(t *testing.T) {
-	contract := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	m := execmoduletester.New(t,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainBerlinConfig,
-			Alloc: types.GenesisAlloc{
-				testAddr: {Balance: big.NewInt(1_000_000_000_000)},
-				contract: {Balance: big.NewInt(7), Code: []byte{0x00}},
-			},
-		}),
-		execmoduletester.WithKey(testKey),
-	)
+func TestGetContractCreatorAtHistoryBoundary(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
-	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), contract, uint256.NewInt(1), 100_000, uint256.NewInt(1), nil), *signer, testKey)
-		require.NoError(t, err)
-		block.AddTx(txn)
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(c))
-
-	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
-	creator, err := api.GetContractCreator(m.Ctx, contract)
-	require.NoError(t, err)
-	require.Nil(t, creator)
-}
-
-func TestGetContractCreatorRecreatedGenesisContractIsNotGenesis(t *testing.T) {
-	initCode := []byte{0x60, 0x00, 0x60, 0x00, 0x53, 0x60, 0x01, 0x60, 0x00, 0xf3}
-	factoryCode := append(append([]byte{0x69}, initCode...), 0x60, 0x00, 0x52, 0x60, 0x00, 0x60, 0x0a, 0x60, 0x16, 0x60, 0x00, 0xf5, 0x00)
-	factory := common.HexToAddress("0x00000000000000000000000000000000000000fa")
-	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
-	m := execmoduletester.New(t,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainBerlinConfig,
-			Alloc: types.GenesisAlloc{
-				testAddr: {Balance: big.NewInt(1_000_000_000_000)},
-				factory:  {Code: factoryCode},
-				target:   {Balance: big.NewInt(7), Code: []byte{0x33, 0xff}},
-			},
-		}),
-		execmoduletester.WithKey(testKey),
-	)
-	signer := types.LatestSignerForChainID(nil)
-	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
-		to := target
-		if i == 1 {
-			to = factory
+	initCode := common.FromHex("0x60016000f3") // Return a one-byte STOP contract.
+	var creations [3]types.Transaction
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		if i != 0 {
+			return
 		}
-		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), to, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil), *signer, testKey)
-		require.NoError(t, err)
-		block.AddTx(txn)
+		for index := range creations {
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+			creations[index] = txn
+		}
 	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(c))
-
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
-	creator, err := api.GetContractCreator(m.Ctx, target)
-	require.Error(t, err)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	minTxNum, err := api._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	api.db = historyFloorDB{TemporalRoDB: m.DB, startTxNum: minTxNum + 3}
+
+	creator, err := api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 2))
+	require.NoError(t, err, "the creation transaction's pre-state is retained")
+	require.Equal(t, &ContractCreatorData{Creator: testAddr, Tx: creations[2].Hash()}, creator)
+
+	creator, err = api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 1))
+	require.ErrorIs(t, err, state.ErrPruned, "the preceding creation's pre-state is pruned")
 	require.Nil(t, creator)
 }
