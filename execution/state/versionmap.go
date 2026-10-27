@@ -1592,32 +1592,10 @@ func validateRead(vm *VersionMap, txIndex int, addr accounts.Address, path Accou
 	return vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, checkVersion, traceInvalid, tracePrefix, false)
 }
 
-// Per-path live ReadResult readers (uniform signature so validateRead can thread them).
-func liveBalance(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := vm.ReadBalance(a, tx)
-	return rr
-}
-
-func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := vm.ReadNonce(a, tx)
-	return rr
-}
-
-func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := vm.ReadIncarnation(a, tx)
-	return rr
-}
-
-func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := vm.ReadCodeHash(a, tx)
-	return rr
-}
-
-func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := vm.ReadAddress(a, tx)
-	return rr
-}
-
+// liveStorage is the one path that needs a dedicated live reader: a slot's wipe after a
+// destruct is a lifecycle verdict ReadStorage alone does not carry. Every other path
+// validates on the plain ReadStatus result (version + status, no value), so ValidateReadSet
+// uses ReadStatus directly for them.
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) ReadResult {
 	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
 	// revived it, anchored on the destruct ({destroyedAt, wipeInc}) so it validates by
@@ -1846,37 +1824,37 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	valid = VersionValid
 	// ok latches valid and stops the scan on the first invalid result.
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
-	// noValueRead validates a path whose read records no value to compare
-	// (self-destruct / create-contract / code / code-size): the version/status check is
-	// authoritative — the same version+valStatus basis every path now validates on.
-	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
-		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
-			vm.ReadStatus(addr, path, key, txIdx), checkVersion, traceInvalid, tracePrefix, false)
+	// validatePath validates any non-storage path on the plain ReadStatus result:
+	// validation never compares the recorded value, so version + status is the
+	// authoritative basis for every path except storage, which needs the wipe-aware
+	// liveStorage reader.
+	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
+		return vm.validateReadImpl(txIdx, addr, path, accounts.NilKey, hdr.Source, hdr.Version,
+			vm.ReadStatus(addr, path, accounts.NilKey, txIdx), checkVersion, traceInvalid, tracePrefix, false)
 	}
 
-	// Value paths validate on version+valStatus via their live ReadResult reader.
 	for a, tr := range rs.address {
-		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, liveAddress, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.balance {
-		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, liveBalance, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validatePath(a, BalancePath, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.nonce {
-		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, liveNonce, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validatePath(a, NoncePath, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.incarnation {
-		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, liveIncarnation, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validatePath(a, IncarnationPath, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, liveCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validatePath(a, CodeHashPath, tr.ReadHeader)) {
 			return
 		}
 	}
@@ -1888,12 +1866,12 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, tr := range rs.selfDestruct {
-		if !ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader)) {
+		if !ok(validatePath(a, SelfDestructPath, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.createContract {
-		if !ok(noValueRead(a, CreateContractPath, accounts.NilKey, tr.ReadHeader)) {
+		if !ok(validatePath(a, CreateContractPath, tr.ReadHeader)) {
 			return
 		}
 	}
@@ -1908,7 +1886,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		return VersionValid
 	}
 	for a, tr := range rs.code {
-		if !ok(noValueRead(a, CodePath, accounts.NilKey, tr.ReadHeader)) {
+		if !ok(validatePath(a, CodePath, tr.ReadHeader)) {
 			return
 		}
 		if len(tr.Val.Bytes) != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
@@ -1916,7 +1894,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, tr := range rs.codeSize {
-		if !ok(noValueRead(a, CodeSizePath, accounts.NilKey, tr.ReadHeader)) {
+		if !ok(validatePath(a, CodeSizePath, tr.ReadHeader)) {
 			return
 		}
 		if tr.Val != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
