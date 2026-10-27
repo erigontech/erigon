@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Check what the RPC performance benchmark actually got back from each client.
+"""Check that the clients of an RPC performance benchmark answered the same requests with data.
 
 Vegeta counts a request as successful on any 2xx status, and a JSON-RPC node
-answers HTTP 200 also for ``"result": null`` and for ``"error"`` objects. A node
-that lacks the requested data (pruned state, missing tx index, pruned history)
-therefore looks healthy, and usually faster, in the latency report.
+answers HTTP 200 also when it lacks the requested data (pruned state or history,
+missing tx index). Such a node looks healthy, and usually faster, in the latency
+report, so its numbers must not be compared with a node that did the work.
 
-``classify`` reads the vegeta result files of one client and method through
-``vegeta encode --to json`` and counts the responses per category:
+Clients do not return identical payloads, so only the presence of data is
+compared. ``classify`` reads the vegeta result files of one client and method
+through ``vegeta encode --to json`` and puts every response in one state:
 
-  ok, empty ([], {}, "", "0x"), null, error, unknown  -- JSON-RPC answers
-  http_error, no_response                             -- transport/load failures
+  data     -- a result carrying data, or an EVM execution failure (the EVM ran)
+  no_data  -- ``null``; an empty value ([], {}, "", "0x", "0x0"); an object whose
+              data field is empty (see EMPTY_FIELDS); any other error, including
+              missing state/history and rejections before execution
+  transport -- HTTP failure or no response: load, not correctness
 
-Only a prefix of each body is decoded: the category is decided by the first
-top-level ``result``/``error`` key, which precedes any nested one.
-
-``compare`` loads the classify outputs of all clients and fails when, for the
-same method, the share of a JSON-RPC category differs from Erigon's by more
-than ``--max-delta`` percentage points. HTTP failures are excluded from the
-shares because they measure load, not correctness.
+``compare`` pairs the responses of Erigon and of each other client by JSON-RPC
+id (unique per pattern file) and fails when the same request got data from one
+client and no data from the other. No data on both sides is accepted.
 """
 import argparse
 import base64
@@ -31,73 +31,147 @@ import sys
 
 REFERENCE_CLIENT = "erigon"
 
-JSONRPC_CATEGORIES = ("ok", "empty", "null", "error", "unknown")
-TRANSPORT_CATEGORIES = ("http_error", "no_response")
-CATEGORIES = JSONRPC_CATEGORIES + TRANSPORT_CATEGORIES
+EMPTY_VALUES = ("", "0x", "0x0")
 
-BODY_PREFIX_B64_CHARS = 1024
-MAX_ERROR_MESSAGE_LEN = 120
-TOP_ERRORS = 10
+EMPTY_FIELDS = {
+    "debug_storageRangeAt": "storage",
+    "debug_traceTransaction": "structLogs",
+    "eth_createAccessList": "accessList",
+    "eth_getBlockByHash": "transactions",
+    "eth_getBlockByNumber": "transactions",
+}
+
+EXECUTION_ERROR_RE = re.compile(
+    r"^(execution reverted|out of gas|contract creation code storage out of gas|max call depth exceeded"
+    r"|insufficient balance for transfer|contract address collision|max code size exceeded"
+    r"|max initcode size exceeded|invalid jump destination|write protection|return data out of bounds"
+    r"|gas uint64 overflow|nonce uint64 overflow|invalid code|stack underflow|stack limit reached|invalid opcode)")
+
+FULL_PARSE_MAX_BYTES = 64 * 1024
+HEAD_BYTES = 768
+TAIL_BYTES = 768
+MAX_REASON_LEN = 120
+TOP_REASONS = 10
+MAX_IDS_SHOWN = 10
 
 KEY_RE = re.compile(rb'"(result|error)"\s*:\s*')
-EMPTY_RE = re.compile(rb'(\[\s*\]|\{\s*\}|"(?:0x)?")')
+ID_RE = re.compile(rb'"id"\s*:\s*(\d+)')
 MESSAGE_RE = re.compile(rb'"message"\s*:\s*"((?:[^"\\]|\\.)*)')
+TOP_LEVEL_ERROR_RE = re.compile(rb'"error"\s*:\s*\{\s*"code"')
 HEX_RE = re.compile(r"0x[0-9a-fA-F]+")
 BARE_HEX_RE = re.compile(r"\b[0-9a-fA-F]{16,}\b")
 NUMBER_RE = re.compile(r"\b\d+\b")
 
 
-def normalize_error(message):
+def normalize(message):
     message = HEX_RE.sub("0x…", message)
     message = BARE_HEX_RE.sub("…", message)
     message = NUMBER_RE.sub("N", message)
-    return message[:MAX_ERROR_MESSAGE_LEN]
+    return message[:MAX_REASON_LEN]
 
 
-def classify_body(body):
-    m = KEY_RE.search(body)
+def is_empty(value):
+    return value is None or value == [] or value == {} or (isinstance(value, str) and value in EMPTY_VALUES)
+
+
+def classify_error(message):
+    if EXECUTION_ERROR_RE.match(message):
+        return "data", None
+    return "no_data", f"error: {normalize(message)}"
+
+
+def classify_result(method, result):
+    if result is None:
+        return "no_data", "result: null"
+    if is_empty(result):
+        return "no_data", "result: empty value"
+    field = EMPTY_FIELDS.get(method)
+    if field and isinstance(result, dict):
+        if method == "eth_createAccessList" and result.get("error"):
+            return "data", None
+        if is_empty(result.get(field)):
+            return "no_data", f"result: {field} empty"
+    return "data", None
+
+
+def classify_object(method, obj):
+    rid = obj.get("id")
+    if "error" in obj:
+        message = str((obj["error"] or {}).get("message", ""))
+        if "result" in obj:
+            return "no_data", f"partial result with error: {normalize(message)}", rid
+        return (*classify_error(message), rid)
+    if "result" not in obj:
+        return "no_data", "not a JSON-RPC response", rid
+    return (*classify_result(method, obj["result"]), rid)
+
+
+def classify_head_tail(head, tail):
+    """Classify a body too large, or truncated, to parse: no empty answer is that large."""
+    m_id = ID_RE.search(head)
+    rid = int(m_id.group(1)) if m_id else None
+    m = KEY_RE.search(head)
     if not m:
-        return "unknown", None
+        return "no_data", "not a JSON-RPC response", rid
     if m.group(1) == b"error":
-        msg = MESSAGE_RE.search(body, m.end())
-        return "error", msg.group(1).decode("utf-8", "replace") if msg else ""
-    rest = body[m.end():]
-    if rest.startswith(b"null"):
-        return "null", None
-    if EMPTY_RE.match(rest):
-        return "empty", None
-    return "ok", None
+        msg = MESSAGE_RE.search(head, m.end())
+        return (*classify_error(msg.group(1).decode("utf-8", "replace") if msg else ""), rid)
+    if head[m.end():].startswith(b"null"):
+        return "no_data", "result: null", rid
+    if TOP_LEVEL_ERROR_RE.search(tail):
+        msg = MESSAGE_RE.search(tail)
+        message = msg.group(1).decode("utf-8", "replace") if msg else ""
+        return "no_data", f"partial result with error: {normalize(message)}", rid
+    return "data", None, rid
 
 
-def classify_record(rec):
+def classify_response(method, body):
+    if len(body) <= FULL_PARSE_MAX_BYTES:
+        try:
+            obj = json.loads(body)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict):
+            return classify_object(method, obj)
+    return classify_head_tail(body[:HEAD_BYTES], body[-TAIL_BYTES:])
+
+
+def classify_record(method, rec):
     code = rec.get("code") or 0
     if code == 0:
-        return "no_response", None
+        return "transport", "no response", None
     if not 200 <= code < 300:
-        return "http_error", None
+        return "transport", f"HTTP {code}", None
     body_b64 = rec.get("body") or ""
-    prefix = body_b64[:BODY_PREFIX_B64_CHARS]
-    prefix = prefix[:len(prefix) - len(prefix) % 4]
-    return classify_body(base64.b64decode(prefix))
+    if len(body_b64) * 3 // 4 <= FULL_PARSE_MAX_BYTES:
+        return classify_response(method, base64.b64decode(body_b64))
+    head_b64 = body_b64[:HEAD_BYTES * 4 // 3]
+    tail_b64 = body_b64[-(TAIL_BYTES * 4 // 3):] if len(body_b64) % 4 == 0 else ""
+    return classify_head_tail(base64.b64decode(head_b64), base64.b64decode(tail_b64))
 
 
 class Tally:
-    def __init__(self):
-        self.counts = {c: 0 for c in CATEGORIES}
-        self.errors = collections.Counter()
+    def __init__(self, method):
+        self.method = method
+        self.counts = {"data": 0, "no_data": 0, "transport": 0}
+        self.data_ids = set()
+        self.no_data_ids = collections.defaultdict(set)
+        self.transport_reasons = collections.Counter()
 
     def add(self, rec):
-        category, message = classify_record(rec)
-        self.counts[category] += 1
-        if category == "error":
-            self.errors[normalize_error(message)] += 1
+        state, reason, rid = classify_record(self.method, rec)
+        self.counts[state] += 1
+        if state == "transport":
+            self.transport_reasons[reason] += 1
+        elif rid is not None:
+            if state == "data":
+                self.data_ids.add(rid)
+            else:
+                self.no_data_ids[reason].add(rid)
 
-    def top_errors(self, n):
-        return self.errors.most_common(n)
 
-
-def tally(lines, into=None):
-    t = into or Tally()
+def tally(method, lines, into=None):
+    t = into or Tally(method)
     for line in lines:
         line = line.strip()
         if line:
@@ -111,82 +185,99 @@ def bin_files(bin_dir, client, method, repetition=None):
     return sorted(os.path.join(bin_dir, f) for f in os.listdir(bin_dir) if name_re.search(f))
 
 
-class Row:
-    def __init__(self, method, client, counts, top_errors):
-        self.method = method
-        self.client = client
-        self.responses = sum(counts.get(c, 0) for c in JSONRPC_CATEGORIES)
-        self.transport_failures = sum(counts.get(c, 0) for c in TRANSPORT_CATEGORIES)
-        self.shares = {c: 100.0 * counts.get(c, 0) / self.responses if self.responses else 0.0
-                       for c in JSONRPC_CATEGORIES}
-        self.top_error = top_errors[0][0] if top_errors else ""
+def sorted_ids(ids):
+    return sorted(ids, key=lambda i: (isinstance(i, str), i))
 
 
-class Divergence:
-    def __init__(self, method, client, category, reference_share, share):
+class Mismatch:
+    def __init__(self, method, data_client, empty_client, reason, ids):
         self.method = method
-        self.client = client
-        self.category = category
-        self.reference_share = reference_share
-        self.share = share
+        self.data_client = data_client
+        self.empty_client = empty_client
+        self.reason = reason
+        self.ids = ids
 
     def describe(self):
-        if self.category == "responses":
-            return f"{self.method}: {self.client} returned no JSON-RPC response"
-        return (f"{self.method}: {self.category} is {self.share:.2f}% on {self.client} "
-                f"vs {self.reference_share:.2f}% on {REFERENCE_CLIENT}")
+        shown = ", ".join(str(i) for i in self.ids[:MAX_IDS_SHOWN])
+        more = f" and {len(self.ids) - MAX_IDS_SHOWN} more" if len(self.ids) > MAX_IDS_SHOWN else ""
+        return (f"{self.method}: {len(self.ids)} requests got data from {self.data_client} "
+                f"but no data from {self.empty_client} ({self.reason}); ids: {shown}{more}")
 
     def __repr__(self):
-        return f"Divergence({self.describe()})"
+        return f"Mismatch({self.describe()})"
 
 
-def compare(reports, max_delta):
+class Pairing:
+    def __init__(self, method, reports):
+        self.method = method
+        self.reports = reports
+        self.paired = self.both_data = self.both_no_data = 0
+        self.data_only_on = collections.Counter()
+
+
+def all_ids(rep):
+    return set(rep["data_ids"]).union(*[set(ids) for ids in rep["no_data_ids"].values()])
+
+
+def compare(reports):
     by_method = collections.defaultdict(dict)
     for rep in reports:
         by_method[rep["method"]][rep["client"]] = rep
 
-    rows, flagged, uncompared = [], [], []
+    pairings, mismatches, uncompared = [], [], []
     for method in sorted(by_method):
         clients = by_method[method]
-        method_rows = {client: Row(method, client, rep["counts"], rep.get("top_errors", []))
-                       for client, rep in sorted(clients.items(), key=lambda kv: kv[0] != REFERENCE_CLIENT)}
-        rows.extend(method_rows.values())
-        ref = method_rows.get(REFERENCE_CLIENT)
-        others = [r for c, r in method_rows.items() if c != REFERENCE_CLIENT]
+        pairing = Pairing(method, [clients[c] for c in sorted(clients, key=lambda c: (c != REFERENCE_CLIENT, c))])
+        pairings.append(pairing)
+        ref = clients.get(REFERENCE_CLIENT)
+        others = [rep for c, rep in clients.items() if c != REFERENCE_CLIENT]
         if ref is None or not others:
             uncompared.append(method)
             continue
-        for row in [ref] + others:
-            if row.responses == 0:
-                flagged.append(Divergence(method, row.client, "responses", 0.0, 0.0))
-        if ref.responses == 0:
-            continue
-        for row in others:
-            if row.responses == 0:
-                continue
-            for category in JSONRPC_CATEGORIES:
-                if abs(row.shares[category] - ref.shares[category]) > max_delta:
-                    flagged.append(Divergence(method, row.client, category,
-                                              ref.shares[category], row.shares[category]))
-    return rows, flagged, uncompared
+        for other in others:
+            common = all_ids(ref) & all_ids(other)
+            ref_data, other_data = set(ref["data_ids"]) & common, set(other["data_ids"]) & common
+            pairing.paired += len(common)
+            pairing.both_data += len(ref_data & other_data)
+            pairing.both_no_data += len(common - ref_data - other_data)
+            for data_rep, empty_rep in ((ref, other), (other, ref)):
+                data_ids = set(data_rep["data_ids"])
+                for reason, ids in sorted(empty_rep["no_data_ids"].items()):
+                    hit = data_ids & set(ids)
+                    if hit:
+                        pairing.data_only_on[data_rep["client"]] += len(hit)
+                        mismatches.append(Mismatch(method, data_rep["client"], empty_rep["client"],
+                                                   reason, sorted_ids(hit)))
+    return pairings, mismatches, uncompared
 
 
-def render_summary(rows, flagged, uncompared, max_delta):
-    badge = "❌" if flagged else "✅"
+def top_no_data_reason(rep):
+    reasons = sorted(rep["no_data_ids"].items(), key=lambda kv: -len(kv[1]))
+    return f"`{reasons[0][0]}` ({len(reasons[0][1])})" if reasons else ""
+
+
+def render_summary(pairings, mismatches, uncompared):
+    badge = "❌" if mismatches else "✅"
     lines = [f"## {badge} RPC performance: response check", "",
-             "Share of JSON-RPC responses per category. Vegeta counts every HTTP 2xx as a success, "
-             f"so a client answering `null` or `error` must not be compared on latency. "
-             f"A difference above {max_delta} percentage points from {REFERENCE_CLIENT} fails the check. "
-             "HTTP failures are counted apart: they measure load, not correctness.", "",
-             "| method | client | responses | " + " | ".join(JSONRPC_CATEGORIES) + " | HTTP failures | top error |",
-             "|---|---|---:|" + "---:|" * len(JSONRPC_CATEGORIES) + "---:|---|"]
-    for r in rows:
-        shares = " | ".join(f"{r.shares[c]:.2f}%" for c in JSONRPC_CATEGORIES)
-        top_error = f"`{r.top_error}`" if r.top_error else ""
-        lines.append(f"| {r.method} | {r.client} | {r.responses} | {shares} | {r.transport_failures} | {top_error} |")
+             "Vegeta counts every HTTP 2xx as a success, so latencies are comparable only if the clients "
+             "returned data for the same requests. Responses are paired by JSON-RPC id: data from one client "
+             "and no data (null, empty value, empty data field, error other than an EVM failure) from the other "
+             "fails the check; no data on both sides is accepted.", "",
+             "| method | paired requests | both data | both no data | data on one side only |",
+             "|---|---:|---:|---:|---|"]
+    for p in pairings:
+        one_side = ", ".join(f"{c}: {n}" for c, n in sorted(p.data_only_on.items())) or "0"
+        lines.append(f"| {p.method} | {p.paired} | {p.both_data} | {p.both_no_data} | {one_side} |")
+    lines += ["", "| method | client | data | no data | transport failures | top no-data reason |",
+              "|---|---|---:|---:|---:|---|"]
+    for p in pairings:
+        for rep in p.reports:
+            c = rep["counts"]
+            lines.append(f"| {p.method} | {rep['client']} | {c['data']} | {c['no_data']} | {c['transport']} | "
+                         f"{top_no_data_reason(rep)} |")
     lines.append("")
-    if flagged:
-        lines += ["### Diverging responses", ""] + [f"- {d.describe()}" for d in flagged] + [""]
+    if mismatches:
+        lines += ["### Data on one side only", ""] + [f"- {m.describe()}" for m in mismatches] + [""]
     if uncompared:
         lines += [f"Not compared (results from one client only): {', '.join(uncompared)}", ""]
     return "\n".join(lines)
@@ -204,22 +295,25 @@ def run_classify(args):
     if not files:
         print(f"no vegeta result file for {args.client} {args.method} in {args.bin_dir}")
         return 1
-    t = Tally()
+    t = Tally(args.method)
     for path in files:
         with subprocess.Popen([args.vegeta, "encode", "--to", "json", path],
                               stdout=subprocess.PIPE, text=True) as proc:
-            tally(proc.stdout, into=t)
+            tally(args.method, proc.stdout, into=t)
         if proc.returncode != 0:
             print(f"vegeta encode failed on {path} with exit code {proc.returncode}")
             return 1
     result = {"client": args.client, "method": args.method,
               "files": [os.path.basename(f) for f in files],
-              "counts": t.counts, "top_errors": t.top_errors(TOP_ERRORS)}
+              "counts": t.counts,
+              "data_ids": sorted_ids(t.data_ids),
+              "no_data_ids": {r: sorted_ids(ids) for r, ids in sorted(t.no_data_ids.items())},
+              "transport_reasons": t.transport_reasons.most_common()}
     with open(args.output, "w", encoding="utf-8") as fh:
-        json.dump(result, fh, indent=2)
-    print(f"{args.client} {args.method}: " + ", ".join(f"{c}={n}" for c, n in t.counts.items()))
-    for message, count in t.top_errors(TOP_ERRORS):
-        print(f"  {count:>9}  {message}")
+        json.dump(result, fh)
+    print(f"{args.client} {args.method}: " + ", ".join(f"{s}={n}" for s, n in t.counts.items()))
+    for reason, ids in sorted(t.no_data_ids.items(), key=lambda kv: -len(kv[1]))[:TOP_REASONS]:
+        print(f"  no data for {len(ids):>7} requests: {reason}")
     return 0
 
 
@@ -234,19 +328,19 @@ def load_reports(input_dir):
 
 
 def run_compare(args):
-    rows, flagged, uncompared = compare(load_reports(args.input_dir), args.max_delta)
-    summary = render_summary(rows, flagged, uncompared, args.max_delta)
+    pairings, mismatches, uncompared = compare(load_reports(args.input_dir))
+    summary = render_summary(pairings, mismatches, uncompared)
     print(summary)
     if args.summary_file:
         with open(args.summary_file, "a", encoding="utf-8") as fh:
             fh.write(summary + "\n")
-    if not rows:
+    if not pairings:
         annotate("warning", "no response classification found, nothing was compared")
     if uncompared:
         annotate("warning", f"results from one client only, not compared: {', '.join(uncompared)}")
-    for d in flagged:
-        annotate("error", d.describe())
-    return 1 if flagged else 0
+    for m in mismatches:
+        annotate("error", m.describe())
+    return 1 if mismatches else 0
 
 
 def parse_args():
@@ -264,11 +358,9 @@ def parse_args():
     classify.add_argument("--vegeta", default="vegeta", help="vegeta CLI (default: %(default)s)")
     classify.add_argument("--output", required=True, help="write the classification JSON here")
 
-    comp = sub.add_parser("compare", help="compare the classifications of all clients")
+    comp = sub.add_parser("compare", help="pair the classifications of all clients by request id")
     comp.add_argument("--input-dir", required=True, dest="input_dir",
                       help="directory searched recursively for *-responses.json")
-    comp.add_argument("--max-delta", type=float, default=2.0, dest="max_delta",
-                      help="max difference in percentage points per category (default: %(default)s)")
     comp.add_argument("--summary-file", default=None, dest="summary_file",
                       help="append a Markdown summary here, e.g. $GITHUB_STEP_SUMMARY")
     return parser.parse_args()
