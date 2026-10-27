@@ -797,8 +797,12 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		if gasOK && evm.chainRules.IsAmsterdam {
 			stateGas = uint64(len(ret)) * params.CostPerStateByte
 			if evm.FrameContext != nil {
+				old := gasRemaining
 				gasOK = evm.FrameContext.ChargeStateGas(stateGas)
 				gasRemaining.State = evm.FrameContext.StateGasLeft()
+				if gasOK && tracer.HasGasChangeHook() {
+					tracer.EmitGasChange(old, gasRemaining, tracing.GasChangeCallCodeStorage)
+				}
 			} else {
 				gasRemaining, depositStateSpill, gasOK = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 			}
