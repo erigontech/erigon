@@ -200,6 +200,49 @@ func TestOverlayGetLogsSkipsFailedTxWithoutOverrides(t *testing.T) {
 	require.Equal(t, hexutil.Uint(1), logs[0].TxIndex, "the log must come from the control transaction, not from a gas-capped replay of the failed one")
 }
 
+func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	successfulTarget, revertingTarget := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	genesis := &types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			successfulTarget: {Code: program.New().Push0().Push0().Op(vm.LOG0).Bytes()},
+			revertingTarget:  {Code: program.New().Push0().Push0().Op(vm.LOG0).Push0().Push0().Op(vm.REVERT).Bytes()},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000}},
+			{Mode: types.FrameSender, Target: &revertingTarget, Limits: mdgas.MdGas{Execution: 10_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddFailedTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	receipt := pack.Receipts[0][0]
+	require.Equal(t, types.ReceiptStatusFailed, receipt.Status)
+	require.Len(t, receipt.Logs, 1)
+	require.Equal(t, successfulTarget, receipt.Logs[0].Address)
+
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, successfulTarget, logs[0].Address)
+}
+
 func TestCallConstructorReturnsOverlayError(t *testing.T) {
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 	base := newBaseApiForTest(m)

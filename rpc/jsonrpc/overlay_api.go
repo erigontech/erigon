@@ -535,11 +535,12 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 
-		if res.Failed() {
+		// Frame transactions can keep logs even if a frame fails. Rollback has
+		// already removed logs from reverted frames and atomic batches.
+		if res.Failed() && txn.Type() != types.FrameTxType {
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
-			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
