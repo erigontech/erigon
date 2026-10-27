@@ -1814,6 +1814,14 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
+// CachedCommitted returns key's committed value from the shared state cache as tx sees it, and the txNum it was written at.
+func (sd *SharedDomains) CachedCommitted(domain kv.Domain, tx kv.TemporalTx, key []byte) ([]byte, uint64, bool) {
+	if sd.stateCache == nil {
+		return nil, 0, false
+	}
+	return sd.cacheViewFor(tx).GetVisible(domain, key)
+}
+
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return sd.mem.GetAsOf(domain, key, ts)
 }
