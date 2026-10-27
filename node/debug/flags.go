@@ -27,6 +27,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/felixge/fgprof"
@@ -245,10 +246,25 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 }
 
 // SetupWithPrefix is Setup with an explicit log-file prefix, for binaries other than erigon.
+// raiseGomaxprocsForIO adds Ps above the CPU count once, after package init. A
+// goroutine faulting on an mmap'd state file holds its P for the device
+// round-trip; extra Ps let runnable work overlap those faults. Worker counts
+// derived from GOMAXPROCS at init keep sizing on the CPU count.
+func raiseGomaxprocsForIO(logger log.Logger) {
+	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", 10)
+	if extra <= 0 {
+		return
+	}
+	base := runtime.GOMAXPROCS(0)
+	runtime.GOMAXPROCS(base + extra)
+	logger.Info("[gomaxprocs] raised for io overlap", "from", base, "to", base+extra)
+}
+
 func SetupWithPrefix(nodeCtx context.Context, ctx *cli.Command, filePrefix string, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx(filePrefix, ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	raiseGomaxprocsForIO(logger)
 	SetGoMemLimit(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
