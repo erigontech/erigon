@@ -144,6 +144,7 @@ const (
 	defaultReqInterval      = 200 * time.Millisecond
 	maxEmptyResponseBackoff = 5 * time.Second
 	maxPrefetchedRanges     = 8
+	slotsPerRange           = uint64(64)
 )
 
 // NewGloasSuccessorValidator validates a direct successor from an immutable checkpoint state.
@@ -400,7 +401,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 // fetchBlockRange requests a range of blocks from peers and waits for a response.
 // Falls back to the beacon API when P2P is unavailable and an HTTP URL is configured.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
-	const count = uint64(64)
+	const count = slotsPerRange
 	start, underflow := math.SafeSub(b.slotToDownload.Load(), count-1)
 	if underflow {
 		start = 0
@@ -450,7 +451,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 
 		case blocks := <-prefetched:
 			prefetched = nil
-			if hasBlockWithRoot(blocks, b.expectedRoot) {
+			if blockWithRoot(blocks, b.expectedRoot) != nil {
 				return blocks, nil
 			}
 			bottom = start
@@ -486,7 +487,7 @@ func (b *BackwardBeaconDownloader) prefetchRange(ctx context.Context, bottom uin
 		return
 	}
 	hi := bottom - 1
-	lo := hi - min(hi, 63)
+	lo := hi - min(hi, slotsPerRange-1)
 	blocks := make(chan []*cltypes.SignedBeaconBlock, 1)
 	b.prefetched = append(b.prefetched, prefetchedRange{lo: lo, hi: hi, blocks: blocks})
 	go func() {
@@ -496,15 +497,6 @@ func (b *BackwardBeaconDownloader) prefetchRange(ctx context.Context, bottom uin
 		}
 		blocks <- resp
 	}()
-}
-
-func hasBlockWithRoot(blocks []*cltypes.SignedBeaconBlock, root common.Hash) bool {
-	for _, block := range slices.Backward(blocks) {
-		if blockRoot, err := block.Block.HashSSZ(); err == nil && blockRoot == root {
-			return true
-		}
-	}
-	return false
 }
 
 // sendBlockRequest sends a block range request and writes the result to the channel.
@@ -736,7 +728,7 @@ func (b *BackwardBeaconDownloader) resolveGloasLookahead(ctx context.Context, bl
 }
 
 func blockWithRoot(blocks []*cltypes.SignedBeaconBlock, expectedRoot common.Hash) *cltypes.SignedBeaconBlock {
-	for _, block := range blocks {
+	for _, block := range slices.Backward(blocks) {
 		if block == nil || block.Block == nil {
 			continue
 		}
