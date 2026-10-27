@@ -276,15 +276,17 @@ func TestReceiptsNoDups(t *testing.T) {
 			sc := integrity.SamplerCfg{Seed: 1, SampleRatio: 1}
 			require.NoError(t, integrity.CheckReceiptRootIntegrity(t.Context(), sc, db, br, chain.AllProtocolChanges, true, log.New()))
 
-			rcacheErr := integrity.CheckRCacheNoDups(t.Context(), sc, db, br, true)
-			receiptsErr := integrity.CheckReceiptsNoDups(t.Context(), sc, db, br, true)
-			if badBlock == 0 { // checks start at block 1
-				require.NoError(t, rcacheErr)
-				require.NoError(t, receiptsErr)
-				return
+			for _, failFast := range []bool{true, false} {
+				rcacheErr := integrity.CheckRCacheNoDups(t.Context(), sc, db, br, failFast)
+				receiptsErr := integrity.CheckReceiptsNoDups(t.Context(), sc, db, br, failFast)
+				if badBlock == 0 { // checks start at block 1
+					require.NoError(t, rcacheErr)
+					require.NoError(t, receiptsErr)
+					continue
+				}
+				require.ErrorIs(t, rcacheErr, integrity.ErrIntegrity, "failFast=%v", failFast)
+				require.ErrorIs(t, receiptsErr, integrity.ErrIntegrity, "failFast=%v", failFast)
 			}
-			require.ErrorIs(t, rcacheErr, integrity.ErrIntegrity)
-			require.ErrorIs(t, receiptsErr, integrity.ErrIntegrity)
 		})
 	}
 }
