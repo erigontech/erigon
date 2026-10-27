@@ -93,7 +93,9 @@ type BackwardBeaconDownloader struct {
 	consecutiveEnvelopeFailures  int
 	gloasSuccessorSourceFailures int
 
-	prefetched []prefetchedRange
+	prefetched          []prefetchedRange
+	lastRangeLo         uint64
+	lastRangeLowestSlot uint64
 
 	mu sync.Mutex
 }
@@ -434,7 +436,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 	}
 	bottom := start
 	var prefetched chan []*cltypes.SignedBeaconBlock
-	if len(b.prefetched) > 0 {
+	if len(b.prefetched) > 0 && (slot <= b.prefetched[0].hi || (b.lastRangeLo <= b.prefetched[0].hi+1 && slot < b.lastRangeLowestSlot)) {
 		prefetched, bottom = b.prefetched[0].blocks, b.prefetched[0].lo
 		b.prefetched = b.prefetched[1:]
 		requestSent.Store(true)
@@ -459,12 +461,14 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 			prefetched = nil
 			if blockWithRoot(blocks, b.expectedRoot) != nil {
 				b.resetEmptyBackoff()
+				b.recordLastRange(bottom, blocks)
 				return blocks, nil
 			}
 			bottom = start
 			requestSent.Store(false)
 
 		case responses := <-received:
+			b.recordLastRange(start, responses)
 			return responses, nil
 
 		case <-p2pDeadline.C:
@@ -483,6 +487,13 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 			}
 			p2pDeadline.Reset(10 * time.Second)
 		}
+	}
+}
+
+func (b *BackwardBeaconDownloader) recordLastRange(lo uint64, blocks []*cltypes.SignedBeaconBlock) {
+	b.lastRangeLo, b.lastRangeLowestSlot = lo, lo+slotsPerRange
+	for _, blk := range blocks {
+		b.lastRangeLowestSlot = min(b.lastRangeLowestSlot, blk.Block.Slot)
 	}
 }
 

@@ -61,6 +61,7 @@ type slowRangeServer struct {
 	held        func(start uint64) bool
 	badPeer     string
 	badStart    uint64
+	sent        atomic.Int32
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
 	mu          sync.Mutex
@@ -69,6 +70,7 @@ type slowRangeServer struct {
 }
 
 func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+	s.sent.Add(1)
 	n := s.inFlight.Add(1)
 	defer s.inFlight.Add(-1)
 	for m := s.maxInFlight.Load(); n > m && !s.maxInFlight.CompareAndSwap(m, n); m = s.maxInFlight.Load() {
@@ -208,6 +210,39 @@ func TestBackwardBeaconDownloaderTakesPrefetchBelowEmptyRangeBottom(t *testing.T
 		want[start] = 1
 	}
 	require.Equal(t, want, server.calls)
+}
+
+func TestBackwardBeaconDownloaderKeepsPrefetchesWhenFirstResponseIsPartial(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	// The first response for start 576 holds only slots 576..599.
+	server := &slowRangeServer{blocks: blocks, forked: blocks[:600], forkBelow: 577, delay: 20 * time.Millisecond, calls: map[uint64]int{}}
+
+	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
+	require.LessOrEqual(t, server.sent.Load(), int32(11))
+}
+
+func TestBackwardBeaconDownloaderKeepsPrefetchesWhenProcessingStopsAboveThem(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	failed := false
+	var processed []uint64
+	downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, _ *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		if blk.Block.Slot == 600 && !failed {
+			failed = true
+			return false, errors.New("transient failure")
+		}
+		processed = append(processed, blk.Block.Slot)
+		return false, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	for !downloader.Finished() {
+		require.NoError(t, downloader.RequestMore(ctx))
+	}
+
+	require.Equal(t, descending(blocks), processed)
+	require.LessOrEqual(t, server.sent.Load(), int32(11))
 }
 
 func TestBackwardBeaconDownloaderCancelsDroppedPrefetches(t *testing.T) {
