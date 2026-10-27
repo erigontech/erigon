@@ -170,6 +170,7 @@ func (c *Chain) Run(ctx context.Context) error {
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db, beaconConfig)
 	downloader.SetCurrentSlotSampler(ethClock.GetCurrentSlot)
 	downloader.SetGloasSuccessorValidator(network.NewGloasSuccessorValidator(bs, bRoot))
+	downloader.SetGloasEnvelopeSignatureValidator(bs)
 	if urls := clparams.GetAllCheckpointSyncEndpoints(networkType); len(urls) > 0 {
 		downloader.SetHTTPFallbackURL(urls[0])
 	}

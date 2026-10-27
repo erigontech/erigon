@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -233,6 +235,50 @@ func ValidateDownloadedGloasEnvelope(beaconCfg *clparams.BeaconChainConfig, bloc
 	return ValidateGloasEnvelopeAgainstBid(beaconCfg, blockRoot, signedBid.Message, env)
 }
 
+func validateBackfilledGloasEnvelopeSignature(anchorState *state.CachingBeaconState, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if anchorState == nil {
+		return errors.New("nil GLOAS anchor state")
+	}
+
+	envelopeEpoch := state.GetEpochAtSlot(anchorState.BeaconConfig(), block.Block.Slot)
+	var publicKey common.Bytes48
+	builderIndex := envelope.Message.BuilderIndex
+	if builderIndex == clparams.BuilderIndexSelfBuild {
+		validator, err := anchorState.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
+		if err != nil {
+			return fmt.Errorf("get proposer validator %d: %w", block.Block.ProposerIndex, err)
+		}
+		publicKey = validator.PublicKey()
+	} else {
+		builders := anchorState.GetBuilders()
+		if builders == nil || builderIndex >= uint64(builders.Len()) {
+			return nil
+		}
+		builder := builders.Get(int(builderIndex))
+		if builder.DepositEpoch >= envelopeEpoch {
+			return nil
+		}
+		publicKey = builder.Pubkey
+	}
+
+	domain, err := fork.ComputeDomainAtEpoch(anchorState.BeaconConfig(), anchorState.BeaconConfig().DomainBeaconBuilder, envelopeEpoch, anchorState.GenesisValidatorsRoot())
+	if err != nil {
+		return fmt.Errorf("compute builder domain: %w", err)
+	}
+	signingRoot, err := fork.ComputeSigningRoot(envelope.Message, domain)
+	if err != nil {
+		return fmt.Errorf("compute envelope signing root: %w", err)
+	}
+	valid, err := bls.Verify(envelope.Signature[:], signingRoot[:], publicKey[:])
+	if err != nil {
+		return fmt.Errorf("verify envelope signature: %w", err)
+	}
+	if !valid {
+		return errors.New("invalid signature on GLOAS execution payload envelope")
+	}
+	return nil
+}
+
 // SetThrottle sets the throttle.
 func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.mu.Lock()
@@ -276,6 +322,15 @@ func (b *BackwardBeaconDownloader) SetCurrentSlotSampler(currentSlot func() uint
 
 func (b *BackwardBeaconDownloader) SetGloasSuccessorValidator(validate func(*cltypes.SignedBeaconBlock) error) {
 	b.validateGloasSuccessor = validate
+}
+
+func (b *BackwardBeaconDownloader) SetGloasEnvelopeSignatureValidator(anchorState *state.CachingBeaconState) {
+	b.validateGloasEnvelope = func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+		if err := ValidateDownloadedGloasEnvelope(b.beaconCfg, block, envelope); err != nil {
+			return err
+		}
+		return validateBackfilledGloasEnvelopeSignature(anchorState, block, envelope)
+	}
 }
 
 // SetOnInitialGloasBlock persists the trusted anchor without classifying its payload before traversing its ancestors.
