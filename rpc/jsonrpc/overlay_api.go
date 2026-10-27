@@ -312,7 +312,9 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		pend.Go(func() {
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
-				log.Error("Error", "error", err)
+				for task := range jobs {
+					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
+				}
 				return
 			}
 			defer tx.Rollback()
@@ -401,6 +403,9 @@ blockLoop:
 		res := results[idx]
 		if res == nil {
 			continue
+		}
+		if res.Error != "" {
+			return nil, fmt.Errorf("block %d: %s", res.BlockNumber, res.Error)
 		}
 		for _, l := range res.Logs {
 			if api.getLogsMaxResults != 0 && len(logs) >= api.getLogsMaxResults {
