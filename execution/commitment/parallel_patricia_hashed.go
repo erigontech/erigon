@@ -20,14 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/estimate"
 	"io"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 )
 
 const deferredWritesPerWorker = 4096

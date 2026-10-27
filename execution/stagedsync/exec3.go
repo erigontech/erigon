@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -154,22 +153,6 @@ func haltOnBadBlockDebug(cfg ExecuteBlockCfg, logPrefix string, cause error, log
 // stage-progress update / bad-block unwind (downstream, via the returned
 // outcome). This lets both SpawnExecuteBlocksStage and an ephemeral single-block
 // replay drive the same execution path.
-// raiseProcsForBlockIO raises GOMAXPROCS while blocks execute: a goroutine faulting on a cold
-// mmap'd state file holds its P, so extra Ps let runnable work overlap the faults. Between
-// blocks the extra Ps only cost CPU-bound RPC, so they are given back.
-func raiseProcsForBlockIO() (restore func()) {
-	if os.Getenv("GOMAXPROCS") != "" {
-		return func() {}
-	}
-	base := runtime.GOMAXPROCS(0)
-	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", (estimate.IOOverlapFactor-1)*base)
-	if extra <= 0 {
-		return func() {}
-	}
-	runtime.GOMAXPROCS(base + extra)
-	return func() { runtime.GOMAXPROCS(base) }
-}
-
 func ExecV3(ctx context.Context,
 	cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
@@ -209,7 +192,7 @@ func ExecV3(ctx context.Context,
 	if maxBlockNum < blockNum {
 		return out, nil
 	}
-	defer raiseProcsForBlockIO()()
+	defer estimate.RaiseProcsForIO()()
 
 	var readAhead chan uint64
 	startBlockNum := blockNum
