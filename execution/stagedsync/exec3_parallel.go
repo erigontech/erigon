@@ -493,25 +493,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					if lastBlockResult.BlockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
-						// AND THE DOMAINS' OWN MARK, WHICH NOTHING ELSE ON THIS PATH SETS. The
-						// commitment has just been drained and processed above, so this moves the mark
-						// TO where the commitment already is — it does not run ahead of it.
-						//
-						// Without it the batch exits with doms.txNum still at the value the round
-						// started from. The staged round then merges that stale value into its parent
-						// (domain_shared.go: sd.txNum = otherTxNum), so the block commits at a position
-						// short of what it executed: measured on live454 block 2789, a body and receipts
-						// of 198 against an account advanced by 128. The pool is then told all 198 were
-						// mined, removes all 198, and the 70 that never applied strand their sender for
-						// good — live457, one event of 72 nonces, 21,919 transactions still queued behind
-						// it 9,330 blocks later on an otherwise healthy chain.
-						//
-						// ⚠ AT THE EXIT, NOT PER RESULT. Advancing it inside the apply loop moves where
-						// the round's writes land, the commitment stops matching the block and the fork
-						// choice refuses it — measured, 758 and 102 forkchoice-invalid against 0 on the
-						// control (reverted in 32f9aa7282). The serial path has no gap here because it
-						// runs exec and commit inline and sets the mark per transaction.
-						pe.doms.SetTxNum(lastBlockResult.lastTxNum)
 					}
 					// Two reasons the exec loop closes the channel:
 					//   (1) sizeEst > batchLimit — flush and tell the stage loop
