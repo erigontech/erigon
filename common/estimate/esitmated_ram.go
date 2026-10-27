@@ -17,7 +17,10 @@
 package estimate
 
 import (
+	"os"
 	"runtime"
+	"strconv"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 )
@@ -68,6 +71,42 @@ const IOOverlapFactor = 4
 // IOWorkers is the default size of a pool that mostly blocks on page faults.
 func IOWorkers() int {
 	return IOOverlapFactor * AllCPUs()
+}
+
+var ioProcs struct {
+	sync.Mutex
+	holders, base int
+}
+
+// RaiseProcsForIO raises GOMAXPROCS by GOMAXPROCS_EXTRA (default (IOOverlapFactor-1) x the
+// current value) for a stretch of page-fault-bound work and returns its release. Overlapping
+// stretches share one raise; the last release restores the previous value. A set GOMAXPROCS
+// env is respected.
+func RaiseProcsForIO() (release func()) {
+	if os.Getenv("GOMAXPROCS") != "" {
+		return func() {}
+	}
+	ioProcs.Lock()
+	defer ioProcs.Unlock()
+	if ioProcs.holders == 0 {
+		ioProcs.base = runtime.GOMAXPROCS(0)
+		extra := (IOOverlapFactor - 1) * ioProcs.base
+		if v, err := strconv.Atoi(os.Getenv("GOMAXPROCS_EXTRA")); err == nil {
+			extra = v
+		}
+		if extra <= 0 {
+			return func() {}
+		}
+		runtime.GOMAXPROCS(ioProcs.base + extra)
+	}
+	ioProcs.holders++
+	return sync.OnceFunc(func() {
+		ioProcs.Lock()
+		defer ioProcs.Unlock()
+		if ioProcs.holders--; ioProcs.holders == 0 {
+			runtime.GOMAXPROCS(ioProcs.base)
+		}
+	})
 }
 
 func HalfCPUs() int {
