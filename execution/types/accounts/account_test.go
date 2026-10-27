@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"unique"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -264,25 +265,6 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	}
 }
 
-func isAccountsEqual(t *testing.T, src, dst Account) {
-	t.Helper()
-
-	if dst.CodeHash != src.CodeHash {
-		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
-	}
-
-	if dst.Balance.Cmp(&src.Balance) != 0 {
-		t.Fatal("cant decode the account Balance", src.Balance, dst.Balance)
-	}
-
-	if dst.Nonce != src.Nonce {
-		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
-	}
-	if dst.Incarnation != src.Incarnation {
-		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
-	}
-}
-
 func TestIncarnationForEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
@@ -421,4 +403,29 @@ func TestAccountCopyCopiesAllFields(t *testing.T) {
 	b.Copy(&a)
 	require.Equal(t, a, b)
 	require.Equal(t, a, *a.SelfCopy())
+}
+
+// Values that share an intern-table slot must each come back as their own canonical handle.
+func TestInternSlotCollision(t *testing.T) {
+	k1, k2 := common.Hash{1}, common.Hash{1}
+	k2[10] = 7
+	a1, a2 := common.Address{1}, common.Address{2}
+	require.Same(t, keySlot(k1), keySlot(k2))
+	require.Same(t, addressSlot(a1), addressSlot(a2))
+	for range 2 {
+		for _, k := range []common.Hash{k1, k2} {
+			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.Equal(t, k, InternKey(k).Value())
+		}
+		for _, a := range []common.Address{a1, a2} {
+			require.Equal(t, Address(unique.Make(a)), InternAddress(a))
+			require.Equal(t, a, InternAddress(a).Value())
+		}
+	}
+}
+
+// Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.
+func TestInternSlotsSpreadLowValues(t *testing.T) {
+	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
+	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
 }

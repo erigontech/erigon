@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -374,6 +375,57 @@ func TestNewForkGraphDiskReturnsErrorOnDumpFailure(t *testing.T) {
 	})
 }
 
+func TestForkGraphDumpsDoNotRequireSync(t *testing.T) {
+	t.Run("beacon state", func(t *testing.T) {
+		anchorState := state.New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+		anchorRoot, err := anchorState.BlockRoot()
+		require.NoError(t, err)
+		fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "sync"}
+
+		forkGraph, err := NewForkGraphDisk(anchorState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+		require.NoError(t, err)
+		graph := forkGraph.(*forkGraphDisk)
+		persisted, err := graph.readBeaconStateFromDisk(anchorRoot)
+		require.NoError(t, err)
+		wantHash, err := anchorState.HashSSZ()
+		require.NoError(t, err)
+		gotHash, err := persisted.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+	})
+
+	t.Run("envelope", func(t *testing.T) {
+		fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "sync"}
+		f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		root := common.HexToHash("0x1234")
+		addEnvelopeTestBlock(f, root, 1)
+		envelope := testEnvelopeWithTransaction(root, []byte{1, 2, 3})
+
+		require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+		persisted, err := f.ReadEnvelopeFromDisk(root)
+		require.NoError(t, err)
+		wantHash, err := envelope.HashSSZ()
+		require.NoError(t, err)
+		gotHash, err := persisted.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+	})
+}
+
+func TestDumpBeaconStateReturnsCloseError(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	root, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	var closes atomic.Int32
+	fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "close", closes: &closes}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+
+	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, anchorState, true), errTestEnvelopeIO)
+	require.Equal(t, int32(1), closes.Load())
+}
+
 func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	fs := &partialWriteFs{Fs: baseFs, fail: true}
@@ -486,13 +538,16 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 			}
 			anchorRoot, err := anchorState.BlockRoot()
 			require.NoError(t, err)
+			callerHeaderRoot := anchorState.LatestBlockHeader().Root
 
 			forkGraph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 			require.NoError(t, err)
 			graph := forkGraph.(*forkGraphDisk)
 
 			require.Equal(t, common.Hash(expectedStateRoot), anchorState.PeekPreviousStateRoot())
-			require.Equal(t, header.Root, anchorState.LatestBlockHeader().Root)
+			require.Equal(t, callerHeaderRoot, anchorState.LatestBlockHeader().Root)
+			require.Equal(t, common.Hash(expectedStateRoot), graph.currentState.PeekPreviousStateRoot())
+			require.Equal(t, header.Root, graph.currentState.LatestBlockHeader().Root)
 			persistedState, err := graph.readBeaconStateFromDisk(anchorRoot)
 			require.NoError(t, err)
 			require.Equal(t, common.Hash(expectedStateRoot), persistedState.PeekPreviousStateRoot())
@@ -1049,7 +1104,7 @@ func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
 	require.NoError(t, err)
 	f := graph.(*forkGraphDisk)
 	blockRoot, err := block.Block.HashSSZ()
@@ -1078,9 +1133,7 @@ func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
 	statePublished := make(chan struct{})
 	go func() {
 		for {
-			f.currentStateMu.RLock()
-			published := f.currentStateBlockRoot == common.Hash(blockRoot)
-			f.currentStateMu.RUnlock()
+			_, _, published := f.GetSyncCommittees(f.beaconCfg.SyncCommitteePeriod(block.Block.Slot))
 			if published {
 				close(statePublished)
 				return
@@ -1505,7 +1558,7 @@ func TestDumpEnvelopeAllowsAnchorRoot(t *testing.T) {
 }
 
 func TestDumpEnvelopeFailurePreservesExistingFinal(t *testing.T) {
-	for _, stage := range []string{"open", "write", "sync", "close", "rename"} {
+	for _, stage := range []string{"open", "write", "close", "rename"} {
 		t.Run(stage, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
 			f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
@@ -1905,4 +1958,68 @@ func writeEnvelopeTestFile(t *testing.T, fs afero.Fs, root common.Hash, version 
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
+}
+
+func TestPreviousHeadFastPathUsesAuthoritativePriorRoot(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	graph := &forkGraphDisk{syncedData: manager}
+
+	first := state.New(&clparams.MainnetBeaconConfig)
+	recomputedRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	first.SetPreviousStateRoot(common.Hash{0xaa, 0xbb, 0xcc})
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NotEqual(t, recomputedRoot, firstRoot, "fixture must make previousStateRoot authoritative, not recomputable")
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x02}))
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "previous-head fast path must resolve the authoritative prior root")
+	outRoot, err := out.BlockRoot()
+	require.NoError(t, err)
+	require.Equal(t, firstRoot, outRoot)
+
+	_, ok, err = graph.useCachedStateIfPossible(recomputedRoot, nil)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+type publishOnHeadRoot struct {
+	*synced_data.SyncedDataManager
+	publish func()
+}
+
+func (s *publishOnHeadRoot) HeadRoot() common.Hash {
+	root := s.SyncedDataManager.HeadRoot()
+	if s.publish != nil {
+		s.publish()
+		s.publish = nil
+	}
+	return root
+}
+
+func TestHeadFastPathRechecksRootAfterHeadMoves(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	first := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, first.SetSlot(1))
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+
+	second := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, second.SetSlot(2))
+	graph := &forkGraphDisk{syncedData: &publishOnHeadRoot{
+		SyncedDataManager: manager,
+		publish: func() {
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(second, common.Hash{0x02}))
+		},
+	}}
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), out.Slot())
 }

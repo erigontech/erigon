@@ -16,16 +16,14 @@ type ExecutionStat struct {
 // complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions
 // arrive out of tx order, so slice insert/delete would be O(n²) per block.
 type execStatusList struct {
-	pending           []int
-	deferred          []int // txs whose retry waits on a directed-delay predicate
-	inProgress        []bool
-	complete          []bool
-	dependency        map[int]map[int]bool
-	blocker           map[int]map[int]bool
-	inProgressCnt     int
-	completeCnt       int
-	completeUpTo      int // completeUpTo-1 == maxComplete (contiguous-from-zero complete prefix)
-	minInProgressHint int // lower bound on the lowest in-progress index; lazily advanced on query
+	pending       []int
+	inProgress    []bool
+	complete      []bool
+	dependency    map[int]map[int]bool
+	blocker       map[int]map[int]bool
+	inProgressCnt int
+	completeCnt   int
+	completeUpTo  int // completeUpTo-1 == maxComplete (contiguous-from-zero complete prefix)
 }
 
 func (m *execStatusList) ensureLen(tx int) {
@@ -62,40 +60,26 @@ func (m *execStatusList) takeNextPending() int {
 	return x
 }
 
-type dispatchAction uint8
-
-const (
-	dispatchStop     dispatchAction = iota // leave tx and the rest in pending, end the pass
-	dispatchConsume                        // tx dispatched: drop it from pending
-	dispatchHold                           // tx held back: keep it in pending
-	dispatchHoldStop                       // hold tx back, then end the pass
-)
-
-// dispatchPending walks pending front-to-back, dispatching or holding each tx
-// per decide. Held-back txs are compacted ahead of the suffix in O(consumed
-// prefix): the suffix is never moved and nothing is allocated, and the compacted
-// prefix stays sorted below the suffix, so it needs no re-sort or dedup.
-func (m *execStatusList) dispatchPending(decide func(tx int) dispatchAction) {
-	read, write := 0, 0
-	for read < len(m.pending) {
-		act := decide(m.pending[read])
-		if act == dispatchStop {
-			break
-		}
-		m.setInProgress(m.pending[read])
-		if act == dispatchHold || act == dispatchHoldStop {
-			m.pending[write] = m.pending[read]
-			write++
-		}
-		read++
-		if act == dispatchHoldStop {
-			break
+// takePendingWhere removes and returns every pending tx satisfying pred, in
+// ascending order, marking each in-progress. Unlike takeNextPending (min-only,
+// contiguous), this lets validation select a non-contiguous ready subset for
+// dependency-ordered validation. Returns nil when nothing matches.
+func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
+	if len(m.pending) == 0 {
+		return nil
+	}
+	var taken []int
+	kept := m.pending[:0]
+	for _, tx := range m.pending {
+		if pred(tx) {
+			taken = append(taken, tx)
+			m.setInProgress(tx)
+		} else {
+			kept = append(kept, tx)
 		}
 	}
-	if write > 0 {
-		copy(m.pending[read-write:read], m.pending[:write])
-	}
-	m.pending = m.pending[read-write:]
+	m.pending = kept
+	return taken
 }
 
 func (m execStatusList) maxComplete() int {
@@ -107,45 +91,11 @@ func (m *execStatusList) pushPending(tx int) {
 	m.pending = insertInList(m.pending, tx)
 }
 
-// pushDeferred parks a tx that hit ErrDependency with no effective blocker
-// (or was invalidated mid-flight). Immediate re-dispatch re-enters the
-// race; drainDeferredIfReady gates retry on a directed-delay predicate.
-func (m *execStatusList) pushDeferred(tx int) {
-	m.deferred = insertInList(m.deferred, tx)
-}
-
-// drainDeferred unconditionally moves deferred → pending. Forward-progress
-// safety net when no workers are in flight.
-func (m *execStatusList) drainDeferred() {
-	for _, tx := range m.deferred {
-		m.pending = insertInList(m.pending, tx)
-	}
-	m.deferred = m.deferred[:0]
-}
-
-func (m *execStatusList) drainDeferredIfReady(ready func(tx int) bool) {
-	if len(m.deferred) == 0 {
-		return
-	}
-	kept := m.deferred[:0]
-	for _, tx := range m.deferred {
-		if ready(tx) {
-			m.pending = insertInList(m.pending, tx)
-		} else {
-			kept = append(kept, tx)
-		}
-	}
-	m.deferred = kept
-}
-
 func (m *execStatusList) setInProgress(tx int) {
 	m.ensureLen(tx)
 	if !m.inProgress[tx] {
 		m.inProgress[tx] = true
 		m.inProgressCnt++
-	}
-	if tx < m.minInProgressHint {
-		m.minInProgressHint = tx
 	}
 }
 
@@ -163,22 +113,6 @@ func (m *execStatusList) setComplete(tx int) {
 }
 
 func (m *execStatusList) inProgressCount() int { return m.inProgressCnt }
-
-// minInProgress returns the lowest in-progress tx index, or -1 if empty.
-func (m *execStatusList) minInProgress() int {
-	if m.inProgressCnt == 0 {
-		return -1
-	}
-	// in-progress txs are >= completeUpTo; advancing the hint lazily from there
-	// (it only moves back when a lower index is re-dispatched) is amortized O(1).
-	if m.minInProgressHint < m.completeUpTo {
-		m.minInProgressHint = m.completeUpTo
-	}
-	for m.minInProgressHint < len(m.inProgress) && !m.inProgress[m.minInProgressHint] {
-		m.minInProgressHint++
-	}
-	return m.minInProgressHint
-}
 
 func removeFromList(l []int, v int, expect bool) []int {
 	x := sort.SearchInts(l, v)

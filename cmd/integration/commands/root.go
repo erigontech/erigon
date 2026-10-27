@@ -112,7 +112,7 @@ func isDefaultChaindata(chaindata, datadir string) bool {
 	return chaindata == filepath.Join(datadir, "chaindata")
 }
 
-func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
 	if applyMigrations && isDefaultChaindata(chaindata, datadirCli) {
 		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {

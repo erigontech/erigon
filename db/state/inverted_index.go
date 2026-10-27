@@ -78,6 +78,8 @@ type InvertedIndex struct {
 	logger log.Logger
 
 	checker *DependencyIntegrityChecker
+
+	_testBuildAccessorHook func(rs *recsplit.RecSplit)
 }
 
 type iiVisible struct {
@@ -720,9 +722,9 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if err != nil {
 		return nil, err
 	}
-	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+	return stream.TransformKV2U64Seekable(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
-	}), nil
+	}, binary.BigEndian.AppendUint64), nil
 }
 
 // IdxRange is to be used in public API, therefore it relies on read-only transaction
@@ -790,7 +792,8 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 }
 
 func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
-	if min := iit.ii.minTxNumInDB(tx); min == 0 || min < iit.files.EndTxNum() {
+	min, _ := iit.ii.minTxNumInDB(tx)
+	if min == 0 || min < iit.files.EndTxNum() {
 		return true
 	}
 	return false
@@ -812,9 +815,10 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
 		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
-		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+		min, _ := iit.ii.minTxNumInDB(tx)
+		return min < iit.files.EndTxNum()
 	}
-	min := iit.ii.minTxNumInDB(tx)
+	min, _ := iit.ii.minTxNumInDB(tx)
 
 	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
@@ -877,9 +881,7 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
 func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
-		if iit.files.EndTxNum() > 0 {
-			txTo = min(txTo, iit.files.EndTxNum())
-		}
+		txTo = min(txTo, iit.files.EndTxNum())
 		if !iit.CanPrune(tx, txTo) && valTable == nil /* it's not a history prune */ {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64, Progress: prune.Done}, nil
 		}
@@ -892,9 +894,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 
 func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
-		if iit.files.EndTxNum() > 0 {
-			txTo = min(txTo, iit.files.EndTxNum())
-		}
+		txTo = min(txTo, iit.files.EndTxNum())
 		if !iit.CanHashPrune(tx) {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}
@@ -994,7 +994,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, prs, mode)
 	if err != nil {
-		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)
+		iit.ii.logger.Error("prune table", "name", iit.ii.FilenameBase, "err", err)
 		return nil, err
 	}
 	defer func() {
@@ -1272,7 +1272,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 
-	if err := buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger, nil); err != nil {
+	if err := buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger, ii._testBuildAccessorHook); err != nil {
 		return err
 	}
 	return nil
@@ -1308,13 +1308,33 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return from, to
 }
 
-func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, ii.KeysTable)
-	if len(fst) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		return fstInDb
+// HasTxNumsInDB reports whether the DB holds index records for any txNum in
+// [fromTxNum, toTxNum). It seeks the txNum-ordered keys table, so the cost does
+// not grow with the number of keys the index holds.
+func (iit *InvertedIndexRoTx) HasTxNumsInDB(fromTxNum, toTxNum uint64, tx kv.Tx) (bool, error) {
+	c, err := tx.CursorDupSort(iit.ii.KeysTable)
+	if err != nil {
+		return false, err
 	}
-	return 0
+	defer c.Close()
+	var from [8]byte
+	binary.BigEndian.PutUint64(from[:], fromTxNum)
+	k, _, err := c.Seek(from[:])
+	if err != nil || k == nil {
+		return false, err
+	}
+	return binary.BigEndian.Uint64(k) < toTxNum, nil
+}
+
+func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
+	fst, err := kv.FirstKey(tx, ii.KeysTable)
+	if err != nil {
+		return 0, err
+	}
+	if len(fst) > 0 {
+		return binary.BigEndian.Uint64(fst), nil
+	}
+	return 0, nil
 }
 
 func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {

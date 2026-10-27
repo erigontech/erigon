@@ -20,6 +20,8 @@
 package mdgas
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
@@ -50,14 +52,10 @@ type IntrinsicGasCalcResult struct {
 
 // CountNonZeroBytes returns the number of non-zero bytes in data.
 func CountNonZeroBytes(data []byte) int {
-	count := 0
-	for _, b := range data {
-		if b != 0 {
-			count++
-		}
-	}
-	return count
+	return len(data) - bytes.Count(data, zeroByte)
 }
+
+var zeroByte = []byte{0}
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // It counts the non-zero bytes in args.Data and then calls CalcIntrinsicGas.
@@ -292,6 +290,21 @@ func MinTxGas(isEIP2780 bool) uint64 {
 		return params.TxBaseEIP2780
 	}
 	return params.TxGas
+}
+
+// MinTxBlockGas is the least block gas a non-AA transaction uses: MinTxGas less
+// the largest refund. Since Prague the EIP-7623 floor is not refundable, and
+// since Amsterdam block gas does not count refunds (EIP-7778).
+func MinTxBlockGas(isLondon, isPrague, isAmsterdam bool) uint64 {
+	minTxGas := MinTxGas(isAmsterdam)
+	switch {
+	case isPrague || isAmsterdam:
+		return minTxGas
+	case isLondon:
+		return minTxGas - minTxGas/params.RefundQuotientEIP3529
+	default:
+		return minTxGas - minTxGas/params.RefundQuotient
+	}
 }
 
 // toWordSize returns the ceiled word size required for memory expansion.

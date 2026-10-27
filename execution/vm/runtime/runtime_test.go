@@ -20,11 +20,13 @@
 package runtime
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -160,6 +162,182 @@ func TestCall(t *testing.T) {
 	if num.Cmp(big.NewInt(10)) != 0 {
 		t.Error("Expected 10, got", num)
 	}
+}
+
+func TestCallDoesNotCreateOrigin(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	origin := accounts.InternAddress(common.HexToAddress("0xbb"))
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(address, nil, &Config{State: statedb, Origin: origin})
+	require.NoError(t, err)
+	exists, err := statedb.Exist(origin)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// returnCalldata32 returns the first 32 bytes of its calldata.
+var returnCalldata32 = []byte{
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN),
+}
+
+func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+
+	first, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	second, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
+}
+
+// A transaction that returned a large output does not leave its buffer to the next one.
+func TestCallDropsAnOversizedOutputBuffer(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	returnCalldataSize := []byte{byte(vm.PUSH1), 0, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	require.NoError(t, statedb.SetCode(address, returnCalldataSize, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	size := func(n int) []byte { return common.LeftPadBytes(big.NewInt(int64(n)).Bytes(), 32) }
+
+	large, _, err := Call(address, size(2*1024*1024), cfg)
+	require.NoError(t, err)
+	small, _, err := Call(address, size(32), cfg)
+	require.NoError(t, err)
+	require.NotSame(t, unsafe.SliceData(large), unsafe.SliceData(small))
+}
+
+// A system call runs without Prepare and keeps its output, as the EIP-7002 requests do.
+func TestCallWithoutPrepareGetsItsOwnOutput(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	first, second := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+
+	out, _, err := Call(address, first, cfg)
+	require.NoError(t, err)
+	_, _, _, err = NewEnv(cfg).Call(cfg.Origin, address, second, mdgas.MdGas{Execution: cfg.GasLimit}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, first, out)
+}
+
+func TestCreatedCodeOutlivesNextTransaction(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	setDefaults(cfg)
+	vmenv := NewEnv(cfg)
+	rules := vmenv.ChainRules()
+	gas := mdgas.MdGas{Execution: cfg.GasLimit}
+	code := bytes.Repeat([]byte{1}, 32)
+	initCode := append(append([]byte{byte(vm.PUSH32)}, code...),
+		byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	_, _, _, err := vmenv.Call(cfg.Origin, address, nil, gas, uint256.Int{}, false)
+	require.NoError(t, err)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	_, created, _, _, err := vmenv.Create(cfg.Origin, initCode, gas, uint256.Int{}, nil, false)
+	require.NoError(t, err)
+	_, _, err = Call(address, bytes.Repeat([]byte{2}, 32), cfg)
+	require.NoError(t, err)
+
+	got, err := statedb.GetCode(created)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}
+
+func TestInnerCreatedCodeOutlivesNextCall(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	callee := common.HexToAddress("0xaa")
+	factory := accounts.InternAddress(common.HexToAddress("0xbb"))
+	code := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(accounts.InternAddress(callee), returnCalldata32, tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(factory, program.New().
+		Create2(program.New().ReturnData(code).Bytes(), 0).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Call(nil, callee, 0, 0, 32, 0, 32).Op(vm.POP).
+		Push(0).Op(vm.MSTORE).Return(0, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(factory, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	got, err := statedb.GetCode(accounts.InternAddress(common.BytesToAddress(ret)))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}
+
+// A tracer that never sees call outputs must not turn off the identity output buffer.
+func TestIdentityReusesOutputBufferUnderEnterTracer(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	const calls = 100
+	p := program.New().Mstore([]byte{1}, 1024)
+	for range calls {
+		p.StaticCall(nil, 0x4, 0, 1024, 0, 0).Op(vm.POP)
+	}
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	cfg.EVMConfig.Tracer = &tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}
+
+	allocs := testing.AllocsPerRun(3, func() {
+		_, _, err := Call(address, nil, cfg)
+		require.NoError(t, err)
+	})
+	require.Less(t, allocs, float64(calls))
+}
+
+// An identity call with too little gas fails on the buffer-reusing path too.
+func TestIdentityOutOfGasFails(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	// 1024 bytes cost 15 + 3*32 = 111 gas; 50 is not enough.
+	p := program.New().Mstore([]byte{1}, 1024).
+		StaticCall(uint256.NewInt(50), 0x4, 0, 1024, 0, 0).
+		Push0().Op(vm.MSTORE).Return(0, 32)
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, make([]byte, 32), ret, "STATICCALL to identity with too little gas must return 0")
+}
+
+// The identity output must not change when the caller later overwrites the input memory.
+func TestIdentityReturnDataOutlivesInputMemory(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	input := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(address, program.New().
+		Mstore(input, 0).
+		StaticCall(nil, 0x4, 0, 32, 0, 0).Op(vm.POP).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Push(32).Push(0).Push(32).Op(vm.RETURNDATACOPY).
+		Return(32, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, input, ret)
 }
 
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
@@ -327,43 +505,6 @@ func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 		GasLimit:   100000,
 	}
 }
-
-// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
-type FakeChainHeaderReader struct{}
-
-func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-
-func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
-}
-func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
-func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
-
-// GetHeader returns a fake header with the parentHash equal to the number - 1
-func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return &types.Header{
-		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     *uint256.NewInt(number),
-		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
-		Time:       number,
-		Nonce:      types.BlockNonce{0x1},
-		Extra:      []byte{},
-		GasLimit:   100000,
-	}
-}
-
-func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return nil
-}
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	return nil
-}
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64 { return 0 }
 
 type dummyChain struct {
 	counter int
@@ -816,7 +957,7 @@ func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, ty
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		uint256.Int{}, // value = 0
 		false,
 	)
@@ -1018,7 +1159,6 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 	}
 	versioned := func() *state.IntraBlockState {
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		return ibs
 	}
 	was := dbg.TraceTransactionIO
@@ -1054,4 +1194,37 @@ func TestStorageCacheIsPerFrame(t *testing.T) {
 	ret, _, err := Call(top, nil, &Config{State: statedb, GasLimit: 1_000_000})
 	require.NoError(t, err)
 	require.Equal(t, []uint64{11, 22}, []uint64{new(uint256.Int).SetBytes(ret[:32]).Uint64(), new(uint256.Int).SetBytes(ret[32:]).Uint64()})
+}
+
+// Without EIP-161 an empty account survives in the post-state, so a zero-value
+// call has to leave its origin existing even though nothing transfers. A chain
+// past Spurious Dragon that disables EIP-161 keeps that behaviour.
+func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"pre-spurious-dragon", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0)}},
+		{"eip161-disabled", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), DisabledEIPs: []int{161}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, domains := temporaltest.NewTestTxSD(t, db)
+
+			ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+			defer ibs.Close()
+			address := accounts.InternAddress(common.HexToAddress("0xaa"))
+			require.NoError(t, ibs.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+			origin := accounts.InternAddress(common.HexToAddress("0xf00d"))
+			_, _, err := Call(address, nil, &Config{State: ibs, Origin: origin, ChainConfig: tc.cfg})
+			require.NoError(t, err)
+
+			exists, err := ibs.Exist(origin)
+			require.NoError(t, err)
+			require.True(t, exists, "the origin must exist in the post-state")
+		})
+	}
 }

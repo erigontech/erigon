@@ -32,6 +32,9 @@ jobs:
       TOTAL_TIME_SECONDS: 28800 # 8 hours
 
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:

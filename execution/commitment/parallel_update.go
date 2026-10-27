@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"slices"
 	"sync"
 )
 
@@ -46,8 +47,20 @@ func (a *plainKeyArena) intern(b []byte) []byte {
 
 func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 
+const touchChunkKeys = 16384
+
+type touchEntry struct {
+	hashedKey []byte
+	plainKey  []byte
+	update    *Update
+}
+
 type parallelUpdate struct {
 	trie *prefixTrie
+
+	pending  []touchEntry
+	spare    []touchEntry
+	inflight sync.WaitGroup
 
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
@@ -56,14 +69,42 @@ type parallelUpdate struct {
 }
 
 func newParallelUpdate() *parallelUpdate {
-	return &parallelUpdate{
-		trie: newPrefixTrie(),
+	return &parallelUpdate{trie: newPrefixTrie()}
+}
+
+// Collect is not safe for concurrent calls; the caller must serialize them.
+func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
+	pu.pending = append(pu.pending, touchEntry{hashedKey: hashedKey, plainKey: plainKey, update: update})
+	if len(pu.pending) >= touchChunkKeys {
+		pu.handOff()
 	}
 }
 
-// Insert is not safe for concurrent calls; the caller must serialize them.
-func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte, update *Update) {
-	pu.trie.Insert(hashedKey, plainKey, update)
+func resetEntries(c []touchEntry) []touchEntry {
+	clear(c)
+	return c[:0]
+}
+
+func (pu *parallelUpdate) handOff() {
+	pu.inflight.Wait()
+	c := pu.pending
+	pu.pending, pu.spare = slices.Grow(pu.spare[:0], touchChunkKeys), c
+	pu.inflight.Go(func() {
+		pu.insertChunk(c)
+		clear(c)
+	})
+}
+
+func (pu *parallelUpdate) insertChunk(c []touchEntry) {
+	for i := range c {
+		pu.trie.Insert(c[i].hashedKey, c[i].plainKey, c[i].update)
+	}
+}
+
+func (pu *parallelUpdate) Build() {
+	pu.inflight.Wait()
+	pu.insertChunk(pu.pending)
+	pu.pending = resetEntries(pu.pending)
 }
 
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
@@ -80,6 +121,8 @@ func (pu *parallelUpdate) drainDeferred() {
 }
 
 func (pu *parallelUpdate) Reset() {
+	pu.inflight.Wait()
+	pu.pending = resetEntries(pu.pending)
 	if pu.trie != nil {
 		pu.trie.Reset()
 	}
@@ -88,9 +131,47 @@ func (pu *parallelUpdate) Reset() {
 }
 
 func (pu *parallelUpdate) Close() {
+	pu.inflight.Wait()
+	pu.pending, pu.spare = nil, nil
 	pu.trie = nil
 	pu.drainDeferred()
 	pu.keyArena.reset()
+}
+
+// foldTombstones keeps, for a prefix a self-destruct tombstoned and the same Process
+// rebuilt, only the rebuilt branch: a forked child checks it in before the parent's
+// tombstone, and merged it onto the old stored branch. Written raw, it carries the
+// tombstone's prev, so the domain diff still restores the old branch on unwind.
+func (pu *parallelUpdate) foldTombstones() {
+	pu.deferredMu.Lock()
+	defer pu.deferredMu.Unlock()
+	var tombs map[string]*DeferredBranchUpdate
+	for _, u := range pu.deferredCombined {
+		if u.rawWrite {
+			if tombs == nil {
+				tombs = map[string]*DeferredBranchUpdate{}
+			}
+			tombs[string(u.prefix)] = u
+		}
+	}
+	if tombs == nil {
+		return
+	}
+	folded := map[*DeferredBranchUpdate]bool{}
+	for _, u := range pu.deferredCombined {
+		if t, ok := tombs[string(u.prefix)]; ok && !u.rawWrite {
+			u.rawWrite = true
+			u.prev = reuseBytes(u.prev, t.prev)
+			folded[t] = true
+		}
+	}
+	pu.deferredCombined = slices.DeleteFunc(pu.deferredCombined, func(u *DeferredBranchUpdate) bool {
+		if folded[u] {
+			putDeferredUpdate(u)
+			return true
+		}
+		return false
+	})
 }
 
 func (pu *parallelUpdate) appendDeferred(updates []*DeferredBranchUpdate) {

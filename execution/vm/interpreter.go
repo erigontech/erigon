@@ -57,10 +57,20 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
-// CallContext contains the things that are per-call, such as stack and memory,
-// but not transients like pc and gas
+type addressWordIndex uint8
+
+const (
+	addressWordSelf addressWordIndex = iota
+	addressWordOrigin
+	addressWordCaller
+	addressWordCoinbase
+	addressWordCount
+)
+
+// CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
+	savedPC           uint64 // run's pc across an out-of-line call
 	stateGas          uint64
 	stateGasSpill     uint64
 	newAccountCharged bool
@@ -83,10 +93,12 @@ type CallContext struct {
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
-	Contract Contract
-	create   createGasPreparation
-	slots    frameSlots
-	Stack    Stack
+	Contract        Contract
+	create          createGasPreparation
+	slots           frameSlots
+	Stack           Stack
+	addressWords    [addressWordCount]uint256.Int
+	addressWordsSet [addressWordCount]bool
 }
 
 // maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
@@ -161,7 +173,7 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 // peekAddress, to keep the two peek functions inside the inlining budget.
 // Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
-	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
+	ctx.cachedKey = evm.intraBlockState.InternStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
@@ -176,7 +188,7 @@ func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 }
 
 func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
-	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
+	ctx.cachedAddr = evm.intraBlockState.InternAddress(ctx.Stack.peek())
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }
@@ -187,22 +199,30 @@ var contextPool = sync.Pool{
 	},
 }
 
-func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
-	ctx, ok := contextPool.Get().(*CallContext)
-	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
+func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
+	ctx := evm.spareFrame
+	evm.spareFrame = nil
+	if ctx == nil {
+		var ok bool
+		if ctx, ok = contextPool.Get().(*CallContext); !ok {
+			log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
+		}
 	}
 
 	ctx.gas = gas.Execution
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
+	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
 }
 
-func (ctx *CallContext) put() {
+// putCallContext parks one nested frame's context on the EVM so the next nested
+// frame takes it without the pool; the spare is not tied to the depth that left
+// it. The outermost frame returns both contexts to the pool.
+func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
 	ctx.cacheGen = 0
@@ -222,7 +242,15 @@ func (ctx *CallContext) put() {
 	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
 	ctx.Contract = Contract{}
+	if evm.depth > 1 && evm.spareFrame == nil {
+		evm.spareFrame = ctx
+		return
+	}
 	contextPool.Put(ctx)
+	if evm.depth == 1 && evm.spareFrame != nil {
+		contextPool.Put(evm.spareFrame)
+		evm.spareFrame = nil
+	}
 }
 
 func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
@@ -483,7 +511,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 
 	var (
 		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
+		callContext = evm.getCallContext(contract, input, gas)
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -518,7 +546,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		callContext.put()
+		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
 		}
@@ -570,6 +598,7 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		callContext.savedPC = pc
 		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
@@ -675,7 +704,7 @@ run:
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
 		gasLeft = callContext.gas
 		if err != nil {
 			break run

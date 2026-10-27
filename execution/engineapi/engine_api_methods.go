@@ -18,8 +18,6 @@ package engineapi
 
 import (
 	"context"
-	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -29,15 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
 )
-
-var errInvalidPayloadID = errors.New("invalid payload id: expected 8 bytes")
-
-func decodePayloadID(payloadID hexutil.Bytes) (uint64, error) {
-	if len(payloadID) != 8 {
-		return 0, errInvalidPayloadID
-	}
-	return binary.BigEndian.Uint64(payloadID), nil
-}
 
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
@@ -64,6 +53,7 @@ var ourCapabilities = []string{
 	"engine_getBlobsV2",
 	"engine_getBlobsV3",
 	"engine_getBlobsV4",
+	"engine_getInclusionListV1",
 	"POST /engine/v1/payloads",
 	"POST /engine/v2/payloads",
 	"POST /engine/v3/payloads",
@@ -82,6 +72,7 @@ var ourCapabilities = []string{
 	"POST /engine/v1/blobs",
 	"POST /engine/v2/blobs",
 	"POST /engine/v3/blobs",
+	"GET /engine/v1/inclusion-list",
 	"POST /engine/v1/client/version",
 	"POST /engine/v1/capabilities",
 }
@@ -95,7 +86,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes
 	}
 	e.engineLogSpamer.RecordRequest()
 
-	decodedPayloadId, err := decodePayloadID(payloadId)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadId)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +103,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes
 // Same as [GetPayloadV1] with addition of blockValue
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +114,7 @@ func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV2], with addition of blobsBundle containing valid blobs, commitments, proofs
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +125,7 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV3], with executionRequests added to the response.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
 func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +136,7 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
 func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +147,7 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV5], but returning ExecutionPayloadV4.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
 func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,4 +314,11 @@ func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash,
 	}
 	ret, _ := resp.([]*engine_types.BlobCellsAndProofsV1)
 	return ret, nil
+}
+
+// Returns an array of transactions as the inclusion list with size limit of 8 KiB
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_getinclusionlistv1
+func (e *EngineServer) GetInclusionListV1(ctx context.Context) ([]hexutil.Bytes, error) {
+	e.logger.Debug("[GetInclusionListV1] Received Request, building Inclusion List")
+	return e.getInclusionList(ctx)
 }

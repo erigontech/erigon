@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
 
@@ -434,6 +433,10 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, logPrefi
 }
 
 type Progress struct {
+	// logMu serializes the Log* methods so the exec goroutine (LogExecution) and
+	// the commitment calculator goroutine (LogCommitments) can interleave without
+	// racing the prev* deltas they share (notably prevDomainMetrics).
+	logMu                   sync.Mutex
 	initialTime             time.Time
 	initialTxNum            uint64
 	initialBlockNum         uint64
@@ -475,6 +478,8 @@ type executor interface {
 }
 
 func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
 	seconds := interval.Seconds()
@@ -707,6 +712,8 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 }
 
 func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
 	var te *txExecutor
 	var suffix string
 
@@ -773,6 +780,8 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 }
 
 func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
 	interval := time.Since(p.initialTime)
 	var te *txExecutor
 	var suffix string
@@ -818,8 +827,7 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
 	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []any,
 ) {
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	mxExecStepsInDB.Set(stepsInDb * 100)
 
 	if len(suffix) > 0 {
@@ -862,8 +870,8 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	}
 
 	vals = append(vals, []any{
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys),
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys),
 		"isForkValidation", te.isForkValidation,
 		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)

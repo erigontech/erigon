@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strconv"
 	"testing"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -159,6 +161,25 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 	require.NotContains(t, byNumber[0][0], "error")
 }
 
+func TestCapEVMTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		server   time.Duration
+		clientMs int64
+		want     time.Duration
+	}{
+		{5 * time.Minute, 0, 5 * time.Minute},
+		{5 * time.Minute, -1, 5 * time.Minute},
+		{5 * time.Minute, (24 * time.Hour).Milliseconds(), 5 * time.Minute},
+		{5 * time.Minute, 1000, time.Second},
+		{0, 1000, time.Second},
+		{0, 0, 0},
+		{1500 * time.Microsecond, 1, time.Millisecond},
+		{0, math.MaxInt64, time.Duration(math.MaxInt64/int64(time.Millisecond)) * time.Millisecond},
+	} {
+		require.Equal(t, tc.want, capEVMTimeout(tc.server, tc.clientMs), "server %v, client %d ms", tc.server, tc.clientMs)
+	}
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api, debugApi := newCallManyApisForTest(m)
@@ -246,22 +267,19 @@ func TestCallMany(t *testing.T) {
 
 	callArgAddr1 := ethapi.CallArgs{
 		From: &address, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &balanceCallAddr1,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &balanceCallAddr1,
 	}
 	callArgAddr2 := ethapi.CallArgs{
 		From: &address, To: &tokenAddr, Nonce: &secondNonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &balanceCallAddr2,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &balanceCallAddr2,
 	}
 
 	callArgTransferAddr2 := ethapi.CallArgs{
 		From: &address2, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &transferCallData,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &transferCallData,
 	}
 
 	timeout := int64(50000)
@@ -370,8 +388,7 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 		to := address
 		calls[i] = ethapi.CallArgs{
 			From: &address, To: &to, Nonce: &nonce,
-			MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-			MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
+			GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 		}
 	}
 	bundles := []Bundle{{Transactions: calls}}
@@ -388,4 +405,58 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 	failing := &countingWriter{failAt: 2}
 	stream = jsonstream.New(failing)
 	require.Error(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
+}
+
+// A state override on a precompile applies to the bundle as it does to eth_call:
+// a code override replaces the precompile, and a moved precompile runs at its
+// new address.
+func TestCallManyStateOverridePrecompile(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api, _ := newCallManyApisForTest(m)
+
+	identity := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	revert := hexutil.Bytes(hexutil.MustDecode("0x60006000fd"))
+	input := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
+	latest := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}
+	callTo := func(to common.Address) ethapi.CallArgs {
+		return ethapi.CallArgs{
+			From:         &bankAddr,
+			To:           &to,
+			Data:         &input,
+			MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(2e9)),
+		}
+	}
+
+	t.Run("code replaces the precompile", func(t *testing.T) {
+		res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{callTo(identity)}}}, latest, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {Code: &revert},
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		require.Len(t, res[0], 1)
+		require.Equal(t, "execution reverted", res[0][0]["error"])
+	})
+
+	t.Run("moved precompile runs at the new address in every call", func(t *testing.T) {
+		// The override is applied once, so the moved set has to reach every
+		// call of every bundle.
+		bundles := []Bundle{
+			{Transactions: []ethapi.CallArgs{callTo(moveTo), callTo(moveTo)}},
+			{Transactions: []ethapi.CallArgs{callTo(moveTo)}},
+		}
+		res, err := api.CallMany(context.Background(), bundles, latest, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {MovePrecompileTo: &moveTo},
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 2)
+		require.Len(t, res[0], 2)
+		require.Len(t, res[1], 1)
+		for i, bundle := range res {
+			for j, call := range bundle {
+				require.NotContains(t, call, "error", "bundle %d, call %d", i, j)
+				require.Equal(t, "deadbeef", call["value"], "bundle %d, call %d", i, j)
+			}
+		}
+	})
 }

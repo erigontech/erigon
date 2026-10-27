@@ -78,6 +78,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 	start := time.Now()
 
 	// sender part
+	sendErrCh := make(chan error, 1)
 	go func() {
 		rpcClient := requests.NewRequestGenerator(
 			rpcAddressNode1,
@@ -99,10 +100,15 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
-			require.NoError(t, err)
+			if err != nil {
+				sendErrCh <- err
+				return
+			}
 
-			_, err = rpcClient.SendTransaction(signedTx)
-			require.NoError(t, err)
+			if _, err = rpcClient.SendTransaction(signedTx); err != nil {
+				sendErrCh <- err
+				return
+			}
 		}
 	}()
 
@@ -126,6 +132,8 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 			lastMeasureTime = time.Now()
 
 		case err := <-errCh:
+			require.NoError(t, err)
+		case err := <-sendErrCh:
 			require.NoError(t, err)
 		}
 	}
@@ -221,6 +229,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 	start := time.Now()
 
 	// sender part
+	sendErrCh := make(chan error, 1)
 	go func() {
 		rpcClient := requests.NewRequestGenerator(
 			rpcAddressNode2,
@@ -242,10 +251,15 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
-			require.NoError(t, err)
+			if err != nil {
+				sendErrCh <- err
+				return
+			}
 
-			_, err = rpcClient.SendTransaction(signedTx)
-			require.NoError(t, err)
+			if _, err = rpcClient.SendTransaction(signedTx); err != nil {
+				sendErrCh <- err
+				return
+			}
 		}
 	}()
 
@@ -278,6 +292,8 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 			}
 
 		case err := <-errCh:
+			require.NoError(t, err)
+		case err := <-sendErrCh:
 			require.NoError(t, err)
 		}
 	}
