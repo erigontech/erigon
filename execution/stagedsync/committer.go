@@ -372,6 +372,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.state.ApplyWrites(r.writes)
 		}
+		// The block's changeset is saved by now, which a changeset-owning block needs to compute ahead.
+		cc.maybeComputeAhead(ctx, r.blockNum)
 
 		// A computed-ahead block already emitted its interior step checkpoints from
 		// the BAL while the domain sat at each edge; re-checkpointing here on an
@@ -509,9 +511,8 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 // execution. Idempotent (computedAhead guard).
 //
 // Two safety restrictions:
-//   - Only pre-window blocks (!ownsChangeset) compute ahead, under computeIsolated
-//     (nil accumulator), so nothing leaks into a later window block's changeset.
-//     A changeset-owning block computes incrementally at its own boundary.
+//   - A changeset-owning block computes ahead only once the exec loop has saved
+//     its changeset by hash, so its commitment writes route into its own changeset.
 //   - Compute ahead only contiguously from the batch's first block: n's baseline
 //     comes from the commitment domain, which only a prior compute-ahead (or the
 //     prior cycle) advanced. Computing across a missing-BAL block would read a
@@ -526,7 +527,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
 		return
 	}
-	if cc.ownsChangeset(n) {
+	if cc.ownsChangeset(n) && cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil {
 		return
 	}
 	if !cc.computeAheadGateOpen(n) {
