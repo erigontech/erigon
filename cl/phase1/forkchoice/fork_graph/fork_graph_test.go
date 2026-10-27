@@ -21,6 +21,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -1391,6 +1392,48 @@ func TestConcurrentEnvelopeAndStateDumps(t *testing.T) {
 	gotStateRoot, err := persistedState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, wantStateRoot, gotStateRoot)
+}
+
+func TestConcurrentEnvelopeReadAndDump(t *testing.T) {
+	f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+	readRoot := common.HexToHash("0x1234")
+	dumpRoot := common.HexToHash("0x5678")
+	addEnvelopeTestBlock(f, readRoot, 1)
+	addEnvelopeTestBlock(f, dumpRoot, 2)
+	require.NoError(t, f.DumpEnvelopeOnDisk(readRoot, testEnvelopeWithTransaction(readRoot, []byte{1, 2, 3})))
+	dumped := testEnvelopeWithTransaction(dumpRoot, []byte{4, 5, 6})
+
+	const rounds = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var readErr, dumpErr error
+	wg.Go(func() {
+		<-start
+		for range rounds {
+			persisted, err := f.ReadEnvelopeFromDisk(readRoot)
+			if err != nil {
+				readErr = err
+				return
+			}
+			if got := persisted.Message.Payload.Transactions.UnderlyngReference(); len(got) != 1 || !bytes.Equal(got[0], []byte{1, 2, 3}) {
+				readErr = fmt.Errorf("read envelope transactions %x, want [010203]", got)
+				return
+			}
+		}
+	})
+	wg.Go(func() {
+		<-start
+		for range rounds {
+			if err := f.DumpEnvelopeOnDisk(dumpRoot, dumped); err != nil {
+				dumpErr = err
+				return
+			}
+		}
+	})
+	close(start)
+	wg.Wait()
+	require.NoError(t, readErr)
+	require.NoError(t, dumpErr)
 }
 
 func TestDumpEnvelopeRejectsUnsupportedVersion(t *testing.T) {
