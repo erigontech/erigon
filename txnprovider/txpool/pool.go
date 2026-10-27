@@ -1414,7 +1414,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	}
 	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
 		}
 		return txpoolcfg.BlobPoolOverflow
 	}
@@ -2456,6 +2456,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
+	followsRemote := false
 	senderHasCode := !senderCodeHash.IsEmpty()
 	senderTxnKept := false
 	var toDel []*metaTxn                       // can't delete items while iterate them
@@ -2500,6 +2501,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			minTip = min(minTip, mt.TxnSlot.GetTipCap().Uint64())
 		}
 		mt.minTip = minTip
+		mt.followsRemote = followsRemote
+		followsRemote = followsRemote || mt.subPool&IsLocal == 0
 
 		mt.nonceDistance = 0
 		if mt.TxnSlot.Nonce > senderNonce { // no uint underflow
