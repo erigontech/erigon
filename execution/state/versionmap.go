@@ -1674,34 +1674,31 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	valid := VersionValid
 	switch rr.Status() {
 	case MVReadResultDone, MVReadResultValidated:
-		if source != MapRead {
-			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry a
-			// storage read saw is a BAL no-op and stays valid; other paths mean a real
-			// concurrent change and must invalidate.
+		switch {
+		case source != MapRead && recursive:
+			// Synthetic cross-validate probe with no recorded value of its own — the outer
+			// entry's validation covers it; invalidating here would over-fire.
+		case source != MapRead && (path != StoragePath || version == UnknownVersion):
+			// A non-storage read, or a storage read with no concrete version to compare.
+			// Only storage reads carry a seeded-origin version; for the rest there is no
+			// version to compare on this branch — a non-storage same-version re-write (e.g. a
+			// fee re-credit of the coinbase balance) would otherwise slip a stale read past a
+			// version check. With BAL the path is pre-populated, so a Done cell is a no-op and
+			// stays valid — unless an in-range removal wiped the slot (EIP-7928 has no removal
+			// field). Otherwise invalidate conservatively. Storage reads with a concrete
+			// version fall to checkVersion below, where the seeded origin matches and any
+			// shadowing cell or wipe anchor version-mismatches; one value per version makes
+			// that value-exact.
 			balTrusted := vm.HasBAL && path.BALSeeded()
-			// A removal of an already-empty account wipes its pre-block storage but carries
-			// no balance/nonce/code delta, so it cannot appear in the BAL (EIP-7928 has no
-			// removal field). A cold storage read beneath such a removal is therefore not a
-			// BAL no-op — drop the exemption and let the value/version check catch it.
 			if balTrusted && path == StoragePath {
 				if _, removed := vm.selfDestructInRange(addr, version.TxIndex+1, txIndex, true); removed {
 					balTrusted = false
 				}
 			}
 			if !balTrusted {
-				switch {
-				case recursive:
-					// Synthetic cross-validate probe with no recorded value of its own —
-					// the outer entry's validation covers it; invalidating here would over-fire.
-				case rr.ValStatus() == ValueUnchanged:
-					// The cold read saw the committed origin; the shadowing Done cell is a
-					// net-zero (ValueUnchanged) write, so the live value still equals that
-					// origin and the read is accurate. Version+valStatus, no value compare.
-				default:
-					valid = VersionInvalid
-				}
+				valid = VersionInvalid
 			}
-		} else {
+		default:
 			valid = checkVersion(version, rr.Version())
 			// An origin AddressPath read is the committed baseline; re-run the create/
 			// destruct cross-checks so a concurrent lower-tx create or SELFDESTRUCT invalidates it.

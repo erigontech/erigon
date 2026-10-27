@@ -24,20 +24,13 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Code, CodeHash and CodeSize always co-write (one code change bumps all three)
-// but validate in different classes: CodeHash is a value path (its cell carries a
-// valStatus) while Code and CodeSize are noValueRead (version/status only).
-//
-// The split shows up on a StorageRead-sourced read — a cold read that saw no
-// VersionMap entry at execution time but now collides with a concurrent worker's
-// Done flush. When the shadowing CodeHash cell is a net-zero (ValueUnchanged)
-// write, the live hash still equals the committed origin the cold read saw, so the
-// read stays valid on version+valStatus; the co-written Code/CodeSize cells are
-// ValueChanged (the default for those structural paths) and invalidate. The
-// divergence is benign — the hash is unchanged so the read is accurate; the
-// version/status checks are conservative, never wrong — and it is what lets an
-// EXTCODEHASH-only tx avoid a re-execution on such a collision.
-func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
+// Code, CodeHash and CodeSize always co-write (one code change bumps all three) and
+// validate uniformly on version. A StorageRead-sourced read carrying a concrete version
+// that collides with a concurrent worker's Done flush at a different version invalidates
+// on all three paths, regardless of the shadowing cell's valStatus — including a
+// CodeHash cell stamped net-zero (ValueUnchanged). One value per version makes the
+// version check value-exact, so no value-path exemption is needed.
+func TestCodeTrio_UniformVersionValidation(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(80)
 	code := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3})
@@ -59,8 +52,8 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 	rsHash := ReadSet{}
 	rsHash.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: readStorage, Val: code.Hash})
 	ioHash.RecordReads(Version{TxIndex: 3}, rsHash)
-	require.Equal(t, VersionValid, vm.ValidateVersion(3, ioHash, validateEqualVersion, false, ""),
-		"CodeHash value path: a net-zero (ValueUnchanged) shadow leaves the cold read's value live")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioHash, validateEqualVersion, false, ""),
+		"CodeHash: a version-mismatched read invalidates even under a net-zero (ValueUnchanged) shadow")
 
 	ioCode := NewVersionedIO(4)
 	rsCode := ReadSet{}

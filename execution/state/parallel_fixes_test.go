@@ -42,83 +42,6 @@ func (r *emptyReader) SetTrace(bool, string)                                   {
 func (r *emptyReader) Trace() bool                                             { return false }
 func (r *emptyReader) TracePrefix() string                                     { return "" }
 
-// TestValueTiebreaker_BalancePath verifies that validation does not
-// invalidate a StorageRead when the versionMap Done value matches the
-// read value. This prevents unnecessary re-executions that cause
-// cascading state errors.
-// TestBalancePath_NetZeroCellKeepsColdReadValid pins that a cold (StorageRead) balance
-// read stays valid under a shadowing Done cell iff that cell is a net-zero (ValueUnchanged)
-// write — the live value still equals the committed origin the read saw. Validation is
-// version+valStatus; the test asserts the value match itself rather than leaning on a
-// read-side compare. A ValueChanged shadow invalidates the stale read.
-func TestBalancePath_NetZeroCellKeepsColdReadValid(t *testing.T) {
-	addr := accounts.InternAddress([20]byte{0x01})
-	balance := *uint256.NewInt(1000)
-	alwaysValidVersion := func(rv, wv Version) VersionValidity { return VersionValid }
-
-	// tx5 re-published 1000 — net-zero vs the origin, stamped ValueUnchanged.
-	vm := NewVersionMap(nil)
-	ws := &WriteSet{}
-	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5}, valStatus: ValueUnchanged},
-		Val:         balance,
-	})
-	vm.FlushVersionedWrites(ws, true, "")
-
-	// The live value genuinely matches the cold read — assert it here, not via the code.
-	live, _, ok := vm.ReadBalance(addr, 10)
-	require.True(t, ok)
-	require.True(t, live.Eq(&balance), "live value equals the cold read's origin value")
-
-	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		liveBalance, alwaysValidVersion, false, "")
-	assert.Equal(t, VersionValid, valid, "a ValueUnchanged shadow leaves the cold read's value live")
-
-	// tx5 wrote 999 — a real change (ValueChanged) → the cold read of 1000 is stale.
-	vm2 := NewVersionMap(nil)
-	ws2 := &WriteSet{}
-	ws2.SetBalance(addr, &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5}, valStatus: ValueChanged},
-		Val:         *uint256.NewInt(999),
-	})
-	vm2.FlushVersionedWrites(ws2, true, "")
-	valid2 := validateRead(vm2, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		liveBalance, alwaysValidVersion, false, "")
-	assert.Equal(t, VersionInvalid, valid2, "a ValueChanged shadow invalidates the stale cold read")
-}
-
-// TestNoncePath_NetZeroCellKeepsColdReadValid mirrors the balance case for nonce: a cold
-// nonce read stays valid under a net-zero (ValueUnchanged) shadow and invalidates under a
-// real (ValueChanged) one — version+valStatus, no read-side value compare.
-func TestNoncePath_NetZeroCellKeepsColdReadValid(t *testing.T) {
-	addr := accounts.InternAddress([20]byte{0x02})
-	alwaysValidVersion := func(rv, wv Version) VersionValidity { return VersionValid }
-
-	// tx5 re-published nonce 42 — net-zero vs origin, stamped ValueUnchanged → read valid.
-	vm := NewVersionMap(nil)
-	ws := &WriteSet{}
-	ws.SetNonce(addr, &VersionedWrite[uint64]{
-		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 5}, valStatus: ValueUnchanged},
-		Val:         42,
-	})
-	vm.FlushVersionedWrites(ws, true, "")
-	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		liveNonce, alwaysValidVersion, false, "")
-	assert.Equal(t, VersionValid, valid, "a ValueUnchanged nonce shadow keeps the cold read valid")
-
-	// tx5 wrote nonce 43 — ValueChanged → the cold read of 42 is stale.
-	vm2 := NewVersionMap(nil)
-	ws2 := &WriteSet{}
-	ws2.SetNonce(addr, &VersionedWrite[uint64]{
-		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 5}, valStatus: ValueChanged},
-		Val:         43,
-	})
-	vm2.FlushVersionedWrites(ws2, true, "")
-	valid = validateRead(vm2, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		liveNonce, alwaysValidVersion, false, "")
-	assert.Equal(t, VersionInvalid, valid, "a ValueChanged nonce shadow invalidates the stale cold read")
-}
-
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
 // txIndex=0 are still reachable. The bug was that finalizeTx appended
 // writes without Version (zero value = txIndex=0), making them only
@@ -401,12 +324,11 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	}
 }
 
-// TestMapRead_EqualValueReExecKeepsIncarnation pins the write-side no-bump rule that makes
-// the old read-side value tiebreaker redundant: when the writer re-executes and re-flushes
-// the same value, flushCell keeps the existing incarnation, so a reader bound to the prior
-// version stays valid by the version check alone — no value compare, and no re-exec cascade
-// on a hot cell. A re-exec that changes the value bumps the incarnation and invalidates the
-// stale reader.
+// TestMapRead_EqualValueReExecKeepsIncarnation pins the write-side no-bump rule: when the
+// writer re-executes and re-flushes the same value, flushCell keeps the existing incarnation,
+// so a reader bound to the prior version stays valid by the version check alone — no value
+// compare, and no re-exec cascade on a hot cell. A re-exec that changes the value bumps the
+// incarnation and invalidates the stale reader.
 func TestMapRead_EqualValueReExecKeepsIncarnation(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x04})
 	balance := *uint256.NewInt(1000)
@@ -426,7 +348,7 @@ func TestMapRead_EqualValueReExecKeepsIncarnation(t *testing.T) {
 
 	// tx5 inc0 wrote 1000; it re-executes at inc1 and re-flushes the same 1000. No-bump
 	// keeps the cell at inc0, so a reader bound to {5,0} still version-matches and is not
-	// forced to re-execute — the perf role the old read-side tiebreaker used to play.
+	// forced to re-execute.
 	vm := NewVersionMap(nil)
 	flushBalance(vm, Version{TxIndex: 5, Incarnation: 0}, balance)
 	flushBalance(vm, Version{TxIndex: 5, Incarnation: 1}, balance)
