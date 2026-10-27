@@ -210,9 +210,11 @@ func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
 	cfg.syncedData = synced_data.NewSyncedDataManager(cfg.beaconCfg, true)
 	require.True(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
 
+	fixtureClock := cfg.ethClock
 	clockAtSlot := func(slot uint64) eth_clock.EthereumClock {
 		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 		clock.EXPECT().GetCurrentSlot().Return(slot)
+		clock.EXPECT().GetSlotTime(slot).Return(fixtureClock.GetSlotTime(slot))
 		clock.EXPECT().GetCurrentEpoch().Return(slot / cfg.beaconCfg.SlotsPerEpoch)
 		return clock
 	}
