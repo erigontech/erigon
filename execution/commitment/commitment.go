@@ -207,6 +207,9 @@ type DeferredBranchUpdate struct {
 	// Backing store for a merged encoded value. encoded either aliases raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
+	// rawWrite writes raw as-is without merging it against prev, for a tombstone whose
+	// prev is carried only for the domain diff (see CollectTombstone).
+	rawWrite bool
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -222,6 +225,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd.raw = reuseBytes(upd.raw, raw)
 	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.rawWrite = false
 
 	return upd
 }
@@ -317,6 +321,10 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
+	if upd.rawWrite {
+		upd.encoded = upd.raw
+		return nil
+	}
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
@@ -507,6 +515,33 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		return err
 	}
 	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	return nil
+}
+
+// CollectTombstone writes an empty-branch tombstone at prefix (touchMap present,
+// afterMap zero, no cells) without merging it against prev. The tombstone carries
+// no cells, and a real stored branch can be shorter than its bitmap implies (state
+// hashes, extensions, inlined leaves), so Merge would overrun it. prev is still
+// forwarded to PutBranch so the domain diff records the real previous branch and an
+// unwind across the destruct restores it rather than an empty tombstone.
+func (be *BranchEncoder) CollectTombstone(ctx PatriciaContext, prefix []byte, touchMap uint16, prev []byte) error {
+	if be.deferUpdates {
+		if err := be.CollectDeferredUpdate(ctx, prefix, 0, touchMap, 0, nil, prev); err != nil {
+			return err
+		}
+		be.deferred[len(be.deferred)-1].rawWrite = true
+		return nil
+	}
+	raw, err := be.EncodeBranch(0, touchMap, 0, nil)
+	if err != nil {
+		return err
+	}
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(raw)
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+		return err
+	}
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
@@ -1511,6 +1546,10 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
+			// Merge into existing entry
+			if update.DeleteStorageSubtree {
+				existing.update.DeleteStorageSubtree = true
+			}
 			if update.Flags&DeleteUpdate != 0 {
 				existing.update.Flags = DeleteUpdate
 				existing.update.CodeHash = empty.CodeHash
@@ -1969,6 +2008,14 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+
+	// DeleteStorageSubtree is a transient (never-serialized) signal that this
+	// account was self-destructed in the block: its whole storage subtree must be
+	// pruned before this account's update is applied, so a same-block recreate
+	// rebuilds from empty storage. Set by the commitment calculator from the SD
+	// marker; consumed by the trie during Process. Not a Flags bit because Flags
+	// is serialized and merged.
+	DeleteStorageSubtree bool
 }
 
 func (u *Update) Reset() {
@@ -1977,6 +2024,7 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.DeleteStorageSubtree = false
 }
 
 func (u *Update) Copy() *Update {
@@ -1984,17 +2032,21 @@ func (u *Update) Copy() *Update {
 		return nil
 	}
 	c := &Update{
-		CodeHash:   u.CodeHash,
-		Storage:    u.Storage,
-		StorageLen: u.StorageLen,
-		Flags:      u.Flags,
-		Nonce:      u.Nonce,
+		CodeHash:             u.CodeHash,
+		Storage:              u.Storage,
+		StorageLen:           u.StorageLen,
+		Flags:                u.Flags,
+		Nonce:                u.Nonce,
+		DeleteStorageSubtree: u.DeleteStorageSubtree,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
 }
 
 func (u *Update) Merge(b *Update) {
+	if b.DeleteStorageSubtree {
+		u.DeleteStorageSubtree = true
+	}
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return

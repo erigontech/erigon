@@ -94,6 +94,11 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 }
 
 func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	return so.OverrideTo(ibs, precompiles, rules, nil)
+}
+
+// OverrideTo is Override that also hands the overridden accounts to stateWriter.
+func (so *StateOverrides) OverrideTo(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if precompiles == nil {
 		precompiles = make(vm.PrecompiledContracts)
 	}
@@ -143,7 +148,44 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
+	return EndCallTx(ibs, &overrideRules, stateWriter)
+}
+
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	return FinalizeCallTxTo(ibs, rules, nil)
+}
+
+// FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter,
+// as FinalizeTx does for a materialized state; a nil stateWriter takes none.
+func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if !ibs.IsVersioned() {
+		if stateWriter == nil {
+			stateWriter = state.NewNoopWriter()
+		}
+		return ibs.FinalizeTx(rules, stateWriter)
+	}
+	writes, err := ibs.FinalizedWrites(rules)
+	if err != nil {
+		return err
+	}
+	ibs.FlushWritesToVersionMap(writes)
+	if stateWriter != nil {
+		if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+			return err
+		}
+	}
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
+}
+
+// EndCallTx is FinalizeCallTxTo that also moves a versioned state to the next tx index,
+// where the finished tx's writes read back.
+func EndCallTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if err := FinalizeCallTxTo(ibs, rules, stateWriter); err != nil {
 		return err
 	}
 	if ibs.IsVersioned() {
@@ -152,28 +194,11 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	return nil
 }
 
-// FinalizeCallTx ends one transaction of a request that runs several on the same state.
-// On the versioned path the writes go to the version map, where the next transaction index
-// reads them; on the materializing path FinalizeTx commits them to the state objects.
-func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
-	if !ibs.IsVersioned() {
-		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+// CommitCallState hands stateWriter the changes not yet handed to it: a versioned
+// state's pending tx, or a materialized state's dirty objects.
+func CommitCallState(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if ibs.IsVersioned() {
+		return FinalizeCallTxTo(ibs, rules, stateWriter)
 	}
-	writes := ibs.FinalizedWrites(rules)
-	ibs.FlushWritesToVersionMap(writes)
-	// A touched empty account has no write of its own: its EIP-161 removal is derived and published.
-	normalized, err := writes.Normalize(ibs.VersionMap(), ibs.TxnIndex(), 0, ibs.StateReader(), nil, rules.IsEIP161Enabled(), rules.IsAura, rules.IsAmsterdam)
-	if err != nil {
-		return err
-	}
-	for addr, removal := range normalized.SelfDestructs() {
-		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
-			// The transaction's own cells of the account would read as its revival.
-			ibs.VersionMap().DeleteAll(addr, ibs.TxnIndex())
-			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
-		}
-	}
-	ibs.SoftFinalise()
-	ibs.ResetVersionedIO()
-	return nil
+	return ibs.CommitBlock(rules, stateWriter)
 }
