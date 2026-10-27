@@ -65,6 +65,16 @@ func amsterdamConfig() *chain.Config {
 	return config
 }
 
+// importRepeats is how often a racy parallel import is repeated: once in short mode, where
+// TestValidatedFeeRecipientsStayEstimates covers the fix, and often enough to catch a regression
+// otherwise.
+func importRepeats() int {
+	if testing.Short() {
+		return 1
+	}
+	return 10
+}
+
 // baseFeePaid is the base fee paid by the tx at index i of the block.
 func baseFeePaid(chainPack *blockgen.ChainPack, i int) uint256.Int {
 	return *uint256.NewInt(chainPack.Receipts[0][i].GasUsed * chainPack.TopBlock.BaseFee().Uint64())
@@ -274,7 +284,7 @@ func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
 				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, recipient, 1))
 			}
 			importSerially(t, gspec, keys[0], chainPack, check)
-			for range 10 {
+			for range importRepeats() {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
 		})
@@ -331,7 +341,7 @@ func TestBurntFeeIsVisibleToLaterBalanceReads(t *testing.T) {
 				require.Equal(t, balance, final)
 			}
 			importSerially(t, gspec, keys[0], chainPack, check)
-			for range 10 {
+			for range importRepeats() {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
 		})
