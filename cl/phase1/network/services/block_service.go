@@ -983,6 +983,8 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 
 	_, headerExists := b.forkchoiceStore.GetHeader(blockRoot)
 
+	// Fork choice may already contain a block whose database write failed.
+	// Check persistence separately so a retry can complete the write without reimporting it.
 	var persisted bool
 	if err := b.db.View(ctx, func(tx kv.Tx) error {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -998,7 +1000,8 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 			return err
 		}
-		// OnBlock also returns nil for blocks it ignores below the validation horizon.
+		// OnBlock can return nil for old blocks it ignores. Require acceptance before
+		// writing indices: an unvalidated state root can overwrite another block's mapping.
 		if _, accepted := b.forkchoiceStore.GetHeader(blockRoot); !accepted {
 			return nil
 		}

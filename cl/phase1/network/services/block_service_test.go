@@ -350,6 +350,8 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	queuedValue, scheduled := impl.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, scheduled, "the block must be queued for a retry")
 
+	// A local execution failure leaves the block queued in memory. Its indices
+	// must stay absent until validation succeeds, including across retries.
 	db := svc.(*blockService).db
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)

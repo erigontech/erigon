@@ -225,7 +225,8 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability); err != nil {
 			return err
 		}
-		// OnBlock also returns nil for blocks it ignores below the validation horizon.
+		// OnBlock can return nil for old blocks it ignores. Require acceptance before
+		// writing indices: an unvalidated state root can overwrite another block's mapping.
 		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
 			return nil
 		}
