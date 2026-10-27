@@ -108,7 +108,7 @@ func ErigonL1(t *testing.T) (*execmoduletester.ExecModuleTester, *recording.Memo
 
 func modelBlock(b *types.Block, receipts types.Receipts) *recording.Block {
 	out := &recording.Block{
-		Header: l1.Header{Number: b.NumberU64(), Hash: b.Hash(), ParentHash: b.ParentHash(), Time: b.Time()},
+		Header: l1.Header{Number: b.NumberU64(), Hash: b.Hash(), ParentHash: b.ParentHash(), Time: b.Time(), MixDigest: b.MixDigest()},
 		Txs:    b.Transactions(),
 	}
 	for i, r := range receipts {

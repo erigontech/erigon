@@ -57,7 +57,7 @@ func NewNative(db kv.TemporalRoDB, blocks dbservices.FullBlockReader, receipts *
 func (r *Native) ChainID(context.Context) (uint64, error) { return r.config.ChainID.Uint64(), nil }
 
 func toHeader(h *types.Header) *Header {
-	return &Header{Number: h.Number.Uint64(), Hash: h.Hash(), ParentHash: h.ParentHash, Time: h.Time}
+	return &Header{Number: h.Number.Uint64(), Hash: h.Hash(), ParentHash: h.ParentHash, Time: h.Time, MixDigest: h.MixDigest}
 }
 
 func (r *Native) HeaderByNumber(ctx context.Context, number uint64) (h *Header, err error) {

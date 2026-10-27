@@ -45,6 +45,7 @@ type rpcHeader struct {
 	Hash       common.Hash    `json:"hash"`
 	ParentHash common.Hash    `json:"parentHash"`
 	Timestamp  hexutil.Uint64 `json:"timestamp"`
+	MixHash    common.Hash    `json:"mixHash"`
 }
 
 func header(h *l1.Header, err error) (*rpcHeader, error) {
@@ -54,7 +55,7 @@ func header(h *l1.Header, err error) (*rpcHeader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rpcHeader{Number: hexutil.Uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Timestamp: hexutil.Uint64(h.Time)}, nil
+	return &rpcHeader{Number: hexutil.Uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Timestamp: hexutil.Uint64(h.Time), MixHash: h.MixDigest}, nil
 }
 
 func (s *ethService) ChainId(ctx context.Context) (hexutil.Uint64, error) { //nolint:revive

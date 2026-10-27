@@ -43,9 +43,16 @@ const LogChunk = 100_000
 type ScannedBatch struct {
 	L1Block     uint64
 	L1BlockHash common.Hash
+	// L1Time and L1MixDigest are the timestamp and mixHash of the L1 block.
+	L1Time      uint64
+	L1MixDigest common.Hash
 	TxHash      common.Hash
 	TxIndex     uint64
-	// Batch is the posted batch; its CallData carries the DA payload.
+	// BlobHashes are the versioned hashes of the posting transaction's
+	// blobs.
+	BlobHashes []common.Hash
+	// Batch is the posted batch; its CallData, or the blobs BlobIndices
+	// selects, carry the DA payload.
 	Batch      *protocol.ProofSystemBatch
 	Settlement protocol.Settlement
 }
@@ -147,6 +154,7 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 
 	var posted []protocol.PostedBatch
 	var txHashes []common.Hash
+	var blobHashes [][]common.Hash
 	for _, l := range logs {
 		if l.Topics[0] != protocol.BatchPostedTopic {
 			continue
@@ -169,6 +177,7 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 		}
 		posted = append(posted, protocol.PostedBatch{Batch: batch, TxIndex: uint64(l.TxIndex), LogIndex: uint64(l.Index)})
 		txHashes = append(txHashes, l.TxHash)
+		blobHashes = append(blobHashes, tx.GetBlobHashes())
 	}
 
 	settlements, err := protocol.AttributeBlock(posted, logs, s.rollupID)
@@ -176,15 +185,27 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 		return nil, fmt.Errorf("block %d (%x): %w", k.number, k.hash, err)
 	}
 	var out []ScannedBatch
+	var h *Header
 	for i, p := range posted {
 		if len(settlements[i].Applied) == 0 {
 			continue
 		}
+		if h == nil {
+			if h, err = s.reader.HeaderByHash(ctx, k.hash); err != nil {
+				return nil, err
+			}
+			if h.Number != k.number {
+				return nil, fmt.Errorf("%w: block %x is number %d, its logs say %d", ErrInconsistent, k.hash, h.Number, k.number)
+			}
+		}
 		out = append(out, ScannedBatch{
 			L1Block:     k.number,
 			L1BlockHash: k.hash,
+			L1Time:      h.Time,
+			L1MixDigest: h.MixDigest,
 			TxHash:      txHashes[i],
 			TxIndex:     p.TxIndex,
+			BlobHashes:  blobHashes[i],
 			Batch:       p.Batch,
 			Settlement:  settlements[i],
 		})

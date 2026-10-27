@@ -61,6 +61,7 @@ type rpcHeader struct {
 	Hash       *common.Hash    `json:"hash"`
 	ParentHash *common.Hash    `json:"parentHash"`
 	Timestamp  *hexutil.Uint64 `json:"timestamp"`
+	MixHash    common.Hash     `json:"mixHash"`
 }
 
 func (r *RPC) header(ctx context.Context, method string, block any) (*Header, error) {
@@ -78,7 +79,7 @@ func (r *RPC) header(ctx context.Context, method string, block any) (*Header, er
 	if h.Number == nil || h.Hash == nil || h.ParentHash == nil || h.Timestamp == nil {
 		return nil, fmt.Errorf("%w: %s(%v) lacks number, hash, parentHash or timestamp", ErrInconsistent, method, block)
 	}
-	return &Header{Number: uint64(*h.Number), Hash: *h.Hash, ParentHash: *h.ParentHash, Time: uint64(*h.Timestamp)}, nil
+	return &Header{Number: uint64(*h.Number), Hash: *h.Hash, ParentHash: *h.ParentHash, Time: uint64(*h.Timestamp), MixDigest: h.MixHash}, nil
 }
 
 func (r *RPC) HeaderByNumber(ctx context.Context, number uint64) (*Header, error) {
