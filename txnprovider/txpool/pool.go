@@ -700,7 +700,7 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 			continue
 		}
 		if record.precheck {
-			if record.reason == txpoolcfg.UnmatchedBlobTxExt {
+			if record.reason == txpoolcfg.UnmatchedBlobTxExt || record.reason == txpoolcfg.UnequalBlobTxExt {
 				retry = true
 			}
 			continue
@@ -1396,7 +1396,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	} else {
 		if len(commitments) != len(proofs) {
 			p.logger.Debug(fmt.Sprintf("TX POOL: NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
-			return txpoolcfg.UnmatchedBlobTxExt
+			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
 
@@ -1712,11 +1712,13 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		}
 		reasons[i] = reason
 		p.recordPrecheck(txn.IDHash, reason)
-		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
-		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
+		if !txns.IsLocal[i] && (reason == txpoolcfg.UnmatchedBlobTxExt || reason == txpoolcfg.UnequalBlobTxExt) {
 			if i < len(sources) && sources[i].result != nil {
 				sources[i].result.invalidSidecar.Store(true)
 			}
+		}
+		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
+		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
 			if i < len(sources) && sources[i].peerID != nil {
 				kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
 			} else {
