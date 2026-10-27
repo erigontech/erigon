@@ -4061,6 +4061,20 @@ func TestBtInMemBudget(t *testing.T) {
 	require.Zero(t, resident)
 }
 
+// Replaced indexes that a reader keeps open across several merges still count against twice the limit.
+func TestBtInMemBudgetCeiling(t *testing.T) {
+	b := &btInMemBudget{limit: 100}
+	first, second := &btindex.BtIndex{}, &btindex.BtIndex{}
+	require.True(t, b.reserve(100))
+	b.admit(first, 100)
+	b.setRetiring([]*btindex.BtIndex{first}, true)
+	require.True(t, b.reserve(90), "the first merge output fits")
+	b.admit(second, 90)
+	b.setRetiring([]*btindex.BtIndex{second}, true)
+	require.False(t, b.reserve(20), "190 bytes are still open, so 20 more would exceed twice the limit")
+	require.True(t, b.reserve(10))
+}
+
 func TestDomain_BtIndexInMem(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -4165,6 +4179,39 @@ func TestDomain_BtIndexInMemMergeReusesInputsBudget(t *testing.T) {
 		m, _ := mergeBtIndexOnce(t, d)
 		require.Truef(t, m.bindex.InMem(), "domain %d: the merged index fits once the replaced indexes are not counted", i)
 	}
+}
+
+// When another domain's merge fails, the aggregator closes this domain's merged index without integrating it; the
+// inputs it would have replaced stay open and must count against the budget again.
+func TestDomain_BtIndexInMemFailedMergeGivesInputsBack(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	db, d, txs := filledDomain(t, log.New())
+	d.btForceInMem, d.btForceMmap, d.btBudget = nil, nil, &btInMemBudget{limit: 1 << 40}
+	buildBtIndexSteps(t, db, d, txs)
+	builtResident, _ := residentBudgetBytes(d.btBudget)
+
+	dc := d.beginForTests()
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
+	r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan, maxSpan)
+	require.True(t, r.any())
+	valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
+	valuesIn, indexIn, historyIn, err := dc.mergeFiles(t.Context(), valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
+	dc.Close()
+	require.NoError(t, err)
+	_, retiring := residentBudgetBytes(d.btBudget)
+	require.Positive(t, retiring)
+
+	valuesIn.closeFiles()
+	indexIn.closeFiles()
+	historyIn.closeFiles()
+	resident, retiring := residentBudgetBytes(d.btBudget)
+	require.Zero(t, retiring, "the inputs count again")
+	require.Equal(t, builtResident, resident)
 }
 
 func TestDomain_BtIndexOverrides(t *testing.T) {

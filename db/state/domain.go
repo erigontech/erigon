@@ -260,11 +260,12 @@ func newBtInMemBudget(totalMemory uint64) *btInMemBudget {
 	return &btInMemBudget{limit: int64(totalMemory / btInMemMaxShare)}
 }
 
-// reserve admits size more bytes, not counting indexes that merges replace.
+// reserve admits size more bytes, not counting indexes that merges replace. A reader can keep replaced indexes
+// open across several merges, so all resident bytes, replaced ones included, stay within twice the limit.
 func (b *btInMemBudget) reserve(size int64) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.resident-b.retiring+size > b.limit {
+	if b.resident-b.retiring+size > b.limit || b.resident+size > 2*b.limit {
 		return false
 	}
 	b.resident += size

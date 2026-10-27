@@ -382,7 +382,7 @@ type BtIndex struct {
 	filePath string
 	indexM   uint64
 	pool     sync.Pool
-	onClose  func()
+	onClose  []func()
 }
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
@@ -649,7 +649,7 @@ func (b *BtIndex) M() uint64 { return b.indexM }
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 
 // OnClose registers fn to run once when the index is closed.
-func (b *BtIndex) OnClose(fn func()) { b.onClose = fn }
+func (b *BtIndex) OnClose(fn func()) { b.onClose = append(b.onClose, fn) }
 
 // InMem reports whether the index was read into memory by OpenBtreeIndexInMem.
 func (b *BtIndex) InMem() bool { return b != nil && b.m == nil && b.data != nil }
@@ -682,10 +682,10 @@ func (b *BtIndex) Close() {
 		b.bplus = nil
 	}
 	b.data, b.ef = nil, nil
-	if b.onClose != nil {
-		b.onClose()
-		b.onClose = nil
+	for _, fn := range b.onClose {
+		fn()
 	}
+	b.onClose = nil
 }
 
 // Get - exact match of key. `k == nil` - means not found

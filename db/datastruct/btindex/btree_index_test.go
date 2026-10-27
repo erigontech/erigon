@@ -882,8 +882,9 @@ func TestOpenBtreeIndexInMem(t *testing.T) {
 
 	closed := 0
 	inMem.OnClose(func() { closed++ })
+	inMem.OnClose(func() { closed += 10 })
 	inMem.Close()
 	inMem.Close()
 	require.False(t, inMem.InMem(), "Close must release the in-memory buffer")
-	require.Equal(t, 1, closed, "OnClose runs once")
+	require.Equal(t, 11, closed, "every OnClose callback runs once")
 }
