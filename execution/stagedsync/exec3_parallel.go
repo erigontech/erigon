@@ -3510,8 +3510,16 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				if txVersion.TxIndex < 0 || be.tasks[tx].Task.IsBlockEnd() {
 					be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
 				} else {
+					// The coinbase and burnt recipient both receive a fee in calcFees, so
+					// leave their Address+Balance cells Estimate: a reader must pause until
+					// the tip is finalized, else it early-breaks on the pre-fee balance and
+					// commits it (the version-only validator can't catch the same-version
+					// in-place tip credit).
+					burntAddr := txResult.ExecutionResult.BurntContractAddress
 					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex),
-						func(addr accounts.Address) bool { return addr == be.coinbase })
+						func(addr accounts.Address) bool {
+							return addr == be.coinbase || (!burntAddr.IsNil() && addr == burntAddr)
+						})
 				}
 				be.validateTasks.markComplete(tx)
 				// Validated against current state; only a later write to one of its
