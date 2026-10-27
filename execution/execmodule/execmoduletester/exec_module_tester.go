@@ -105,9 +105,9 @@ type StateChangesClient interface {
 type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
+	Cancel               context.CancelFunc
 	Log                  log.Logger
 	tb                   testing.TB
-	cancel               context.CancelFunc
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               rules.Engine
@@ -129,6 +129,7 @@ type ExecModuleTester struct {
 	Address              common.Address
 	ForkValidator        *execmodule.ForkValidator
 	ExecModule           *execmodule.ExecModule
+	ReadAheader          *exec.BlockReadAheader
 	BlockBuilder         *builder.Builder
 	StateCache           *execmodule.Cache
 	retirementStart      chan bool
@@ -154,7 +155,7 @@ type ExecModuleTester struct {
 }
 
 func (emt *ExecModuleTester) Close() {
-	emt.cancel()
+	emt.Cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
@@ -600,7 +601,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	br := freezeblocks.NewBlockReader(allSnapshots)
 
 	mock := &ExecModuleTester{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, Cancel: ctxCancel, DB: db,
 		tb:                 tb,
 		Log:                logger,
 		Dirs:               dirs,
@@ -727,6 +728,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
+	mock.ReadAheader = readAheader
 	blkBuilder := builder.NewBuilder(
 		mock.DB,
 		&cfg.Builder,

@@ -39,6 +39,17 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.onAttestationLocked(attestation, fromBlock, nil, common.Hash{})
+}
+
+// onAttestationLocked reads the committees from blockState, the post-state of the block at blockRoot, when it
+// has the target's shuffling.
+func (f *ForkChoiceStore) onAttestationLocked(
+	attestation *solid.Attestation,
+	fromBlock bool,
+	blockState *state.CachingBeaconState,
+	blockRoot common.Hash,
+) error {
 	f.headHash = common.Hash{} // reset current head hash to force recomputation on next GetHead
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	data := attestation.Data
@@ -61,7 +72,10 @@ func (f *ForkChoiceStore) OnAttestation(
 	target := data.Target
 
 	useCheckpointState := f.syncedDataManager.Syncing()
-	if !useCheckpointState {
+	if blockState != nil && f.HeadStateHasTargetShuffling(blockState, blockRoot, target) {
+		useCheckpointState = false
+		attestationIndicies, err = f.verifyAttestationWithState(blockState, attestation, fromBlock)
+	} else if !useCheckpointState {
 		if err := f.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 			if !f.HeadStateHasTargetShuffling(headState, headRoot, target) {
 				useCheckpointState = true
