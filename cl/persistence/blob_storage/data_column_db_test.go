@@ -541,7 +541,7 @@ func columnRow(t *testing.T, storage DataColumnStorage, root common.Hash) []byte
 	t.Helper()
 	var row []byte
 	require.NoError(t, storage.(*dataColumnStorageImpl).db.View(t.Context(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BlockRootToDataColumnCount, root[:])
+		v, err := tx.GetOne(kv.BlockRootToDataColumnBitmap, root[:])
 		row = bytes.Clone(v)
 		return err
 	}))
@@ -646,6 +646,40 @@ func TestRemoveColumnSidecarsClearsTheRow(t *testing.T) {
 
 	require.NoError(t, storage.RemoveColumnSidecars(t.Context(), 1000, root, 1))
 	require.Nil(t, columnRow(t, storage, root), "a root with no columns left keeps no row")
+}
+
+func newWideColumnStoreWithShortRow(t *testing.T, root common.Hash) DataColumnStorage {
+	t.Helper()
+	cfg := *globalBeaconConfig
+	cfg.NumberOfColumns = 128
+	db := setupTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BlockRootToDataColumnBitmap, root[:], []byte{0xff})
+	}))
+	return NewDataColumnStore(db, afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+}
+
+func TestColumnRowOfAnotherWidthReadsAsAbsent(t *testing.T) {
+	root := common.Hash{1}
+	storage := newWideColumnStoreWithShortRow(t, root)
+
+	exists, err := storage.ColumnSidecarExists(t.Context(), 1000, root, 100)
+	require.NoError(t, err)
+	require.False(t, exists)
+	saved, err := storage.GetSavedColumnIndex(t.Context(), 1000, root)
+	require.NoError(t, err)
+	require.Empty(t, saved, "a row written under another NumberOfColumns must not name columns")
+}
+
+func TestColumnWriteReseedsARowOfAnotherWidthFromFiles(t *testing.T) {
+	root := common.Hash{1}
+	storage := newWideColumnStoreWithShortRow(t, root)
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 100, createTestDataColumnSidecar(1000, 100)))
+
+	saved, err := storage.GetSavedColumnIndex(t.Context(), 1000, root)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{100}, saved, "bits copied from a row of another width name columns with no file")
 }
 
 func TestDataColumnStorePruneDropsTheRowsOfPrunedBuckets(t *testing.T) {

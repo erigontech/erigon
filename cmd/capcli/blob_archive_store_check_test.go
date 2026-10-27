@@ -167,7 +167,7 @@ func TestBlobArchiveStoreCheckExposesTheRemoveFlag(t *testing.T) {
 	require.True(t, b.RemoveMismatched, "parsing --remove-mismatched must set the field")
 }
 
-// Earlier prunes removed sidecar files but leaked their BlockRootToKzgCommitments rows, so a count can
+// A BlockRootToKzgCommitments row does not prove its sidecar files are on disk, so a count can
 // match for a slot whose files are gone. Accepting metadata equality as completeness makes the audit
 // report a clean datadir right before it is published from. The old wrong-root lookup missed every
 // count and flagged these by accident; reading the canonical root removes that accident.

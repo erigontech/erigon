@@ -54,7 +54,7 @@ func NewDataColumnStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.Bea
 		emitters:          emitters,
 	}
 	impl.bucketStore.init(fs)
-	impl.dropRows = deleteRootRows(db, kv.BlockRootToDataColumnCount)
+	impl.dropRows = deleteRootRows(db, kv.BlockRootToDataColumnBitmap)
 	impl.slotLocks.initLocks()
 	return impl
 }
@@ -62,8 +62,10 @@ func NewDataColumnStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.Bea
 func (s *dataColumnStorageImpl) columnRow(blockRoot common.Hash) ([]byte, error) {
 	var row []byte
 	err := s.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
-		row = bytes.Clone(v)
+		v, err := tx.GetOne(kv.BlockRootToDataColumnBitmap, blockRoot[:])
+		if uint64(len(v)) == (s.beaconChainConfig.NumberOfColumns+7)/8 {
+			row = bytes.Clone(v)
+		}
 		return err
 	})
 	return row, err
@@ -71,11 +73,14 @@ func (s *dataColumnStorageImpl) columnRow(blockRoot common.Hash) ([]byte, error)
 
 func (s *dataColumnStorageImpl) markColumns(slot uint64, blockRoot common.Hash, stored bool, columns ...uint64) error {
 	return s.db.Update(context.Background(), func(tx kv.RwTx) error {
-		row, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
+		row, err := tx.GetOne(kv.BlockRootToDataColumnBitmap, blockRoot[:])
 		if err != nil {
 			return err
 		}
 		bitmap := make([]byte, (s.beaconChainConfig.NumberOfColumns+7)/8)
+		if len(row) != len(bitmap) {
+			row = nil
+		}
 		copy(bitmap, row)
 		if row == nil && stored {
 			for column := range s.beaconChainConfig.NumberOfColumns {
@@ -99,9 +104,9 @@ func (s *dataColumnStorageImpl) markColumns(slot uint64, blockRoot common.Hash, 
 			}
 		}
 		if !slices.ContainsFunc(bitmap, func(b byte) bool { return b != 0 }) {
-			return tx.Delete(kv.BlockRootToDataColumnCount, blockRoot[:])
+			return tx.Delete(kv.BlockRootToDataColumnBitmap, blockRoot[:])
 		}
-		return tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], bitmap)
+		return tx.Put(kv.BlockRootToDataColumnBitmap, blockRoot[:], bitmap)
 	})
 }
 
