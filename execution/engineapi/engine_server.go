@@ -608,26 +608,21 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
-// rejectStoredBlockWithInvalidGasLimit handles a payload that the parent cap of the transaction
-// bound rejects, and whose hash names a stored block with an invalid gas limit. Such a block was
-// stored without the cap, for example by a download while its parent was unknown, so it goes
-// through the block validation, which rejects and removes it. Only the stored header decides, as
-// the payload's block hash is not verified yet. While the execution module stays busy, or without
-// the chain segment below the block, the bound's answer stands.
+// rejectStoredBlockWithInvalidGasLimit validates the stored block that a payload above the
+// parent-capped transaction bound names, if the stored gas limit is invalid for the parent, so that
+// the validation rejects and removes it. Only the stored header decides, as the payload's block hash
+// is not verified yet. Unless the validation rejects the block, the bound's answer stands.
 func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) (*engine_types.PayloadStatus, error) {
 	number := req.BlockNumber.Uint64()
 	stored := e.chainRW.GetHeader(ctx, req.BlockHash, number)
 	if stored == nil || stored.ParentHash != req.ParentHash || misc.VerifyParentGasLimit(e.config, parent, stored) == nil {
 		return nil, nil
 	}
-	// As on the normal path, wait a while for a busy execution module.
-	readyCtx, cancelReady := context.WithTimeout(ctx, defaultReadinessWait)
-	defer cancelReady()
-	busy, err := waitForResponse(readyCtx, defaultReadinessWait, func() (bool, error) {
-		ready, err := e.chainRW.Ready(readyCtx)
-		return !ready, err
-	})
-	if err != nil || busy {
+	// The validation does not go beyond the reorg depth.
+	if head := e.chainRW.CurrentHeader(ctx); head == nil || math.AbsoluteDifference(head.Number.Uint64(), number) >= e.maxReorgDepth {
+		return nil, nil
+	}
+	if busy, err := e.waitWhileBusy(ctx, defaultReadinessWait); err != nil || busy {
 		return nil, err
 	}
 	e.lock.Lock()
@@ -645,6 +640,17 @@ func (e *EngineServer) rejectStoredBlockWithInvalidGasLimit(ctx context.Context,
 		ValidationError: engine_types.NewStringifiedErrorFromString(common.Deref(validationErr)),
 		LatestValidHash: &latestValidHash,
 	}, nil
+}
+
+// waitWhileBusy reports whether the execution module stayed busy for the whole wait.
+func (e *EngineServer) waitWhileBusy(ctx context.Context, wait time.Duration) (bool, error) {
+	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
+	readyCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	return waitForResponse(readyCtx, wait, func() (bool, error) {
+		ready, err := e.chainRW.Ready(readyCtx)
+		return !ready, err
+	})
 }
 
 // defaultReadinessWait is how long a request waits for a busy execution module before answering
@@ -798,13 +804,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
-	readyCtx, cancelReady := context.WithTimeout(ctx, readinessWait)
-	defer cancelReady()
-	waitingForExecutionReady, err := waitForResponse(readyCtx, readinessWait, func() (bool, error) {
-		isReady, err := e.chainRW.Ready(readyCtx)
-		return !isReady, err
-	})
+	waitingForExecutionReady, err := e.waitWhileBusy(ctx, readinessWait)
 	if err != nil {
 		return nil, err
 	}
