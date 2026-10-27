@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
@@ -70,17 +69,6 @@ func TestValidatePBTAttachFilesAcceptsStaleNodeBinFiles(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(published.SnapDomain, "v1.0-commitment-bin.1-2.kv"), []byte("published"), 0o644))
 	require.NoError(t, validatePBTAttachFiles(node, published, 8, 15))
-}
-
-func TestValidatePBTAttachLeafStampsRejectsAfterConversion(t *testing.T) {
-	commitmentflags.Restore(t)
-	require.NoError(t, eip8297.SetHashSuite(commitment.PBinHashBlake3))
-	value := make([]byte, 32)
-	value[31] = 1
-	_, err := validatePBTAttachLeafStamps(7, func(emit func(state.PBinLeaf) error) error {
-		return emit(state.PBinLeaf{Key: []byte{0x01}, Value: value, Stamp: 8})
-	})
-	require.ErrorContains(t, err, "published leaf stamp 8 is after conversion txNum 7")
 }
 
 func TestPBTAttachVisibleFilesPrefersMergedRanges(t *testing.T) {
@@ -487,19 +475,11 @@ func TestAttachPBTRemovesCorruptedCopiedFile(t *testing.T) {
 }
 
 func pbtAttachManifestStateFile(t *testing.T, published string) string {
-	return pbtAttachManifestFile(t, published, true)
-}
-
-func pbtAttachManifestIndexFile(t *testing.T, published string) string {
-	return pbtAttachManifestFile(t, published, false)
-}
-
-func pbtAttachManifestFile(t *testing.T, published string, data bool) string {
 	t.Helper()
 	sources, err := pbtAttachManifestSources(datadir.Open(published))
 	require.NoError(t, err)
 	for _, source := range sources {
-		if strings.Contains(source.Name, "accounts") && (data == strings.HasSuffix(source.Name, ".kv")) {
+		if strings.Contains(source.Name, "accounts") && strings.HasSuffix(source.Name, ".kv") {
 			info, statErr := os.Stat(source.Path)
 			require.NoError(t, statErr)
 			if info.Size() != 0 {
@@ -1121,13 +1101,6 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 			break
 		}
 	}
-	settings, err := state.ReadErigonDBSettings(datadir.Open(published))
-	require.NoError(t, err)
-	blockNum, txNum, ok, err := settings.ConversionPoint()
-	require.NoError(t, err)
-	require.True(t, ok)
-	_, err = validatePBTAttachPublishedPointWithLeafStamps(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New(), validatePBTAttachLeafStamps)
-	require.ErrorContains(t, err, "accounts")
 	setExecutionProgress(t, source.Chaindata, 1)
 	err = attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
 	require.ErrorContains(t, err, "accounts")

@@ -1429,9 +1429,9 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 	var partitions []pbinPartitionRange
 	var offset int64
 	var previousKey []byte
-	var written, reported uint64
 	writeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "pbin-ops file write", TempDir: tmpDir})
-	defer writeProgress.Done()
+	writeProgressBatch := &pbtProgressBatch{progress: writeProgress, threshold: 4096}
+	defer writeProgressBatch.Done()
 	emit := func(op pbt.Op, stamp uint64) error {
 		key := batchOperationKey(op)
 		if previousKey != nil && bytes.Compare(key, previousKey) <= 0 {
@@ -1460,18 +1460,11 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		offset += size
 		partitions[len(partitions)-1].size += size
 		partitions[len(partitions)-1].count++
-		written++
-		if written-reported >= 4096 {
-			writeProgress.Add(written - reported)
-			reported = written
-		}
+		writeProgressBatch.Add(1)
 		return nil
 	}
 	if err := stream(emit); err != nil {
 		return err
-	}
-	if written != reported {
-		writeProgress.Add(written - reported)
 	}
 	if err := sortedWriter.Flush(); err != nil {
 		return err

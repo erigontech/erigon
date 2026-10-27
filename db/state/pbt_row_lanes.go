@@ -26,7 +26,6 @@ import (
 	"os"
 	"sort"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -113,11 +112,6 @@ func (r *pbinRowLanes) collect(key, value []byte) (string, error) {
 	lane.last = append(lane.last[:0], key...)
 	r.laneByteCount += uint64(pbinRowLaneLengthBytes*2 + len(key) + len(value))
 	return "lane", nil
-}
-
-func (r *pbinRowLanes) setSkipBuffer(size datasize.ByteSize) {
-	r.skip.Close()
-	r.skip = etl.NewCollector("pbin-range-"+r.name+"-skip", r.tmpDir, etl.NewSortableBuffer(size), log.Root()).MergeInBackground(true)
 }
 
 func (r *pbinRowLanes) openLane(partition pbinPartition) (*pbinRowLane, error) {

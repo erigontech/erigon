@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -405,16 +406,7 @@ func (v *pbinRangeWriterView) Absent(key []byte) bool {
 }
 
 func (o *pbinRangeWriterOverlay) FlushFinished(lookahead [][]byte) error {
-	rows, err := o.detach(pbinRangeWriterSkip(lookahead))
-	if err != nil {
-		return err
-	}
-	for _, row := range rows {
-		if err := o.write(row.key, row.data, row.prev); err != nil {
-			return err
-		}
-	}
-	return o.finished()
+	return o.flush(pbinRangeWriterSkip(lookahead))
 }
 
 func (o *pbinRangeWriterOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
@@ -436,7 +428,11 @@ func (o *pbinRangeWriterOverlay) PutBranch(prefix, data, prevData []byte) error 
 }
 
 func (o *pbinRangeWriterOverlay) Flush() error {
-	rows, err := o.detach(nil)
+	return o.flush(nil)
+}
+
+func (o *pbinRangeWriterOverlay) flush(skip func([]byte) (bool, error)) error {
+	rows, err := o.detach(skip)
 	if err != nil {
 		return err
 	}
@@ -471,11 +467,7 @@ func pbinRangeWriterSkip(lookahead [][]byte) func([]byte) (bool, error) {
 }
 
 func (o *pbinRangeWriterOverlay) detach(skip func([]byte) (bool, error)) ([]pbinRangeWriterDetached, error) {
-	keys := make([]string, 0, len(o.writes))
-	for key := range o.writes {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(o.writes))
 	rows := make([]pbinRangeWriterDetached, 0, len(keys))
 	putter, direct := o.PatriciaContext.(pbinDirectBranchWriter)
 	for _, key := range keys {
@@ -511,10 +503,6 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 
 func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
 	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
-}
-
-func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64) (*PBinRangeWriter, error) {
-	return newPBinRangeWriterForResume(aggregator, domain, baseTxNum, endTxNum, nil, 0, nil)
 }
 
 func newPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64, baseState []byte, baseStateEnd uint64, sourceRanges [][2]uint64) (*PBinRangeWriter, error) {
@@ -1020,19 +1008,10 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}
 	stream := func(emit func(pbt.Op, uint64) error) error {
 		progress := NewPBTProgress(PBTProgressConfig{Message: "PBT range writer progress", Phase: "range leaf stream", TempDir: w.aggregator.Dirs().Tmp})
-		var progressDone, progressReported uint64
-		defer func() {
-			if progressDone != progressReported {
-				progress.Add(progressDone - progressReported)
-			}
-			progress.Done()
-		}()
+		batch := &pbtProgressBatch{progress: progress, threshold: 4096}
+		defer batch.Done()
 		return leaves(func(leaf PBinLeaf) error {
-			progressDone++
-			if progressDone-progressReported >= 4096 {
-				progress.Add(progressDone - progressReported)
-				progressReported = progressDone
-			}
+			batch.Add(1)
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}

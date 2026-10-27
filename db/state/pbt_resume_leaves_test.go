@@ -58,12 +58,12 @@ func TestPBinResumeLeavesMatchesSourceState(t *testing.T) {
 		{address: addressC, code: code, codeWritten: true, nonce: 3, balance: 3, slots: map[string][]byte{string(slotC): {4}}},
 		{address: addressD, code: delegation, codeWritten: true, nonce: 4, balance: 4},
 	})
-	deletePBinResumeAccount(t, db, addressB, 2*pbinLeafStreamStepSize)
-	deletePBinResumeStorage(t, db, addressD, slotD, 2*pbinLeafStreamStepSize)
+	deletePBinResumeKey(t, db, kv.AccountsDomain, addressB, 2*pbinLeafStreamStepSize)
+	deletePBinResumeKey(t, db, kv.StorageDomain, append(bytes.Clone(addressD), slotD...), 2*pbinLeafStreamStepSize)
 	writePBinLeafStreamRange(t, db, 2*pbinLeafStreamStepSize, 3*pbinLeafStreamStepSize, []pbinLeafStreamAccount{
 		{address: addressD, nonce: 4, balance: 4},
 	})
-	deletePBinResumeCode(t, db, addressD, 2*pbinLeafStreamStepSize)
+	deletePBinResumeKey(t, db, kv.CodeDomain, addressD, 2*pbinLeafStreamStepSize)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 1, 2, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
 	base := pbinResumeLeafMap(t, agg)
@@ -153,7 +153,7 @@ func pbinResumeLeafMap(t *testing.T, agg *state.Aggregator) map[string][]byte {
 	return leaves
 }
 
-func deletePBinResumeAccount(t *testing.T, db kv.TemporalRwDB, address []byte, txNum uint64) {
+func deletePBinResumeKey(t *testing.T, db kv.TemporalRwDB, domain kv.Domain, key []byte, txNum uint64) {
 	t.Helper()
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -161,40 +161,9 @@ func deletePBinResumeAccount(t *testing.T, db kv.TemporalRwDB, address []byte, t
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer sd.Close()
-	previous, _, err := sd.GetLatest(kv.AccountsDomain, tx, address)
+	previous, _, err := sd.GetLatest(domain, tx, key)
 	require.NoError(t, err)
-	require.NoError(t, sd.DomainDel(kv.AccountsDomain, tx, address, txNum, previous))
-	require.NoError(t, sd.Flush(t.Context(), tx))
-	require.NoError(t, tx.Commit())
-}
-
-func deletePBinResumeCode(t *testing.T, db kv.TemporalRwDB, address []byte, txNum uint64) {
-	t.Helper()
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
-	require.NoError(t, err)
-	defer sd.Close()
-	previous, _, err := sd.GetLatest(kv.CodeDomain, tx, address)
-	require.NoError(t, err)
-	require.NoError(t, sd.DomainDel(kv.CodeDomain, tx, address, txNum, previous))
-	require.NoError(t, sd.Flush(t.Context(), tx))
-	require.NoError(t, tx.Commit())
-}
-
-func deletePBinResumeStorage(t *testing.T, db kv.TemporalRwDB, address, slot []byte, txNum uint64) {
-	t.Helper()
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
-	require.NoError(t, err)
-	defer sd.Close()
-	key := append(bytes.Clone(address), slot...)
-	previous, _, err := sd.GetLatest(kv.StorageDomain, tx, key)
-	require.NoError(t, err)
-	require.NoError(t, sd.DomainDel(kv.StorageDomain, tx, key, txNum, previous))
+	require.NoError(t, sd.DomainDel(domain, tx, key, txNum, previous))
 	require.NoError(t, sd.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())
 }

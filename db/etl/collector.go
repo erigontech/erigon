@@ -129,10 +129,6 @@ func (c *Collector) MergeInBackground(v bool) *Collector {
 	return c
 }
 
-func BackgroundMergeRuns() uint64 {
-	return mergeBackgroundRuns.Load()
-}
-
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if len(k) > MaxKeyLen {
 		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)

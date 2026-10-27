@@ -426,7 +426,9 @@ func (t *Trie) loadVerifyExact(key []byte) error {
 		return err
 	}
 	t.verifyRows = rows
-	t.verifyRowsUsed = make(map[string]struct{}, len(rows))
+	if t.verifyRowsUsed == nil {
+		t.verifyRowsUsed = make(map[string]struct{}, len(rows))
+	}
 	t.verifyRowsExact = true
 	return nil
 }
@@ -458,36 +460,20 @@ func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
 			return data, 0, nil
 		}
 	}
-	if t.verifyOnly && t.verifyRows != nil {
+	if t.verifyOnly {
 		data, ok := t.verifyRows[string(key)]
-		if !ok && t.verifyRowsExact {
+		if !ok && (t.verifyRows == nil || t.verifyRowsExact) {
 			if err := t.loadVerifyExact(key); err != nil {
 				return nil, 0, err
 			}
 			data, ok = t.verifyRows[string(key)]
 		}
-		if ok {
-			keyString := string(key)
-			if _, used := t.verifyRowsUsed[keyString]; !used {
-				t.verifyRowsUsed[keyString] = struct{}{}
-				if t.verifyRowsExact && !commitment.IsCommitmentStateKey(key) && !t.verifyKeyOwnedByTask(key) {
-					t.verifyReferencedKeys++
-				}
-			}
-		}
-		return data, 0, nil
-	}
-	if t.verifyOnly {
-		if err := t.loadVerifyExact(key); err != nil {
-			return nil, 0, err
-		}
 		if t.verifyRows != nil {
-			data, ok := t.verifyRows[string(key)]
 			if ok {
 				keyString := string(key)
 				if _, used := t.verifyRowsUsed[keyString]; !used {
 					t.verifyRowsUsed[keyString] = struct{}{}
-					if !commitment.IsCommitmentStateKey(key) && !t.verifyKeyOwnedByTask(key) {
+					if t.verifyRowsExact && !commitment.IsCommitmentStateKey(key) && !t.verifyKeyOwnedByTask(key) {
 						t.verifyReferencedKeys++
 					}
 				}

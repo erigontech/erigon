@@ -1242,11 +1242,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 }
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
-	return d.buildHashMapAccessorAt(ctx, d.kviAccessorNewFilePath(fromStep, toStep), data, ps, nil)
-}
-
-func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet, pbtProgress *pbtProgressBatch) error {
-	return d.buildHashMapAccessorAtWithWorkers(ctx, idxPath, data, ps, pbtProgress, d.BuildAccessorsWorkers)
+	return d.buildHashMapAccessorAtWithWorkers(ctx, d.kviAccessorNewFilePath(fromStep, toStep), data, ps, nil, d.BuildAccessorsWorkers)
 }
 
 func (d *Domain) buildHashMapAccessorAtWithWorkers(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet, pbtProgress *pbtProgressBatch, workers int) error {

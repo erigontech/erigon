@@ -17,10 +17,15 @@
 package state
 
 import (
+	"context"
 	"errors"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 func NewPBinRangeWriterWithLimitsForTest(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, maxOps, maxBytes int) (*PBinRangeWriter, error) {
@@ -28,6 +33,14 @@ func NewPBinRangeWriterWithLimitsForTest(aggregator *Aggregator, domain kv.Domai
 		return nil, errors.New("pbin range writer: invalid batch limits")
 	}
 	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: maxBytes})
+}
+
+func NewPBinRangeWriterForResume(aggregator *Aggregator, domain kv.Domain, baseTxNum, endTxNum uint64) (*PBinRangeWriter, error) {
+	return newPBinRangeWriterForResume(aggregator, domain, baseTxNum, endTxNum, nil, 0, nil)
+}
+
+func VerifyPBinDomainRootWithStats(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain, stats *pbt.VerifyStats) (common.Hash, error) {
+	return verifyPBinDomainRoot(ctx, tx, aggregator, domain, stats)
 }
 
 func (w *PBinRangeWriter) WorkerViewsForTest() int32 {
@@ -56,7 +69,8 @@ func (w *PBinRangeWriter) SetWorkersForTest(workers int) {
 
 func (w *PBinRangeWriter) SetRowLaneSkipBufferForTest(size uint64) {
 	for i := range w.ranges {
-		w.ranges[i].rows.setSkipBuffer(datasize.ByteSize(size))
+		w.ranges[i].rows.skip.Close()
+		w.ranges[i].rows.skip = etl.NewCollector("pbin-range-"+w.ranges[i].rows.name+"-skip", w.ranges[i].rows.tmpDir, etl.NewSortableBuffer(datasize.ByteSize(size)), log.Root()).MergeInBackground(true)
 	}
 }
 

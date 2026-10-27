@@ -69,18 +69,10 @@ func (b *mergeBatch) row(index int) ([]byte, []byte) {
 	entry := b.entries[index]
 	var key, value []byte
 	if !entry.keyNil {
-		if entry.keyLength == 0 {
-			key = []byte{}
-		} else {
-			key = b.arena[entry.keyOffset : entry.keyOffset+entry.keyLength]
-		}
+		key = b.arena[entry.keyOffset : entry.keyOffset+entry.keyLength]
 	}
 	if !entry.valueNil {
-		if entry.valueLength == 0 {
-			value = []byte{}
-		} else {
-			value = b.arena[entry.valueOffset : entry.valueOffset+entry.valueLength]
-		}
+		value = b.arena[entry.valueOffset : entry.valueOffset+entry.valueLength]
 	}
 	return key, value
 }

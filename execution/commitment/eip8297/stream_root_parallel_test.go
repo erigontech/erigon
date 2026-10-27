@@ -52,7 +52,7 @@ func TestParallelStreamRootMatchesSerial(t *testing.T) {
 					parallel, err := NewParallelStreamRoot(sum, workers)
 					require.NoError(t, err)
 					for _, entry := range entries {
-						require.NoError(t, parallel.Add(entry.Key, entry.Value))
+						require.NoError(t, parallel.AddContext(t.Context(), entry.Key, entry.Value))
 					}
 					got, err := parallel.RootHash()
 					require.NoError(t, err)
@@ -77,14 +77,15 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 			parallel, err := NewParallelStreamRoot(sum, 4)
 			require.NoError(t, err)
 			var active, maxActive atomic.Int32
-			parallel.SetBuildConcurrencyCounters(&active, &maxActive)
+			parallel.buildActive = &active
+			parallel.buildMax = &maxActive
 			release := make(chan struct{})
 			var first atomic.Bool
-			parallel.SetBuildStartHook(func() {
+			parallel.buildStart = func() {
 				if first.CompareAndSwap(false, true) {
 					<-release
 				}
-			})
+			}
 			entries := make([]Entry, 0, 48)
 			for shard := range 16 {
 				for leaf := range 3 {
@@ -98,7 +99,7 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				for _, entry := range entries {
-					if err := parallel.Add(entry.Key, entry.Value); err != nil {
+					if err := parallel.AddContext(t.Context(), entry.Key, entry.Value); err != nil {
 						done <- err
 						return
 					}
@@ -122,19 +123,20 @@ func TestParallelStreamRootProducerReachesNextShardBeforeFirstFinishes(t *testin
 	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 2)
 	require.NoError(t, err)
 	var active, maxActive atomic.Int32
-	parallel.SetBuildConcurrencyCounters(&active, &maxActive)
+	parallel.buildActive = &active
+	parallel.buildMax = &maxActive
 	release := make(chan struct{})
 	var first atomic.Bool
-	parallel.SetBuildStartHook(func() {
+	parallel.buildStart = func() {
 		if first.CompareAndSwap(false, true) {
 			<-release
 		}
-	})
+	}
 	entries := parallelStreamRootLongShardEntries(10)
 	done := make(chan error, 1)
 	go func() {
 		for _, entry := range entries {
-			if err := parallel.Add(entry.Key, entry.Value); err != nil {
+			if err := parallel.AddContext(t.Context(), entry.Key, entry.Value); err != nil {
 				done <- err
 				return
 			}
@@ -168,7 +170,7 @@ func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
 	parallel, err := newParallelStreamRoot(streamRootHash(HashKeccak), 4, 2*parallelStreamRootBatchResidentBytes)
 	require.NoError(t, err)
 	for _, entry := range entries {
-		require.NoError(t, parallel.Add(entry.Key, entry.Value))
+		require.NoError(t, parallel.AddContext(t.Context(), entry.Key, entry.Value))
 	}
 	got, err := parallel.RootHash()
 	require.NoError(t, err)

@@ -30,8 +30,8 @@ func TestReviewR17ParallelRejectsCrossShardPrefix(t *testing.T) {
 	value := streamRootValue(1)
 	require.NoError(t, serial.Add([]byte{0x12}, value))
 	require.ErrorContains(t, serial.Add([]byte{0x12, 0x80}, value), "not prefix-free")
-	require.NoError(t, parallel.Add([]byte{0x12}, value))
-	require.NoError(t, parallel.Add([]byte{0x12, 0x80}, value))
+	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12}, value))
+	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12, 0x80}, value))
 	root, err := parallel.RootHash()
 	require.Error(t, err, "parallel accepted prefix-related keys 12 and 1280: root=%x, err=%v", root, err)
 }
@@ -48,8 +48,8 @@ func TestReviewR17ParallelBufferReuse(t *testing.T) {
 	require.NoError(t, err)
 	parallel, err := NewParallelStreamRoot(sum, 1)
 	require.NoError(t, err)
-	require.NoError(t, parallel.Add(entries[0].Key, entries[0].Value))
-	require.NoError(t, parallel.Add(entries[1].Key, entries[1].Value))
+	require.NoError(t, parallel.AddContext(t.Context(), entries[0].Key, entries[0].Value))
+	require.NoError(t, parallel.AddContext(t.Context(), entries[1].Key, entries[1].Value))
 	entries[1].Value[0] = 0x7f
 	got, err := parallel.RootHash()
 	require.NoError(t, err)

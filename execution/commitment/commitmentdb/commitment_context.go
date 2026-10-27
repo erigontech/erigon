@@ -1608,9 +1608,7 @@ func (p *verifyRangePlan) prepare(starts [][]byte) error {
 		path := eip8297.PathFromBits(start, p.upperBits)
 		prefix := path.Words[0] >> uint(64-p.upperBits)
 		offsets := make([]uint64, len(p.fileEnds))
-		for fileIndex := range offsets {
-			offsets[fileIndex] = p.fileEnds[fileIndex]
-		}
+		copy(offsets, p.fileEnds)
 		if planned := p.prefixOffsets[prefix]; planned != nil {
 			for fileIndex, offset := range planned {
 				if offset != ^uint64(0) {

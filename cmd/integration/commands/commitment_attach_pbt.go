@@ -267,16 +267,8 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			if err != nil {
 				return fmt.Errorf("commitment attach-pbt: legacy attach marker has no roots; restore the node before retry: %w", err)
 			}
-		} else {
-			nodeBlock, nodeTx, ok, err = marker.Settings.ConversionPoint()
-			if err != nil {
-				return err
-			}
-			if !ok || nodeBlock != blockNum || nodeTx != txNum {
-				return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
-			}
 		}
-		if nodeBlock != blockNum || nodeTx != txNum {
+		if legacyMarker && (nodeBlock != blockNum || nodeTx != txNum) {
 			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
 		}
 	}
@@ -350,7 +342,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := validatePBTAttachManifestFiles(ctx, manifest, publishedDirs, hooks.workers, hooks.skipVerify, logger, "attach published manifest digest"); err != nil {
 		return err
 	}
-	if _, err := validatePBTAttachPublishedPointWithLeafStamps(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger, nil); err != nil {
+	if _, err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
 	}
 	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, manifestPbtRoot, logger); err != nil {
@@ -754,7 +746,7 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 	return nil
 }
 
-func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger, leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)) (common.Hash, error) {
+func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
 	configurePBTSourceVariant(settings)
 	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
 		return common.Hash{}, err
@@ -829,12 +821,7 @@ func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs dat
 			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
 	}
-	if leafStamps == nil {
-		return common.Hash{}, nil
-	}
-	return leafStamps(txNum, func(emit func(dbstate.PBinLeaf) error) error {
-		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
-	})
+	return common.Hash{}, nil
 }
 
 func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
@@ -871,20 +858,6 @@ func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs
 	}
 	progress.Add(1)
 	return nil
-}
-
-func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
-	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Phase: "attach leaf stamps verify"})
-	defer progress.Done()
-	return dbstate.PBinRootFromStream(eip8297.SelectedHash(), func(emit func(dbstate.PBinLeaf) error) error {
-		return forEach(func(leaf dbstate.PBinLeaf) error {
-			progress.Add(1)
-			if leaf.Stamp > txNum {
-				return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
-			}
-			return emit(leaf)
-		})
-	})
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {

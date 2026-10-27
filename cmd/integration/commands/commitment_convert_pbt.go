@@ -892,32 +892,18 @@ func linkPBTResumeBaseFiles(sourceDirs, outputDirs datadir.Dirs, base pbtResumeB
 	return nil
 }
 
-func pbtResumeSourceDomain(settings *dbstate.ErigonDBSettings) (kv.Domain, error) {
+func pbtResumeLayoutSourceDomain(settings *dbstate.ErigonDBSettings) (kv.Domain, error) {
 	if settings == nil {
 		return kv.Domain(0), errors.New("commitment convert-pbt: resume source binary commitment settings are missing")
 	}
 	switch settings.TrieVariantName() {
-	case dbstate.TrieVariantBin:
+	case dbstate.TrieVariantBin, dbstate.TrieVariantHexBin:
 		return kv.CommitmentDomain, nil
-	case dbstate.TrieVariantHexBin:
-		return kv.CommitmentBinDomain, nil
+	case dbstate.TrieVariantHex:
+		return kv.AccountsDomain, nil
 	default:
 		return kv.Domain(0), fmt.Errorf("commitment convert-pbt: resume source has no binary commitment domain: %s", settings.TrieVariantName())
 	}
-}
-
-func pbtResumeLayoutSourceDomain(settings *dbstate.ErigonDBSettings) (kv.Domain, error) {
-	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
-		return kv.CommitmentDomain, nil
-	}
-	domain, err := pbtResumeSourceDomain(settings)
-	if err == nil {
-		return domain, nil
-	}
-	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHex {
-		return kv.AccountsDomain, nil
-	}
-	return kv.Domain(0), err
 }
 
 func pbtResumeTargetDomain(base *dbstate.ErigonDBSettings, keepHex, outputHasFiles bool) kv.Domain {
@@ -1077,12 +1063,6 @@ func pbtResumeSourceRanges(dirs datadir.Dirs, domain kv.Domain, stepSize uint64)
 		}
 		ranges = append(ranges, [2]uint64{file.from * stepSize, file.to * stepSize})
 	}
-	sort.Slice(ranges, func(i, j int) bool {
-		if ranges[i][0] == ranges[j][0] {
-			return ranges[i][1] < ranges[j][1]
-		}
-		return ranges[i][0] < ranges[j][0]
-	})
 	return ranges, nil
 }
 
@@ -1419,19 +1399,15 @@ func verifyPBTOutputIdentity(sourceDirs, outputDirs datadir.Dirs, visibleRanges 
 			sourceByPath[filepath.Clean(rel)] = file
 		}
 	}
-	identityFiles := make([]pbtAttachFile, 0, len(outputFiles))
+	outputByPath := make(map[string]pbtAttachFile, len(outputFiles))
 	for _, file := range pbtAttachVisibleFiles(outputFiles) {
 		if pbtAttachAdoptsFile(file) && !isBinary(file) {
-			identityFiles = append(identityFiles, file)
+			rel, relErr := filepath.Rel(outputDirs.Snap, file.path)
+			if relErr != nil {
+				return relErr
+			}
+			outputByPath[filepath.Clean(rel)] = file
 		}
-	}
-	outputByPath := make(map[string]pbtAttachFile, len(identityFiles))
-	for _, file := range identityFiles {
-		rel, relErr := filepath.Rel(outputDirs.Snap, file.path)
-		if relErr != nil {
-			return relErr
-		}
-		outputByPath[filepath.Clean(rel)] = file
 	}
 	paths := slices.Sorted(maps.Keys(sourceByPath))
 	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "output identity verify", Total: uint64(len(paths))})

@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -71,6 +72,40 @@ func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
 	require.Zero(t, stats.UpperRowsAtStart.Load(), "upper rows must be verified after task rows are released")
 	require.Equal(t, stats.RangeTaskReads.Load(), stats.RangeReadsAtOffset.Load(), "every verification task must start at a planned file offset")
 	require.LessOrEqual(t, stats.PeakRows.Load(), stats.TaskWorkers.Load()*stats.MaxTaskRows.Load(), "verification row memory exceeded the worker bound")
+}
+
+func TestPBinVerifySerialManyStorageSlots(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateManyStorageSlots(t, db)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg,
+		SourceTx:         sourceTx,
+		TargetAggregator: agg,
+		TargetTx:         targetTx,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         7,
+		Hash:             eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+
+	verifyTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer verifyTx.Rollback()
+	previousWorkers := dbg.PBTWorkers
+	dbg.PBTWorkers = 1
+	t.Cleanup(func() { dbg.PBTWorkers = previousWorkers })
+	_, err = state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
+	require.NoError(t, err)
 }
 
 func TestPBinVerifyRejectsUnreferencedRowInsideChainRange(t *testing.T) {

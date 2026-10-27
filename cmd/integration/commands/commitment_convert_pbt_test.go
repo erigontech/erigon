@@ -2158,12 +2158,7 @@ func pbtCommitmentBinKVBytes(t *testing.T, output string) map[string][]byte {
 }
 
 func pbtSortedBinFileNames(files map[string][]byte) []string {
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(files))
 }
 
 func pbtResumeRangeKeys(t *testing.T, dirs datadir.Dirs, domain kv.Domain) []string {

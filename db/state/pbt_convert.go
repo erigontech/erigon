@@ -242,10 +242,6 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	return verifyPBinDomainRoot(ctx, tx, aggregator, domain, nil)
 }
 
-func VerifyPBinDomainRootWithStats(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain, stats *pbt.VerifyStats) (common.Hash, error) {
-	return verifyPBinDomainRoot(ctx, tx, aggregator, domain, stats)
-}
-
 func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain, stats *pbt.VerifyStats) (common.Hash, error) {
 	if tx == nil || aggregator == nil {
 		return common.Hash{}, fmt.Errorf("pbin verification: missing database input")

@@ -17,6 +17,7 @@
 package state_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -103,11 +104,11 @@ func TestPBinR21ZeroStartDropsDeletionTombstones(t *testing.T) {
 	}
 	for _, db := range []kv.TemporalRwDB{baseDB, sourceDB, targetDB, freshDB} {
 		writePBinLeafStreamRange(t, db, 0, 8, initial)
-		deletePBinResumeAccount(t, db, initial[2].address, 7)
+		deletePBinResumeKey(t, db, kv.AccountsDomain, initial[2].address, 7)
 	}
 	for _, db := range []kv.TemporalRwDB{sourceDB, freshDB} {
-		deletePBinResumeAccount(t, db, initial[0].address, 8)
-		deletePBinResumeStorage(t, db, initial[0].address, []byte{1}, 8)
+		deletePBinResumeKey(t, db, kv.AccountsDomain, initial[0].address, 8)
+		deletePBinResumeKey(t, db, kv.StorageDomain, append(bytes.Clone(initial[0].address), 1), 8)
 		writePBinLeafStreamStates(t, db, 8, updated)
 	}
 	writePBinLeafStreamStates(t, targetDB, 8, updated)

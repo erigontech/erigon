@@ -120,10 +120,6 @@ func newParallelStreamRoot(sum HashFn, workers int, queueBytes uint64) (*Paralle
 	return b, nil
 }
 
-func (b *ParallelStreamRoot) Add(key, value []byte) error {
-	return b.AddContext(context.Background(), key, value)
-}
-
 func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) error {
 	if b.err != nil {
 		return b.err
@@ -180,15 +176,6 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 	b.lastShard = shard
 	b.hasShard = true
 	return nil
-}
-
-func (b *ParallelStreamRoot) SetBuildConcurrencyCounters(active, max *atomic.Int32) {
-	b.buildActive = active
-	b.buildMax = max
-}
-
-func (b *ParallelStreamRoot) SetBuildStartHook(hook func()) {
-	b.buildStart = hook
 }
 
 func (b *ParallelStreamRoot) flush(ctx context.Context) error {

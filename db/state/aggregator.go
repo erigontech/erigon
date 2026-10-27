@@ -3043,10 +3043,6 @@ func (at *AggregatorRoTx) DebugRangeLatestWithOffsets(tx kv.Tx, domain kv.Domain
 	return at.d[domain].DebugRangeLatestWithOffsets(tx, from, to, limit, fileOffsets)
 }
 
-func (at *AggregatorRoTx) DebugRangeLatestOffsets(domain kv.Domain, starts [][]byte) ([][]uint64, error) {
-	return at.d[domain].DebugRangeLatestOffsets(starts)
-}
-
 func (at *AggregatorRoTx) DebugRangeLatestVerifyData(tx kv.Tx, domain kv.Domain, rootKey []byte, upperBits int16) (map[uint64][]uint64, []uint64, map[string][]byte, error) {
 	return at.d[domain].DebugRangeLatestVerifyData(tx, rootKey, upperBits)
 }

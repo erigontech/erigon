@@ -35,7 +35,7 @@ func BenchmarkParallelStreamRootSkewed(b *testing.B) {
 					b.Fatal(err)
 				}
 				for _, entry := range entries {
-					if err := parallel.Add(entry.Key, entry.Value); err != nil {
+					if err := parallel.AddContext(b.Context(), entry.Key, entry.Value); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -60,7 +60,7 @@ func BenchmarkParallelStreamRootHoodiMix(b *testing.B) {
 			b.Fatal(err)
 		}
 		for _, entry := range entries {
-			if err := parallel.Add(entry.Key, entry.Value); err != nil {
+			if err := parallel.AddContext(b.Context(), entry.Key, entry.Value); err != nil {
 				b.Fatal(err)
 			}
 		}
