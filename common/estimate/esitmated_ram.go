@@ -80,7 +80,7 @@ var ioProcs struct {
 
 // RaiseProcsForIO raises GOMAXPROCS by GOMAXPROCS_EXTRA (default (IOOverlapFactor-1) x the
 // current value) for a stretch of page-fault-bound work and returns its release. Overlapping
-// stretches share one raise; the last release restores the previous value. A set GOMAXPROCS
+// stretches share one raise; the last release restores the runtime default. A set GOMAXPROCS
 // env is respected.
 func RaiseProcsForIO() (release func()) {
 	if os.Getenv("GOMAXPROCS") != "" {
@@ -104,7 +104,7 @@ func RaiseProcsForIO() (release func()) {
 		ioProcs.Lock()
 		defer ioProcs.Unlock()
 		if ioProcs.holders--; ioProcs.holders == 0 {
-			runtime.GOMAXPROCS(ioProcs.base)
+			runtime.SetDefaultGOMAXPROCS() // also turns automatic updates back on
 		}
 	})
 }

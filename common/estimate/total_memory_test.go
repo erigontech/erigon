@@ -42,6 +42,9 @@ func TestMemoryBound(t *testing.T) {
 func TestRaiseProcsForIOSharesOneRaise(t *testing.T) {
 	t.Setenv("GOMAXPROCS", "")
 	t.Setenv("GOMAXPROCS_EXTRA", "3")
+	prev := runtime.GOMAXPROCS(0)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
+	runtime.SetDefaultGOMAXPROCS()
 	base := runtime.GOMAXPROCS(0)
 	first, second := RaiseProcsForIO(), RaiseProcsForIO()
 	require.Equal(t, base+3, runtime.GOMAXPROCS(0))
