@@ -103,6 +103,8 @@ type Domain struct {
 	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 
 	btIndexFits func() bool // set by AggOpts.BtIndexInMem: whether the .bt files of btInMemDefaultDomains fit in memory now
+	// DOMAIN_BT_MEM and DOMAIN_BT_MMAP as read at start, kept per domain so tests can clear them locally.
+	btForceInMem, btForceMmap []string
 }
 
 type domainVisible struct {
@@ -120,8 +122,10 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	}
 
 	d := &Domain{
-		DomainCfg:  cfg,
-		dirtyFiles: newDirtyFiles(),
+		DomainCfg:    cfg,
+		dirtyFiles:   newDirtyFiles(),
+		btForceInMem: domainBtForceInMem,
+		btForceMmap:  domainBtForceMmap,
 	}
 
 	var err error
@@ -274,7 +278,7 @@ func btIndexFilesSize(dir string, domains []string) uint64 {
 }
 
 func (d *Domain) btIndexInMem() bool {
-	return readBtIndexInMem(d.Name.String(), d.btIndexFits, domainBtForceInMem, domainBtForceMmap)
+	return readBtIndexInMem(d.Name.String(), d.btIndexFits, d.btForceInMem, d.btForceMmap)
 }
 
 func (d *Domain) openBtIndex(fPath string, r *seg.Reader) (*btindex.BtIndex, error) {

@@ -912,9 +912,6 @@ func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
 }
 
 func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
-	if len(domainBtForceInMem) > 0 || len(domainBtForceMmap) > 0 {
-		t.Skip("DOMAIN_BT_MEM or DOMAIN_BT_MMAP overrides the option")
-	}
 	t.Parallel()
 	for _, enabled := range []bool{false, true} {
 		opts := NewTest(datadir.New(t.TempDir())).StepSize(1)
@@ -926,6 +923,7 @@ func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
 			if d == nil {
 				continue
 			}
+			d.btForceInMem, d.btForceMmap = nil, nil
 			require.Equal(t, enabled, d.btIndexFits != nil, "enabled=%v domain=%s", enabled, d.Name)
 			if !enabled {
 				require.False(t, d.btIndexInMem(), "domain=%s", d.Name)

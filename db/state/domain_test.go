@@ -3993,6 +3993,7 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 	t.Parallel()
 
 	db, d, txs := filledDomain(t, log.New())
+	d.btForceInMem, d.btForceMmap = nil, nil
 	d.btIndexFits = func() bool { return true }
 	requireBtIndexesInMem := func() {
 		t.Helper()
@@ -4071,6 +4072,7 @@ func TestDomain_BtIndexInMemChecksBudgetOnBuildAndMerge(t *testing.T) {
 	t.Parallel()
 
 	db, d, txs := filledDomain(t, log.New())
+	d.btForceInMem, d.btForceMmap = nil, nil
 	var checks atomic.Int32
 	d.btIndexFits = func() bool {
 		checks.Add(1)
