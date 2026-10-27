@@ -103,46 +103,30 @@ func MakeFrontierSigner() *Signer {
 	return &signer
 }
 
-// LatestSigner returns the 'most permissive' Signer available for the given chain
-// configuration. Specifically, this enables support of EIP-155 replay protection and
-// EIP-2930 access list transactions when their respective forks are scheduled to occur at
-// any block number in the chain config.
-//
-// Use this in transaction-handling code where the current block number is unknown. If you
-// have the current block number available, use MakeSigner instead.
+// LatestSigner returns the most permissive signer for the forks scheduled in config.
+// A nil chain ID allows only unprotected legacy transactions.
+// Use MakeSigner when the current block number and timestamp are known.
 func LatestSigner(config *chain.Config) *Signer {
 	var signer Signer
 	signer.unprotected = true
-	if config.ChainID != nil {
-		signer.chainID.Set(config.ChainID)
-		signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
-		if config.CancunTime != nil {
-			signer.blob = true
-		}
-		if config.LondonBlock != nil {
-			signer.dynamicFee = true
-		}
-		if config.BerlinBlock != nil {
-			signer.accessList = true
-		}
-		if config.SpuriousDragonBlock != nil {
-			signer.protected = true
-		}
-		signer.frame = config.BogotaTime != nil
-		if config.PragueTime != nil {
-			signer.setCode = true
-		}
+	if config.ChainID == nil {
+		return &signer
 	}
+	signer.chainID.Set(config.ChainID)
+	signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
+	signer.protected = config.SpuriousDragonBlock != nil
+	signer.accessList = config.BerlinBlock != nil
+	signer.dynamicFee = config.LondonBlock != nil
+	signer.blob = config.CancunTime != nil
+	signer.setCode = config.PragueTime != nil
+	signer.frame = config.BogotaTime != nil
 	return &signer
 }
 
-// LatestSignerForChainID returns the 'most permissive' Signer available. Specifically,
-// this marks support for EIP-155 replay protection, EIP-2718 typed transactions and EIP-1559 dynamic fee
-// transaction types if chainID is non-nil.
-//
-// Use this in transaction-handling code where the current block number and fork
-// configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
-// If you have a ChainConfig and know the current block number, use MakeSigner instead.
+// LatestSignerForChainID returns the most permissive signer for the given chain ID.
+// A nil chain ID allows only unprotected legacy transactions.
+// Use LatestSigner when the chain configuration is known, or MakeSigner when the
+// current block number and timestamp are also known.
 func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	var signer Signer
 	signer.unprotected = true
