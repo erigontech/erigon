@@ -2,11 +2,19 @@ package eth
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 func TestRemoveContents(t *testing.T) {
@@ -49,4 +57,35 @@ func TestRemoveContents(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Empty(t, list)
+}
+
+// MCP serves only the namespaces --http.api enables: it must not force admin, debug
+// or trace on, and an empty list gives it no namespace-backed RPC methods.
+func TestMCPNamespacesFollowHTTPAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		api  []string
+		want []string
+	}{
+		{"eth only", []string{"eth"}, []string{"eth"}},
+		{"debug enabled", []string{"eth", "debug"}, []string{"debug", "eth"}},
+		{"empty", nil, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := httpcfg.HttpCfg{API: tc.api}
+			logger := log.New()
+			apis := jsonrpc.APIList(nil, nil, nil, nil, nil, nil, freezeblocks.NewBlockReader(nil), &cfg, nil, logger, nil, nil)
+			srv, err := newMCPRPCServer(apis, &cfg, logger)
+			require.NoError(t, err)
+			defer srv.Stop()
+			client := rpc.DialInProc(srv, logger)
+			defer client.Close()
+
+			modules, err := client.SupportedModules()
+			require.NoError(t, err)
+			got := slices.Sorted(maps.Keys(modules))
+			got = slices.DeleteFunc(got, func(ns string) bool { return ns == "rpc" })
+			require.Equal(t, tc.want, got)
+		})
+	}
 }

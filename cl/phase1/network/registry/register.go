@@ -50,7 +50,7 @@ func RegisterGossipServices(
 	// register services
 	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2)))
 	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withAggregateAndProofRateLimiter(beaconCfg)))
 	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16)))
 	add(gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
 	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8)))
@@ -105,6 +105,15 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests func() i
 // peer, because gossipsub has already marked it as seen.
 func withPayloadAttestationRateLimiter() gossip.ConditionFunc {
 	return withRateLimiterByPeer(float64(clparams.MaxPtcSize), int(clparams.MaxPtcSize))
+}
+
+// withAggregateAndProofRateLimiter lets one peer forward every aggregate expected in a slot at once
+// (TARGET_AGGREGATORS_PER_COMMITTEE for each committee), refilled over the slot. Aggregates are
+// published at the same point in the slot, and one ignored here is also dropped from every other
+// peer, because gossipsub has already marked it as seen.
+func withAggregateAndProofRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
+	perSlot := beaconCfg.MaxCommitteesPerSlot * beaconCfg.TargetAggregatorsPerCommittee
+	return withRateLimiterByPeer(float64(perSlot)/float64(beaconCfg.SecondsPerSlot), int(perSlot))
 }
 
 // withProposerPreferencesRateLimiter lets one peer relay one preference for every slot of the

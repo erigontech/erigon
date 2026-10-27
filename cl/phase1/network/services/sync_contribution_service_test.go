@@ -213,3 +213,64 @@ func TestSyncContributionServiceCommitteeNotInHeadState(t *testing.T) {
 		})
 	}
 }
+
+func TestSyncContributionServiceSeenSetIsBounded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	s, _, clock := setupSyncContributionServiceTest(ctrl)
+	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	service := s.(*syncContributionService)
+	contribution := func(slot uint64) *cltypes.ContributionAndProof {
+		return &cltypes.ContributionAndProof{Contribution: &cltypes.Contribution{Slot: slot}}
+	}
+
+	slots := 100 * service.beaconCfg.SyncCommitteeSize
+	for slot := range slots {
+		service.markContributionAsSeen(contribution(slot))
+	}
+	require.False(t, service.wasContributionSeen(contribution(0)))
+	require.True(t, service.wasContributionSeen(contribution(slots-1)))
+}
+
+func TestSyncContributionServiceSeenSetHoldsThreeSlots(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	s, _, clock := setupSyncContributionServiceTest(ctrl)
+	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	service := s.(*syncContributionService)
+	contribution := func(slot, aggregator uint64) *cltypes.ContributionAndProof {
+		return &cltypes.ContributionAndProof{AggregatorIndex: aggregator, Contribution: &cltypes.Contribution{Slot: slot}}
+	}
+
+	for slot := range uint64(3) {
+		for aggregator := range service.beaconCfg.SyncCommitteeSize {
+			service.markContributionAsSeen(contribution(slot, aggregator))
+		}
+	}
+	require.True(t, service.wasContributionSeen(contribution(0, 0)))
+}
+
+func TestSyncContributionServiceLateMarkDoesNotEvict(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	s, _, clock := setupSyncContributionServiceTest(ctrl)
+	const currentSlot = 10
+	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).DoAndReturn(func(slot uint64) bool {
+		return slot >= currentSlot
+	}).AnyTimes()
+	service := s.(*syncContributionService)
+	contribution := func(slot, aggregator uint64) *cltypes.ContributionAndProof {
+		return &cltypes.ContributionAndProof{AggregatorIndex: aggregator, Contribution: &cltypes.Contribution{Slot: slot}}
+	}
+
+	size := service.beaconCfg.SyncCommitteeSize * seenContributionSlots
+	for aggregator := range size {
+		service.markContributionAsSeen(contribution(currentSlot, aggregator))
+	}
+	service.markContributionAsSeen(contribution(currentSlot-3, 0))
+	require.True(t, service.wasContributionSeen(contribution(currentSlot, 0)))
+	require.False(t, service.wasContributionSeen(contribution(currentSlot-3, 0)))
+}

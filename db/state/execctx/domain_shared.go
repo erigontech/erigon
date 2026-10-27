@@ -2055,3 +2055,28 @@ type DomainReader interface {
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
 	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 }
+
+// AsGetterMetered returns a getter that records reads into the caller's single-owner metrics instance m.
+func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(m))
+}
+
+// SwapChangesetAccumulatorLocked installs the given changeset accumulator
+// and returns a func that restores the previous one. Callers must hold
+// changesetMu.
+func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
+	prev := sd.getChangesetAccumulatorLocked()
+	sd.setChangesetAccumulatorLocked(acc)
+	return func() { sd.setChangesetAccumulatorLocked(prev) }
+}
+
+// GetLatestContext is GetLatest with per-worker metrics carried on ctx: the
+// commitment worker's lock-free accumulator (a nil ctx-value collects nothing,
+// so concurrent workers neither share metrics state nor take a lock).
+func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+	var wm kv.GetLatestMetrics
+	if m := kvmetrics.MetricsFromContext(ctx); m != nil {
+		wm = m
+	}
+	return sd.getLatest(domain, tx, k, wm, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
+}
