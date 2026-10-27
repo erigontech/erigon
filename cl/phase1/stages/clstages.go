@@ -89,9 +89,10 @@ type Cfg struct {
 	sleepForSlotHeadChanged      bool
 	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
-	executionHead      common.Hash
-	forkChoiceRerunAt  time.Time
-	chainTipRejections *chainTipRejections
+	executionHead             common.Hash
+	forkChoiceRerunAt         time.Time
+	chainTipRejections        *chainTipRejections
+	pendingChainTipBlockWrite *cltypes.SignedBeaconBlock
 }
 
 type Args struct {
@@ -232,6 +233,10 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 		}
 	}
 
+	return persistAcceptedBlock(ctx, cfg, db, block)
+}
+
+func persistAcceptedBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
@@ -388,6 +393,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.pendingChainTipBlockWrite != nil {
+						return ChainTipSync
+					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
