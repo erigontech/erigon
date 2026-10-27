@@ -101,7 +101,7 @@ func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, stateBlo
 	validation, err := p.simulateFrame(ctx, txn, stateBlockHash)
 	if err != nil {
 		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
-		return frameValidationResult{reason: txpoolcfg.ErrFrameValidation}
+		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
 	}
 	if validation == nil {
 		return frameValidationResult{reason: txpoolcfg.InvalidFrame}
@@ -283,7 +283,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 			p.queued.Add(mt, "frame revalidated", p.logger)
 		} else {
 			reason := txpoolcfg.FrameStateChanged
-			if result.reason == txpoolcfg.ErrFrameValidation {
+			if result.reason == txpoolcfg.FrameValidationUnavailable {
 				reason = result.reason
 			}
 			p.discardLocked(mt, reason)

@@ -645,7 +645,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
 		// Retryable failures may clear before the discarded pool row is removed.
 		switch reason {
-		case txpoolcfg.NonceTooDistant, txpoolcfg.ErrFrameValidation, txpoolcfg.FrameStateChanged:
+		case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
 			return false, nil
 		default:
 			return true, nil
@@ -1610,7 +1610,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 					return errFrameStateChanged
 				}
 				for txn := range frames {
-					frames[txn] = frameValidationResult{reason: txpoolcfg.ErrFrameValidation}
+					frames[txn] = frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
 				}
 			}
 			reasons = slices.Clone(precheckReasons)
@@ -1621,7 +1621,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 				if result, ok := frames[txn]; ok {
 					if result.reason != txpoolcfg.Success {
 						reasons[i] = result.reason
-						if result.reason == txpoolcfg.ErrFrameValidation {
+						if result.reason == txpoolcfg.FrameValidationUnavailable {
 							p.discardReasonsLRU.Add(string(txn.IDHash[:]), result.reason)
 						}
 					} else {

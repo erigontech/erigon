@@ -292,7 +292,7 @@ func TestFramePoolValidationErrorIsolated(t *testing.T) {
 			if local {
 				reasons, err := pool.AddLocalTxns(ctx, txns)
 				require.NoError(t, err)
-				require.Equal(t, txpoolcfg.ErrFrameValidation, reasons[0])
+				require.Equal(t, txpoolcfg.FrameValidationUnavailable, reasons[0])
 				require.Equal(t, txpoolcfg.Success, reasons[1])
 			} else {
 				pool.started.Store(true)
