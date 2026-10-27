@@ -168,6 +168,10 @@ type VersionMap struct {
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
 	trace    bool
+
+	// fieldMissHook runs after an account-field probe missed, before the
+	// fallbacks probe the version map again. Tests set it to land a flush there.
+	fieldMissHook func()
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {

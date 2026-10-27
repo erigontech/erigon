@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -54,6 +55,8 @@ func TestUpgradeToGloasStateRootMatchesDecodedState(t *testing.T) {
 	require.NoError(t, s.UpgradeToDeneb())
 	require.NoError(t, s.UpgradeToElectra())
 	require.NoError(t, s.UpgradeToFulu())
+	s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{ValidatorIndex: 1, Amount: 2, WithdrawableEpoch: 3})
+	s.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: 4, TargetIndex: 5})
 	_, err := s.HashSSZ()
 	require.NoError(t, err)
 

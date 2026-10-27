@@ -126,10 +126,10 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return head.Root, slot, err
 }
 
-// GetHeadWithSyncedHeadState reads the synced head state while holding the fork-choice lock, so callers must not hold a synced-data lock.
-func (f *ForkChoiceStore) GetHeadWithSyncedHeadState() (common.Hash, uint64, error) {
-	head, slot, err := f.getHeadNode(f.syncedDataManager.ViewHeadState)
-	return head.Root, slot, err
+// GetHeadWithSyncedHeadState resolves the head using the synced head state when needed.
+// Callers must not hold a synced-data lock: the fork-choice lock must come first.
+func (f *ForkChoiceStore) GetHeadWithSyncedHeadState() (ForkChoiceNode, uint64, error) {
+	return f.getHeadNode(f.syncedDataManager.ViewHeadState)
 }
 
 func (f *ForkChoiceStore) getHeadNode(viewAuxiliaryState auxiliaryStateView) (ForkChoiceNode, uint64, error) {
@@ -186,7 +186,7 @@ func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, uint64, error) {
 func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointState)
 		if err != nil {
 			return ForkChoiceNode{}, 0, err
 		}
@@ -223,8 +223,8 @@ func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	}
 }
 
-func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint) (*checkpointState, error) {
-	cs, err := f.getCheckpointState(justifiedCheckpoint)
+func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint, getCheckpointState func(solid.Checkpoint) (*checkpointState, error)) (*checkpointState, error) {
+	cs, err := getCheckpointState(justifiedCheckpoint)
 	if err != nil {
 		if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
 			return nil, nil

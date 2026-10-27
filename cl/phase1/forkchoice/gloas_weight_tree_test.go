@@ -663,7 +663,7 @@ func TestComputeVotesSkipsMessagesBeyondJustifiedRegistry(t *testing.T) {
 // out-of-bounds indices, so vote counting must not walk past the registry.
 func TestComputeVotesAuxStateSkipsMessagesBeyondValidatorSet(t *testing.T) {
 	f := buildExAnteStore(t)
-	s, err := f.GetStateAtBlockRoot(f.ProposerBoostRoot(), true)
+	s, err := f.GetStateAtBlockRoot(f.ProposerBoostRoot())
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)

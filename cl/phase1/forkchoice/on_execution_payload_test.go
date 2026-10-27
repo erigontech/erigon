@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -152,7 +153,7 @@ type concurrentPayloadValidationForkGraph struct {
 	verified    atomic.Bool
 }
 
-func (g *concurrentPayloadValidationForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g *concurrentPayloadValidationForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	if g.stateReads.Add(1) == 2 {
 		g.readOnce.Do(func() { close(g.bothRead) })
 	}
@@ -225,6 +226,22 @@ type persistingEnvelopeForkGraph struct {
 	verified atomic.Bool
 }
 
+type currentEnvelopeForkGraph struct {
+	*persistingEnvelopeForkGraph
+	root common.Hash
+}
+
+func (g *currentEnvelopeForkGraph) CurrentStateLocked(root common.Hash) *state2.CachingBeaconState {
+	if root != g.root {
+		return nil
+	}
+	return g.state
+}
+
+func (g *currentEnvelopeForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
+	return g.state.Copy()
+}
+
 type interleavingIndexRepairForkGraph struct {
 	fork_graph.ForkGraph
 	envelope *cltypes.SignedExecutionPayloadEnvelope
@@ -264,7 +281,11 @@ func (g dataAvailabilityForkGraph) HasEnvelope(common.Hash) bool {
 	return false
 }
 
-func (g dataAvailabilityForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g dataAvailabilityForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	if g.stateErr != nil && *g.stateErr != nil {
 		return nil, *g.stateErr
 	}
@@ -282,14 +303,14 @@ func (g dataAvailabilityForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockH
 	return &cltypes.BeaconBlockHeader{Slot: g.block.Block.Slot, Root: g.block.Block.StateRoot}, true
 }
 
-func (g *admissionYieldForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *admissionYieldForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	g.once.Do(func() { close(g.stateRead) })
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
 }
 
-func (g *admissionPersistingForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *admissionPersistingForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	g.once.Do(func() { close(g.stateRead) })
-	return g.persistingEnvelopeForkGraph.GetState(root, alwaysCopy)
+	return g.persistingEnvelopeForkGraph.ReplayState(root)
 }
 
 func (g *commitmentFallbackForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -299,9 +320,14 @@ func (g *commitmentFallbackForkGraph) GetBlock(root common.Hash) (*cltypes.Signe
 	return g.dataAvailabilityForkGraph.GetBlock(root)
 }
 
-func (g *pendingCommitmentReadinessForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *pendingCommitmentReadinessForkGraph) CurrentStateLocked(root common.Hash) *state2.CachingBeaconState {
 	g.stateReads.Add(1)
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.CurrentStateLocked(root)
+}
+
+func (g *pendingCommitmentReadinessForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
+	g.stateReads.Add(1)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
 }
 
 func (g *pendingCommitmentReadinessForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -343,15 +369,15 @@ func (g *admissionYieldForkGraph) HasEnvelope(common.Hash) bool {
 	return g.hasEnvelope.Load()
 }
 
-func (g *blockingValidationForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *blockingValidationForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	if root == g.blockedRoot {
 		g.once.Do(func() { close(g.stateRead) })
 		<-g.release
 	}
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
 }
 
-func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g *boundedGossipValidationForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	active := g.activeCopies.Add(1)
 	defer g.activeCopies.Add(-1)
 	for {
@@ -367,11 +393,11 @@ func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.
 	return g.state.Copy()
 }
 
-func (g *panickingGossipValidationForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *panickingGossipValidationForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	if g.panicIn == "state" {
 		panic("injected state panic")
 	}
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
 }
 
 func (g *panickingGossipValidationForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -440,7 +466,11 @@ func (g blockRefreshForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock
 	return g.block, g.block != nil
 }
 
-func (blockRefreshForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (blockRefreshForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (blockRefreshForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	panic("refresh must not replay state")
 }
 
@@ -579,14 +609,18 @@ func (g replacingPendingForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockH
 	return nil, false
 }
 
-func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g replacingPendingForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (g replacingPendingForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	g.replace()
 	return nil, nil
 }
 
 func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool { return false }
 
-func (g missingBlockForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g missingBlockForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	return g.state, nil
 }
 
@@ -645,7 +679,11 @@ func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.
 	return g.completedEnvelope, nil
 }
 
-func (g pendingRetryForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g pendingRetryForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (g pendingRetryForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	return nil, nil
 }
 
@@ -2045,17 +2083,22 @@ func TestExecutionPayloadIndexRepairRetainsNotificationAcrossTransientReadFailur
 }
 
 func TestExecutionPayloadOperationEventsDoNotRequireHeadData(t *testing.T) {
+	const slot = uint64(64)
 	blockRoot := common.HexToHash("0x1234")
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	envelope.Message.BeaconBlockRoot = blockRoot
-	envelope.Message.Payload.SlotNumber = 64
-	envelope.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+	blockHash := common.HexToHash("0xabcd")
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = slot
+	bid := block.Block.Body.SignedExecutionPayloadBid.Message
+	bid.Slot = slot
+	bid.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.BlockHash = blockHash
+	envelope := envelopeForIndexRepair(envelopeIndexRepairToken{blockNumber: 42, blockHash: blockHash})
 	emitter := beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 2)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	f := newPayloadVoteTestStore(t, blockRoot, false, false)
-	f.forkGraph = dataAvailabilityForkGraph{}
+	f.forkGraph = dataAvailabilityForkGraph{block: block}
 	f.emitters = emitter
 
 	f.emitExecutionPayloadIntegrationEvents(blockRoot, envelope)
@@ -2068,8 +2111,33 @@ func TestExecutionPayloadOperationEventsDoNotRequireHeadData(t *testing.T) {
 			return nil
 		}
 	}
-	require.Equal(t, beaconevents.OpExecutionPayload, nextEvent().Event)
-	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, nextEvent().Event)
+	payloadEvent := nextEvent()
+	require.Equal(t, beaconevents.OpExecutionPayload, payloadEvent.Event)
+	require.Equal(t, &beaconevents.ExecutionPayloadData{
+		Slot: slot, BuilderIndex: clparams.BuilderIndexSelfBuild, BlockHash: blockHash, BlockRoot: blockRoot,
+	}, payloadEvent.Data)
+	availableEvent := nextEvent()
+	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, availableEvent.Event)
+	require.Equal(t, &beaconevents.ExecutionPayloadAvailableData{Slot: slot, BlockRoot: blockRoot}, availableEvent.Data)
+}
+
+func TestExecutionPayloadOperationEventsSkipMissingBlock(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.forkGraph = dataAvailabilityForkGraph{}
+	f.emitters = emitter
+
+	f.emitExecutionPayloadIntegrationEvents(blockRoot, envelopeForIndexRepair(envelopeIndexRepairToken{}))
+
+	select {
+	case event := <-events:
+		t.Fatalf("emitted operation event without the beacon block: %#v", event)
+	default:
+	}
 }
 
 func TestExecutionPayloadIndexWriteHasSingleNotificationOwner(t *testing.T) {
@@ -2629,7 +2697,7 @@ func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) 
 
 	readDone := make(chan error, 1)
 	go func() {
-		_, err := store.GetStateAtBlockRoot(otherRoot, false)
+		_, err := store.GetStateAtBlockRoot(otherRoot)
 		readDone <- err
 	}()
 	select {
@@ -4630,6 +4698,89 @@ func TestExecutionPayloadCommitmentFallbackRefreshesAfterYield(t *testing.T) {
 	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
 	require.Equal(t, int32(3), graph.blockReads.Load())
 	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+}
+
+func TestExecutionPayloadEnvelopeCurrentStateCopiesAreCoherent(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	validator := blockState.ValidatorSet().Get(0)
+	for range 1_000 {
+		require.NoError(t, blockState.AddValidator(validator, cfg.MaxEffectiveBalance))
+	}
+	root := envelope.Message.BeaconBlockRoot
+	beforeRoot, err := blockState.HashSSZ()
+	require.NoError(t, err)
+	expectedAfter, err := blockState.Copy()
+	require.NoError(t, err)
+	expectedAfter.SetPreviousStateRoot(block.Block.StateRoot)
+	require.NoError(t, transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(expectedAfter, envelope))
+	afterRoot, err := expectedAfter.HashSSZ()
+	require.NoError(t, err)
+
+	graph := &currentEnvelopeForkGraph{
+		persistingEnvelopeForkGraph: &persistingEnvelopeForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		},
+		root: root,
+	}
+	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, eth2Roots: eth2Roots}
+
+	checkCopy := func() error {
+		copied, err := store.GetStateAtBlockRoot(root)
+		if err != nil {
+			return err
+		}
+		cachedRoot, err := copied.HashSSZ()
+		if err != nil {
+			return err
+		}
+		encoded, err := copied.EncodeSSZ(nil)
+		if err != nil {
+			return err
+		}
+		decoded := state2.New(cfg)
+		if err := decoded.DecodeSSZ(encoded, int(copied.Version())); err != nil {
+			return err
+		}
+		freshRoot, err := decoded.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if cachedRoot != freshRoot || cachedRoot != beforeRoot && cachedRoot != afterRoot {
+			return fmt.Errorf("incoherent copied state: cached %x, fresh %x", cachedRoot, freshRoot)
+		}
+		return nil
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 4)
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			<-start
+			for range 4 {
+				if err := checkCopy(); err != nil {
+					errs <- err
+					return
+				}
+			}
+		})
+	}
+	writerDone := make(chan error, 1)
+	go func() {
+		<-start
+		writerDone <- store.OnExecutionPayload(t.Context(), envelope, false, false)
+	}()
+	close(start)
+	require.NoError(t, <-writerDone)
+	readers.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	actualAfter, err := blockState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, afterRoot, actualAfter)
 }
 
 func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testing.T) {

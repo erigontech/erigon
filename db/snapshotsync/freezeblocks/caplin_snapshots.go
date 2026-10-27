@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -147,21 +150,12 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 
 // OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
 // segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false) }
+func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
 
 func (s *CaplinSnapshots) OpenBeaconBlocks() error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
-	if err != nil {
-		return err
-	}
-	var list []string
-	for i := range files {
-		if files[i].Type != nil && files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
-			_, fName := filepath.Split(files[i].Path)
-			list = append(list, fName)
-		}
-	}
-	return s.OpenList(list, false)
+	return s.openFolder(false, func(f snaptype.FileInfo) bool {
+		return f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks
+	})
 }
 
 // Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
@@ -182,13 +176,16 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 	return nil
 }
 
-func (s *CaplinSnapshots) openFolder(optimistic bool) error {
+func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
 	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
 	if err != nil {
 		return err
 	}
 	list := make([]string, 0, len(files))
 	for i := range files {
+		if fileFilter != nil && !fileFilter(files[i]) {
+			continue
+		}
 		f := &files[i]
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
@@ -370,10 +367,36 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
+	if err := removeBlobIndexAndTorrents(snapDir, fromSlot, toSlot); err != nil {
+		return err
+	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
 	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+}
+
+func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
+	idx := snaptype.IdxFileMask(from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	masks := []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"}
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if slices.ContainsFunc(masks, func(mask string) bool {
+			matched, _ := filepath.Match(mask, e.Name())
+			return matched
+		}) {
+			if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -450,7 +473,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	if err := s.openFolder(true); err != nil {
+	if err := s.openFolder(true, nil); err != nil {
 		return err
 	}
 

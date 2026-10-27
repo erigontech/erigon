@@ -157,12 +157,12 @@ type blockingStateForkGraph struct {
 	release chan struct{}
 }
 
-func (g *blockingStateForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (g *blockingStateForkGraph) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	if blockRoot == g.root {
 		g.calls.Add(1)
 		<-g.release
 	}
-	return g.ForkGraph.GetState(blockRoot, alwaysCopy)
+	return g.ForkGraph.ReplayState(blockRoot)
 }
 
 func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
