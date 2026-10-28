@@ -242,6 +242,14 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 	defer sharedDomains.Close()
+	// Below the simulated writes, state must come from the base block, not the chain head.
+	if !latest {
+		baseEndTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+		sharedDomains.SetStateAsOf(baseEndTxNum)
+	}
 	// Meter this request's state reads under the rpc source (flushed at Close).
 	// SimulateV1 owns this SharedDomains on a single goroutine.
 	sharedDomains.StartRequestMetrics(kvmetrics.SourceRPC)

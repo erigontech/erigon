@@ -266,6 +266,10 @@ type SharedDomains struct {
 	cacheUnwind      cacheUnwindState
 	localCacheUnwind bool
 
+	// See SetStateAsOf.
+	stateAsOf    uint64
+	hasStateAsOf bool
+
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
 	visibleEnds domainVisibleEndMemo
@@ -941,9 +945,27 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 // check in SetStateCache. Tests use it so they always exercise the cache without
 // mutating the process-global flag, which would race t.Parallel tests.
 func (sd *SharedDomains) BindStateCache(stateCache *cache.StateCache) {
+	if sd.hasStateAsOf {
+		panic("BindStateCache: the state cache holds latest state, but this SharedDomains reads state as of a txNum")
+	}
 	sd.stateCache = stateCache
 	sd.cacheApplier = stateCache.Applier()
 	sd.cacheApplier.Initialize(sd.baseStateVersion)
+}
+
+// SetStateAsOf makes account, storage and code reads that are not in the mem
+// batch return the state at txNum instead of the latest state. Writes are
+// compared against the same state, so a write that matches the latest value is
+// still kept. Commitment reads are not affected.
+func (sd *SharedDomains) SetStateAsOf(txNum uint64) {
+	if sd.stateCache != nil {
+		panic("SetStateAsOf: the state cache holds latest state")
+	}
+	sd.stateAsOf, sd.hasStateAsOf = txNum, true
+}
+
+func (sd *SharedDomains) readsStateAsOf(domain kv.Domain) bool {
+	return sd.hasStateAsOf && (domain == kv.AccountsDomain || domain == kv.StorageDomain || domain == kv.CodeDomain)
 }
 
 // GuardAggregatorForCache forbids visibility lowering on db's aggregator when
@@ -1399,6 +1421,13 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 		return v, step, nil
 	}
+	if sd.readsStateAsOf(domain) {
+		v, _, err = tx.GetAsOf(domain, k, sd.stateAsOf)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%s %x read as of txNum %d: %w", domain, k, sd.stateAsOf, err)
+		}
+		return v, 0, nil
+	}
 	// stateCache holds committed values shared across domain readers.
 	if sd.stateCache != nil {
 		v, cTxNum, ok := view.GetWithTxNum(domain, k)
@@ -1578,6 +1607,9 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 	v, _, maxStep, ok := sd.latestFromMem(domain, k)
 	if ok {
 		return len(v), true, true, nil
+	}
+	if sd.readsStateAsOf(domain) {
+		return 0, false, false, nil
 	}
 	if sd.stateCache != nil {
 		if v, txNum, ok := view.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep) && !sd.rejectedByLocalUnwind(txNum) {
