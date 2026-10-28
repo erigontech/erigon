@@ -1121,7 +1121,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 
 	if !isLocal && uint64(p.all.count(txn.SenderID)+batch.senderTxns) > p.cfg.AccountSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID)+batch.senderTxns, p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer, nil
 	}
@@ -1215,7 +1215,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, batch batchUsage) t
 	}
 	if p.totalBlobsInPool.Load()+batch.totalBlobs >= p.cfg.TotalBlobPoolLimit {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()+batch.totalBlobs))
 		}
 		return txpoolcfg.BlobPoolOverflow
 	}
