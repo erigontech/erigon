@@ -36,25 +36,25 @@ func BenchEthGetBlockByNumber(erigonURL string) error {
 
 		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, false /* withTxs */))
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %w\n", bn, res.Err)
+			return fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn, res.Err)
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
 			return fmt.Errorf("error: %d %s", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
 		if res.Result.Get("result") == nil || res.Result.Get("result").Get("number") == nil {
-			return fmt.Errorf("empty result: %s\n", res.Response)
+			return fmt.Errorf("empty result: %s", res.Response)
 		}
 
 		bn1 := lastBlock - bn
 		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn1, false /* withTxs */))
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %w\n", bn1, res.Err)
+			return fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn1, res.Err)
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
 			return fmt.Errorf("error: %d %s", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
 		if res.Result.Get("result") == nil || res.Result.Get("result").Get("number") == nil {
-			return fmt.Errorf("empty result: %s\n", res.Response)
+			return fmt.Errorf("empty result: %s", res.Response)
 		}
 	}
 	return nil

@@ -23,6 +23,7 @@ func (v VisibleFiles) Fullpaths() []string {
 	}
 	return names
 }
+
 func (v VisibleFiles) EndRootNum() uint64 {
 	if len(v) == 0 {
 		return 0

@@ -110,7 +110,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
 		if base := ctx.String(OutputBasedir.Name); len(base) > 0 {
-			err2 := os.MkdirAll(base, 0755) // //rw-r--r--
+			err2 := os.MkdirAll(base, 0o755) // //rw-r--r--
 			if err2 != nil {
 				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %w", err2))
 			}
@@ -163,7 +163,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
-		decoder.Decode(inputData) //nolint:errcheck
+		if err := decoder.Decode(inputData); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling stdin: %w", err))
+		}
 	}
 	if allocStr != stdinSelector {
 		inFile, err1 := os.Open(allocStr)
@@ -192,6 +194,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %w", err))
 		}
 		inputData.Env = &env
+	}
+	if inputData.Env == nil {
+		return NewError(ErrorJson, errors.New("missing 'env' section in input"))
 	}
 	prestate.Env = *inputData.Env
 
@@ -276,7 +281,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// manufacture block from above inputs
 	header := NewHeader(prestate.Env)
 
-	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
+	ommerHeaders := make([]*types.Header, len(prestate.Env.Ommers))
 	header.Number.AddUint64(&header.Number, uint64(len(prestate.Env.Ommers)))
 	for i, ommer := range prestate.Env.Ommers {
 		var ommerN uint256.Int
@@ -303,7 +308,11 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 
@@ -313,7 +322,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := newT8nSharedDomains(context.Background(), db, tx)
 	if err != nil {
 		return err
 	}
@@ -366,7 +375,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, blockNum)
-	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
+	if _, err := dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0); err != nil {
+		return err
+	}
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -419,7 +430,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		return uint256.Int(*b)
 	}
 	value := deref(txJson.Value)
-	gasPrice := deref(txJson.GasPrice)
+	gasPrice := uint256.Int(txJson.GasPrice)
 	chainId := deref(txJson.ChainID)
 	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
@@ -456,7 +467,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
-			AccessList: *txJson.Accesses,
+			AccessList: txJson.Accesses,
 		}, nil
 	case txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType:
 		tipCap := deref(txJson.MaxPriorityFeePerGas)
@@ -477,11 +488,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
-				AccessList: *txJson.Accesses,
+				AccessList: txJson.Accesses,
 			}, nil
 		}
 
-		jsonAuths := *txJson.Authorizations
+		jsonAuths := txJson.Authorizations
 		auths := make([]types.Authorization, 0, len(jsonAuths))
 		for i := range jsonAuths {
 			a, err := jsonAuths[i].ToAuthorization()
@@ -507,12 +518,12 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
-				AccessList: *txJson.Accesses,
+				AccessList: txJson.Accesses,
 			},
 			Authorizations: auths,
 		}, nil
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("unsupported transaction type %d", txJson.Type)
 	}
 }
 
@@ -578,7 +589,7 @@ func saveFile(baseDir, filename string, data any) error {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %w", err))
 	}
 	location := filepath.Join(baseDir, filename)
-	if err = os.WriteFile(location, b, 0644); err != nil { //nolint:gosec
+	if err = os.WriteFile(location, b, 0o644); err != nil { //nolint:gosec
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %w", err))
 	}
 	log.Info("Wrote file", "file", location)
@@ -662,4 +673,13 @@ func CalculateStateRoot(sd *execctx.SharedDomains, tx kv.TemporalRwTx, blockNum 
 	hashRoot.SetBytes(root)
 
 	return &hashRoot, nil
+}
+
+func newT8nSharedDomains(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sd.EnableParaTrieDB(db)
+	return sd, nil
 }

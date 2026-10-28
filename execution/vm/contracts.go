@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -69,56 +71,97 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-// Precompiles resolves the newest active fork first. The case order is load-bearing:
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkIstanbulBSC
+	forkNanoBSC
+	forkMoranBSC
+	forkPlanckBSC
+	forkLubanBSC
+	forkPlatoBSC
+	forkHertzBSC
+	forkFeynmanBSC
+	forkBerlin
+	forkCancun
+	forkCancunBSC
+	forkHaberBSC
+	forkPrague
+	forkPragueBSC
+	forkOsaka
+	forkOsakaBSC
+	forkPasteurBSC
+	forkTierCount
+)
+
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
+var forkSets [forkTierCount]mergedPrecompileSet
+
+// forkTierFor resolves the newest active fork first. The case order is load-bearing:
 // an arm placed below an older fork's arm can never match, because that older fork
 // stays active forever.
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
 	case chainRules.IsPasteur:
-		return PrecompiledContractsPasteurForBSC
+		return forkPasteurBSC
 	case chainRules.IsOsaka:
 		if chainRules.IsParlia {
-			return PrecompiledContractsOsakaForBSC
+			return forkOsakaBSC
 		}
-		return PrecompiledContractsOsaka
+		return forkOsaka
 	case chainRules.IsPrague:
 		if chainRules.IsParlia {
-			return PrecompiledContractsPragueForBSC
+			return forkPragueBSC
 		}
-		return PrecompiledContractsPrague
+		return forkPrague
 	case chainRules.IsHaber:
-		return PrecompiledContractsHaberForBSC
+		return forkHaberBSC
 	case chainRules.IsCancun:
 		if chainRules.IsParlia {
-			return PrecompiledContractsCancunForBSC
+			return forkCancunBSC
 		}
-		return PrecompiledContractsCancun
+		return forkCancun
 	case chainRules.IsFeynman:
-		return PrecompiledContractsFeynmanForBSC
+		return forkFeynmanBSC
 	case chainRules.IsHertz:
-		return PrecompiledContractsHertzForBSC
+		return forkHertzBSC
 	case chainRules.IsPlato:
-		return PrecompiledContractsPlatoForBSC
+		return forkPlatoBSC
 	case chainRules.IsLuban:
-		return PrecompiledContractsLubanForBSC
+		return forkLubanBSC
 	case chainRules.IsPlanck:
-		return PrecompiledContractsPlanckForBSC
+		return forkPlanckBSC
 	case chainRules.IsMoran:
-		return PrecompiledContractsMoranForBSC
+		return forkMoranBSC
 	case chainRules.IsNano:
-		return PrecompiledContractsNanoForBSC
+		return forkNanoBSC
 	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
+		return forkBerlin
 	case chainRules.IsIstanbul:
 		if chainRules.IsParlia {
-			return PrecompiledContractsIstanbulForBSC
+			return forkIstanbulBSC
 		}
-		return PrecompiledContractsIstanbul
+		return forkIstanbul
 	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+		return forkByzantium
 	default:
-		return PrecompiledContractsHomestead
+		return forkHomestead
 	}
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return forkSets[forkTierFor(chainRules)].contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -327,11 +370,13 @@ var PrecompiledContractsPasteurForBSC = func() PrecompiledContracts {
 }()
 
 var (
-	PrecompiledAddressesOsaka          []accounts.Address
-	PrecompiledAddressesPrague         []accounts.Address
-	PrecompiledAddressesCancun         []accounts.Address
-	PrecompiledAddressesBerlin         []accounts.Address
+	PrecompiledAddressesHomestead      []accounts.Address
+	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesIstanbul       []accounts.Address
+	PrecompiledAddressesBerlin         []accounts.Address
+	PrecompiledAddressesCancun         []accounts.Address
+	PrecompiledAddressesPrague         []accounts.Address
+	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesIstanbulForBSC []accounts.Address
 	PrecompiledAddressesNanoForBSC     []accounts.Address
 	PrecompiledAddressesMoranForBSC    []accounts.Address
@@ -345,121 +390,43 @@ var (
 	PrecompiledAddressesPragueForBSC   []accounts.Address
 	PrecompiledAddressesOsakaForBSC    []accounts.Address
 	PrecompiledAddressesPasteurForBSC  []accounts.Address
-	PrecompiledAddressesByzantium      []accounts.Address
-	PrecompiledAddressesHomestead      []accounts.Address
 )
 
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsIstanbulForBSC {
-		PrecompiledAddressesIstanbulForBSC = append(PrecompiledAddressesIstanbulForBSC, k)
-	}
-	for k := range PrecompiledContractsNanoForBSC {
-		PrecompiledAddressesNanoForBSC = append(PrecompiledAddressesNanoForBSC, k)
-	}
-	for k := range PrecompiledContractsMoranForBSC {
-		PrecompiledAddressesMoranForBSC = append(PrecompiledAddressesMoranForBSC, k)
-	}
-	for k := range PrecompiledContractsPlanckForBSC {
-		PrecompiledAddressesPlanckForBSC = append(PrecompiledAddressesPlanckForBSC, k)
-	}
-	for k := range PrecompiledContractsLubanForBSC {
-		PrecompiledAddressesLubanForBSC = append(PrecompiledAddressesLubanForBSC, k)
-	}
-	for k := range PrecompiledContractsPlatoForBSC {
-		PrecompiledAddressesPlatoForBSC = append(PrecompiledAddressesPlatoForBSC, k)
-	}
-	for k := range PrecompiledContractsHertzForBSC {
-		PrecompiledAddressesHertzForBSC = append(PrecompiledAddressesHertzForBSC, k)
-	}
-	for k := range PrecompiledContractsFeynmanForBSC {
-		PrecompiledAddressesFeynmanForBSC = append(PrecompiledAddressesFeynmanForBSC, k)
-	}
-	for k := range PrecompiledContractsCancunForBSC {
-		PrecompiledAddressesCancunForBSC = append(PrecompiledAddressesCancunForBSC, k)
-	}
-	for k := range PrecompiledContractsHaberForBSC {
-		PrecompiledAddressesHaberForBSC = append(PrecompiledAddressesHaberForBSC, k)
-	}
-	for k := range PrecompiledContractsPragueForBSC {
-		PrecompiledAddressesPragueForBSC = append(PrecompiledAddressesPragueForBSC, k)
-	}
-	for k := range PrecompiledContractsOsakaForBSC {
-		PrecompiledAddressesOsakaForBSC = append(PrecompiledAddressesOsakaForBSC, k)
-	}
-	for k := range PrecompiledContractsPasteurForBSC {
-		PrecompiledAddressesPasteurForBSC = append(PrecompiledAddressesPasteurForBSC, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead:   {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium:   {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:    {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:      {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:      {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:      {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:       {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+		forkIstanbulBSC: {PrecompiledContractsIstanbulForBSC, &PrecompiledAddressesIstanbulForBSC},
+		forkNanoBSC:     {PrecompiledContractsNanoForBSC, &PrecompiledAddressesNanoForBSC},
+		forkMoranBSC:    {PrecompiledContractsMoranForBSC, &PrecompiledAddressesMoranForBSC},
+		forkPlanckBSC:   {PrecompiledContractsPlanckForBSC, &PrecompiledAddressesPlanckForBSC},
+		forkLubanBSC:    {PrecompiledContractsLubanForBSC, &PrecompiledAddressesLubanForBSC},
+		forkPlatoBSC:    {PrecompiledContractsPlatoForBSC, &PrecompiledAddressesPlatoForBSC},
+		forkHertzBSC:    {PrecompiledContractsHertzForBSC, &PrecompiledAddressesHertzForBSC},
+		forkFeynmanBSC:  {PrecompiledContractsFeynmanForBSC, &PrecompiledAddressesFeynmanForBSC},
+		forkCancunBSC:   {PrecompiledContractsCancunForBSC, &PrecompiledAddressesCancunForBSC},
+		forkHaberBSC:    {PrecompiledContractsHaberForBSC, &PrecompiledAddressesHaberForBSC},
+		forkPragueBSC:   {PrecompiledContractsPragueForBSC, &PrecompiledAddressesPragueForBSC},
+		forkOsakaBSC:    {PrecompiledContractsOsakaForBSC, &PrecompiledAddressesOsakaForBSC},
+		forkPasteurBSC:  {PrecompiledContractsPasteurForBSC, &PrecompiledAddressesPasteurForBSC},
+	} {
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		*tierSet.addresses = forkSets[tier].addresses
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsPasteur:
-		return PrecompiledAddressesPasteurForBSC
-	case rules.IsOsaka:
-		if rules.IsParlia {
-			return PrecompiledAddressesOsakaForBSC
-		}
-		return PrecompiledAddressesOsaka
-	case rules.IsPrague:
-		if rules.IsParlia {
-			return PrecompiledAddressesPragueForBSC
-		}
-		return PrecompiledAddressesPrague
-	case rules.IsHaber:
-		return PrecompiledAddressesHaberForBSC
-	case rules.IsCancun:
-		if rules.IsParlia {
-			return PrecompiledAddressesCancunForBSC
-		}
-		return PrecompiledAddressesCancun
-	case rules.IsFeynman:
-		return PrecompiledAddressesFeynmanForBSC
-	case rules.IsHertz:
-		return PrecompiledAddressesHertzForBSC
-	case rules.IsPlato:
-		return PrecompiledAddressesPlatoForBSC
-	case rules.IsLuban:
-		return PrecompiledAddressesLubanForBSC
-	case rules.IsPlanck:
-		return PrecompiledAddressesPlanckForBSC
-	case rules.IsMoran:
-		return PrecompiledAddressesMoranForBSC
-	case rules.IsNano:
-		return PrecompiledAddressesNanoForBSC
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		if rules.IsParlia {
-			return PrecompiledAddressesIstanbulForBSC
-		}
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
-	}
+	return forkSets[forkTierFor(rules)].addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
@@ -467,20 +434,19 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
-) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	gasCost := p.RequiredGas(input)
-	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+	if suppliedGas.Execution < gasCost {
+		return nil, suppliedGas, ErrOutOfGas
 	}
 
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	remaining := suppliedGas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(suppliedGas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
-
-	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, err
+	return output, remaining, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -535,6 +501,7 @@ type sha256hash struct{}
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.Sha256PerWordGas + params.Sha256BaseGas
 }
+
 func (c *sha256hash) Run(input []byte) ([]byte, error) {
 	h := sha256.Sum256(input)
 	return h[:], nil
@@ -554,6 +521,7 @@ type ripemd160hash struct{}
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
+
 func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
 	ripemd := ripemd160.New()
 	ripemd.Write(input)
@@ -576,6 +544,7 @@ type dataCopy struct{}
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
+
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
 	return bytes.Clone(in), nil
 }
@@ -646,7 +615,6 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
-
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64

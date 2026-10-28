@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -42,7 +43,7 @@ func TestConvertConsensusWithdrawalsToExecutionWithdrawals(t *testing.T) {
 
 	// The execution layer owns its copy: mutating the source afterwards must not reach it.
 	source[0].Amount = 999
-	require.Equal(t, uint64(100), converted[0].Amount)
+	require.Equal(t, hexutil.Uint64(100), converted[0].Amount)
 }
 
 func TestConvertConsensusWithdrawalsToExecutionWithdrawalsNeverReturnsNil(t *testing.T) {

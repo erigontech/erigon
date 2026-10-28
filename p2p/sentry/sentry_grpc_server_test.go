@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/protocols/wit"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
@@ -127,47 +127,6 @@ func (m *MockMsgReadWriter) WriteToReadBuffer(data []byte) {
 	m.readMu.Lock()
 	defer m.readMu.Unlock()
 	m.readBuf.Write(data)
-}
-
-// MockPeer implements p2p.Peer for testing purposes
-type MockPeer struct {
-	pubkey [64]byte
-	name   string
-}
-
-func NewMockPeer(pubkey [64]byte, name string) *MockPeer {
-	return &MockPeer{pubkey: pubkey, name: name}
-}
-
-func (m *MockPeer) Pubkey() [64]byte {
-	return m.pubkey
-}
-
-func (m *MockPeer) Name() string {
-	return m.name
-}
-
-func (m *MockPeer) Fullname() string {
-	return fmt.Sprintf("%s/%x", m.name, m.pubkey[:4])
-}
-
-func (m *MockPeer) ID() enode.ID {
-	var id enode.ID
-	copy(id[:], m.pubkey[:])
-	return id
-}
-
-func (m *MockPeer) Info() *p2p.PeerInfo {
-	// Simplified mock, as NetworkInfo is not directly accessible or needed for this test
-	return &p2p.PeerInfo{
-		ID:   m.ID().String(),
-		Name: m.Name(),
-		// Removed Network field entirely to avoid p2p.NetworkInfo dependency
-	}
-}
-
-func (m *MockPeer) Disconnect(reason *p2p.PeerError) {
-	// No-op for mock
 }
 
 func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, minimumBlockHeight uint64, maxBlockHeight uint64) *sentryproto.StatusData {
@@ -548,7 +507,6 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 		},
 	}
 	return s
-
 }
 
 func startHandshake(
@@ -698,9 +656,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	}
 }
 
-// newTestPeerInfoWithEth creates a PeerInfo backed by a *p2p.Peer that has
-// the eth protocol in its running map (so WaitForEth won't fail) and marks
-// the eth handshake as already completed.
+// newTestPeerInfoWithEth returns a peer with a completed ETH handshake.
 func newTestPeerInfoWithEth(t *testing.T) (*PeerInfo, [64]byte) {
 	t.Helper()
 	var pubkey [64]byte
@@ -719,93 +675,12 @@ func newTestPeerInfoWithEth(t *testing.T) (*PeerInfo, [64]byte) {
 	rw := NewRLPReadWriter()
 	t.Cleanup(rw.Close)
 
-	pi := NewPeerInfo(peer)
+	pi := NewPeerInfo(peer, rw)
 	// Stop the per-peer worker goroutine started by NewPeerInfo.
 	t.Cleanup(pi.Close)
-	pi.SetEthRw(rw)
-	// Mark eth handshake as done so WaitForEth returns immediately.
 	pi.SetEthProtocol(direct.ETH68)
 
 	return pi, pubkey
-}
-
-// TestRunWitPeer_MalformedNewWitnessMsg verifies that a malformed
-// NewWitnessMsg causes a PeerError (peer disconnect) rather than a
-// nil-pointer panic. This is the regression test for the DoS
-// vulnerability where a missing 'continue' after RLP decode failure
-// led to query.Witness.Header().Hash() panicking on a nil Witness.
-func TestRunWitPeer_MalformedNewWitnessMsg(t *testing.T) {
-	t.Parallel()
-
-	peerInfo, peerID := newTestPeerInfoWithEth(t)
-
-	rw := NewRLPReadWriter()
-	t.Cleanup(rw.Close)
-
-	logger := log.Root()
-
-	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) {}
-	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
-	getWitnessRequest := func(hash common.Hash, peerID [64]byte) bool { return false }
-
-	// Feed a NewWitnessMsg with garbage RLP payload.
-	garbage := []byte{0xff, 0xfe, 0xfd}
-	rw.readCh <- p2p.Msg{
-		Code:    wit.NewWitnessMsg,
-		Size:    uint32(len(garbage)),
-		Payload: io.NopCloser(bytes.NewReader(garbage)),
-	}
-
-	errCh := make(chan *p2p.PeerError, 1)
-	go func() {
-		errCh <- runWitPeer(t.Context(), peerID, rw, peerInfo, send, hasSubscribers, getWitnessRequest, logger)
-	}()
-
-	select {
-	case peerErr := <-errCh:
-		require.NotNil(t, peerErr, "expected a PeerError for malformed message")
-		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
-	case <-time.After(5 * time.Second):
-		t.Fatal("runWitPeer did not return within timeout")
-	}
-}
-
-// TestRunWitPeer_MalformedNewWitnessHashesMsg verifies the same
-// protection for NewWitnessHashesMsg.
-func TestRunWitPeer_MalformedNewWitnessHashesMsg(t *testing.T) {
-	t.Parallel()
-
-	peerInfo, peerID := newTestPeerInfoWithEth(t)
-
-	rw := NewRLPReadWriter()
-	t.Cleanup(rw.Close)
-
-	logger := log.Root()
-
-	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) {}
-	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
-	getWitnessRequest := func(hash common.Hash, peerID [64]byte) bool { return false }
-
-	// Feed a NewWitnessHashesMsg with garbage RLP payload.
-	garbage := []byte{0xff, 0xfe, 0xfd}
-	rw.readCh <- p2p.Msg{
-		Code:    wit.NewWitnessHashesMsg,
-		Size:    uint32(len(garbage)),
-		Payload: io.NopCloser(bytes.NewReader(garbage)),
-	}
-
-	errCh := make(chan *p2p.PeerError, 1)
-	go func() {
-		errCh <- runWitPeer(t.Context(), peerID, rw, peerInfo, send, hasSubscribers, getWitnessRequest, logger)
-	}()
-
-	select {
-	case peerErr := <-errCh:
-		require.NotNil(t, peerErr, "expected a PeerError for malformed message")
-		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
-	case <-time.After(5 * time.Second):
-		t.Fatal("runWitPeer did not return within timeout")
-	}
 }
 
 func freshNewBlockHashesMsg(t *testing.T, entries int) p2p.Msg {
@@ -931,7 +806,7 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
 	}
 
-	for range newBlockHashesBurst + 10 {
+	for range blockAnnouncementsBurst + 10 {
 		select {
 		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
 		case peerErr := <-errCh:
@@ -983,6 +858,100 @@ func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for forwarded NewBlockHashes")
 		}
+	}
+}
+
+func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
+	for _, subscribers := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribers=%t", subscribers), func(t *testing.T) {
+			peerInfo, peerID := newTestPeerInfoWithEth(t)
+			rw := NewMockMsgReadWriter()
+			for range 40 {
+				require.NoError(t, rw.WriteMsg(p2p.Msg{
+					Code: eth.NewBlockMsg, Size: 1, Payload: bytes.NewReader([]byte{0xc0}),
+				}))
+			}
+			rw.WriteToReadBuffer(rw.ReadAllWritten())
+			forwarded := 0
+			peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68},
+				rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
+				func(sentryproto.MessageId) bool { return subscribers }, log.Root())
+			require.NotNil(t, peerErr)
+			require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+			if subscribers {
+				require.Positive(t, forwarded)
+				require.Less(t, forwarded, 40)
+			} else {
+				require.Zero(t, forwarded)
+			}
+		})
+	}
+}
+
+func TestSentryServer_BoundsQueuedPayloadBytes(t *testing.T) {
+	ss := &GrpcServer{}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	defer ss.addMessagesStream([]sentryproto.MessageId{sentryproto.MessageId_NEW_BLOCK_66}, server)()
+	data := make([]byte, eth.ProtocolMaxMsgSize)
+	for range 20 {
+		ss.send(sentryproto.MessageId_NEW_BLOCK_66, [64]byte{}, data)
+	}
+	server.Close()
+	var queuedBytes, count int
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		count++
+	}
+	require.Equal(t, 6, count)
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+}
+
+func TestSentryServer_BoundsMixedUploadRequestBytes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ss := &GrpcServer{}
+	ids := []sentryproto.MessageId{
+		sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		sentryproto.MessageId_GET_RECEIPTS_66,
+	}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	defer server.Close()
+	defer ss.addMessagesStream(ids, server)()
+	data, err := rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+		RequestId:            1,
+		GetBlockBodiesPacket: make(eth.GetBlockBodiesPacket, 317700),
+	})
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(data), eth.ProtocolMaxMsgSize)
+	var receipts eth.GetReceiptsPacket66
+	require.NoError(t, rlp.DecodeBytes(data, &receipts))
+	const flood = 20
+	for i := range flood {
+		ss.send(ids[i%len(ids)], [64]byte{byte(i)}, data)
+	}
+	server.Close()
+	var queuedBytes int
+	messages := make([]*sentryproto.InboundMessage, 0, 6)
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		messages = append(messages, message)
+	}
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+	require.Len(t, messages, 6)
+	for i, message := range messages {
+		sequence := flood - len(messages) + i
+		require.Equal(t, [64]byte{byte(sequence)}, gointerfaces.ConvertH512ToHash(message.PeerId))
+		require.Equal(t, ids[sequence%len(ids)], message.Id)
 	}
 }
 
@@ -1076,7 +1045,6 @@ func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 	// Ghost: no protocol set anywhere yet (RLPx-only / in-flight handshake).
 	ghost, _ := newTestPeerInfoWithEth(t)
 	ghost.protocol = 0
-	ghost.witProtocol = 0
 	var ghostKey [64]byte
 	ghostKey[0] = 0x43
 	store.peers[ghostKey] = ghost
@@ -1092,69 +1060,6 @@ func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 	reply, err := ss.Peers(context.Background(), nil)
 	require.NoError(t, err)
 	require.Len(t, reply.Peers, 1, "only the entry matching this sentry's eth version should be reported")
-}
-
-// TestGrpcServer_SharedPeerStore_VisibleToEthAndWit covers the central
-// invariant of SetSharedPeerStore: two GrpcServers backing one p2p.Server,
-// after the swap, see the same PeerInfo when one of them calls
-// getOrCreatePeer. That's what unblocks wit/0's WaitForEth in shared-
-// Server mode — eth/* runs on a different sentry but populates the same
-// PeerInfo's protocol field.
-func TestGrpcServer_SharedPeerStore_VisibleToEthAndWit(t *testing.T) {
-	shared := NewPeerStore()
-	ethSentry := &GrpcServer{statusReady: make(chan struct{})}
-	ethSentry.peers.Store(NewPeerStore())
-	witSentry := &GrpcServer{statusReady: make(chan struct{})}
-	witSentry.peers.Store(NewPeerStore())
-	ethSentry.SetSharedPeerStore(shared)
-	witSentry.SetSharedPeerStore(shared)
-
-	pi, peerID := newTestPeerInfoWithEth(t)
-	store := ethSentry.peers.Load()
-	store.mu.Lock()
-	store.peers[peerID] = pi
-	store.mu.Unlock()
-
-	// witSentry shares the same store, so the entry placed via ethSentry
-	// must be visible through witSentry too.
-	got := witSentry.getPeer(peerID)
-	require.NotNil(t, got, "shared PeerStore: wit-side sentry must see entry placed by eth-side sentry")
-	require.Same(t, pi, got)
-}
-
-// TestGrpcServer_ProtocolForMessageID_ResolvesByMessageId guards the
-// disambiguation that writePeer relies on: eth and wit reuse the same
-// numeric msg codes (e.g. 0x01 is both eth.NewBlockHashesMsg and
-// wit.NewWitnessHashesMsg). Routing by numeric code would always pick
-// the eth Protocol entry when eth is registered first, sending wit
-// frames at the wrong RLPx offset. Looking up by sentryproto.MessageId
-// (which is globally unique) avoids the collision.
-func TestGrpcServer_ProtocolForMessageID_ResolvesByMessageId(t *testing.T) {
-	ss := &GrpcServer{
-		Protocols: []p2p.Protocol{
-			{
-				Name:      eth.ProtocolName,
-				Version:   direct.ETH69,
-				FromProto: eth.FromProto[direct.ETH69],
-			},
-			{
-				Name:      wit.ProtocolName,
-				Version:   wit.ProtocolVersions[0],
-				FromProto: wit.FromProto[wit.ProtocolVersions[0]],
-			},
-		},
-	}
-
-	name, version := ss.protocolForMessageID(sentryproto.MessageId_NEW_BLOCK_HASHES_66)
-	require.Equal(t, eth.ProtocolName, name)
-	require.Equal(t, uint(direct.ETH69), version)
-
-	// wit.NewWitnessHashesMsg shares the same numeric code (0x01) as
-	// eth.NewBlockHashesMsg. The MessageId-based lookup must still
-	// resolve to wit here.
-	name, version = ss.protocolForMessageID(sentryproto.MessageId_NEW_WITNESS_HASHES_W0)
-	require.Equal(t, wit.ProtocolName, name)
-	require.Equal(t, wit.ProtocolVersions[0], version)
 }
 
 // TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close
@@ -1491,9 +1396,8 @@ func TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites(t *testing.T) 
 			ethVersion:  v,
 			logger:      log.New(),
 			Protocols: []p2p.Protocol{{
-				Name:      eth.ProtocolName,
-				Version:   v,
-				FromProto: eth.FromProto[v],
+				Name:    eth.ProtocolName,
+				Version: v,
 			}},
 		}
 		ss.peers.Store(NewPeerStore())
@@ -1503,7 +1407,7 @@ func TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites(t *testing.T) 
 
 	pi, peerID := newTestPeerInfoWithEth(t)
 	rw := &countingMsgReadWriter{}
-	pi.SetEthRw(rw)
+	pi.rw = rw
 	pi.SetEthProtocol(direct.ETH70)
 	store := servers[0].peers.Load()
 	store.mu.Lock()

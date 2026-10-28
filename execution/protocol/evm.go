@@ -39,7 +39,8 @@ import (
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
-	engine rules.EngineReader, author accounts.Address, config *chain.Config) evmtypes.BlockContext {
+	engine rules.EngineReader, author accounts.Address, config *chain.Config,
+) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary accounts.Address
 	if author.IsNil() {
@@ -170,7 +171,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				defer hashLookupCacheLock.Lock()
 				return getHeader(hash, num)
 			}()
-
 			if err != nil {
 				return common.Hash{}, err
 			}

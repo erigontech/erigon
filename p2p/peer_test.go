@@ -134,9 +134,15 @@ func TestPeerProtoReadMsg(t *testing.T) {
 	closer, rw, _, errc := testPeer([]Protocol{proto})
 	defer closer()
 
-	Send(rw, baseProtocolLength+2, []uint{1})
-	Send(rw, baseProtocolLength+3, []uint{2})
-	Send(rw, baseProtocolLength+4, []uint{3})
+	if err := Send(rw, baseProtocolLength+2, []uint{1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Send(rw, baseProtocolLength+3, []uint{2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Send(rw, baseProtocolLength+4, []uint{3}); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case err := <-errc:
@@ -249,8 +255,8 @@ func TestPeerDisconnectRace(t *testing.T) {
 		})
 
 		// Simulate incoming messages.
-		go SendItems(rw, baseProtocolLength+1)
-		go SendItems(rw, baseProtocolLength+2)
+		go func() { _ = SendItems(rw, baseProtocolLength+1) }()
+		go func() { _ = SendItems(rw, baseProtocolLength+2) }()
 		// Close the network connection.
 		go closer()
 		// Make protocol "closereq" return.
@@ -263,7 +269,7 @@ func TestPeerDisconnectRace(t *testing.T) {
 		}
 		// In some cases, simulate remote requesting a disconnect.
 		if maybe() {
-			go SendItems(rw, discMsg, DiscQuitting)
+			go func() { _ = SendItems(rw, discMsg, DiscQuitting) }()
 		}
 
 		select {

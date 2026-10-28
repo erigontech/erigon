@@ -26,9 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var (
-	blsSignatureT = reflect.TypeFor[Bytes96]()
-)
+var blsSignatureT = reflect.TypeFor[Bytes96]()
 
 type Bytes96 [length.Bytes96]byte
 

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -81,32 +82,16 @@ func shouldBuild(singleHeaderBatch, alreadyCached bool) bool {
 func waitCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, hash common.Hash) (kv.TemporalTx, bool, error) {
 	backoff := witnessBuildInitialBackoff
 	for {
-		// The tx is handed to the caller on a match and rolled back explicitly on every
-		// other branch, so a deferred rollback is inapplicable (and wrong inside the loop).
-		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		tx, state, err := checkCommittedHead(ctx, db, num, hash)
 		if err != nil {
 			return nil, false, err
 		}
-		committedHead, err := stages.GetStageProgress(tx, stages.Finish)
-		if err != nil {
-			tx.Rollback()
-			return nil, false, err
-		}
-		var canonicalHash common.Hash
-		if committedHead >= num {
-			if canonicalHash, err = rawdb.ReadCanonicalHash(tx, num); err != nil {
-				tx.Rollback()
-				return nil, false, err
-			}
-		}
-		switch decideCommittedHead(committedHead, num, canonicalHash, hash) {
+		switch state {
 		case headBuild:
 			return tx, true, nil
 		case headReorged:
-			tx.Rollback()
 			return nil, false, nil
 		default: // headWait
-			tx.Rollback()
 			select {
 			case <-ctx.Done():
 				return nil, false, ctx.Err()
@@ -120,15 +105,44 @@ func waitCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, hash
 	}
 }
 
+// checkCommittedHead returns the open tx only for headBuild; the caller owns it.
+func checkCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, hash common.Hash) (kv.TemporalTx, headState, error) {
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, headWait, err
+	}
+	ok := false
+	defer kv.RollbackUnless(&ok, tx)
+	committedHead, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return nil, headWait, err
+	}
+	var canonicalHash common.Hash
+	if committedHead >= num {
+		if canonicalHash, err = rawdb.ReadCanonicalHash(tx, num); err != nil {
+			return nil, headWait, err
+		}
+	}
+	state := decideCommittedHead(committedHead, num, canonicalHash, hash)
+	if state != headBuild {
+		return nil, state, nil
+	}
+	ok = true
+	return tx, state, nil
+}
+
 // rollingPin is the one-block-lag parent snapshot the head-capture builder holds: an
 // open RO temporal tx whose commitment-latest is the parent(B) commitment plane when it
 // is pinned at B-1, tagged with the (num, hash) it was opened at. Owned solely by the
 // builder goroutine; released and re-opened as the tip rolls forward.
 type rollingPin struct {
 	tx   kv.TemporalTx
+	warm []kv.TemporalTx
 	num  uint64
 	hash common.Hash
 }
+
+const headCaptureWarmTxs = 4
 
 // close rolls back the pinned tx and clears it, so a second call is a no-op.
 func (p *rollingPin) close() {
@@ -136,6 +150,21 @@ func (p *rollingPin) close() {
 		p.tx.Rollback()
 		p.tx = nil
 	}
+	if p != nil {
+		for _, tx := range p.warm {
+			tx.Rollback()
+		}
+		p.warm = nil
+	}
+}
+
+func pinHead(tx kv.TemporalTx) (uint64, common.Hash, error) {
+	num, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil || num == 0 {
+		return 0, common.Hash{}, err
+	}
+	hash, err := rawdb.ReadCanonicalHash(tx, num)
+	return num, hash, err
 }
 
 // openRollingPin opens a fresh RO temporal tx pinned at the current committed head and
@@ -143,31 +172,33 @@ func (p *rollingPin) close() {
 // head's commitment plane. It returns (nil,nil) before any block has committed (num 0)
 // or when the head has no canonical hash. The caller owns the returned tx.
 func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error) {
-	// The tx is handed to the caller on success and rolled back on every other branch,
-	// so a deferred rollback is inapplicable.
 	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	num, err := stages.GetStageProgress(tx, stages.Finish)
+	ok := false
+	defer kv.RollbackUnless(&ok, tx)
+	num, hash, err := pinHead(tx)
 	if err != nil {
-		tx.Rollback()
 		return nil, err
 	}
-	if num == 0 {
-		tx.Rollback()
+	if num == 0 || hash == (common.Hash{}) {
 		return nil, nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, num)
-	if err != nil {
-		tx.Rollback()
-		return nil, err
+	ok = true
+	p := &rollingPin{tx: tx, num: num, hash: hash}
+	for range headCaptureWarmTxs - 1 {
+		w, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			break
+		}
+		if n, h, err := pinHead(w); err != nil || n != num || h != hash {
+			w.Rollback()
+			break
+		}
+		p.warm = append(p.warm, w)
 	}
-	if hash == (common.Hash{}) {
-		tx.Rollback()
-		return nil, nil
-	}
-	return &rollingPin{tx: tx, num: num, hash: hash}, nil
+	return p, nil
 }
 
 // pinVerdict is decidePin's ruling on whether the held rolling pin can serve as the
@@ -241,6 +272,10 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 		return
 	}
 	headCapture := dbg.witnessCache.HeadCapture()
+	if headCapture {
+		commitmentdb.WantParentReads(true)
+		defer commitmentdb.WantParentReads(false)
+	}
 	// pin is the one-block-lag parent snapshot for head-capture builds; nil in the
 	// durable path. The deferred close releases whichever pin is held at shutdown.
 	var pin *rollingPin
@@ -383,9 +418,9 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
-	if err != nil {
+	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
 		} else {
@@ -394,14 +429,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := result.MarshalFastJSON()
-	if err != nil {
-		witnessCacheBuildFailOtherCounter.Inc()
-		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
-		return false
-	}
-	api.storeWitness(num, hash, enc)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
@@ -473,9 +500,13 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
-	if err != nil {
+	records := commitmentdb.ParentRecordsFor(num, hash, parentHash)
+	if records != nil {
+		witnessCacheParentRecordsCounter.Inc()
+	}
+	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin, records, info, witnessModeLegacy)
+	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
 		} else {
@@ -484,19 +515,18 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := result.MarshalFastJSON()
-	if err != nil {
-		witnessCacheBuildFailOtherCounter.Inc()
-		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
-		return false
-	}
-	api.storeWitness(num, hash, enc)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
 
-func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, enc []byte) {
-	api.witnessCache.store(num, hash, enc)
+func (api *DebugAPIImpl) storeBuiltWitness(num uint64, hash common.Hash) witnessStoreFunc {
+	return func(r *ExecutionWitnessResult, took time.Duration) {
+		witnessCacheBuildDuration.Observe(took.Seconds())
+		api.storeWitness(num, hash, r)
+	}
+}
+
+func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, result *ExecutionWitnessResult) {
+	api.witnessCache.store(num, hash, result)
 	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
 }

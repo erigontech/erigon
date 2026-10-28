@@ -189,7 +189,7 @@ func TestSize(t *testing.T) {
 
 	// Now add a signature.
 	nodeid := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	signTest(nodeid, &r)
+	require.NoError(t, signTest(nodeid, &r))
 	assert.Equal(t, uint64(45), r.Size())
 	enc, _ := rlp.EncodeToBytes(&r)
 	if r.Size() != uint64(len(enc)) {
@@ -206,7 +206,7 @@ func TestSeq(t *testing.T) {
 	assert.Equal(t, uint64(0), r.Seq())
 	r.Set(UDP(1))
 	assert.Equal(t, uint64(0), r.Seq())
-	signTest([]byte{5}, &r)
+	require.NoError(t, signTest([]byte{5}, &r))
 	assert.Equal(t, uint64(0), r.Seq())
 	r.Set(UDP(2))
 	assert.Equal(t, uint64(1), r.Seq())
@@ -350,30 +350,4 @@ func (testSig) NodeAddr(r *Record) []byte {
 		return nil
 	}
 	return id
-}
-
-func BenchmarkDecodeRecord(b *testing.B) {
-	var r Record
-	r.Set(IPv4{192, 0, 2, 1})
-	r.Set(TCP(30303))
-	r.Set(UDP(30303))
-	r.Set(IPv6{0x20, 0x01, 0xd, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
-	r.Set(TCP6(30303))
-	r.Set(UDP6(30303))
-	r.Set(WithEntry("eth", []byte{0xc7, 0xc6, 0x84, 0xa0, 0x0b, 0xc6, 0x80}))
-	r.Set(WithEntry("attnets", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))
-	require.NoError(b, signTest([]byte{5}, &r))
-
-	enc, err := rlp.EncodeToBytes(&r)
-	require.NoError(b, err)
-	b.Logf("record size %d bytes, %d pairs", len(enc), len(r.pairs))
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		var dec Record
-		if err := rlp.DecodeBytes(enc, &dec); err != nil {
-			b.Fatal(err)
-		}
-	}
 }

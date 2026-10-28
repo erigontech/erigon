@@ -415,7 +415,7 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	// Phase 4 invariant: rebuild dir is gone.
 	rebuildDir := filepath.Join(agg.Dirs().Snap, "rebuild", "domain")
 	_, statErr := os.Stat(rebuildDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"rebuild dir must be removed; got err=%v", statErr)
 
 	// Phase 4 invariant: snapshots/domain/ has a fresh .kv + .kvi for each
@@ -600,9 +600,9 @@ func TestConvertCommitmentFiles_AllAlreadyTarget(t *testing.T) {
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
 	rebuildDir := filepath.Join(agg.Dirs().Snap, "rebuild", "domain")
 	_, err := os.Stat(backupDir)
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "backup dir must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "backup dir must not exist (err=%v)", err)
 	_, err = os.Stat(rebuildDir)
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "rebuild dir must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "rebuild dir must not exist (err=%v)", err)
 }
 
 // TestConvertCommitmentFiles_EmptyDatadir covers the no-files-at-all path:
@@ -626,9 +626,9 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 
 	// Nothing was created.
 	_, err = os.Stat(filepath.Join(agg.Dirs().Snap, "backup"))
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "backup must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "backup must not exist (err=%v)", err)
 	_, err = os.Stat(filepath.Join(agg.Dirs().Snap, "rebuild"))
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "rebuild must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "rebuild must not exist (err=%v)", err)
 }
 
 // TestConvertCommitmentFiles_BackupExists covers the pre-flight refusal path:
@@ -679,7 +679,7 @@ func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
 
 	// Junk gone; conversion completed.
 	_, err := os.Stat(junk)
-	require.Truef(t, errors.Is(err, os.ErrNotExist),
+	require.ErrorIsf(t, err, os.ErrNotExist,
 		"stale rebuild file must be wiped (err=%v)", err)
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
 	_, err = os.Stat(backupDir)
@@ -811,7 +811,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 		require.Truef(t, bytes.Equal(want, got), "snapDomain file %s mutated during Phase 1 cancel", name)
 	}
 	_, statErr := os.Stat(backupDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"backup dir must not exist after Phase 1 cancel (Phase 3 did not run): %v", statErr)
 
 	// Second run: Continue=true, fresh ctx, hook installed only to count calls
@@ -838,7 +838,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 
 	// Phase 4 invariant: rebuildDir is gone.
 	_, statErr = os.Stat(rebuildDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"rebuildDir must be removed after successful resume: %v", statErr)
 
 	// Phase 3 invariant: every original is backed up.
@@ -913,10 +913,10 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 	require.Equal(t, origBT, restoredBT, "bt must hold original backup bytes")
 
 	_, statErr := os.Stat(backupDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"backup dir must be removed after restore (err=%v)", statErr)
 	_, statErr = os.Stat(filepath.Join(dirs.Snap, "backup"))
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"empty backup parent must be removed (err=%v)", statErr)
 }
 
@@ -968,10 +968,10 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 
 	// Sweep removed both cross-version artifacts.
 	_, statErr := os.Stat(convKVPath)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"v2.1 .kv orphan must be swept (err=%v)", statErr)
 	_, statErr = os.Stat(convKVEIPath)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"v2.1 .kvei orphan must be swept (err=%v)", statErr)
 
 	// Originals restored with backup content.
@@ -1019,7 +1019,7 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 
 	// Backup tree gone after successful completion.
 	_, statErr := os.Stat(backupDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"backup dir must be removed after successful retry (err=%v)", statErr)
 }
 

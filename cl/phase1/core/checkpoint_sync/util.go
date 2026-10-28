@@ -18,16 +18,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 )
 
+func RemoteCheckpointSyncEnabled(caplinConfig clparams.CaplinConfig) bool {
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	return !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
+}
+
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
 // If remote checkpoint sync fails, it falls back to the local finalized state on disk.
 // If no local finalized state is available, it returns an error.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
 	var syncer CheckpointSyncer
-	// Allow remote checkpoint sync for devnets when the user explicitly provides a checkpoint sync URL.
-	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
-	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
-
-	if remoteSync {
+	if RemoteCheckpointSyncEnabled(caplinConfig) {
 		// Prefer resuming from our own most-recently-finalized state (local, reorg-immune) so the
 		// node comes up at a finalized anchor at/below the EL head — no network fetch, no EL backfill.
 		if localFinalized := tryResumeFromLocalFinalizedState(dirs, beaconCfg, caplinConfig, genesisDB); localFinalized != nil {
@@ -199,9 +200,7 @@ func stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, h
 
 // FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
 func FetchFinalizedEnvelope(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedExecutionPayloadEnvelope {
-	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
-	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
-	if !remoteSync {
+	if !RemoteCheckpointSyncEnabled(caplinConfig) {
 		return nil
 	}
 

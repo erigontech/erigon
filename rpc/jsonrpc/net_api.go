@@ -44,13 +44,10 @@ func NewNetAPIImpl(eth rpchelper.ApiBackend) *NetAPIImpl {
 	}
 }
 
-// Listening implements net_listening. Returns true if client is actively listening for network connections.
-// If we can get peers info, it means the network interface is up and listening
-func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
-	_, err := api.ethBackend.Peers(ctx)
-	if err != nil {
-		return false, nil
-	}
+// Listening implements net_listening.
+// Always true, as in geth and Nethermind: probing the sentries would build the info of every peer
+// only to discard it, which makes this the slowest of the trivial RPC methods.
+func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
 	return true, nil
 }
 

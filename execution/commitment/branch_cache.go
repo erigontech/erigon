@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"sync"
@@ -47,9 +48,8 @@ type BranchCache struct {
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
 	accountTrunk *trunk
 
-	pinned        atomic.Pointer[maphash.Map[*trunk]]
-	pinnedMu      sync.Mutex
-	pinnedEntries atomic.Int64
+	pinned   atomic.Pointer[maphash.Map[*trunk]]
+	pinnedMu sync.Mutex
 
 	tail    atomic.Pointer[tailLRU]
 	tailCap uint32
@@ -73,10 +73,12 @@ type BranchCache struct {
 
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
+	lastPublishedStaleEvicted atomic.Uint64
 
 	putStripes [256]sync.Mutex
 
-	coh coherence.Gen
+	coh         coherence.Gen
+	unwoundView atomic.Uint64 // MDBX txn that committed the latest unwind
 }
 
 type branchCacheEntry struct {
@@ -100,6 +102,7 @@ type trunk struct {
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
 
+	entries  atomic.Int64
 	maxDepth uint8
 }
 
@@ -352,8 +355,8 @@ func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 		return hash, false
 	}
 	if prefix[0]&0x10 != 0 { // odd: first nibble is the low nibble of byte 0
-		for i := range 32 {
-			hash[i] = prefix[i]&0x0f<<4 | prefix[i+1]>>4
+		for i := 0; i < 32; i += 8 {
+			binary.BigEndian.PutUint64(hash[i:], binary.BigEndian.Uint64(prefix[i:])<<4|uint64(prefix[i+8]>>4))
 		}
 		return hash, true
 	}
@@ -523,25 +526,60 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		c.tailForWrite().Add(maphash.Hash(prefix), entry)
 		return
 	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(prefix))
+	}
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		// Swap publishes and reads prior occupancy in one step: eviction
 		// (Invalidate from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
 		if slot.Swap(entry) == nil {
-			c.pinnedEntries.Add(1)
+			st.entries.Add(1)
 		}
 		return
 	}
 	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
-		c.pinnedEntries.Add(1)
+		st.entries.Add(1)
 	}
 }
 
 func (c *BranchCache) PinnedCount() int {
-	return int(c.pinnedEntries.Load())
+	p := c.pinned.Load()
+	if p == nil {
+		return 0
+	}
+	var n int64
+	p.Range(func(_ uint64, st *trunk) bool {
+		n += st.entries.Load()
+		return true
+	})
+	return int(n)
+}
+
+func (c *BranchCache) PinnedCountFor(contractHash []byte) int {
+	p := c.pinned.Load()
+	if p == nil {
+		return 0
+	}
+	st, ok := p.Get(contractHash)
+	if !ok {
+		return 0
+	}
+	return int(st.entries.Load())
+}
+
+func (c *BranchCache) UnpinContract(contractHash []byte) {
+	if p := c.pinned.Load(); p != nil {
+		p.Delete(contractHash)
+	}
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
+	return c.GetBefore(prefix, ^uint64(0))
+}
+
+// GetBefore rejects newer entries without evicting them from other readers.
+func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
@@ -553,6 +591,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if coh.IsStale(entry.txN, entry.epoch) {
 		c.Invalidate(prefix)
 		c.staleEvicted.Add(1)
+		return nil, 0, false
+	}
+	if entry.txN >= txNum {
 		return nil, 0, false
 	}
 	c.bytesServed.Add(uint64(len(entry.data)))
@@ -579,6 +620,31 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
+// Fill copies a branch read through MDBX txn viewID. It drops the read if that txn is older than the latest
+// committed unwind, or if an Unwind or Clear ran during the read.
+func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64) {
+	epoch := c.coh.Epoch()
+	if viewID < c.unwoundView.Load() || isCommitmentStateKey(prefix) {
+		return
+	}
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	if c.coh.Epoch() != epoch {
+		return
+	}
+	c.store(prefix, &branchCacheEntry{
+		data:  dataCopy,
+		step:  step,
+		txN:   txN,
+		epoch: epoch,
+	})
+}
+
 func (c *BranchCache) Invalidate(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
@@ -592,10 +658,10 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			if slot.Swap(nil) != nil {
-				c.pinnedEntries.Add(-1)
+				st.entries.Add(-1)
 			}
 		} else if _, loaded := st.deep.LoadAndDelete(prefix); loaded {
-			c.pinnedEntries.Add(-1)
+			st.entries.Add(-1)
 		}
 	}
 	if tail := c.tail.Load(); tail != nil {
@@ -609,6 +675,12 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
+// UnwindCommitted is Unwind for an unwind committed by MDBX txn viewID; older txns can no longer Fill.
+func (c *BranchCache) UnwindCommitted(unwindToTxN, viewID uint64) {
+	c.unwoundView.Store(viewID) // before the epoch bump, see Fill
+	c.Unwind(unwindToTxN)
+}
+
 // Clear holds every writer stripe so a publication cannot cross generations.
 func (c *BranchCache) Clear() {
 	c.lockAllPutStripes()
@@ -617,7 +689,6 @@ func (c *BranchCache) Clear() {
 	c.root.Store(nil)
 	c.clearTrunk()
 	c.pinned.Store(nil)
-	c.pinnedEntries.Store(0)
 	if tail := c.tail.Load(); tail != nil {
 		tail.reset()
 	}
@@ -633,6 +704,7 @@ func (c *BranchCache) Clear() {
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
 	c.staleEvicted.Store(0)
+	c.lastPublishedStaleEvicted.Store(0)
 	c.coh.Reset()
 }
 
@@ -653,7 +725,7 @@ func (c *BranchCache) Stats() string {
 		"branch-cache root hit=%d miss=%d (%.1f%%) | trunk hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | staleEvicted=%d",
 		rh, rm, pct(rh, rm),
 		kh, km, pct(kh, km),
-		ph, pm, pct(ph, pm), int(c.pinnedEntries.Load()),
+		ph, pm, pct(ph, pm), c.PinnedCount(),
 		th, tm, pct(th, tm), c.tailLen(),
 		float64(bb)/1024/1024, c.staleEvicted.Load(),
 	)

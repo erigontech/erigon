@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -31,46 +30,75 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
-
-//go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
 
 func init() {
 	register("callTracer", newCallTracer)
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callLog -out gen_calllog_fastjson.go
 type callLog struct {
-	Index    hexutil.Uint64 `json:"index"`
-	Address  common.Address `json:"address"`
-	Topics   []common.Hash  `json:"topics"`
-	Data     hexutil.Bytes  `json:"data"`
-	Position hexutil.Uint   `json:"position"`
+	Index    hexutil.Uint64 `json:"index" ethjson:"quantity"`
+	Address  common.Address `json:"address" ethjson:"data"`
+	Topics   []common.Hash  `json:"topics" ethjson:"datalist"`
+	Data     hexutil.Bytes  `json:"data" ethjson:"data"`
+	Position hexutil.Uint   `json:"position" ethjson:"quantity"`
 }
+
+type callLogs []callLog
+
+func (ls callLogs) MarshalFastJSONTo(s *jsonstream.Stream) error { return writeObjects(s, ls) }
+
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callFrame -out gen_callframe_fastjson.go
 
 type callFrame struct {
-	Type     vm.OpCode      `json:"-"`
-	From     common.Address `json:"from"`
-	Gas      uint64         `json:"gas"`
-	GasUsed  uint64         `json:"gasUsed"`
-	To       common.Address `json:"to,omitempty" rlp:"optional"`
-	Input    []byte         `json:"input" rlp:"optional"`
-	Output   []byte         `json:"output,omitempty" rlp:"optional"`
-	Error    string         `json:"error,omitempty" rlp:"optional"`
-	Revertal string         `json:"revertReason,omitempty"`
-	Calls    []callFrame    `json:"calls,omitempty" rlp:"optional"`
-	Logs     []callLog      `json:"logs,omitempty" rlp:"optional"`
-	// Placed at end on purpose. The RLP will be decoded to 0 instead of
-	// nil if there are non-empty elements after in the struct.
-	Value *big.Int `json:"value,omitempty" rlp:"optional"`
+	Type           vm.OpCode       `json:"-"`
+	From           common.Address  `json:"from" ethjson:"data"`
+	Gas            hexutil.Uint64  `json:"gas" ethjson:"quantity"`
+	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty" ethjson:"quantity"`
+	GasUsed        hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`                  // root frame: receipt gas after refund and floor; child frame: execution gas.
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty" ethjson:"quantity"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty" ethjson:"quantity"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
+	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty" ethjson:"quantity"`
+	To             *common.Address `json:"to,omitempty" ethjson:"data"`
+	Input          hexutil.Bytes   `json:"input" ethjson:"data"`
+	Output         hexutil.Bytes   `json:"output,omitempty" ethjson:"data"`
+	Error          string          `json:"error,omitempty" ethjson:"string"`
+	Revertal       string          `json:"revertReason,omitempty" ethjson:"string"`
+	Calls          callFrames      `json:"calls,omitempty" ethjson:"objects"`
+	Logs           callLogs        `json:"logs,omitempty" ethjson:"objects"`
+	Value          *hexutil.U256   `json:"value,omitempty" ethjson:"quantity"`
+	TypeStr        string          `json:"type" ethjson:"string"`
 }
 
-func (f *callFrame) TypeString() string {
-	return f.Type.String()
+type callFrames []callFrame
+
+func (fs callFrames) MarshalFastJSONTo(s *jsonstream.Stream) error { return writeObjects(s, fs) }
+
+func writeObjects[E any, P interface {
+	*E
+	jsonstream.Marshaler
+}](s *jsonstream.Stream, items []E) error {
+	s.WriteArrayStart()
+	for i := range items {
+		if err := P(&items[i]).MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayEnd()
+	return nil
+}
+
+// setType keeps the opcode and its wire spelling in step.
+func (f *callFrame) setType(op vm.OpCode) {
+	f.Type, f.TypeStr = op, op.String()
 }
 
 func (f *callFrame) failed() bool {
@@ -85,7 +113,7 @@ func (f *callFrame) processOutput(output []byte, err error) {
 	}
 	f.Error = err.Error()
 	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
-		f.To = common.Address{}
+		f.To = nil
 	}
 	if !errors.Is(err, vm.ErrExecutionReverted) || len(output) == 0 {
 		return
@@ -99,25 +127,15 @@ func (f *callFrame) processOutput(output []byte, err error) {
 	}
 }
 
-type callFrameMarshaling struct {
-	TypeString string `json:"type"`
-	Gas        hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Value      *hexutil.Big
-	Input      hexutil.Bytes
-	Output     hexutil.Bytes
-}
-
 type callTracer struct {
 	callstack   []callFrame
 	config      callTracerConfig
 	gasLimit    uint64
+	isAmsterdam bool
 	depth       int
 	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
 	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
-	logIndex    uint64
-	logGaps     map[uint64]int
-	precompiles []bool // keep track of whether scopes are for pre-compiles or not
+	precompiles []bool                // keep track of whether scopes are for pre-compiles or not
 }
 
 func defaultCallTracerConfig() callTracerConfig {
@@ -147,55 +165,18 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
+			OnTxEndV2: t.OnTxEndV2,
+			OnEnterV2: t.OnEnterV2,
+			OnExitV2:  t.OnExitV2,
 			OnLog:     t.OnLog,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:         t.GetResult,
+		MarshalFastJSONTo: t.MarshalFastJSONTo,
+		Stop:              t.Stop,
 	}, nil
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.precompiles = append(t.precompiles, precompile)
-	if precompile && !t.config.IncludePrecompiles {
-		return
-	}
-	var toValue common.Address
-	if !to.IsNil() {
-		toValue = to.Value()
-	}
-	t.callstack[0] = callFrame{
-		Type:  vm.CALL,
-		From:  from.Value(),
-		To:    toValue,
-		Input: bytes.Clone(input),
-		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
-	}
-	if value != nil {
-		t.callstack[0].Value = value.ToBig()
-	}
-	if create {
-		t.callstack[0].Type = vm.CREATE
-	}
-}
-
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
-
-	if len(t.callstack) == 0 {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		return
-	}
-
-	t.callstack[0].processOutput(output, err)
-}
-
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *callTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)
 	if t.config.OnlyTopCall && depth > 0 {
@@ -209,31 +190,33 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		return
 	}
 
-	var toValue common.Address
+	var toValue *common.Address
 	if !to.IsNil() {
-		toValue = to.Value()
+		v := to.Value()
+		toValue = &v
 	}
 	call := callFrame{
-		Type:  vm.OpCode(typ),
-		From:  from.Value(),
-		To:    toValue,
-		Input: bytes.Clone(input),
-		Gas:   gas,
+		From:     from.Value(),
+		To:       toValue,
+		Input:    bytes.Clone(input),
+		Gas:      hexutil.Uint64(gas.Execution),
+		StateGas: hexutil.Uint64(gas.State),
 	}
 
+	call.setType(vm.OpCode(typ))
 	if call.Type != vm.STATICCALL {
-		call.Value = value.ToBig()
+		call.Value = (*hexutil.U256)(&value)
 	}
 
 	if depth == 0 {
-		call.Gas = t.gasLimit
+		call.Gas = hexutil.Uint64(t.gasLimit)
 	}
 	t.callstack = append(t.callstack, call)
 }
 
-func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *callTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth == 0 {
-		t.captureEnd(output, gasUsed, err, reverted)
+		t.captureEnd(output, err)
 		return
 	}
 
@@ -261,12 +244,15 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
-	call.GasUsed = gasUsed
+	call.GasUsed = hexutil.Uint64(gasUsed.Execution)
+	if t.isAmsterdam {
+		call.StateGasUsed = (*hexutil.Int64)(&gasUsed.State)
+	}
 	call.processOutput(output, err)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *callTracer) captureEnd(output []byte, err error) {
 	if len(t.callstack) != 1 {
 		return
 	}
@@ -275,11 +261,10 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.gasLimit = tx.GetGasLimit()
-	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
+	t.isAmsterdam = env.Rules.IsAmsterdam
 }
 
-func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	// Error happened during tx validation.
 	if err != nil {
 		return
@@ -291,14 +276,17 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 
-	t.callstack[0].GasUsed = receipt.GasUsed
+	t.callstack[0].GasUsed = hexutil.Uint64(receipt.GasUsed)
+	if t.isAmsterdam {
+		t.callstack[0].RegularGasUsed = toHexUint64Ptr(txnGasUsage.BlockExecutionGasUsed)
+		stateGasUsed := hexutil.Int64(txnGasUsage.BlockStateGasUsed)
+		t.callstack[0].StateGasUsed = &stateGasUsed
+		t.callstack[0].GasRefund = toHexUint64Ptr(txnGasUsage.GasRefund)
+	}
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false, t.logGaps)
-		fixLogIndexGap(&t.callstack[0], addCumulativeGaps(t.logIndex, t.logGaps))
+		clearFailedLogs(&t.callstack[0], false)
 	}
-	t.logIndex = 0
-	t.logGaps = nil
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
@@ -314,23 +302,21 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: hexutil.Uint64(t.logIndex), Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
-	t.logIndex++
+	frame := &t.callstack[len(t.callstack)-1]
+	frame.Logs = append(frame.Logs, callLog{
+		Address: log.Address, Topics: log.Topics, Data: log.Data,
+		Index: hexutil.Uint64(log.Index), Position: hexutil.Uint(len(frame.Calls)),
+	})
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *callTracer) GetResult() (json.RawMessage, error) {
-	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		// do not return err, just empty result
-		return nil, nil
+	root, err := t.root()
+	if root == nil || err != nil {
+		return nil, err
 	}
-	if len(t.callstack) != 1 {
-		return nil, errors.New("incorrect number of top-level calls")
-	}
-	res, err := json.Marshal(t.callstack[0])
+	res, err := json.Marshal(root)
 	if err != nil {
 		return nil, err
 	}
@@ -340,58 +326,46 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	return res, nil
 }
 
+func (t *callTracer) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	root, err := t.root()
+	if err != nil {
+		return err
+	}
+	if root == nil {
+		s.WriteNil()
+		return nil
+	}
+	if p := t.reason.Load(); p != nil {
+		return *p
+	}
+	return root.MarshalFastJSONTo(s)
+}
+
+// root is nil without an error when the top-level call went to a precompile and includePrecompiles is false.
+func (t *callTracer) root() (*callFrame, error) {
+	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
+		return nil, nil
+	}
+	if len(t.callstack) != 1 {
+		return nil, errors.New("incorrect number of top-level calls")
+	}
+	return &t.callstack[0], nil
+}
+
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *callTracer) Stop(err error) {
 	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 
-// clearFailedLogs clears the logs of a callframe and all its children
-// in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool, logGaps map[uint64]int) {
+// clearFailedLogs clears the logs of a callframe and all its children in case
+// of execution failure. Revert gave those indices back, so no renumbering.
+func clearFailedLogs(cf *callFrame, parentFailed bool) {
 	failed := cf.failed() || parentFailed
 	if failed {
-		lastIdx := len(cf.Logs) - 1
-		if lastIdx >= 0 && logGaps != nil {
-			idx := uint64(cf.Logs[lastIdx].Index)
-			logGaps[idx] = len(cf.Logs)
-		}
-		// Clear own logs
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed, logGaps)
-	}
-}
-
-// Find the shift position of each potential logIndex
-func addCumulativeGaps(h uint64, logGaps map[uint64]int) []uint64 {
-	if len(logGaps) == 0 || logGaps == nil {
-		return nil
-	}
-	cumulativeGaps := make([]uint64, h)
-	for idx, gap := range logGaps {
-		if idx+1 < h {
-			cumulativeGaps[idx+1] = uint64(gap) // Next index of the last failed index
-		}
-	}
-	for i := 1; i < int(h); i++ {
-		cumulativeGaps[i] += cumulativeGaps[i-1]
-	}
-	return cumulativeGaps
-}
-
-// Recursively shift log indices of callframe - self and children
-func fixLogIndexGap(cf *callFrame, cumulativeGaps []uint64) {
-	if cumulativeGaps == nil {
-		return
-	}
-	if len(cf.Logs) > 0 {
-		for i := range cf.Logs {
-			cf.Logs[i].Index = hexutil.Uint64(uint64(cf.Logs[i].Index) - cumulativeGaps[cf.Logs[i].Index])
-		}
-	}
-	for i := range cf.Calls {
-		fixLogIndexGap(&cf.Calls[i], cumulativeGaps)
+		clearFailedLogs(&cf.Calls[i], failed)
 	}
 }

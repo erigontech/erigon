@@ -26,9 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var (
-	bytes4T = reflect.TypeFor[Bytes4]()
-)
+var bytes4T = reflect.TypeFor[Bytes4]()
 
 type Bytes4 [length.Bytes4]byte
 

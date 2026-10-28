@@ -117,6 +117,7 @@ func (mf MergeResult) FilePaths(relative string) (fPaths []string) {
 	}
 	return fPaths
 }
+
 func (mf *MergeResult) Close() {
 	if mf == nil {
 		return

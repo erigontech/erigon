@@ -322,7 +322,7 @@ func updateSomeNodes(keys []*ecdsa.PrivateKey, nodes []*enode.Node) {
 		r := n.Record()
 		r.Set(enr.IP{127, 0, 0, 1})
 		r.SetSeq(55)
-		enode.SignV4(r, keys[i])
+		_ = enode.SignV4(r, keys[i])
 		n2, _ := enode.New(enode.ValidSchemes, r)
 		nodes[i] = n2
 	}
@@ -432,7 +432,9 @@ func testNodes(keys []*ecdsa.PrivateKey) []*enode.Node {
 	for i, key := range keys {
 		record := new(enr.Record)
 		record.SetSeq(uint64(i))
-		enode.SignV4(record, key)
+		if err := enode.SignV4(record, key); err != nil {
+			panic(err)
+		}
 		n, err := enode.New(enode.ValidSchemes, record)
 		if err != nil {
 			panic(err)

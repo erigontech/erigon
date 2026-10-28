@@ -15,7 +15,8 @@ func (e *ErigonMCPServer) registerResources() {
 
 	// Static resources
 	srv.AddResource(
-		mcp.NewResource("erigon://node/info",
+		mcp.NewResource(
+			"erigon://node/info",
 			"node info",
 			mcp.WithResourceDescription("Get node information and capabilities"),
 			mcp.WithMIMEType("application/json"),
@@ -24,16 +25,8 @@ func (e *ErigonMCPServer) registerResources() {
 	)
 
 	srv.AddResource(
-		mcp.NewResource("erigon://chain/config",
-			"chain config",
-			mcp.WithResourceDescription("Get chain configuration"),
-			mcp.WithMIMEType("application/json"),
-		),
-		e.handleResourceChainConfig,
-	)
-
-	srv.AddResource(
-		mcp.NewResource("erigon://blocks/recent",
+		mcp.NewResource(
+			"erigon://blocks/recent",
 			"recent blocks",
 			mcp.WithResourceDescription("Get recent blocks (default: last 10)"),
 			mcp.WithMIMEType("application/json"),
@@ -42,7 +35,8 @@ func (e *ErigonMCPServer) registerResources() {
 	)
 
 	srv.AddResource(
-		mcp.NewResource("erigon://network/status",
+		mcp.NewResource(
+			"erigon://network/status",
 			"network status",
 			mcp.WithResourceDescription("Get network sync status and peer info"),
 			mcp.WithMIMEType("application/json"),
@@ -51,7 +45,8 @@ func (e *ErigonMCPServer) registerResources() {
 	)
 
 	srv.AddResource(
-		mcp.NewResource("erigon://gas/current",
+		mcp.NewResource(
+			"erigon://gas/current",
 			"gas current",
 			mcp.WithResourceDescription("Get current gas price information"),
 			mcp.WithMIMEType("application/json"),
@@ -61,7 +56,8 @@ func (e *ErigonMCPServer) registerResources() {
 
 	// Resource templates (with parameters)
 	srv.AddResourceTemplate(
-		mcp.NewResourceTemplate("erigon://address/{address}/summary",
+		mcp.NewResourceTemplate(
+			"erigon://address/{address}/summary",
 			"address summary",
 			mcp.WithTemplateDescription("Get address summary (balance, nonce, code)"),
 			mcp.WithTemplateMIMEType("application/json"),
@@ -70,7 +66,8 @@ func (e *ErigonMCPServer) registerResources() {
 	)
 
 	srv.AddResourceTemplate(
-		mcp.NewResourceTemplate("erigon://block/{number}/summary",
+		mcp.NewResourceTemplate(
+			"erigon://block/{number}/summary",
 			"block summary",
 			mcp.WithTemplateDescription("Get block summary"),
 			mcp.WithTemplateMIMEType("application/json"),
@@ -79,7 +76,8 @@ func (e *ErigonMCPServer) registerResources() {
 	)
 
 	srv.AddResourceTemplate(
-		mcp.NewResourceTemplate("erigon://transaction/{hash}/analysis",
+		mcp.NewResourceTemplate(
+			"erigon://transaction/{hash}/analysis",
 			"transaction analysis",
 			mcp.WithTemplateDescription("Get transaction analysis"),
 			mcp.WithTemplateMIMEType("application/json"),
@@ -99,24 +97,6 @@ func (e *ErigonMCPServer) handleResourceNodeInfo(ctx context.Context, req mcp.Re
 			URI:      "erigon://node/info",
 			MIMEType: "application/json",
 			Text:     toJSONIndent(result),
-		},
-	}, nil
-}
-
-func (e *ErigonMCPServer) handleResourceChainConfig(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	var blockNum string
-	if err := e.client.CallContext(ctx, &blockNum, "eth_blockNumber"); err != nil {
-		return nil, fmt.Errorf("eth_blockNumber: %w", err)
-	}
-
-	return []mcp.ResourceContents{
-		mcp.TextResourceContents{
-			URI:      "erigon://chain/config",
-			MIMEType: "application/json",
-			Text: toJSONText(map[string]any{
-				"current_block": blockNum,
-				"note":          "Chain config details would come from Erigon's chain spec",
-			}),
 		},
 	}, nil
 }

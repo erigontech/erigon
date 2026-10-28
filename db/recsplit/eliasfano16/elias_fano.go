@@ -230,9 +230,8 @@ func (ef *EliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -244,13 +243,10 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.minDelta = binary.BigEndian.Uint64(r[16:24])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[24]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[24])), (len(r)-24)/8)
 	ef.deriveFields()
 	return ef, 24 + 8*len(ef.data)
 }
-
-const maxDataSize = 0xFFFFFFFFFFFF
 
 // DoubleEliasFano can be used to encode two monotone sequences
 // it is called "double" because the lower bits array contains two sequences interleaved
@@ -341,9 +337,9 @@ func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
 		//fmt.Printf("i=%d, set pos for %d = %d\n", i, position[i]-bitDelta, (position[i]-bitDelta)>>ef.lPosition+i)
 	}
-	//fmt.Printf("loweBits %b\n", ef.lowerBits)
-	//fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
-	//fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
+	// fmt.Printf("loweBits %b\n", ef.lowerBits)
+	// fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
+	// fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
 	// i iterates over the 64-bit words in the wordCumKeys vector
 	// c iterates over bits in the wordCumKeys
 	// lastSuperQ is the largest multiple of 2^14 (4096) which is no larger than c
@@ -431,7 +427,8 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 }
 
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
-	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64) {
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
+) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift
@@ -533,9 +530,8 @@ func (ef *DoubleEliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -548,8 +544,7 @@ func (ef *DoubleEliasFano) Read(r []byte) int {
 	ef.uPosition = binary.BigEndian.Uint64(r[16:24])
 	ef.cumKeysMinDelta = binary.BigEndian.Uint64(r[24:32])
 	ef.posMinDelta = binary.BigEndian.Uint64(r[32:40])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[40]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[40])), (len(r)-40)/8)
 	ef.deriveFields()
 	return 40 + 8*len(ef.data)
 }

@@ -39,8 +39,6 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
-  # tracing on top of pending is rejected only after #22533 is merged
-  debug_traceBlockByNumber/test_25.json
 )
 
 # Transform the array into a comma-separated string

@@ -190,20 +190,21 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
-			break
-		}
-
-		hasExtension := (fieldBits & 1) != 0
-		if hasExtension && pos < len(branchData) {
-			extLen, n := binary.Uvarint(branchData[pos:])
-			if n > 0 && extLen > 0 {
-				depth += int(extLen)
-				continue
+		fields := cellFields(fieldBits)
+		extLen := 0
+		if fields&fieldExtension != 0 {
+			if l, n := binary.Uvarint(branchData[pos:]); n > 0 {
+				extLen = int(l)
 			}
 		}
-
-		depth++
+		switch {
+		case fields&(fieldAccountAddr|fieldStorageAddr|fieldHash) == fieldAccountAddr|fieldHash && depth < 64 && len(hashedKey) > 64:
+			depth = 64 + extLen
+		case fields&(fieldAccountAddr|fieldStorageAddr) != 0:
+			return
+		default:
+			depth += 1 + extLen
+		}
 	}
 }
 
@@ -242,15 +243,6 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 		}
 		w.cond.Wait()
 	}
-	return nil
-}
-
-func (w *Warmuper) Wait() error {
-	if !w.started.Load() || w.numWorkers <= 0 {
-		return nil
-	}
-	w.Close()
-	w.g.Wait()
 	return nil
 }
 

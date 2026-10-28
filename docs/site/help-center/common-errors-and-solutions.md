@@ -40,11 +40,11 @@ This section details common error messages and provides clear, actionable steps 
 
 * **Error Description:** The Erigon process is abruptly terminated by the operating system, often with an OOM-kill event in the system logs (`code=killed, status=9/KILL`).
 * **Cause:** This can be a genuine memory leak or, more commonly, a symptom of a disk I/O bottleneck. When the disk can't keep up with processing, memory usage can balloon as the system tries to buffer data. Erigon and the Go runtime also size their memory and CPU use from the resources they can *see*, so on a shared or memory-constrained host they may reserve more than is safe.
-* **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](/get-started/hardware-requirements). To make Erigon more conservative on constrained hosts, set a hard memory ceiling and throttle the runtime:
+* **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](/get-started/hardware-requirements). Since 3.7 Erigon already sets `GOMEMLIMIT` to 80% of the lower of RAM and the container memory limit unless you set it yourself. To make Erigon more conservative on constrained hosts, set a lower memory ceiling and throttle the runtime:
 
   ```bash
   # Export the runtime tunables, then pass --batchSize as an Erigon flag:
-  export GOMEMLIMIT=26GiB               # cap total Go heap (set below your physical/container limit)
+  export GOMEMLIMIT=20GiB               # cap total Go heap (e.g. below the 80% default on a 32 GB host)
   export GOGC=80                        # collect garbage more aggressively
   export GOMAXPROCS=$(( $(nproc) / 2 )) # show Erigon fewer cores → smaller RAM estimates
 
@@ -79,9 +79,10 @@ This section details common error messages and provides clear, actionable steps 
 
 ### Connect: connection refused or dial tcp... failures
 
-* **Error Description:** The node cannot connect to an external service, such as a local or remote consensus-layer endpoint.
-* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
-* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--externalcl`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
+* **Error Description:** The node cannot connect to a component it dials out to, such as a
+  separately run sentry or downloader, or the core instance an external RPC daemon talks to.
+* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag naming its address points to the wrong one.
+* **Solution:** Confirm that the required services are running and that the address flags for the components you run separately are correct — for example `--sentry.api.addr`, `--downloader.api.addr`, or `--private.api.addr` for an external RPC daemon. Note that `--externalcl` is a switch, not an address: it only disables the embedded Caplin, after which the external consensus client connects inbound to Erigon's Engine API (`--authrpc.addr` / `--authrpc.port`) rather than Erigon dialling out to it. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
 

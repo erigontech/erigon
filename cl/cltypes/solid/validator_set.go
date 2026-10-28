@@ -80,14 +80,11 @@ func (v *ValidatorSet) Bytes() []byte {
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 	size := newValidatorSetLength * validatorSize
 
-	if size <= cap(v.buffer) {
-		v.buffer = v.buffer[:size]
-		return
+	if size > cap(v.buffer) {
+		increasedValidatorsCapacity := int(uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier)+1) * validatorSize
+		v.buffer = slices.Grow(v.buffer, increasedValidatorsCapacity-len(v.buffer))
 	}
-	increasedValidatorsCapacity := uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier) + 1
-	buffer := make([]byte, size, increasedValidatorsCapacity*validatorSize)
-	copy(buffer, v.buffer)
-	v.buffer = buffer
+	v.buffer = v.buffer[:size]
 }
 
 func (v *ValidatorSet) Append(val Validator) {
@@ -228,7 +225,7 @@ func (*ValidatorSet) Static() bool {
 }
 
 func (v *ValidatorSet) Get(idx int) Validator {
-	if idx >= v.l {
+	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- Get: out of bounds")
 	}
 
@@ -282,7 +279,7 @@ func (v *ValidatorSet) SetProgressiveHashing(enabled bool) {
 }
 
 func (v *ValidatorSet) Set(idx int, val Validator) {
-	if idx >= v.l {
+	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- Set: out of bounds")
 	}
 	copy(v.buffer[idx*validatorSize:(idx*validatorSize)+validatorSize], val)
@@ -290,21 +287,21 @@ func (v *ValidatorSet) Set(idx int, val Validator) {
 }
 
 func (v *ValidatorSet) getPhase0(idx int) *Phase0Data {
-	if idx >= v.l {
+	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- getPhase0: out of bounds")
 	}
 	return &v.phase0Data[idx]
 }
 
 func (v *ValidatorSet) getAttesterBit(idx int, bit int) bool {
-	if idx >= v.l {
+	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- getBit: out of bounds")
 	}
 	return (v.attesterBits[idx] & (1 << bit)) > 0
 }
 
 func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
-	if idx >= v.l {
+	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- getBit: out of bounds")
 	}
 	if val {

@@ -118,7 +118,7 @@ func isBloomMagic(peek []byte) bool {
 func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
 	_, fileName := filepath.Split(filePath)
 	idx = &Filter{FilePath: filePath, FileName: fileName}
-	var validationPassed = false
+	validationPassed := false
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", fileName, rec, dbg.Stack())

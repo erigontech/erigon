@@ -35,7 +35,7 @@ import (
 func main() {
 	startTime := time.Now()
 	var logger log.Logger
-	var rootCmd = &cobra.Command{
+	rootCmd := &cobra.Command{
 		Use: "test",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			log.Info(cmd.Name() + " starting")
@@ -114,7 +114,7 @@ func main() {
 		}
 	}
 
-	var benchEthCallCmd = &cobra.Command{
+	benchEthCallCmd := &cobra.Command{
 		Use:   "benchEthCall",
 		Short: "",
 		Long:  ``,
@@ -127,7 +127,7 @@ func main() {
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchEthEstimateGasCmd = &cobra.Command{
+	benchEthEstimateGasCmd := &cobra.Command{
 		Use:   "benchEthEstimateGas",
 		Short: "",
 		Long:  ``,
@@ -140,7 +140,7 @@ func main() {
 	}
 	with(benchEthEstimateGasCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchEthCreateAccessListCmd = &cobra.Command{
+	benchEthCreateAccessListCmd := &cobra.Command{
 		Use:   "benchEthCreateAccessList",
 		Short: "",
 		Long:  ``,
@@ -153,7 +153,7 @@ func main() {
 	}
 	with(benchEthCreateAccessListCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchEthGetBlockByHash = &cobra.Command{
+	benchEthGetBlockByHash := &cobra.Command{
 		Use:   "benchEthGetBlockByHash",
 		Short: "",
 		Long:  ``,
@@ -166,7 +166,7 @@ func main() {
 	}
 	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchEthGetBlockByNumber2Cmd = &cobra.Command{
+	benchEthGetBlockByNumber2Cmd := &cobra.Command{
 		Use:   "benchEthGetBlockByNumber2",
 		Short: "",
 		Long:  ``,
@@ -179,7 +179,7 @@ func main() {
 	}
 	with(benchEthGetBlockByNumber2Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchEthGetTransactionByHashCmd = &cobra.Command{
+	benchEthGetTransactionByHashCmd := &cobra.Command{
 		Use:   "benchEthGetTransactionByHash",
 		Short: "",
 		Long:  ``,
@@ -192,7 +192,7 @@ func main() {
 	}
 	with(benchEthGetTransactionByHashCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchOtsGetBlockTransactions = &cobra.Command{
+	benchOtsGetBlockTransactions := &cobra.Command{
 		Use:   "benchOtsGetBlockTransactions",
 		Short: "",
 		Long:  ``,
@@ -205,7 +205,7 @@ func main() {
 	}
 	with(benchOtsGetBlockTransactions, withErigonUrl, withGethUrl, withNeedCompare, withVisitAllPages, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var bench1Cmd = &cobra.Command{
+	bench1Cmd := &cobra.Command{
 		Use:   "bench1",
 		Short: "",
 		Long:  ``,
@@ -219,7 +219,7 @@ func main() {
 	with(bench1Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
 	bench1Cmd.Flags().BoolVar(&fullTest, "fullTest", false, "some text")
 
-	var bench2Cmd = &cobra.Command{
+	bench2Cmd := &cobra.Command{
 		Use:   "bench2",
 		Short: "",
 		Long:  ``,
@@ -230,7 +230,7 @@ func main() {
 			}
 		},
 	}
-	var bench3Cmd = &cobra.Command{
+	bench3Cmd := &cobra.Command{
 		Use:   "bench3",
 		Short: "",
 		Long:  ``,
@@ -243,7 +243,7 @@ func main() {
 	}
 	with(bench3Cmd, withErigonUrl, withGethUrl)
 
-	var bench4Cmd = &cobra.Command{
+	bench4Cmd := &cobra.Command{
 		Use:   "bench4",
 		Short: "",
 		Long:  ``,
@@ -256,7 +256,7 @@ func main() {
 	}
 	with(bench4Cmd, withErigonUrl)
 
-	var bench5Cmd = &cobra.Command{
+	bench5Cmd := &cobra.Command{
 		Use:   "bench5",
 		Short: "",
 		Long:  ``,
@@ -268,7 +268,7 @@ func main() {
 		},
 	}
 	with(bench5Cmd, withErigonUrl)
-	var bench6Cmd = &cobra.Command{
+	bench6Cmd := &cobra.Command{
 		Use:   "bench6",
 		Short: "",
 		Long:  ``,
@@ -281,7 +281,7 @@ func main() {
 	}
 	with(bench6Cmd, withErigonUrl)
 
-	var bench7Cmd = &cobra.Command{
+	bench7Cmd := &cobra.Command{
 		Use:   "bench7",
 		Short: "",
 		Long:  ``,
@@ -294,7 +294,7 @@ func main() {
 	}
 	with(bench7Cmd, withErigonUrl, withGethUrl)
 
-	var benchEthGetLogsCmd = &cobra.Command{
+	benchEthGetLogsCmd := &cobra.Command{
 		Use:   "benchEthGetLogs",
 		Short: "",
 		Long:  ``,
@@ -307,7 +307,7 @@ func main() {
 	}
 	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var ethGetLogsInvariantsCmd = &cobra.Command{
+	ethGetLogsInvariantsCmd := &cobra.Command{
 		Use:   "invariantsEthGetLogs",
 		Short: "",
 		Long:  ``,
@@ -320,7 +320,7 @@ func main() {
 	}
 	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest, withFailFast, withQueryLimit)
 
-	var benchOverlayGetLogsCmd = &cobra.Command{
+	benchOverlayGetLogsCmd := &cobra.Command{
 		Use:   "benchOverlayGetLogs",
 		Short: "",
 		Long:  ``,
@@ -333,7 +333,7 @@ func main() {
 	}
 	with(benchOverlayGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var bench9Cmd = &cobra.Command{
+	bench9Cmd := &cobra.Command{
 		Use:   "bench9",
 		Short: "",
 		Long:  ``,
@@ -346,7 +346,7 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare, withLatest)
 
-	var benchTraceCallCmd = &cobra.Command{
+	benchTraceCallCmd := &cobra.Command{
 		Use:   "benchTraceCall",
 		Short: "",
 		Long:  ``,
@@ -360,7 +360,7 @@ func main() {
 	with(benchTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
 	// debug_trace* APIs
-	var benchDebugTraceBlockByNumberCmd = &cobra.Command{
+	benchDebugTraceBlockByNumberCmd := &cobra.Command{
 		Use:   "benchDebugTraceBlockByNumber",
 		Short: "",
 		Long:  ``,
@@ -373,7 +373,7 @@ func main() {
 	}
 	with(benchDebugTraceBlockByNumberCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchDebugTraceBlockByHashCmd = &cobra.Command{
+	benchDebugTraceBlockByHashCmd := &cobra.Command{
 		Use:   "benchDebugTraceBlockByHash",
 		Short: "",
 		Long:  ``,
@@ -386,7 +386,7 @@ func main() {
 	}
 	with(benchDebugTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchDebugTraceTransactionCmd = &cobra.Command{
+	benchDebugTraceTransactionCmd := &cobra.Command{
 		Use:   "benchDebugTraceTransaction",
 		Short: "",
 		Long:  ``,
@@ -399,7 +399,7 @@ func main() {
 	}
 	with(benchDebugTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withAdditionalParams, withRecord, withErrorFile)
 
-	var benchDebugTraceCallCmd = &cobra.Command{
+	benchDebugTraceCallCmd := &cobra.Command{
 		Use:   "benchDebugTraceCall",
 		Short: "",
 		Long:  ``,
@@ -414,7 +414,7 @@ func main() {
 
 	// debug_trace* APIs END
 
-	var benchTraceCallManyCmd = &cobra.Command{
+	benchTraceCallManyCmd := &cobra.Command{
 		Use:   "benchTraceCallMany",
 		Short: "",
 		Long:  ``,
@@ -427,7 +427,7 @@ func main() {
 	}
 	with(benchTraceCallManyCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchTraceBlockCmd = &cobra.Command{
+	benchTraceBlockCmd := &cobra.Command{
 		Use:   "benchTraceBlock",
 		Short: "",
 		Long:  ``,
@@ -440,7 +440,7 @@ func main() {
 	}
 	with(benchTraceBlockCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchTraceFilterCmd = &cobra.Command{
+	benchTraceFilterCmd := &cobra.Command{
 		Use:   "benchTraceFilter",
 		Short: "",
 		Long:  ``,
@@ -453,7 +453,7 @@ func main() {
 	}
 	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchTxReceiptCmd = &cobra.Command{
+	benchTxReceiptCmd := &cobra.Command{
 		Use:   "benchTxReceipt",
 		Short: "",
 		Long:  ``,
@@ -466,7 +466,7 @@ func main() {
 	}
 	with(benchTxReceiptCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchBlockReceiptsCmd = &cobra.Command{
+	benchBlockReceiptsCmd := &cobra.Command{
 		Use:   "benchBlockReceipts",
 		Short: "",
 		Long:  ``,
@@ -479,7 +479,7 @@ func main() {
 	}
 	with(benchBlockReceiptsCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchTraceReplayTransactionCmd = &cobra.Command{
+	benchTraceReplayTransactionCmd := &cobra.Command{
 		Use:   "benchTraceReplayTransaction",
 		Short: "",
 		Long:  ``,
@@ -492,7 +492,7 @@ func main() {
 	}
 	with(benchTraceReplayTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchTraceTransactionCmd = &cobra.Command{
+	benchTraceTransactionCmd := &cobra.Command{
 		Use:   "benchTraceTransaction",
 		Short: "",
 		Long:  ``,
@@ -505,7 +505,7 @@ func main() {
 	}
 	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var benchEthBlockByNumberCmd = &cobra.Command{
+	benchEthBlockByNumberCmd := &cobra.Command{
 		Use:   "benchBlockByNumber",
 		Short: "",
 		Long:  ``,
@@ -518,7 +518,7 @@ func main() {
 	}
 	with(benchEthBlockByNumberCmd, withErigonUrl)
 
-	var benchEthGetBalanceCmd = &cobra.Command{
+	benchEthGetBalanceCmd := &cobra.Command{
 		Use:   "benchEthGetBalance",
 		Short: "",
 		Long:  ``,
@@ -531,7 +531,7 @@ func main() {
 	}
 	with(benchEthGetBalanceCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum)
 
-	var BenchEthGetLogsRandomBlockCmd = &cobra.Command{
+	BenchEthGetLogsRandomBlockCmd := &cobra.Command{
 		Use:   "benchEthGetLogsRandomBlock",
 		Short: "",
 		Long:  ``,
@@ -541,7 +541,7 @@ func main() {
 	}
 	with(BenchEthGetLogsRandomBlockCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)
 
-	var BenchEthGetBalanceRandomAccountCmd = &cobra.Command{
+	BenchEthGetBalanceRandomAccountCmd := &cobra.Command{
 		Use:   "benchEthGetBalanceRandomAccount",
 		Short: "",
 		Long:  ``,
@@ -551,7 +551,7 @@ func main() {
 	}
 	with(BenchEthGetBalanceRandomAccountCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)
 
-	var replayCmd = &cobra.Command{
+	replayCmd := &cobra.Command{
 		Use:   "replay",
 		Short: "",
 		Long:  ``,
@@ -563,7 +563,7 @@ func main() {
 
 	var tmpDataDir, tmpDataDirOrig string
 	var notRegenerateGethData bool
-	var compareAccountRange = &cobra.Command{
+	compareAccountRange := &cobra.Command{
 		Use:   "compareAccountRange",
 		Short: "",
 		Long:  ``,

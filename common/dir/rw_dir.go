@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -240,4 +241,24 @@ func CreateTempWithExtension(file string, extension string) (*os.File, error) {
 		return nil, fmt.Errorf("extension must end with .tmp, erigon cleans these up at restart. pattern: %s", pattern)
 	}
 	return os.CreateTemp(directory, pattern)
+}
+
+// FsyncDir flushes the directory's metadata (including any pending rename
+// entries inside it) to disk. Required on POSIX filesystems to make a rename
+// durable across power loss.
+func FsyncDir(path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows rejects Sync on a directory handle opened via os.Open;
+		// directory-entry fsync for rename durability is a POSIX-only concern.
+		return nil
+	}
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }

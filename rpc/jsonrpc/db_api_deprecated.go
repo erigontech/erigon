@@ -32,8 +32,7 @@ type DBAPI interface {
 }
 
 // DBAPIImpl data structure to store things needed for db_ commands
-type DBAPIImpl struct {
-}
+type DBAPIImpl struct{}
 
 // NewDBAPIImpl returns NetAPIImplImpl instance
 func NewDBAPIImpl() *DBAPIImpl {

@@ -66,21 +66,21 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 			}
 
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve transactions of block (Erigon) %d: %w\n", bn, res.Err)
+				return fmt.Errorf("could not retrieve transactions of block (Erigon) %d: %w", bn, res.Err)
 			}
 
 			if b.Error != nil {
-				return fmt.Errorf("Error retrieving transactions of block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+				return fmt.Errorf("error retrieving transactions of block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 			}
 
 			if needCompare {
 				var bg OtsBlockTransactions
 				res = reqGen.Geth("ots_getBlockTransactions", reqGen.otsGetBlockTransactions(bn, pageCount, 10), &bg)
 				if res.Err != nil {
-					return fmt.Errorf("Could not retrieve block (geth) %d: %w\n", bn, res.Err)
+					return fmt.Errorf("could not retrieve block (geth) %d: %w", bn, res.Err)
 				}
 				if bg.Error != nil {
-					return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+					return fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
 				}
 				if !compareBlockTransactions(&b, &bg) {
 					if rec != nil {
@@ -88,7 +88,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 						rec.Flush()
 						continue
 					} else {
-						return fmt.Errorf("block %d has different fields\n", bn)
+						return fmt.Errorf("block %d has different fields", bn)
 					}
 				}
 			}

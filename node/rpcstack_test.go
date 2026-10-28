@@ -108,8 +108,10 @@ func TestWebsocketOrigins(t *testing.T) {
 	tests := []originTest{
 		{
 			spec: "*", // allow all
-			expOk: []string{"", "http://test", "https://test", "http://test:8540", "https://test:8540",
-				"http://test.com", "https://foo.test", "http://testa", "http://atestb:8540", "https://atestb:8540"},
+			expOk: []string{
+				"", "http://test", "https://test", "http://test:8540", "https://test:8540",
+				"http://test.com", "https://foo.test", "http://testa", "http://atestb:8540", "https://atestb:8540",
+			},
 		},
 		{
 			spec:    "test",
@@ -124,7 +126,8 @@ func TestWebsocketOrigins(t *testing.T) {
 				"test",                                // no scheme, required by spec
 				"http://test",                         // wrong scheme
 				"http://test.foo", "https://a.test.x", // subdomain variatoins
-				"http://testx:8540", "https://xtest:8540"},
+				"http://testx:8540", "https://xtest:8540",
+			},
 		},
 		// ip tests
 		{
@@ -135,7 +138,8 @@ func TestWebsocketOrigins(t *testing.T) {
 				"http://12.34.56.78:443", // wrong scheme
 				"http://1.12.34.56.78",   // wrong 'domain name'
 				"http://12.34.56.78.a",   // wrong 'domain name'
-				"https://87.65.43.21", "http://87.65.43.21:8540", "https://87.65.43.21:8540"},
+				"https://87.65.43.21", "http://87.65.43.21:8540", "https://87.65.43.21:8540",
+			},
 		},
 		// port tests
 		{
@@ -144,7 +148,8 @@ func TestWebsocketOrigins(t *testing.T) {
 			expFail: []string{
 				"http://test", "https://test", // spec says port required
 				"http://test:8541", "https://test:8541", // wrong port
-				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540"},
+				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540",
+			},
 		},
 		// scheme and port
 		{
@@ -155,16 +160,20 @@ func TestWebsocketOrigins(t *testing.T) {
 				"http://test",                           // missing port, + wrong scheme
 				"http://test:8540",                      // wrong scheme
 				"http://test:8541", "https://test:8541", // wrong port
-				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540"},
+				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540",
+			},
 		},
 		// several allowed origins
 		{
 			spec: "localhost,http://127.0.0.1",
-			expOk: []string{"localhost", "http://localhost", "https://localhost:8443",
-				"http://127.0.0.1", "http://127.0.0.1:8080"},
+			expOk: []string{
+				"localhost", "http://localhost", "https://localhost:8443",
+				"http://127.0.0.1", "http://127.0.0.1:8080",
+			},
 			expFail: []string{
 				"https://127.0.0.1", // wrong scheme
-				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540"},
+				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540",
+			},
 		},
 	}
 	for _, tc := range tests {
@@ -236,7 +245,7 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 }
 
 func TestAllowList(t *testing.T) {
-	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) // don't allow RPC modules
 	url := startHTTPServer(t, allowList, nil, nil)
 
 	assert.False(t, testCustomRequest(t, url, "rpc_modules"))
@@ -293,14 +302,33 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 	return resp
 }
 
-func TestHTTP2H2C(t *testing.T) {
+// A batch is answered through the codec, not the stream, so the gzip wrapper must not get a zero Content-Length.
+func TestGzipBatchKeepsBody(t *testing.T) {
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, testlog.Logger(t, log.LvlError), 0)
+	t.Cleanup(srv.Stop)
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, 1000, true))
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}]`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"id":1`)
+}
+
+// Cleartext HTTP/2 is not served: it is measurably slower than HTTP/1.1 here, geth and reth
+// reach it only by prior knowledge and Nethermind refuses it too.
+func TestHTTP2CleartextNotServed(t *testing.T) {
 	srv := newTestRPCServer(t)
 	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
 
-	// Create an HTTP/2 cleartext client.
 	transport := &http.Transport{}
 	transport.Protocols = new(http.Protocols)
 	transport.Protocols.SetUnencryptedHTTP2(true)
@@ -310,25 +338,16 @@ func TestHTTP2H2C(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+addr.String(), body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	// Validate protocol
-	assert.Equal(t, "HTTP/2.0", resp.Proto, "expected HTTP/2.0 protocol")
-
-	// Validate status
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// Validate response body
-	result, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
+	resp, err := client.Do(req) //nolint:bodyclose
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	require.Error(t, err, "a client that commits to cleartext HTTP/2 has no HTTP/1.1 to fall back to")
 }
 
-// TestHTTP2H2CUpgrade checks the HTTP/1.1 Upgrade route into h2c (RFC 7540
-// Section 3.2), which curl uses for "--http2" over cleartext.
-func TestHTTP2H2CUpgrade(t *testing.T) {
+// A client offering the RFC 7540 Section 3.2 upgrade — what "curl --http2" sends over cleartext —
+// is answered on HTTP/1.1 instead of being switched, so it keeps working.
+func TestHTTP1UpgradeToH2CIsIgnored(t *testing.T) {
 	srv := newTestRPCServer(t)
 	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
@@ -350,7 +369,7 @@ func TestHTTP2H2CUpgrade(t *testing.T) {
 
 	statusLine, err := bufio.NewReader(conn).ReadString('\n')
 	require.NoError(t, err)
-	assert.Equal(t, "HTTP/1.1 101 Switching Protocols\r\n", statusLine)
+	assert.Equal(t, "HTTP/1.1 200 OK\r\n", statusLine)
 }
 
 // TestHTTPSEndpoint checks that the TLS endpoint negotiates HTTP/2 via ALPN and
@@ -432,8 +451,8 @@ func newSelfSignedCert(t *testing.T) (certFile, keyFile string, roots *x509.Cert
 	dir := t.TempDir()
 	certFile = filepath.Join(dir, "cert.pem")
 	keyFile = filepath.Join(dir, "key.pem")
-	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600))
-	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600))
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
 	return certFile, keyFile, roots
 }
 

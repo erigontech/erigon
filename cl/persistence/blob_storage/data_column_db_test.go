@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
@@ -19,10 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	globalBeaconConfig *clparams.BeaconChainConfig
-	globalCaplinConfig *clparams.CaplinConfig
-)
+var globalBeaconConfig *clparams.BeaconChainConfig
 
 func init() {
 	// Initialize global config once for all tests
@@ -34,8 +32,7 @@ func init() {
 	cfg.MaxBlobCommittmentsPerBlock = 6
 	cfg.GloasForkEpoch = cfg.FarFutureEpoch
 	globalBeaconConfig = &cfg
-	globalCaplinConfig = &clparams.CaplinConfig{}
-	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
+	clparams.InitGlobalStaticConfig(globalBeaconConfig)
 }
 
 func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig) {
@@ -431,6 +428,58 @@ func TestWriteStream(t *testing.T) {
 	assert.Equal(t, sidecar.SignedBlockHeader.Header.Slot, streamedData.SignedBlockHeader.Header.Slot)
 }
 
+func addTestBlob(sidecars ...*cltypes.DataColumnSidecar) {
+	for _, sidecar := range sidecars {
+		sidecar.Column.Append(&cltypes.Cell{1})
+		sidecar.KzgCommitments.Append(&cltypes.KZGCommitment{2})
+		sidecar.KzgProofs.Append(&cltypes.KZGProof{3})
+	}
+}
+
+// A canonical file is served as stored, without decoding it: the junk byte would not survive a re-encode.
+func TestWriteStreamServesCanonicalFileVerbatim(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	sidecar := createTestDataColumnSidecar(1000, 1)
+	addTestBlob(sidecar)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 1, sidecar))
+
+	_, file := storage.(*dataColumnStorageImpl).path(1000, blockRoot, 1)
+	fh, err := fs.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = fh.Write([]byte{0xff})
+	require.NoError(t, err)
+	require.NoError(t, fh.Close())
+	want, err := afero.ReadFile(fs, file)
+	require.NoError(t, err)
+
+	var got bytes.Buffer
+	require.NoError(t, storage.WriteStream(&got, 1000, blockRoot, 1))
+	require.Equal(t, want, got.Bytes())
+}
+
+// A sidecar stored with a 17-hash inclusion proof must be served with the canonical 4-hash proof, keeping its hashes.
+func TestWriteStreamServesLegacyInclusionProofCanonically(t *testing.T) {
+	storage, _, _ := setupTestDataColumnStorage(t)
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	canonical := createTestDataColumnSidecar(1000, 1)
+	legacy := createTestDataColumnSidecar(1000, 1)
+	legacy.KzgCommitmentsInclusionProof = solid.NewHashVector(cltypes.CommitmentBranchSize)
+	for i := range cltypes.KzgCommitmentsInclusionProofDepth {
+		canonical.KzgCommitmentsInclusionProof.Set(i, common.Hash{byte(i + 1)})
+		legacy.KzgCommitmentsInclusionProof.Set(i, common.Hash{byte(i + 1)})
+	}
+	addTestBlob(canonical, legacy)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 1, legacy))
+
+	var got bytes.Buffer
+	require.NoError(t, storage.WriteStream(&got, 1000, blockRoot, 1))
+
+	var want bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&want, canonical))
+	require.Equal(t, want.Bytes(), got.Bytes())
+}
+
 func TestGetSavedColumnIndex(t *testing.T) {
 	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
@@ -498,6 +547,101 @@ func TestDataColumnStorePruneBelowFloorAboveEveryBucketEmptiesTheStore(t *testin
 		require.NoError(t, err)
 		require.False(t, exists)
 	}
+}
+
+func TestDataColumnStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	oldRoot := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), oldRoot, 0, createTestDataColumnSidecar(100, 0)))
+	<-events
+
+	require.NoError(t, storage.PruneBelow(500))
+	require.NoError(t, storage.RemoveColumnSidecars(t.Context(), 100, oldRoot, 0))
+	exists, err := storage.ColumnSidecarExists(t.Context(), 100, oldRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists, "cleanup removes must remain available below the write floor")
+
+	lateRoot := common.Hash{2}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), lateRoot, 0, createTestDataColumnSidecar(499, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 499, lateRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Empty(t, events, "a rejected write must not emit a sidecar event")
+
+	boundaryRoot := common.Hash{3}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), boundaryRoot, 0, createTestDataColumnSidecar(500, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 500, boundaryRoot, 0)
+	require.NoError(t, err)
+	require.True(t, exists, "the floor itself remains writable")
+	require.Equal(t, beaconevents.OpDataColumnSidecar, (<-events).Event)
+
+	require.NoError(t, storage.PruneBelow(250))
+	lowerRoot := common.Hash{4}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), lowerRoot, 0, createTestDataColumnSidecar(499, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 499, lowerRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Empty(t, events, "a lower later prune must not lower the write floor")
+}
+
+func TestDataColumnStorePartialPruneStillRejectsLateWrites(t *testing.T) {
+	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
+	fs.failOn["0"] = errInducedFailure
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+
+	require.ErrorIs(t, storage.PruneBelow(subdivisionSlot), errInducedFailure)
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(subdivisionSlot-1, 0)))
+	exists, err := storage.ColumnSidecarExists(t.Context(), subdivisionSlot-1, root, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestDataColumnStoreConcurrentPrunesKeepTheHighestFloor(t *testing.T) {
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, floor := range []uint64{500, 1_000} {
+		go func() {
+			<-start
+			errs <- storage.PruneBelow(floor)
+		}()
+	}
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(999, 0)))
+	exists, err := storage.ColumnSidecarExists(t.Context(), 999, root, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1_000, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 1_000, root, 0)
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
+func TestBucketStorePruneFloorsAreIndependent(t *testing.T) {
+	first := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	second := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	require.NoError(t, first.PruneBelow(500))
+	root := common.Hash{1}
+	sidecar := createTestDataColumnSidecar(499, 0)
+
+	require.NoError(t, first.WriteColumnSidecars(t.Context(), root, 0, sidecar))
+	require.NoError(t, second.WriteColumnSidecars(t.Context(), root, 0, sidecar))
+	firstExists, err := first.ColumnSidecarExists(t.Context(), 499, root, 0)
+	require.NoError(t, err)
+	secondExists, err := second.ColumnSidecarExists(t.Context(), 499, root, 0)
+	require.NoError(t, err)
+	require.False(t, firstExists)
+	require.True(t, secondExists)
 }
 
 func TestWriteColumnSidecarsErrorHandling(t *testing.T) {

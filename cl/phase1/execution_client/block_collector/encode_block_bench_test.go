@@ -33,7 +33,7 @@ func benchPayload(txCount, txSize int) *cltypes.Eth1Block {
 	txs := make([][]byte, txCount)
 	for i := range txs {
 		txs[i] = make([]byte, txSize)
-		rnd.Read(txs[i])
+		_, _ = rnd.Read(txs[i]) // ChaCha8.Read always returns (len(p), nil)
 	}
 	body := &types.RawBody{Transactions: txs, Withdrawals: []*types.Withdrawal{}}
 	return cltypes.NewEth1BlockFromHeaderAndBody(makeTestHeader(12345, common.Hash{}, nil), body, &clparams.MainnetBeaconConfig)

@@ -31,6 +31,13 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+func (e *ExecModule) InclusionList(ctx context.Context) (types.Transactions, error) {
+	if e.inclusionListFunc == nil {
+		return nil, errors.New("inclusion list building is not available")
+	}
+	return e.inclusionListFunc(ctx)
+}
+
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}

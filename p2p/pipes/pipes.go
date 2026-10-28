@@ -41,6 +41,7 @@ func TCPPipe() (_ net.Conn, _ net.Conn, err error) {
 
 	var dconn net.Conn
 	if dconn, err = net.Dial("tcp", l.Addr().String()); err != nil { //nolint:noctx
+		l.Close()
 		<-aerr
 		return nil, nil, err
 	}

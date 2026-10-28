@@ -66,9 +66,9 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 	require.NotEmpty(t, activeIndices)
 	chosenIndex := activeIndices[0]
 	for _, validatorIndex := range activeIndices {
-		headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(validatorIndex), 0)
+		require.NoError(t, headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(validatorIndex), 0))
 	}
-	headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(chosenIndex), handler.beaconChainCfg.MaxEffectiveBalanceForVersion(headWithChangedBalances.Version()))
+	require.NoError(t, headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(chosenIndex), handler.beaconChainCfg.MaxEffectiveBalanceForVersion(headWithChangedBalances.Version())))
 
 	manager, ok := syncedData.(*synced_data.SyncedDataManager)
 	require.True(t, ok)
@@ -86,7 +86,7 @@ func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testin
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, 0, genesisRoot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot))
 	require.NoError(t, tx.Commit())
 
 	roTx, err := db.BeginRo(context.Background())
@@ -108,7 +108,7 @@ func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, 0, genesisRoot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot))
 	require.NoError(t, tx.Commit())
 
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 0, Root: genesisRoot}

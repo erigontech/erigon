@@ -45,9 +45,9 @@ func TestGetProposerDependentRoot(t *testing.T) {
 	cfg.SlotsPerHistoricalRoot = 8192
 	cfg.MinSeedLookahead = 1
 	s := state2.New(&cfg)
-	s.SetSlot(100)
+	require.NoError(t, s.SetSlot(100))
 	want := common.Hash{0x42}
-	s.SetBlockRootAt(63, want)
+	require.NoError(t, s.SetBlockRootAt(63, want))
 
 	got, err := state2.GetProposerDependentRoot(s, 3)
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
 	cfg.SlotsPerEpoch = 32
 	cfg.MinSeedLookahead = 1
 	s := state2.New(&cfg)
-	s.SetSlot(100)
+	require.NoError(t, s.SetSlot(100))
 
 	_, err := state2.GetProposerDependentRoot(s, 0)
 	require.Error(t, err)
@@ -241,7 +241,7 @@ func TestAddBuilderToRegistryRejectsFullRegistry(t *testing.T) {
 func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
-	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	require.NoError(t, s.SetSlot(cfg.SlotsPerEpoch*10))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	pubkey := common.Bytes48{0x11}
 	builders.Append(&cltypes.Builder{
@@ -266,7 +266,7 @@ func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoc
 func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderKeepsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
-	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	require.NoError(t, s.SetSlot(cfg.SlotsPerEpoch*10))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	pubkey := common.Bytes48{0x11}
 	builders.Append(&cltypes.Builder{

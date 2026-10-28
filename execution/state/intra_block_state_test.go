@@ -37,6 +37,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -58,8 +60,7 @@ func TestSnapshotRandom(t *testing.T) {
 	err := quick.Check(func() bool {
 		return ts.run(t)
 	}, config)
-	var cerr *quick.CheckError
-	if errors.As(err, &cerr) {
+	if cerr, ok := errors.AsType[*quick.CheckError](err); ok {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
 	} else if err != nil {
@@ -519,7 +520,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx1 read
 	v, err = states[1].GetState(addr, key)
@@ -557,7 +558,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true)
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
@@ -598,7 +599,7 @@ func TestVersionMapRevert(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, states[0].SetState(addr, key, val))
 	require.NoError(t, states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
@@ -624,7 +625,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr, key)
@@ -668,14 +669,14 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx1 write
 	_, err = states[1].GetOrNewStateObject(addr)
 	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx2 read
 	v, err = states[2].GetState(addr, key)
@@ -748,7 +749,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, states[0].SetState(addr, key, val1))
 	require.NoError(t, states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx1 write
 	require.NoError(t, states[1].SetState(addr, key, val2))
@@ -757,7 +758,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -838,17 +839,17 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx0 write
 	_, err := states[0].GetOrNewStateObject(addr)
 	require.NoError(t, err)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx2 write
 	require.NoError(t, states[2].SetState(addr, key2, val2))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true)
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
 	require.NoError(t, states[1].SetState(addr, key1, val1))
 	require.NoError(t, states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx1 read
 	v, err := states[1].GetState(addr, key1)
@@ -913,7 +914,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].PopSnapshot(tx1Snapshot)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 	// map deletes necessary here as they happen in scheduler not ibs
 	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
 	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
@@ -1038,7 +1039,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	_, err = states[0].GetOrNewStateObject(addr3)
 	require.NoError(t, err)
 	require.NoError(t, states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	_, err = sSingleProcess.GetOrNewStateObject(addr1)
 	require.NoError(t, err)
@@ -1056,7 +1057,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
 	require.NoError(t, states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	require.NoError(t, sSingleProcess.SetState(addr1, key2, val2))
 	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
@@ -1070,7 +1071,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
 	require.NoError(t, states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
 	require.NoError(t, states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true)
 
 	require.NoError(t, sSingleProcess.SetState(addr1, key1, val2))
 	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
@@ -1089,7 +1090,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.True(t, destructed)
 	require.NoError(t, states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true)
 
 	destructed, err = sSingleProcess.Selfdestruct(addr2, false)
 	require.NoError(t, err)
@@ -1182,4 +1183,351 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 			require.ErrorIs(t, tc.call(sdb), wantErr)
 		})
 	}
+}
+
+// TestRevertSetCodeOnCodelessAccount pins the revert of a code change whose
+// previous code was empty on an account that outlives the revert, e.g. an EOA.
+func TestRevertSetCodeOnCodelessAccount(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+
+	snapshot := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	ibs.RevertToSnapshot(snapshot, nil)
+
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Empty(t, code)
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, codeHash)
+}
+
+// TestSetCodeReusesTheLastEqualCode pins the SetCode memo: an equal code from a
+// separate allocation gets the previous code's bytes and hash, a different code
+// gets its own.
+func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	codeA := []byte{0x60, 0x01, 0x60, 0x00, 0xf3}
+	codeB := []byte{0x60, 0x02, 0x60, 0x00, 0xf3}
+	var stored [][]byte
+	for i, code := range [][]byte{codeA, bytes.Clone(codeA), codeB, bytes.Clone(codeA)} {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
+
+		got, err := ibs.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+		codeHash, err := ibs.GetCodeHash(addr)
+		require.NoError(t, err)
+		require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), codeHash)
+		stored = append(stored, got)
+	}
+	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
+	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
+}
+
+// A pooled IntraBlockState serves call after call: nothing of one call may be
+// visible to the next, while the read set keeps its maps.
+func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	ibs.AddAddressToAccessList(addr)
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true) // an address with no cell is not memoized
+	ibs.readSelfDestructMemo(addr)
+	require.NotEmpty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address)
+	ibs.SetTxContext(5, 2)
+	ibs.SetVersion(3)
+	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
+
+	require.True(t, ibs.resetForPool())
+	require.Nil(t, ibs.stateReader)
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.version)
+	require.False(t, ibs.eip8246 || ibs.eip161 || ibs.isAura, "fork flags are the next call's to set")
+	require.Empty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
+	require.Empty(t, ibs.versionedReads.address)
+
+	ibs.stateReader = NewNoopReader()
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+	value, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, value.IsZero())
+	require.Empty(t, ibs.GetRawLogs(0))
+	require.False(t, ibs.AddressInAccessList(addr))
+}
+
+// The caller reads a call's output after its ibs goes back to the pool, so the
+// next call must not write into that buffer.
+func TestResetForPoolDropsTheOutputBuffer(t *testing.T) {
+	ibs := New(NewNoopReader())
+	ibs.txOutputFree = true
+	out := ibs.TxOutputBuffer()
+	*out = append((*out)[:0], 1, 2, 3)
+	kept := *out
+
+	require.True(t, ibs.resetForPool())
+	ibs.txOutputFree = true
+	next := ibs.TxOutputBuffer()
+	*next = append((*next)[:0], 9, 9, 9)
+	require.Equal(t, []byte{1, 2, 3}, kept)
+}
+
+// Maps never shrink, so a call that grew the state past the bound is not pooled.
+func TestResetForPoolDropsAnOversizedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	require.False(t, ibs.resetForPool())
+
+	reads := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
+	}
+	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
+
+	warm := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		warm.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))))
+	}
+	require.False(t, warm.resetForPool(), "access-list slots count toward the bound")
+
+	absent := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		_, err := absent.GetBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1)))))
+		require.NoError(t, err)
+	}
+	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
+}
+
+// sync.Pool may drop any one entry, so the reuse shows over a few round trips.
+// slotPool keeps exactly what it was handed, so the release path can be checked
+// without sync.Pool's freedom to discard.
+type slotPool struct{ held any }
+
+func (p *slotPool) Get() any {
+	v := p.held
+	p.held = nil
+	return v
+}
+func (p *slotPool) Put(v any) { p.held = v }
+
+func withSlotPool(t *testing.T) *slotPool {
+	t.Helper()
+	prev := ibsPool
+	p := &slotPool{}
+	ibsPool = p
+	t.Cleanup(func() { ibsPool = prev })
+	return p
+}
+
+func TestReleasePooledHandsTheStateToNewPooled(t *testing.T) {
+	withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
+	ReleasePooled(ibs)
+	require.Same(t, ibs, NewPooled(NewNoopReader()), "the released state must come back")
+}
+
+func TestReleasePooledKeepsAnOversizedStateOutOfThePool(t *testing.T) {
+	p := withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	ReleasePooled(ibs)
+	require.Nil(t, p.held, "an oversized state must not be pooled")
+	require.NotSame(t, ibs, NewPooled(NewNoopReader()))
+}
+
+func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
+	ibs := NewPooled(NewNoopReader())
+	ibs.SetTxContext(5, 2)
+	ReleasePooled(ibs)
+
+	// sync.Pool may drop the entry at any GC, so assert the release handed the
+	// state on rather than that the next Get returns this one: Close would have
+	// dropped the maps.
+	require.NotNil(t, ibs.stateObjects, "a poolable state must be handed on, not closed")
+	require.Nil(t, ibs.stateReader, "and must not keep the last call's reader")
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.txIndex)
+
+	reader := NewNoopReader()
+	got := NewPooled(reader)
+	defer ReleasePooled(got)
+	require.Same(t, reader, got.stateReader)
+	require.Zero(t, got.txIndex)
+}
+
+// An oversized state must not reach the pool, so the next call does not inherit
+// its map capacity.
+func TestReleasePooledDropsAnOversizedState(t *testing.T) {
+	big := NewPooled(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		require.NoError(t, big.AddBalance(accounts.InternAddress(common.BigToAddress(big2(i+1))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	ReleasePooled(big)
+
+	fresh := NewPooled(NewNoopReader())
+	defer ReleasePooled(fresh)
+	require.NotSame(t, big, fresh, "an oversized state must not come back from the pool")
+}
+
+// A state closed before its release has lost its maps, so it must not reach the
+// pool for the next call to write into.
+func TestReleasePooledDropsAClosedState(t *testing.T) {
+	closed := NewPooled(NewNoopReader())
+	closed.Close()
+	ReleasePooled(closed)
+
+	fresh := NewPooled(NewNoopReader())
+	defer ReleasePooled(fresh)
+	require.NotSame(t, closed, fresh, "a closed state must not come back from the pool")
+}
+
+// A call that warms slots and then reverts keeps the grown slot maps, so it is
+// not poolable even though nothing is live.
+func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	snap := ibs.PushSnapshot()
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	ibs.RevertToSnapshot(snap, nil)
+	live := len(ibs.accessList.addresses)
+	for _, s := range ibs.accessList.slots {
+		live += len(s)
+	}
+	require.Zero(t, live, "the revert leaves nothing live")
+	require.False(t, ibs.resetForPool(), "the grown slot maps are still retained")
+}
+
+// The address map is the same case: a reverted warm-up deletes its keys and the
+// buckets stay.
+func TestResetForPoolDropsARevertedAddressWarmUp(t *testing.T) {
+	ibs := New(NewNoopReader())
+	snap := ibs.PushSnapshot()
+	for i := range maxPooledEntries + 1 {
+		ibs.AddAddressToAccessList(accounts.InternAddress(common.BigToAddress(big2(i))))
+	}
+	ibs.RevertToSnapshot(snap, nil)
+	require.Empty(t, ibs.accessList.addresses, "the revert leaves nothing live")
+	require.False(t, ibs.resetForPool(), "the grown address map is still retained")
+}
+
+func big2(i int) *big.Int { return big.NewInt(int64(i)) }
+
+// Slots, not just addresses, decide poolability: one contract's slot map is
+// what a reused read set keeps, and Go maps never shrink.
+func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
+	}
+	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
+}
+
+// On a versioned IBS that caches state objects, an account touched and then
+// credited in the same tx is not empty and must survive FinalizeTx.
+func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x161A"))
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 1)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(5), bal)
+}
+
+func TestSetStorageRejectsNoMaterialize(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+	defer ibs.Close()
+
+	addr := accounts.InternAddress([20]byte{0xaa})
+	key := accounts.InternKey([32]byte{0x01})
+	require.Panics(t, func() {
+		_ = ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)})
+	})
+}
+
+// Each call stays under the bound on its own, yet leaves a grown slot map at
+// the next index for addSlotSlow to reuse. The retained maps have to add up, or
+// a sequence of such calls pins them all in the pool.
+func TestResetForPoolCountsSlotMapsRetainedAcrossCalls(t *testing.T) {
+	ibs := New(NewNoopReader())
+	const perCall = maxPooledEntries / 4
+
+	// Call k warms one slot on every earlier address, then many on its own, so
+	// its own map lands at a fresh index.
+	for call := range 4 {
+		for earlier := range call {
+			a := accounts.InternAddress(common.BigToAddress(big2(earlier)))
+			ibs.AddSlotToAccessList(a, accounts.InternKey(common.BigToHash(big2(0))))
+		}
+		own := accounts.InternAddress(common.BigToAddress(big2(call)))
+		for i := range perCall {
+			ibs.AddSlotToAccessList(own, accounts.InternKey(common.BigToHash(big2(i))))
+		}
+		poolable := ibs.resetForPool()
+		if call < 3 {
+			require.True(t, poolable, "call %d is under the bound on its own", call)
+			continue
+		}
+		require.False(t, poolable, "the maps retained by earlier calls must count")
+	}
+}
+
+// estimateGas probes and access-list convergence call Reset between executions.
+// A large intermediate execution leaves its grown map behind, so the bound has
+// to survive those resets, not just the final release.
+func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	// A big intermediate execution, discarded the way a gas probe discards one.
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	ibs.Reset()
+
+	// The final execution is tiny, but the grown map is still there to reuse.
+	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(0))))
+	require.False(t, ibs.resetForPool(), "a map lost to an intermediate reset must still count")
 }

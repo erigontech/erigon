@@ -526,10 +526,10 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					balReqs        []BALRequest
 				)
 				balPrimary := peerId
-				var batchEg errgroup.Group
+				batchEg, batchCtx := errgroup.WithContext(ctx)
 				batchEg.Go(func() error {
 					var err error
-					bodiesResponse, err = bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
+					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, fetcherOpts...)
 					return err
 				})
 				if bbd.balFetcher != nil {
@@ -544,7 +544,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						balPeers = append(balPeers, peerId)
 					}
 					batchEg.Go(func() error {
-						balsResponse = bbd.balFetcher.Fetch(ctx, balReqs, &balPrimary, balPeers, config.balsBatchFetchTimeout, config.balsRequestTimeout)
+						balsResponse = bbd.balFetcher.Fetch(batchCtx, balReqs, &balPrimary, balPeers, config.balsBatchFetchTimeout, config.balsRequestTimeout)
 						return nil
 					})
 				}

@@ -61,3 +61,33 @@ func TestEth1BlockStrictSchemaCoverage(t *testing.T) {
 		})
 	}
 }
+
+func TestEth1BlockTransactionLimitsChangeAtGloas(t *testing.T) {
+	decoderCfg := clparams.MainnetBeaconConfig
+	decoderCfg.MaxTransactionsPerPayload = 1
+	for _, test := range []struct {
+		version   clparams.StateVersion
+		wantError bool
+	}{
+		{version: clparams.DenebVersion, wantError: true},
+		{version: clparams.GloasVersion},
+	} {
+		t.Run(test.version.String(), func(t *testing.T) {
+			block := NewEth1Block(test.version, &clparams.MainnetBeaconConfig)
+			block.Extra = solid.NewExtraData()
+			block.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
+			block.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+			encoded, err := block.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			decoded := NewEth1Block(test.version, &decoderCfg)
+			err = decoded.DecodeSSZStrict(encoded, int(test.version))
+			if test.wantError {
+				require.ErrorContains(t, err, "expected at most 1 transactions")
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, decoded.Transactions.UnderlyngReference(), 2)
+		})
+	}
+}

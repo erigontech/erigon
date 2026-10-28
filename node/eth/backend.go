@@ -209,7 +209,6 @@ type Ethereum struct {
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
-
 	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return err
@@ -238,7 +237,8 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
 		return fmt.Errorf(
 			"flag '--prune.experimental.include-commitment-history' mismatch: db: %v; config: %v. please restart Erigon '--prune.experimental.include-commitment-history=%v' or delete the chaindata folder: %s",
-			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata)
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata,
+		)
 	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err
@@ -246,9 +246,44 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	return nil
 }
 
+type newOptions struct {
+	stateTransitionObserver execmodule.StateTransitionObserver
+	rpcStateCacheDecorator  func(kvcache.Cache) kvcache.Cache
+}
+
+// NewOption configures Ethereum construction without adding runtime settings.
+type NewOption func(*newOptions)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) NewOption {
+	return func(options *newOptions) {
+		options.stateTransitionObserver = observer
+	}
+}
+
+// WithRPCStateCacheDecorator wraps the embedded RPC state cache during construction.
+func WithRPCStateCacheDecorator(decorator func(kvcache.Cache) kvcache.Cache) NewOption {
+	return func(options *newOptions) {
+		options.rpcStateCacheDecorator = decorator
+	}
+}
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+func New(
+	ctx context.Context,
+	stack *node.Node,
+	config *ethconfig.Config,
+	logger log.Logger,
+	tracer *tracers.Tracer,
+	opts ...NewOption,
+) (*Ethereum, error) {
+	options := newOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	var kzgWarmupDone chan struct{}
 	if config.WarmupKzgCtxOnInit {
 		kzgWarmupDone = make(chan struct{})
@@ -294,13 +329,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 
-		// Apply config-driven global state for the commitment and trie subsystems.
-		// These globals are read by 80+ call sites; the config fields are the source of truth.
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
-		}
-		if config.ExperimentalParallelCommitment {
-			statecfg.ExperimentalParallelCommitment = true
 		}
 
 		if err := stages.UpdateMetrics(tx); err != nil {
@@ -349,8 +379,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var chainConfig *chain.Config
 	var genesis *types.Block
+	var compatErr *chain.ConfigCompatError
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-
 		genesisConfig, err := rawdb.ReadGenesis(tx)
 		if err != nil {
 			return err
@@ -366,7 +396,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		genesisSpec := config.Genesis
 		if h != (common.Hash{}) { // fallback to db content
@@ -374,14 +404,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		var compatErr *chain.ConfigCompatError
 		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 			return genesisErr
 		}
-
 		return nil
 	}); err != nil {
-		panic(err)
+		return nil, err
+	}
+	// The rejected config is not written, so starting would run this process on a schedule
+	// the database contradicts, with no path back to agreement short of a rewind.
+	if compatErr != nil {
+		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
 	}
 	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
@@ -450,21 +483,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// live here; see node/components/sentry/provider.go.
 	backend.sentryProvider = &sentrycomp.Provider{}
 	backend.sentryProvider.Configure(sentrycomp.Config{
-		SentryCtx:         backend.sentryCtx,
-		P2P:               p2pConfig,
-		ChainDB:           backend.chainDB,
-		ChainConfig:       backend.chainConfig,
-		GenesisHash:       backend.genesisHash,
-		NetworkID:         backend.networkID,
-		Genesis:           genesis,
-		BlockReader:       blockReader,
-		EthDiscoveryURLs:  backend.config.EthDiscoveryURLs,
-		ChainName:         config.Snapshot.ChainName,
-		NodesDir:          stack.Config().Dirs.Nodes,
-		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
-		Events:            backend.notifications.Events,
-		Logger:            logger,
-		Disable:           stack.Config().DisableSentry,
+		SentryCtx:        backend.sentryCtx,
+		P2P:              p2pConfig,
+		ChainDB:          backend.chainDB,
+		ChainConfig:      backend.chainConfig,
+		GenesisHash:      backend.genesisHash,
+		NetworkID:        backend.networkID,
+		Genesis:          genesis,
+		BlockReader:      blockReader,
+		EthDiscoveryURLs: backend.config.EthDiscoveryURLs,
+		ChainName:        config.Snapshot.ChainName,
+		NodesDir:         stack.Config().Dirs.Nodes,
+		Events:           backend.notifications.Events,
+		Logger:           logger,
+		Disable:          stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
@@ -680,8 +712,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	execmoduleCache := &execmodule.Cache{}
 	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
+	var rpcStateCache kvcache.Cache = execmoduleCache
+	if options.rpcStateCacheDecorator != nil {
+		rpcStateCache = options.rpcStateCacheDecorator(rpcStateCache)
+	}
 	httpRpcCfg := stack.Config().Http
-	httpRpcCfg.StateCache.LocalCache = execmoduleCache
+	httpRpcCfg.StateCache.LocalCache = rpcStateCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,
 		backend.chainDB,
@@ -769,7 +805,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		),
 		backend.notifications.Events,
 		&vm.Config{},
-		tmpdir,
 		txnProvider,
 		backend.sealCancel,
 		latestBlockBuiltStore,
@@ -797,7 +832,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			stack.Config().PrivateApiRateLimit,
 			creds,
 			stack.Config().HealthCheck,
-			logger)
+			logger,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("private api: %w", err)
 		}
@@ -883,6 +919,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		currentBlockNumber,
 		chainConfig,
 		blkBuilder.Build,
+		blkBuilder.BuildInclusionList,
 		hook,
 		accum,
 		execmoduleCache,
@@ -890,10 +927,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		backend.engine,
 		config.Sync,
+		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
 		backend.stopNode,
+		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 
@@ -1095,7 +1134,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.MCPAddress != "" {
 		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
 		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
-			if err := mcpSrv.RegisterName(api.Namespace, api.Service); err != nil {
+			if err := mcpSrv.RegisterAPI(api); err != nil {
 				return err
 			}
 		}
@@ -1254,7 +1293,11 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		if settingsErr != nil {
 			return nil, nil, nil, nil, settingsErr
 		}
-		aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+		aggOpts := state.New(dirs).
+			Logger(logger).
+			SanityOldNaming().
+			GenSaltIfNeed(createNewSaltFileIfNeeded).
+			WithErigonDBSettings(erigonDBSettings)
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
 			stepsStr := "Inf"
@@ -1264,18 +1307,18 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
 			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
 		}
-		agg, openErr := aggOpts.Open(ctx, db)
+		agg, openErr := aggOpts.Open(ctx)
 		if openErr != nil {
 			return nil, nil, nil, nil, openErr
 		}
 		agg.SetSnapshotBuildSema(blockSnapBuildSema)
 		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-		if allSegmentsDownloadComplete {
-			_ = agg.OpenFolder()
-		}
 		temporalDb, err = temporal.New(db, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			_ = temporalDb.OpenStateSnapshots(ctx)
 		}
 	}
 
@@ -1463,13 +1506,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
-	// Wait for any in-flight updateForkChoice goroutine to finish. These are
-	// fire-and-forget goroutines that hold DB read transactions; without this
-	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
+	// Detached forkchoice work can hold a database transaction. Shutdown must
+	// drain it completely before chainDB.Close rather than continue on a timer.
 	if s.execModule != nil {
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		s.execModule.WaitIdle(waitCtx)
-		waitCancel()
+		s.execModule.Drain()
 	}
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read

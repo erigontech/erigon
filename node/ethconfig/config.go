@@ -80,14 +80,15 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
+		ExecWorkerCount:            dbg.Exec3Workers, // only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
-		//LoopBlockLimit:             100_000,
+		// LoopBlockLimit:             100_000,
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
+		PersistReceiptsCacheV2:   true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -306,11 +307,12 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                    bool
-	AlwaysGenerateChangesets       bool
-	MaxReorgDepth                  uint64
-	KeepExecutionProofs            bool
-	ExperimentalParallelCommitment bool
-	PersistReceiptsCacheV2         bool
-	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
+	MaxReorgDepth            uint64
+	KeepExecutionProofs      bool
+	PersistReceiptsCacheV2   bool
+	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+
+	SlowBlockThreshold *time.Duration
 }

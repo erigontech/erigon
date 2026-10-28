@@ -5,6 +5,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -55,13 +56,13 @@ func NewLogTracer(traceTransfers bool, blockNumber uint64, blockHash, txHash com
 
 func (t *LogTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnEnter: t.onEnter,
-		OnExit:  t.onExit,
-		OnLog:   t.onLog,
+		OnEnterV2: t.onEnterV2,
+		OnExitV2:  t.onExitV2,
+		OnLog:     t.onLog,
 	}
 }
 
-func (t *LogTracer) onEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *LogTracer) onEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.logs = append(t.logs, make([]*types.Log, 0))
 	op := vm.OpCode(typ)
 	if op != vm.DELEGATECALL && op != vm.CALLCODE && !value.IsZero() {
@@ -69,7 +70,7 @@ func (t *LogTracer) onEnter(depth int, typ byte, from accounts.Address, to accou
 	}
 }
 
-func (t *LogTracer) onExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *LogTracer) onExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth == 0 {
 		t.onEnd(reverted)
 		return

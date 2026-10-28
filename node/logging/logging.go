@@ -62,8 +62,8 @@ func SetupLoggerCtx(
 	dirDefaultLevel log.Lvl,
 	rootHandler bool,
 ) log.Logger {
-	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
-	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
+	consoleJson := ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
+	dirJson := ctx.Bool(LogDirJsonFlag.Name)
 
 	metrics.DelayLoggingEnabled.Store(ctx.Bool(LogBlockDelayFlag.Name))
 
@@ -116,7 +116,6 @@ func SetupLoggerCtx(
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
 func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
-
 	logJsonVal, ljerr := cmd.Flags().GetBool(LogJsonFlag.Name)
 	if ljerr != nil {
 		logJsonVal = false
@@ -127,7 +126,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 		logConsoleJsonVal = false
 	}
 
-	var consoleJson = logJsonVal || logConsoleJsonVal
+	consoleJson := logJsonVal || logConsoleJsonVal
 	dirJson, djerr := cmd.Flags().GetBool(LogDirJsonFlag.Name)
 	if djerr != nil {
 		dirJson = false
@@ -175,18 +174,18 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 // SetupLoggerCmd performs the logging using parameters specified by the `flag` package and sets it on the root logger
 // This is the function which is NOT used by Erigon itself, but instead by utility commands
 func SetupLogger(filePrefix string) log.Logger {
-	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
-	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
-	var logDirPath = flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
-	var logDirPrefix = flag.String(LogDirPrefixFlag.Name, "", LogDirPrefixFlag.Usage)
-	var logVerbosity = flag.String(LogVerbosityFlag.Name, "", LogVerbosityFlag.Usage)
-	var logConsoleJson = flag.Bool(LogConsoleJsonFlag.Name, false, LogConsoleJsonFlag.Usage)
-	var logJson = flag.Bool(LogJsonFlag.Name, false, LogJsonFlag.Usage)
-	var logDirJson = flag.Bool(LogDirJsonFlag.Name, false, LogDirJsonFlag.Usage)
+	logConsoleVerbosity := flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
+	logDirVerbosity := flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
+	logDirPath := flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
+	logDirPrefix := flag.String(LogDirPrefixFlag.Name, "", LogDirPrefixFlag.Usage)
+	logVerbosity := flag.String(LogVerbosityFlag.Name, "", LogVerbosityFlag.Usage)
+	logConsoleJson := flag.Bool(LogConsoleJsonFlag.Name, false, LogConsoleJsonFlag.Usage)
+	logJson := flag.Bool(LogJsonFlag.Name, false, LogJsonFlag.Usage)
+	logDirJson := flag.Bool(LogDirJsonFlag.Name, false, LogDirJsonFlag.Usage)
 	flag.Parse()
 
-	var consoleJson = *logJson || *logConsoleJson
-	var dirJson = logDirJson
+	consoleJson := *logJson || *logConsoleJson
+	dirJson := logDirJson
 
 	consoleLevel, lErr := GetLogLevel(*logConsoleVerbosity)
 	if lErr != nil {
@@ -220,8 +219,8 @@ func initSeparatedLogging(
 	consoleLevel log.Lvl,
 	dirLevel log.Lvl,
 	consoleJson bool,
-	dirJson bool) {
-
+	dirJson bool,
+) {
 	var consoleHandler log.Handler
 
 	if consoleJson {
@@ -246,7 +245,7 @@ func initSeparatedLogging(
 			logger.Warn("failed to stat log dir, console logging only", "err", err)
 			return
 		}
-		if err := os.MkdirAll(dirPath, 0700); err != nil {
+		if err := os.MkdirAll(dirPath, 0o700); err != nil {
 			logger.Warn("failed to create log dir, console logging only", "err", err)
 			return
 		}
@@ -261,7 +260,7 @@ func initSeparatedLogging(
 	// lumberjack.v2 copies the mode of the existing file when rotating, so
 	// all subsequent rotated files will also be created with 0640.
 	logFilePath := filepath.Join(dirPath, filePrefix+".log")
-	if f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640); err == nil {
+	if f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 		_ = f.Close()
 	}
 
@@ -274,7 +273,7 @@ func initSeparatedLogging(
 		Filename:   logFilePath,
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
-		MaxAge:     28, //days
+		MaxAge:     28, // days
 		Compress:   true,
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)

@@ -88,7 +88,7 @@ func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, sta
 	fromKey := append(bytes.Clone(contractAddress[:]), start...)
 	toKey, _ := kv.NextSubtree(contractAddress[:])
 
-	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
+	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) // no limit because need skip empty records
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -194,7 +194,8 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 	// Fill result with up to maxResult entries; the extra one (if present) becomes nextKey.
 	for i := range entries {
 		if i >= maxResult {
-			result.NextKey = &entries[i].seckey
+			nextKey := entries[i].seckey
+			result.NextKey = &nextKey
 			break
 		}
 		key := entries[i].key

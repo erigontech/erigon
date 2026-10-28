@@ -127,3 +127,15 @@ but miss these real-world patterns:
 2. **Storage diversity** — many unique SLOAD/SSTORE slots per tx
 3. **Compound patterns** — SLOAD+SSTORE+LOG in realistic combinations
 4. **Cold vs warm** — EIP-2929 access list amortization across call depth
+
+## Mainnet transactions
+
+`BenchmarkTxReplay` replays real transactions on both state paths. Fetch them first from a node that serves
+`debug_traceTransaction` for their blocks (they stay out of the repo):
+
+```bash
+go run ./cmd/evm fixture --rpc http://127.0.0.1:8545 --list execution/vm/benchmark/testdata/mainnet_txs.txt
+go test -run '^$' -bench BenchmarkTxReplay -count 10 ./execution/vm/benchmark/
+```
+
+Each replay must match its receipt's gas, so a fixture that cannot be reproduced fails instead of benching another program.

@@ -26,6 +26,7 @@ type debugContextKey struct{}
 func WithDebug(ctx context.Context, v bool) context.Context {
 	return context.WithValue(ctx, debugContextKey{}, v)
 }
+
 func Enabled(ctx context.Context) bool {
 	v := ctx.Value(debugContextKey{})
 	if v == nil {

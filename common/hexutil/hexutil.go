@@ -289,9 +289,7 @@ func EncodeTs(number uint64) []byte {
 
 // Encode encodes b as a hex string with 0x prefix.
 func Encode(b []byte) string {
-	enc := make([]byte, len(b)*2+2)
-	copy(enc, "0x")
-	hex.Encode(enc[2:], b)
+	enc, _ := Bytes(b).MarshalText()
 	return string(enc)
 }
 

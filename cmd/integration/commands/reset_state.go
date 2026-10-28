@@ -53,7 +53,7 @@ var cmdResetState = &cobra.Command{
 		}
 		defer db.Close()
 
-		sn, _, _, err := allSnapshots(ctx, db, logger)
+		sn, _, err := allSnapshots(ctx, db, logger)
 		if err != nil {
 			logger.Error("Opening snapshots", "error", err)
 			return
@@ -244,6 +244,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error 
 	//})
 	return nil
 }
+
 func u64or0(in []byte) (v uint64) {
 	if len(in) > 0 {
 		v = binary.BigEndian.Uint64(in)

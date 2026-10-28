@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -147,7 +146,7 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 	blockID, err := beaconhttp.BlockIdFromRequest(request)
 	require.NoError(t, err)
 
-	root, err := a.rootFromBlockId(request.Context(), nil, blockID)
+	root, err := a.rootFromBlockId(nil, blockID)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{0xaa}, root)
 }
@@ -241,6 +240,6 @@ func TestViewHeadStateWithIdentityReportsSyncing(t *testing.T) {
 
 	err := a.viewHeadStateWithIdentity(func(*state.CachingBeaconState, common.Hash, uint64) error { return nil })
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 }

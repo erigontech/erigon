@@ -25,13 +25,12 @@ import (
 	"io"
 	"math/bits"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -41,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -50,9 +48,6 @@ import (
 )
 
 var (
-	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-
 	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
 	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
 	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
@@ -93,7 +88,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -104,6 +98,11 @@ type Trie interface {
 	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
 	Release()
+}
+
+type TrieStateCodec interface {
+	EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error)
+	RestoreState(value []byte) (blockNum, txNum uint64, err error)
 }
 
 type CommitProgress struct {
@@ -126,10 +125,52 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
+	VariantCommitmentV3        TrieVariant = "commitment-v3"
+	CommitmentV3StateMarker    byte        = 0x04
 )
+
+var KeyCommitmentV3State = []byte{0x42}
+
+const CommitmentV3StateSize = 1 + 8 + 8 + 32
+
+var (
+	ErrCommitmentV3StateMarker = errors.New("commitment v3: invalid state variant marker")
+	ErrCommitmentV3StateSize   = errors.New("commitment v3: invalid state size")
+)
+
+func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
+	if len(root) != length.Hash {
+		return nil, ErrCommitmentV3StateSize
+	}
+	dst = append(slices.Grow(dst, CommitmentV3StateSize), CommitmentV3StateMarker)
+	dst = binary.BigEndian.AppendUint64(dst, txNum)
+	dst = binary.BigEndian.AppendUint64(dst, blockNum)
+	return append(dst, root...), nil
+}
+
+func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	if len(value) != CommitmentV3StateSize {
+		return 0, 0, nil, ErrCommitmentV3StateSize
+	}
+	if value[0] != CommitmentV3StateMarker {
+		return 0, 0, nil, ErrCommitmentV3StateMarker
+	}
+	return binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), bytes.Clone(value[17:]), nil
+}
+
+func IsCommitmentStateKey(key []byte) bool {
+	return bytes.Equal(key, KeyCommitmentV3State) || bytes.Equal(key, KeyCommitmentState)
+}
+
+var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
+	case VariantCommitmentV3:
+		if NewCommitmentV3Trie == nil {
+			panic("commitment v3 selected without importing execution/commitment/v3")
+		}
+		return NewCommitmentV3Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -210,6 +251,9 @@ type DeferredBranchUpdate struct {
 	raw     BranchData
 	prev    []byte
 	encoded BranchData
+	// Backing store for a merged encoded value. encoded either aliases raw or points
+	// here, so it is never itself reused — this is the buffer that survives pooling.
+	encodedBuf []byte
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -218,26 +262,12 @@ var deferredUpdatePool = &sync.Pool{
 	},
 }
 
-var getDeferredUpdateCount atomic.Int64
-
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
 	upd.raw = reuseBytes(upd.raw, raw)
-	// prev stays cloned: it is the one argument that is legitimately nil or empty, and
-	// callers read a nil prev as "look up the previous value". Deriving that shape from a
-	// recycled buffer's capacity rather than from the input is not worth one allocation.
-	upd.prev = bytes.Clone(prev)
+	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
 
 	return upd
@@ -268,10 +298,17 @@ func capLen(b []byte) []byte {
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prev = nil
+		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
+		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
+}
+
+type BranchDelta struct {
+	Key  []byte
+	Data []byte
+	Prev []byte
 }
 
 type PendingCommitmentUpdate struct {
@@ -280,9 +317,20 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	Deltas    [][]BranchDelta
+	// Metrics is the producing trie's, carried so the later apply still reaches
+	// that trie's log and CSV counters. The Prometheus counters do not depend on
+	// it — publishBranchWrites bills those where the write lands.
+	Metrics *Metrics
+}
+
+func (p *PendingCommitmentUpdate) Apply(putBranch func(prefix, data, prevData []byte) error) error {
+	_, err := ApplyDeferredBranchUpdates(p.Deferred, runtime.NumCPU(), putBranch, p.Metrics)
+	return err
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
+	p.Deltas = nil
 	for _, upd := range p.Deferred {
 		putDeferredUpdate(upd)
 	}
@@ -297,9 +345,9 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	deferUpdates       bool
+	callerOwnsDeferred bool
 	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
-	pendingPrefixes    *maphash.NonConcurrentMap[struct{}]
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -311,13 +359,8 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
-	if defer_ {
-		if be.deferred == nil {
-			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
-		}
-		if be.pendingPrefixes == nil {
-			be.pendingPrefixes = maphash.NewNonConcurrentMap[struct{}]()
-		}
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
 }
 
@@ -325,23 +368,12 @@ func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
 }
 
-func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
-	if be.pendingPrefixes == nil {
-		return false
-	}
-	_, found := be.pendingPrefixes.Get(prefix)
-	return found
-}
-
 func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
-	if be.pendingPrefixes != nil {
-		be.pendingPrefixes.Clear()
-	}
-	ResetDeferredUpdateMetrics()
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
@@ -354,7 +386,8 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = bytes.Clone(merged)
+		upd.encodedBuf = reuseBytes(upd.encodedBuf, merged)
+		upd.encoded = upd.encodedBuf
 		return nil
 	}
 	upd.encoded = upd.raw
@@ -366,26 +399,29 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
-	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
-	if err != nil {
+	if _, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch, be.metrics); err != nil {
 		return err
-	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
 	}
 	return nil
 }
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// Returns the number of updates written. putBranch must copy prefix and data rather than
-// retain them: they are pooled and reused for a later, unrelated update. prevData is
-// cloned per update and carries no such constraint.
+// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
+// were written. Writes are published to the branch-write counters as they land,
+// not against a round: the caller-owned path applies from SharedDomains after the
+// producing round has already closed, so there is no round left to bill. m, when
+// non-nil, additionally carries them into that trie's log and CSV counters.
+//
+// putBranch must copy prefix and data rather than retain them: they are pooled and
+// reused for a later, unrelated update. prevData is cloned per update and carries
+// no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
+	m *Metrics,
+) (n int, err error) {
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -397,20 +433,23 @@ func ApplyDeferredBranchUpdates(
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
 
-		var written int
+		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
+			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
+		PublishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -442,17 +481,19 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
-	var written int
+	var written, bytesOut int
 	for _, upd := range deferred {
 		if upd.encoded == nil {
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+			PublishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
+		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
+	PublishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -460,26 +501,21 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
+// prev is the record stored at prefix, empty when the branch is new. The caller
+// supplies it because the trie already read it while unfolding the row.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	if be.deferUpdates {
+		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
 	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -500,50 +536,31 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-	}
-	mxTrieBranchesUpdated.Inc()
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
+// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
 	}
-	needsFlush := len(be.deferred) >= limit
-	if !needsFlush {
-		_, needsFlush = be.pendingPrefixes.Get(prefix)
-	}
-
-	if needsFlush {
+	if !be.callerOwnsDeferred && len(be.deferred) >= limit {
 		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
 	}
-
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
-	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
-	be.pendingPrefixes.Set(prefix, struct{}{})
 
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
@@ -691,21 +708,28 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-var errShortenedKeyFound = errors.New("shortened key found")
-
 // A malformed branch reports true: treat as referenced, never under-report.
 func (branchData BranchData) HasShortenedKeys() bool {
-	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) != length.Addr+length.Hash {
-				return nil, errShortenedKeyFound
-			}
-		} else if len(key) != length.Addr {
-			return nil, errShortenedKeyFound
+	_, _, shortened, err := branchData.CountPlainKeys()
+	return shortened > 0 || err != nil
+}
+
+// CountPlainKeys tallies the branch's keys by kind. It walks every cell rather than stopping at the
+// first shortened key, so a branch holding both kinds reports both truthfully. A non-nil err is a
+// parse failure, and leaves the tally partial.
+func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, shortened uint64, err error) {
+	_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		switch {
+		case isStorage && len(key) == length.Addr+length.Hash:
+			plainStorages++
+		case !isStorage && len(key) == length.Addr:
+			plainAccounts++
+		default:
+			shortened++
 		}
 		return nil, nil
 	})
-	return err != nil
+	return plainAccounts, plainStorages, shortened, err
 }
 
 // If fn returns nil, the original key is kept.
@@ -726,6 +750,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	spanStart := 0
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
+		if pos >= len(branchData) {
+			return nil, errors.New("replacePlainKeys buffer too small for cell fields")
+		}
 		fields := cellFields(branchData[pos])
 		pos++
 		if fields&fieldExtension != 0 {
@@ -974,7 +1001,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err := validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err := validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
+	if err := validatePlainKeys(branchKey, row); err != nil {
 		return err
 	}
 	return nil
@@ -994,7 +1021,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell) error {
 	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
 	if nibbles.HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
@@ -1011,7 +1038,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
+		err := c.deriveHashedKeys(depth, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}
@@ -1143,6 +1170,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
+	case "v3":
+		trieVariant = VariantCommitmentV3
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1304,6 +1333,7 @@ const (
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
 	ModeParallel Mode = 3
+	ModeCollect  Mode = 4
 )
 
 func (m Mode) String() string {
@@ -1316,6 +1346,8 @@ func (m Mode) String() string {
 		return "update"
 	case ModeParallel:
 		return "parallel"
+	case ModeCollect:
+		return "collect"
 	default:
 		return "unknown"
 	}
@@ -1335,17 +1367,25 @@ type Updates struct {
 	directBytes    int
 	directMemLimit int
 
+	collected     []collectedUpdate
+	hashedTouches [][]byte
+
 	batchSlab []KeyUpdate
 
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
 
-	addrCache      addrHashCache
+	addrCache      AddrHashCache
 	addrCacheReuse bool
 }
 
 const arenaRingSize = 2
+
+type collectedUpdate struct {
+	plainKey string
+	update   Update
+}
 
 func (t *Updates) arenaAlloc(b []byte) []byte {
 	arena := t.arenas[t.curArena]
@@ -1370,13 +1410,7 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel
-}
-
 type keyHasher func(key []byte) []byte
-
-func keyHasherNoop(key []byte) []byte { return key }
 
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
@@ -1384,7 +1418,7 @@ func hasherReusesAddrPrefix(h keyHasher) bool {
 
 func (t *Updates) hashKey(key []byte) []byte {
 	if t.addrCacheReuse {
-		return keyToHexNibbleHashCached(key, &t.addrCache)
+		return KeyToHexNibbleHashCached(key, &t.addrCache)
 	}
 	return t.hasher(key)
 }
@@ -1410,6 +1444,8 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
+	case ModeCollect:
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	return t
 }
@@ -1500,6 +1536,8 @@ func (t *Updates) Size() (updates uint64) {
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
+	case ModeCollect:
+		return uint64(len(t.treeIdx) + len(t.collected))
 	default:
 		return 0
 	}
@@ -1526,16 +1564,37 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		if _, ok := t.keys[key]; ok {
+			return
+		}
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		ik := keyBytes
-		if _, ok := t.keys[key]; !ok {
-			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
-		}
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
+	case ModeCollect:
+		existing, ok := t.treeIdx[key]
+		if !ok {
+			existing = &KeyUpdate{plainKey: key, update: new(Update)}
+			t.treeIdx[key] = existing
+		}
+		fn(existing, val)
 	default:
 	}
+}
+
+func (t *Updates) Grow(n int) {
+	if t.mode == ModeCollect {
+		t.collected = slices.Grow(t.collected, n)
+	}
+}
+
+func (t *Updates) TouchPlainKeyUnique(key string, update *Update) {
+	if t.mode != ModeCollect {
+		t.TouchPlainKeyDirect(key, update)
+		return
+	}
+	t.collected = append(t.collected, collectedUpdate{plainKey: key, update: *update})
 }
 
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
@@ -1546,29 +1605,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
-			if update.Flags&DeleteUpdate != 0 {
-				existing.update.Flags = DeleteUpdate
-				existing.update.CodeHash = empty.CodeHash
-			} else {
-				existing.update.Flags &^= DeleteUpdate
-				if update.Flags&BalanceUpdate != 0 {
-					existing.update.Balance.Set(&update.Balance)
-					existing.update.Flags |= BalanceUpdate
-				}
-				if update.Flags&NonceUpdate != 0 {
-					existing.update.Nonce = update.Nonce
-					existing.update.Flags |= NonceUpdate
-				}
-				if update.Flags&CodeUpdate != 0 {
-					existing.update.CodeHash = update.CodeHash
-					existing.update.Flags |= CodeUpdate
-				}
-				if update.Flags&StorageUpdate != 0 {
-					existing.update.Storage = update.Storage
-					existing.update.StorageLen = update.StorageLen
-					existing.update.Flags |= StorageUpdate
-				}
-			}
+			mergeUpdateInto(existing.update, update)
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
@@ -1595,8 +1632,58 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, u)
+	case ModeCollect:
+		if existing, ok := t.treeIdx[key]; ok {
+			mergeUpdateInto(existing.update, update)
+			return
+		}
+		u := *update
+		t.treeIdx[key] = &KeyUpdate{plainKey: key, update: &u}
 	default:
 	}
+}
+
+func mergeUpdateInto(existing, update *Update) {
+	if update.Flags&DeleteUpdate != 0 {
+		existing.Flags = DeleteUpdate
+		existing.CodeHash = empty.CodeHash
+		return
+	}
+	existing.Flags &^= DeleteUpdate
+	if update.Flags&BalanceUpdate != 0 {
+		existing.Balance.Set(&update.Balance)
+		existing.Flags |= BalanceUpdate
+	}
+	if update.Flags&NonceUpdate != 0 {
+		existing.Nonce = update.Nonce
+		existing.Flags |= NonceUpdate
+	}
+	if update.Flags&CodeUpdate != 0 {
+		existing.CodeHash = update.CodeHash
+		existing.Flags |= CodeUpdate
+	}
+	if update.Flags&StorageUpdate != 0 {
+		existing.Storage = update.Storage
+		existing.StorageLen = update.StorageLen
+		existing.Flags |= StorageUpdate
+	}
+}
+
+func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
+	for i := range t.collected {
+		if err := fn(t.collected[i].plainKey, &t.collected[i].update); err != nil {
+			return err
+		}
+	}
+	t.collected = t.collected[:0]
+	t.hashedTouches = t.hashedTouches[:0]
+	for key, item := range t.treeIdx {
+		if err := fn(key, item.update); err != nil {
+			return err
+		}
+	}
+	clear(t.treeIdx)
+	return nil
 }
 
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
@@ -1622,8 +1709,25 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 	case ModeUpdate:
 		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
 		t.tree.ReplaceOrInsert(pivot)
+	case ModeCollect:
+		if len(hashedKey) != 0 {
+			t.hashedTouches = append(t.hashedTouches, bytes.Clone(hashedKey))
+		}
 	default:
 	}
+}
+
+func (t *Updates) CollectedHashedKeys() [][]byte {
+	keys := make([][]byte, 0, len(t.collected)+len(t.treeIdx)+len(t.hashedTouches))
+	for i := range t.collected {
+		keys = append(keys, bytes.Clone(t.hashKey([]byte(t.collected[i].plainKey))))
+	}
+	for key := range t.treeIdx {
+		keys = append(keys, bytes.Clone(t.hashKey([]byte(key))))
+	}
+	keys = append(keys, t.hashedTouches...)
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
 }
 
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
@@ -1640,22 +1744,16 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if err != nil {
 		panic(err)
 	}
-	if c.update.Nonce != acc.Nonce {
-		c.update.Nonce = acc.Nonce
-		c.update.Flags |= NonceUpdate
+	c.update.Nonce = acc.Nonce
+	c.update.Balance.Set(&acc.Balance)
+	if acc.CodeHash.IsEmpty() {
+		c.update.CodeHash = empty.CodeHash
+	} else {
+		c.update.CodeHash = acc.CodeHash.Value()
 	}
-	if !c.update.Balance.Eq(&acc.Balance) {
-		c.update.Balance.Set(&acc.Balance)
-		c.update.Flags |= BalanceUpdate
-	}
-	if acc.CodeHash.Value() != c.update.CodeHash {
-		if acc.CodeHash.IsEmpty() {
-			c.update.CodeHash = empty.CodeHash
-		} else {
-			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash.Value()
-		}
-	}
+	// val is the whole account record, so flag every field: a cell may skip its state
+	// read only when the update it was given covers the account completely.
+	c.update.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
@@ -1685,6 +1783,7 @@ func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
 	}
+	t.collected = nil
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
@@ -1742,6 +1841,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)
@@ -1900,6 +2002,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 		t.tree.Clear(true)
 
+	case ModeCollect:
+		return errors.New("commitment: ModeCollect has no HashSort; use Drain")
+
 	default:
 		return nil
 	}
@@ -1943,6 +2048,10 @@ func (t *Updates) Reset() {
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
+	case ModeCollect:
+		clear(t.treeIdx)
+		t.collected = t.collected[:0]
+		t.hashedTouches = t.hashedTouches[:0]
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]

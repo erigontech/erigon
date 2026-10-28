@@ -387,17 +387,6 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 		assert.False(t, ok)
 		assert.Equal(t, 3, idx)
 	})
-
-	t.Run("popcount", func(t *testing.T) {
-		n := &prefixNode{}
-		assert.Equal(t, 0, popcount(n))
-		n.bitmap = 0xFFFF
-		assert.Equal(t, 16, popcount(n))
-		n.bitmap = 0x0001
-		assert.Equal(t, 1, popcount(n))
-		n.bitmap = uint16(1)<<0x03 | uint16(1)<<0x07 | uint16(1)<<0x0B
-		assert.Equal(t, 3, popcount(n))
-	})
 }
 
 func TestParallelUpdateLifecycle(t *testing.T) {

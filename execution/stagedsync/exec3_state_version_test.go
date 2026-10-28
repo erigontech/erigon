@@ -32,7 +32,7 @@ import (
 
 func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
-	overlay, err := membatchwithdb.NewMemoryBatch(tx, t.TempDir(), log.New())
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
 	require.NoError(t, err)
 	defer overlay.Close()
 

@@ -19,14 +19,18 @@ package state
 import (
 	"errors"
 	"fmt"
+	"math/big"
+	"math/rand"
 	"sort"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -125,17 +129,30 @@ type minimalStateReader struct{}
 func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
+func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *minimalStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (r *minimalStateReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *minimalStateReader) HasStorage(addr accounts.Address) (bool, error) { return false, nil }
+
 func (r *minimalStateReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	return nil, nil
 }
+
 func (r *minimalStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) { return 0, nil }
+
 func (r *minimalStateReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
 	return 0, nil
 }
@@ -143,76 +160,22 @@ func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string) {}
 func (r *minimalStateReader) Trace() bool                             { return false }
 func (r *minimalStateReader) TracePrefix() string                     { return "" }
 
-// TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
-// system address (0xff...fe) is excluded from the BAL when it has no actual
-// state changes and only revertable accesses (e.g. incidental gas-calculation
-// reads during system calls).
-func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
+// TestAsBlockAccessList_SystemAddressIsOrdinary pins that SystemAddress follows
+// the same BAL rules as any other address: an access-only entry is included even
+// from the system-call slot (txIndex -1). System calls do not record their
+// caller, so no SystemAddress exclusion belongs in AsBlockAccessList.
+func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
 	t.Parallel()
 
-	sysAddr := params.SystemAddress
-	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
-
-	io := NewVersionedIO(1) // 2 tx slots: system call at -1, user tx at 0
-
-	// System call (txIndex = -1): record system address as a revertable access.
-	// This simulates EIP-4788 beacon root call where system address is msg.sender.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): record a normal address with a balance write.
-	readSets := ReadSet{}
-	readSets.SetBalance(userAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: userAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(200)},
-	))
+	io := NewVersionedIO(1)
+	rs := io.ReadSet(-1)
+	rs.access = AccessSet{params.SystemAddress: accessOptions{revertable: true}}
+	io.RecordReads(Version{TxIndex: -1}, rs)
 
 	bal := io.AsBlockAccessList()
 
-	// System address should be excluded (no state changes, only revertable access).
-	for _, ac := range bal {
-		require.NotEqual(t, sysAddr, ac.Address,
-			"system address should be excluded from BAL when it has no state changes and only revertable accesses")
-	}
-	// User address should be present.
-	found := false
-	for _, ac := range bal {
-		if ac.Address == userAddr {
-			found = true
-			break
-		}
-	}
-	require.True(t, found, "user address should be present in BAL")
-}
-
-// TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess verifies
-// that the system address is included in the BAL when a user tx performs a
-// non-revertable access to it (e.g. BALANCE opcode, direct call, SELFDESTRUCT
-// beneficiary), even without actual state changes.
-func TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-
-	io := NewVersionedIO(1) // system call at -1, user tx at 0
-
-	// System call (txIndex = -1): revertable access (as usual).
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): non-revertable access (e.g. BALANCE opcode on system address).
-	recordTouch(io, 0, sysAddr, false)
-
-	bal := io.AsBlockAccessList()
-
-	found := false
-	for _, ac := range bal {
-		if ac.Address == sysAddr {
-			found = true
-			break
-		}
-	}
-	require.True(t, found,
-		"system address should be included in BAL when a user tx has non-revertable access")
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
 }
 
 func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
@@ -228,107 +191,7 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 	bal := io.AsBlockAccessList()
 
 	require.Len(t, bal, 1)
-	require.Equal(t, params.SystemAddress, bal[0].Address)
-}
-
-// TestAsBlockAccessList_SystemAddressIncludedWithStateChanges verifies that the
-// system address is kept in the BAL when it has actual state changes (e.g. a
-// value transfer to the system address), regardless of access type.
-func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-
-	io := NewVersionedIO(1)
-
-	// System call (txIndex = -1): revertable access only.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): revertable access BUT with a balance change
-	// (e.g. ETH transferred to system address).
-	recordTouch(io, 0, sysAddr, true)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sysAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(42)},
-	))
-
-	bal := io.AsBlockAccessList()
-
-	found := false
-	for _, ac := range bal {
-		if ac.Address == sysAddr {
-			found = true
-			break
-		}
-	}
-	require.True(t, found,
-		"system address should be included in BAL when it has actual state changes")
-}
-
-// TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly verifies that
-// a revertable access from a system call (txIndex = -1) does NOT set the
-// nonRevertableUserAccess flag, so the system address is still excluded.
-func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-	otherAddr := accounts.InternAddress(common.HexToAddress("0x2222"))
-
-	io := NewVersionedIO(1)
-
-	// System call (txIndex = -1): non-revertable access. Even though it's
-	// non-revertable, it's from a system call (txIndex < 0) so it should
-	// NOT mark the system address for inclusion.
-	recordTouch(io, -1, sysAddr, false)
-
-	// User tx (txIndex = 0): touches a different address to ensure there's
-	// at least one user tx in the block.
-	readSets := ReadSet{}
-	readSets.SetBalance(otherAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(50)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: otherAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(100)},
-	))
-
-	bal := io.AsBlockAccessList()
-
-	for _, ac := range bal {
-		require.NotEqual(t, sysAddr, ac.Address,
-			"system address should be excluded: non-revertable access from system call (txIndex < 0) should not trigger inclusion")
-	}
-}
-
-// TestAsBlockAccessList_NonRevertableOverridesRevertable verifies that if the
-// system address first gets a revertable access from a user tx, then a
-// non-revertable access from another user tx, the non-revertable wins and the
-// address is included.
-func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-
-	io := NewVersionedIO(2) // 3 slots: system call at -1, user tx 0, user tx 1
-
-	// System call: revertable.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx 0: revertable access (e.g. gas calc).
-	recordTouch(io, 0, sysAddr, true)
-
-	// User tx 1: non-revertable access (e.g. BALANCE opcode).
-	recordTouch(io, 1, sysAddr, false)
-
-	bal := io.AsBlockAccessList()
-
-	found := false
-	for _, ac := range bal {
-		if ac.Address == sysAddr {
-			found = true
-			break
-		}
-	}
-	require.True(t, found,
-		"system address should be included: non-revertable user access overrides earlier revertable access")
-
+	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
 }
 
 // TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL verifies that a balance
@@ -354,7 +217,7 @@ func TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL(t *testing.T) {
 
 	bal := io.AsBlockAccessList()
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			require.Empty(t, ac.BalanceChanges,
 				"net-zero balance write (matches pre-block balance, no intermediates) must not appear in BAL")
 		}
@@ -393,7 +256,7 @@ func TestVersionedIO_BalanceRestoreAfterIntermediateIsRecorded(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 2,
 				"both the intermediate write and the restore-to-initial write must appear in BAL")
@@ -431,7 +294,7 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx1's write of 200 is a no-op (same as tx0's 200); stale read must not cause a spurious second entry")
@@ -483,7 +346,7 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx 1's burn write must remain in BAL — a post-write read with the same value must not seed initialBalanceValue and trigger the net-zero filter")
@@ -523,7 +386,7 @@ func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address != addr {
+		if ac.Address != addr.Value() {
 			continue
 		}
 		found = true
@@ -904,17 +767,6 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 		"newly-created account (not in DB) should NOT generate a BalancePath read")
 }
 
-// recordTouch records an address-level ephemeral access for txIndex on the
-// read-set (accesses feed the BAL through the read-set now).
-func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable bool) {
-	rs := io.ReadSet(txIndex)
-	if rs.access == nil {
-		rs.access = make(AccessSet)
-	}
-	rs.access[addr] = accessOptions{revertable: revertable}
-	io.RecordReads(Version{TxIndex: txIndex}, rs)
-}
-
 // hasRead reports whether the ReadSet has a read for the given address and path.
 func hasRead(reads ReadSet, addr accounts.Address, path AccountPath) bool {
 	_, ok := reads.getHeader(addr, path, accounts.NilKey)
@@ -1151,7 +1003,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		_, err := tx3.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
 		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx3.VersionedWrites(), true, "")
+		vm.FlushVersionedWrites(tx3.VersionedWrites(), true)
 
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)
@@ -1185,24 +1037,24 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 }
 
 // EIP-7928 net-zero guard: a slot that is read and then written back to the
-// same value must stay a read in the BAL, not become a write. The filter
-// lives in accountState.applyWriteStorage (the helper addStorageUpdate only
-// appends). This locks the behaviour down across the typed-vio refactor.
+// same value must stay a read in the BAL, not become a write. The filter lives
+// in accountState.applyWriteStorage.
 func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
 	slot := accounts.InternKey(common.HexToHash("0x07"))
 	orig := *uint256.NewInt(42)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	account := newAccountState(addr)
 
 	account.updateReadStorage(slot, orig)
 	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
 
 	account.applyWriteStorage(slot, orig, 0)
 
-	require.Empty(t, account.changes.StorageChanges,
+	changes := account.changes
+	require.Empty(t, changes.StorageChanges,
 		"write-back to the originally-read value is net-zero and must NOT be recorded as a storage write")
-	require.Contains(t, account.changes.StorageReads, slot,
+	require.Contains(t, changes.StorageReads, slot,
 		"the net-zero write-back must remain a read")
 }
 
@@ -1214,16 +1066,17 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	orig := *uint256.NewInt(42)
 	changed := *uint256.NewInt(99)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	account := newAccountState(addr)
 
 	account.updateReadStorage(slot, orig)
 
 	account.applyWriteStorage(slot, changed, 0)
 
-	require.Len(t, account.changes.StorageChanges, 1,
+	changes := account.changes
+	require.Len(t, changes.StorageChanges, 1,
 		"a write to a different value is a real state change and must be recorded")
-	require.Equal(t, slot, account.changes.StorageChanges[0].Slot)
-	require.NotContains(t, account.changes.StorageReads, slot,
+	require.Equal(t, slot, changes.StorageChanges[0].Slot)
+	require.NotContains(t, changes.StorageReads, slot,
 		"a real write supersedes the recorded read")
 }
 
@@ -1243,7 +1096,7 @@ func TestAsBlockAccessList_SelfdestructNoBurn(t *testing.T) {
 	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
-	require.Equal(t, addr, bal[0].Address)
+	require.Equal(t, addr.Value(), bal[0].Address)
 	require.Len(t, bal[0].BalanceChanges, 1)
 	require.Equal(t, uint64(1), bal[0].BalanceChanges[0].Value.Uint64(),
 		"the balance write records as-is: EIP-8246 removed the destroy-time burn")
@@ -1258,7 +1111,7 @@ func TestAsBlockAccessList_SelfdestructTouchKeepsEntry(t *testing.T) {
 	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1, "a destroyed account with no net changes is still a touched BAL entry")
-	require.Equal(t, addr, bal[0].Address)
+	require.Equal(t, addr.Value(), bal[0].Address)
 	require.Empty(t, bal[0].BalanceChanges)
 }
 
@@ -1589,6 +1442,7 @@ func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) 
 	require.True(t, stateObject.selfdestructed)
 	require.False(t, stateObject.createdContract)
 }
+
 func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testing.T) {
 	t.Parallel()
 
@@ -1608,6 +1462,7 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 	require.True(t, vr.Val.IsZero(),
 		"the synthetic creation BalancePath read must keep the pre-tx balance (0); the CREATE2 re-creation must not overwrite it with the in-tx funded balance")
 }
+
 func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChange(t *testing.T) {
 	t.Parallel()
 
@@ -1635,12 +1490,13 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 	bal := io.AsBlockAccessList()
 
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			require.Empty(t, ac.BalanceChanges,
 				"balance is unchanged (7->7); the promoted read is the baseline so EELS emits no BalanceChange\n%s", bal.DebugString())
 		}
 	}
 }
+
 func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	t.Parallel()
 
@@ -1662,7 +1518,7 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Empty(t, ac.CodeChanges,
 				"a delegation set then cleared in the same tx nets to empty code; pre-block code of an absent account is empty, so no code change must be recorded\n%s", bal.DebugString())
@@ -1672,6 +1528,7 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	}
 	require.True(t, found, "authority account must appear in BAL")
 }
+
 func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
 	t.Parallel()
 
@@ -1699,7 +1556,7 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 
 	found := false
 	for _, ac := range bal {
-		if ac.Address == addr {
+		if ac.Address == addr.Value() {
 			found = true
 			require.Len(t, ac.CodeChanges, 1,
 				"the delegation clear is a real pre!=post code change and must stay in the BAL\n%s", bal.DebugString())
@@ -1708,4 +1565,440 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 		}
 	}
 	require.True(t, found, "authority account must appear in BAL")
+}
+
+// Slots recorded on either side of the slotIndexMin crossover must stay
+// findable, in both directions: a missed write index opens a second SlotChanges
+// for the same slot, and a missed read index leaves a superseded read behind.
+func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	account := newAccountState(addr)
+	key := func(n int64) accounts.StorageKey {
+		return accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(n)))
+	}
+
+	early := key(1)
+	account.applyWriteStorage(early, *uint256.NewInt(1), 0)
+	for i := range 4 * slotIndexMin {
+		account.updateReadStorage(key(int64(i+1000)), uint256.Int{})
+		account.applyWriteStorage(key(int64(i+100)), *uint256.NewInt(1), uint32(i))
+	}
+	require.NotNil(t, account.slotWrites, "the index must be built past the threshold")
+	require.NotNil(t, account.slotReads)
+
+	late := key(9999)
+	account.updateReadStorage(late, uint256.Int{})
+	account.applyWriteStorage(late, *uint256.NewInt(1), 50)
+	account.applyWriteStorage(early, *uint256.NewInt(2), 98)
+	account.applyWriteStorage(late, *uint256.NewInt(2), 99)
+
+	changes := account.changes
+	for _, slot := range []accounts.StorageKey{early, late} {
+		seen := 0
+		for _, sc := range changes.StorageChanges {
+			if sc.Slot == slot {
+				seen++
+				require.Len(t, sc.Changes, 2, "the second write must append to the existing slot")
+			}
+		}
+		require.Equal(t, 1, seen, "the slot must appear exactly once")
+		require.NotContains(t, changes.StorageReads, slot, "a write supersedes the recorded read")
+	}
+	require.Len(t, changes.StorageReads, 4*slotIndexMin)
+}
+
+// TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
+// cross slotIndexMin in both lists and compares the normalized result against a
+// straightforward builder. The indexes are pure bookkeeping, so any divergence
+// is a bug in them.
+func TestAccountState_MatchesReferenceBuilder(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	r := rand.New(rand.NewSource(11))
+	for range 300 {
+		nSlots := 1 + r.Intn(4*slotIndexMin)
+		keys := make([]accounts.StorageKey, nSlots)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+
+		account := newAccountState(addr)
+		ref := newReferenceAccount(addr)
+		for op := range 4 * nSlots {
+			k := keys[r.Intn(nSlots)]
+			v := *uint256.NewInt(uint64(r.Intn(3)))
+			if r.Intn(2) == 0 {
+				account.updateReadStorage(k, v)
+				ref.read(k, v)
+				continue
+			}
+			account.applyWriteStorage(k, v, uint32(op))
+			ref.write(k, v, uint32(op))
+		}
+
+		got, want := account.changes, ref.changes
+		got.Normalize()
+		want.Normalize()
+		require.Equal(t, want.StorageReads, got.StorageReads, "slots=%d", nSlots)
+		require.Equal(t, want.StorageChanges, got.StorageChanges, "slots=%d", nSlots)
+	}
+}
+
+// referenceAccount is the BAL storage bookkeeping written the obvious way.
+type referenceAccount struct {
+	changes  *types.AccountChanges
+	origVals map[accounts.StorageKey]uint256.Int
+}
+
+func newReferenceAccount(addr accounts.Address) *referenceAccount {
+	return &referenceAccount{
+		changes:  &types.AccountChanges{Address: addr.Value()},
+		origVals: map[accounts.StorageKey]uint256.Int{},
+	}
+}
+
+func (a *referenceAccount) written(slot accounts.StorageKey) int {
+	for i := range a.changes.StorageChanges {
+		if a.changes.StorageChanges[i].Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (a *referenceAccount) read(slot accounts.StorageKey, val uint256.Int) {
+	if _, seen := a.origVals[slot]; !seen {
+		a.origVals[slot] = val
+	}
+	if a.written(slot) >= 0 {
+		return
+	}
+	a.changes.StorageReads = append(a.changes.StorageReads, slot)
+}
+
+func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx uint32) {
+	at := a.written(slot)
+	if at < 0 {
+		if orig, seen := a.origVals[slot]; seen && val.Eq(&orig) {
+			return
+		}
+	}
+	kept := a.changes.StorageReads[:0]
+	for _, s := range a.changes.StorageReads {
+		if s != slot {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == 0 {
+		a.changes.StorageReads = nil
+	} else {
+		a.changes.StorageReads = kept
+	}
+	if at >= 0 {
+		sc := &a.changes.StorageChanges[at]
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
+			return
+		}
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: idx, Value: val})
+		return
+	}
+	a.changes.StorageChanges = append(a.changes.StorageChanges, types.SlotChanges{
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: idx, Value: val}},
+	})
+}
+
+// Fresh states and the sets Snapshot returns never use an arena, so they must
+// not carry its metadata.
+func TestWriteSetKeepsTheArenaOutOfLine(t *testing.T) {
+	require.Less(t, unsafe.Sizeof(WriteSet{}), unsafe.Sizeof(vwArenas{}))
+}
+
+// An arena-backed write set hands out distinct cells and keeps its slabs across
+// resets, so a reused set allocates nothing after the first call.
+func TestWriteSetArenaReusesItsCells(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addrs := make([]accounts.Address, vwFirstSlab*4+3)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+
+	first := make(map[*VersionedWrite[uint64]]struct{}, len(addrs))
+	for _, a := range addrs {
+		vw := ws.newVWNonce()
+		_, dup := first[vw]
+		require.False(t, dup, "a live cell must not be handed out twice")
+		first[vw] = struct{}{}
+		vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+		vw.Val = 7
+		ws.SetNonce(a, vw)
+	}
+	require.Equal(t, len(addrs), ws.Count())
+
+	ws.ReleaseAndReset()
+	require.Zero(t, ws.Count())
+
+	allocs := testing.AllocsPerRun(20, func() {
+		for _, a := range addrs {
+			vw := ws.newVWNonce()
+			vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+			ws.SetNonce(a, vw)
+		}
+		ws.ReleaseAndReset()
+	})
+	require.Less(t, allocs, float64(len(addrs)), "cells must come from the slabs, not the heap")
+}
+
+// A reset cell carries nothing from the call that used it.
+func TestWriteSetArenaCellsComeBackZeroed(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 3}}
+	vw.Val = 42
+	ws.SetNonce(addr, vw)
+	ws.ReleaseAndReset()
+
+	again := ws.newVWNonce()
+	require.Same(t, vw, again, "the slab hands the same cell back")
+	require.Zero(t, again.Val)
+	require.Equal(t, WriteHeader{}, again.WriteHeader)
+}
+
+// A delete must not hand an arena cell to the shared pool: the arena reuses and
+// zeroes that memory, so another set holding it would be corrupted. SetCode's
+// revert-to-base path and journal rollback both delete cells.
+func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	var arena WriteSet
+	arena.UseArena()
+	arena.SetNonce(addr, arena.newVWNonce())
+	arena.SetStorage(addr, key, arena.newVWStorage())
+
+	delCell(&arena, arena.nonce, addr, func(*VersionedWrite[uint64]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	delCell(&arena, arena.storage[addr], key, func(*VersionedWrite[uint256.Int]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	require.Empty(t, arena.nonce)
+	require.Empty(t, arena.storage[addr])
+}
+
+// An arena-backed set must not hand its cells to another set: the arena reuses
+// and zeroes them, so the other set would read freed memory.
+func TestArenaBackedSetRefusesToShareItsCells(t *testing.T) {
+	was := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = was })
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	newArenaSet := func() *WriteSet {
+		ws := &WriteSet{}
+		ws.UseArena()
+		vw := ws.newVWNonce()
+		vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+		ws.SetNonce(addr, vw)
+		return ws
+	}
+
+	require.Panics(t, func() { newArenaSet().MergeInto(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).MergeInto(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Filter(func(WriteHeader) bool { return true }) })
+	// Merge returns an input directly when the other side is empty.
+	require.Panics(t, func() { newArenaSet().Merge(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).Merge(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Merge(newArenaSet()) })
+	// Normalize also takes cell pointers straight from the receiver.
+	require.Panics(t, func() {
+		_, _ = newArenaSet().Normalize(NewVersionMap(nil), 0, 0, NewNoopReader(), nil, false, false, false)
+	})
+}
+
+// ReleaseMaps zeroes the set; the arena must survive it, or a reused set
+// silently falls back to the shared pools and leaks its slabs.
+func TestReleaseMapsKeepsTheArena(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+	ws.SetNonce(addr, vw)
+
+	ws.ReleaseMaps()
+	require.True(t, ws.ArenaBacked(), "the arena must outlive the map release")
+}
+
+// The arena stops growing at its cap, so one outlier call cannot pin an
+// unbounded footprint on a set that keeps its slabs across resets.
+func TestArenaStopsGrowingAtItsCap(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	for range vwMaxCells + vwFirstSlab {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap, "the arena must not grow past its cap")
+
+	slabs := len(ws.cells.nonce.slabs)
+	ws.ReleaseAndReset()
+	require.Len(t, ws.cells.nonce.slabs, slabs, "a reset keeps the slabs for the next call")
+}
+
+func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
+	const overflow = 64
+	var a vwArena[uint64]
+
+	taken := make([]*VersionedWrite[uint64], 0, vwMaxCells+overflow)
+	for range vwMaxCells + overflow {
+		taken = append(taken, a.alloc(getVWNonce))
+	}
+	require.Len(t, a.overflow, overflow, "cells past the cap must be tracked")
+
+	var released []*VersionedWrite[uint64]
+	a.reset(func(vw *VersionedWrite[uint64]) { released = append(released, vw) })
+	require.Equal(t, taken[vwMaxCells:], released, "a reset must hand every overflow cell back")
+	require.Empty(t, a.overflow)
+
+	// The pools clear only what pins memory, so the arena has to finish the job.
+	dirty := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Path: NoncePath}, Val: 7}
+	for range vwMaxCells {
+		a.alloc(getVWNonce)
+	}
+	require.Zero(t, *a.alloc(func() *VersionedWrite[uint64] { return dirty }))
+}
+
+// One outlier tx must not pin its overflow list on a set that keeps its slabs.
+func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
+	var a vwArena[uint64]
+	for range vwMaxCells + vwMaxOverflow + 1 {
+		a.alloc(getVWNonce)
+	}
+	a.reset(releaseVWNonce)
+	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
+}
+
+func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
+	ibs := New(NewNoopReader())
+	require.False(t, ibs.versionedWrites.ArenaBacked(), "a one-shot state buys no slabs")
+
+	ibs.ResetVersionedIO()
+	require.True(t, ibs.versionedWrites.ArenaBacked(), "a state that outlives a tx owns its cells")
+}
+
+// A path that writes a handful of cells must buy a handful: the first slab is
+// what the first tx on a reused state pays for, and it grows as writes keep
+// coming.
+func TestArenaSlabsGrowWithTheWrites(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+
+	require.NotNil(t, ws.newVWNonce())
+	require.Equal(t, vwFirstSlab, ws.cells.nonce.cap, "one write must not buy more than the first slab")
+
+	for range vwMaxCells - 1 {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap)
+	require.Less(t, len(ws.cells.nonce.slabs), 12, "doubling must reach the cap in a few slabs")
+}
+
+// A reused read set keeps its per-address slot maps, so a call that reads the
+// same contract's slots again does not regrow the map from scratch.
+func TestReusedReadSetKeepsItsSlotMaps(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	keys := make([]accounts.StorageKey, 256)
+	for i := range keys {
+		keys[i] = accounts.InternKey(common.BigToHash(big.NewInt(int64(i))))
+	}
+	var rs ReadSet
+	for _, k := range keys {
+		rs.SetStorage(addr, k, VersionedRead[uint256.Int]{})
+	}
+	require.Len(t, rs.storage[addr], len(keys))
+
+	rs.clearForReuse()
+	require.Empty(t, rs.storage[addr], "the slots are gone")
+
+	allocs := testing.AllocsPerRun(10, func() {
+		for _, k := range keys {
+			rs.SetStorage(addr, k, VersionedRead[uint256.Int]{})
+		}
+		rs.clearForReuse()
+	})
+	require.Zero(t, allocs, "refilling a kept slot map must not allocate")
+}
+
+// Past the bound the outer map is dropped, so one call that touches many
+// contracts cannot pin a slot map for each of them.
+func TestReusedReadSetDropsTooManySlotMaps(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs + 1 {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+	}
+	rs.clearForReuse()
+	// Nil, not empty: clear would keep the buckets the many addresses grew.
+	require.Nil(t, rs.storage, "too many addresses must drop the outer map")
+}
+
+// Slot maps from earlier calls go, so a sequence of calls on different
+// contracts cannot pin one map each while every entries() count stays small.
+func TestReusedReadSetDropsSlotMapsItNoLongerUses(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		rs.clearForReuse()
+		require.LessOrEqual(t, len(rs.storage), 1, "only the contract this call read stays")
+	}
+}
+
+// A cleared slot map keeps the buckets it grew, so reading one slot of every
+// kept contract while another one grows must not pile up their capacities.
+func TestReusedReadSetBoundsTheSlotsItsMapsHeld(t *testing.T) {
+	var rs ReadSet
+	addrs := make([]accounts.Address, 4)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	held := map[accounts.Address]int{}
+	for call := range addrs {
+		for _, a := range addrs {
+			if _, kept := rs.storage[a]; !kept {
+				held[a] = 0
+			}
+			rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		}
+		for j := range maxPooledEntries / 2 {
+			rs.SetStorage(addrs[call], accounts.InternKey(common.BigToHash(big.NewInt(int64(j+2)))), VersionedRead[uint256.Int]{})
+		}
+		for _, a := range addrs {
+			held[a] = max(held[a], len(rs.storage[a]))
+		}
+		rs.clearForReuse()
+		kept := 0
+		for a := range rs.storage {
+			kept += held[a]
+		}
+		require.LessOrEqual(t, kept, maxPooledEntries, "call %d: kept slot maps once held too many slots", call)
+	}
+}
+
+// synthesizeCreatedAccountBase must allocate nothing when the version map holds
+// no cell for the address: every probe would miss and the account is dropped.
+func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	acc, ok := ibs.synthesizeCreatedAccountBase(addr)
+	require.Nil(t, acc)
+	require.False(t, ok)
+
+	allocs := testing.AllocsPerRun(50, func() {
+		if _, ok := ibs.synthesizeCreatedAccountBase(addr); ok {
+			t.Fatal("no cell may synthesize an account")
+		}
+	})
+	require.Zero(t, allocs)
 }

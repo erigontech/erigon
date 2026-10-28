@@ -92,9 +92,11 @@ func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
 func (df *DirtyFiles) MadvNormal() {
 	df.Scan(func(f *FilesItem) bool { f.MadvNormal(); return true })
 }
+
 func (df *DirtyFiles) DisableReadAhead() {
 	df.Scan(func(f *FilesItem) bool { f.DisableReadAhead(); return true })
 }
+
 func (df *DirtyFiles) EnableReadAhead() {
 	df.Scan(func(f *FilesItem) bool { f.EnableReadAhead(); return true })
 }
@@ -152,10 +154,12 @@ func (i *FilesItem) MadvNormal() {
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
+
 func (i *FilesItem) EnableReadAhead() {
 	i.decompressor.MadvSequential()
 	i.index.MadvSequential()
 }
+
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
 	i.index.DisableReadAhead()
@@ -242,6 +246,7 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 		if err != nil {
 			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
 		}
+		relativePaths[i] = filepath.ToSlash(relativePaths[i])
 	}
 	return relativePaths
 }
@@ -337,7 +342,7 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
 
-		var newFile = newFilesItem(startTxNum, endTxNum)
+		newFile := newFilesItem(startTxNum, endTxNum)
 		res = append(res, newFile)
 	}
 	return res
@@ -704,11 +709,13 @@ func (files visibleFiles) MadvNormal() {
 		f.src.MadvNormal()
 	}
 }
+
 func (files visibleFiles) EnableReadAhead() {
 	for _, f := range files {
 		f.src.EnableReadAhead()
 	}
 }
+
 func (files visibleFiles) DisableReadAhead() {
 	for _, f := range files {
 		f.src.DisableReadAhead()
@@ -742,6 +749,7 @@ func (files visibleFiles) LatestMergedRange(stepSize uint64) MergeRange {
 	}
 	return MergeRange{}
 }
+
 func (files visibleFiles) String(stepSize uint64) string {
 	res := make([]string, 0, len(files))
 	for _, file := range files {
@@ -749,6 +757,7 @@ func (files visibleFiles) String(stepSize uint64) string {
 	}
 	return strings.Join(res, ",")
 }
+
 func (files visibleFiles) Len() int {
 	return len(files)
 }

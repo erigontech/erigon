@@ -45,8 +45,7 @@ func (tf *TrackingFetcher) FetchHeaders(
 ) (FetcherResponse[[]*types.Header], error) {
 	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
-		var errIncompleteHeaders *ErrIncompleteHeaders
-		if errors.As(err, &errIncompleteHeaders) {
+		if errIncompleteHeaders, ok := errors.AsType[*ErrIncompleteHeaders](err); ok {
 			tf.peerTracker.BlockNumMissing(peerId, errIncompleteHeaders.LowestMissingBlockNum())
 		} else if errors.Is(err, context.DeadlineExceeded) {
 			tf.peerTracker.BlockNumMissing(peerId, start)
@@ -83,8 +82,7 @@ func (tf *TrackingFetcher) FetchBodies(
 ) (FetcherResponse[[]*types.Body], error) {
 	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
-		var errMissingBodies *ErrMissingBodies
-		if errors.As(err, &errMissingBodies) {
+		if errMissingBodies, ok := errors.AsType[*ErrMissingBodies](err); ok {
 			lowest, exists := errMissingBodies.LowestMissingBlockNum()
 			if exists {
 				tf.peerTracker.BlockNumMissing(peerId, lowest)

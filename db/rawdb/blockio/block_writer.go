@@ -18,54 +18,26 @@ package blockio
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-//Naming:
+// Naming:
 //  Prune: delete old data
 //  Unwind: delete recent data
 
 // BlockWriter can write blocks from db and snapshots
-type BlockWriter struct {
-}
+type BlockWriter struct{}
 
 func NewBlockWriter() *BlockWriter {
 	return &BlockWriter{}
-}
-
-func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error {
-	startKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(startKey, from)
-	endKey := dbutils.HeaderKey(to, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
-
-	return etl.Transform(
-		logPrefix,
-		tx,
-		kv.Headers,
-		kv.HeaderNumber,
-		tmpDir,
-		extractHeaders,
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			ExtractStartKey: startKey,
-			ExtractEndKey:   endKey,
-			Quit:            ctx.Done(),
-		},
-		logger,
-	)
 }
 
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
@@ -79,19 +51,12 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 	}
 	return nil
 }
+
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 	if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
 		return err
 	}
 	return nil
-}
-
-func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
-	// We only want to extract entries composed by Block Number + Header Hash
-	if len(k) != 40 {
-		return nil
-	}
-	return next(k, k[8:], k[:8])
 }
 
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
@@ -110,15 +75,13 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	return nil
 }
 
-var (
-	mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
-)
+var mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
 
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
+func (w *BlockWriter) PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }

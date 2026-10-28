@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -55,7 +56,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	params.ExtraData[0] = 50
 
 	require.Nil(t, copied.Withdrawals[0])
-	require.Equal(t, uint64(4), copied.Withdrawals[1].Index)
+	require.Equal(t, hexutil.Uint64(4), copied.Withdrawals[1].Index)
 	require.Equal(t, common.Hash{0x01}, *copied.ParentBeaconBlockRoot)
 	require.Equal(t, uint64(2), *copied.SlotNumber)
 	require.Equal(t, uint64(3), *copied.TargetGasLimit)

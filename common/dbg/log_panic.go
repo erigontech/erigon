@@ -35,6 +35,7 @@ func Stack() string {
 	}
 	return stack.String()
 }
+
 func StackSkip(skip int) string {
 	stack := stack2.Trace().TrimBelow(stack2.Caller(skip))
 	if len(stack) > 1 {

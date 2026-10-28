@@ -20,14 +20,22 @@
 package rpc
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestNewID(t *testing.T) {
@@ -129,6 +137,41 @@ func TestSubscriptions(t *testing.T) {
 	}
 }
 
+// Every subscribe call of a batch must take effect, though they all add to the notifiers the
+// batch shares.
+func TestBatchSubscriptionsAllNotify(t *testing.T) {
+	logger := log.New()
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	if err := server.RegisterName("nftest", new(notificationTestService)); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+
+	const subs = 16
+	batch := make([]map[string]any, subs)
+	for i := range batch {
+		batch[i] = map[string]any{"jsonrpc": "2.0", "id": i, "method": "nftest_subscribe", "params": []any{"someSubscription", 1, i}}
+	}
+	if err := json.NewEncoder(clientConn).Encode(batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+	for notified := 0; notified < subs; {
+		var msg json.RawMessage
+		if err := in.Decode(&msg); err != nil {
+			t.Fatalf("%d of %d subscriptions notified: %v", notified, subs, err)
+		}
+		if msg[0] != '[' {
+			notified++
+		}
+	}
+}
+
 // This test checks that unsubscribing works.
 func TestServerUnsubscribe(t *testing.T) {
 	logger := log.New()
@@ -138,12 +181,18 @@ func TestServerUnsubscribe(t *testing.T) {
 	// Start the server.
 	server := newTestServer(logger)
 	service := &notificationTestService{unsubscribed: make(chan string, 1)}
-	server.RegisterName("nftest2", service)
+	if err := server.RegisterName("nftest2", service); err != nil {
+		t.Fatal(err)
+	}
 	go server.ServeCodec(NewCodec(p1), 0)
 
 	// Subscribe.
-	p2.SetDeadline(time.Now().Add(10 * time.Second))
-	p2.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["someSubscription",0,10]}`))
+	if err := p2.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p2.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["someSubscription",0,10]}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	// Handle received messages.
 	var (
@@ -162,7 +211,9 @@ func TestServerUnsubscribe(t *testing.T) {
 	}
 
 	// Unsubscribe and check that it is handled on the server side.
-	p2.Write([]byte(`{"jsonrpc":"2.0","method":"nftest2_unsubscribe","params":["` + sub.subid + `"]}`))
+	if _, err := p2.Write([]byte(`{"jsonrpc":"2.0","method":"nftest2_unsubscribe","params":["` + sub.subid + `"]}`)); err != nil {
+		t.Fatal(err)
+	}
 	for {
 		select {
 		case id := <-service.unsubscribed:
@@ -218,11 +269,367 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 			return nil, nil, msg.Error
 		} else if err := json.Unmarshal(msg.Result, &c.subid); err != nil {
 			return nil, nil, fmt.Errorf("invalid response: %w", err)
+		} else if err := json.Unmarshal(msg.ID, &c.reqid); err != nil {
+			return nil, nil, fmt.Errorf("invalid request id: %w", err)
 		} else {
-			json.Unmarshal(msg.ID, &c.reqid)
 			return &c, nil, nil
 		}
 	default:
 		return nil, nil, fmt.Errorf("unrecognized message: %v", msg)
+	}
+}
+
+type streamedPayload struct{}
+
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.Stream) error {
+	w.WriteHex([]byte{0xab})
+	return nil
+}
+
+// valueFastJSON has a value receiver, so a typed nil panics unless Notify sends it down the
+// reflection path.
+type valueFastJSON struct{ data []byte }
+
+func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.Stream) error {
+	w.WriteHex(b.data)
+	return nil
+}
+
+func TestNotifyUsesFastJSON(t *testing.T) {
+	t.Parallel()
+
+	for payload, want := range map[any]string{streamedPayload{}: `"0xab"`, (*valueFastJSON)(nil): "null", &valueFastJSON{data: []byte{0xab}}: `"0xab"`} {
+		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
+		if err := n.Notify("0x1", payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
+			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
+		}
+	}
+}
+
+type wireOnly struct{ v int }
+
+func (w wireOnly) LocalValue() any { return w.v }
+
+// A payload that carries a wire encoding reaches an in-process subscriber as the value it wraps.
+func TestLocalNotifierDeliversLocalValue(t *testing.T) {
+	resc, closec := make(chan any, 1), make(chan any)
+	n := NewLocalNotifier("eth", resc, closec)
+	sub := n.CreateSubscription()
+	if err := n.Notify(sub.ID, wireOnly{v: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resc; got != 7 {
+		t.Fatalf("delivered %#v, want 7", got)
+	}
+}
+
+// The notification is built around bytes that are already encoded, and must come out as the
+// message json.Marshal made of them.
+func TestNotificationMatchesMarshalledMessage(t *testing.T) {
+	result := json.RawMessage(`[{"blockHash":"0x01","logs":[]},{"blockHash":"0x02","logs":[]}]`)
+	params, err := json.Marshal(&subscriptionResult{ID: "0x9a", Result: result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, namespace := range []string{"eth", `quote"back\slash`} {
+		want, err := json.Marshal(&jsonrpcMessage{Version: vsn, Method: namespace + notificationMethodSuffix, Params: params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix(namespace, "0x9a"), activated: true}
+		if err := n.send(result); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.got; !bytes.Equal(got, want) {
+			t.Fatalf("notification = %s, want %s", got, want)
+		}
+	}
+}
+
+// An activated notifier streams the whole notification: the prefix, the result and "}}".
+// emptyStreamed writes nothing; a notification still carries a result, as a response does.
+type emptyStreamed struct{}
+
+func (emptyStreamed) MarshalFastJSONTo(*jsonstream.Stream) error { return nil }
+
+func TestNotifyStreamsTheNotification(t *testing.T) {
+	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`, common.Hash{0xab}: `"0xab00000000000000000000000000000000000000000000000000000000000000"`} {
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+		if err := n.Notify("0x9a", payload); err != nil {
+			t.Fatal(err)
+		}
+		if want := string(notificationPrefix("eth", "0x9a")) + result + "}}"; string(w.got) != want {
+			t.Fatalf("%T: notification = %s, want %s", payload, w.got, want)
+		}
+	}
+}
+
+// A pending-tx hash is sent to every subscriber, so it must not go through reflection:
+// only the any box and the envelope's rawResponse box may allocate.
+func TestNotifyHashSkipsReflection(t *testing.T) {
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+	h := common.Hash{0xab}
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := n.Notify("0x9a", h); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !race.Enabled && allocs > 2 { // the race detector allocates inside sync.Pool
+		t.Fatalf("Notify(hash) allocates %.0f times, want at most 2", allocs)
+	}
+}
+
+// A notification buffered before activation carries a result too.
+func TestBufferedNotificationOfEmptyMarshallerCarriesNull(t *testing.T) {
+	w := &captureWriter{}
+	n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}}
+	if err := n.Notify("0x9a", emptyStreamed{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.activate(); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0x9a","result":null}}`; string(w.got) != want {
+		t.Fatalf("notification = %s, want %s", w.got, want)
+	}
+}
+
+// captureWriter keeps a copy of what it is given: a notification's buffer is reused once the
+// write returns.
+type captureWriter struct{ got []byte }
+
+func (w *captureWriter) WriteJSON(_ context.Context, v any) error {
+	w.got = bytes.Clone(v.(rawResponse))
+	return nil
+}
+func (*captureWriter) closed() <-chan any { return nil }
+func (*captureWriter) remoteAddr() string { return "" }
+
+type discardWriter struct{}
+
+func (discardWriter) WriteJSON(context.Context, any) error { return nil }
+func (discardWriter) closed() <-chan any                   { return nil }
+func (discardWriter) remoteAddr() string                   { return "" }
+
+// Every subscriber gets the same encoded result, so wrapping it for one subscriber must not
+// allocate its size: at 2000 subscribers a block's receipts would be allocated 2000 times.
+func TestNotifySendDoesNotAllocateResult(t *testing.T) {
+	result := json.RawMessage(`"` + strings.Repeat("x", 160*1024) + `"`)
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), activated: true}
+	send := func() {
+		if err := n.send(result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send()
+	var m0, m1 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+	const runs = 100
+	for range runs {
+		send()
+	}
+	runtime.ReadMemStats(&m1)
+	perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs
+	if !race.Enabled && perSend > uint64(len(result))/10 { // the race detector drops sync.Pool puts at random
+		t.Fatalf("a send allocates %d bytes for a %d-byte result", perSend, len(result))
+	}
+}
+
+const subscribeRequest = `{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["someSubscription",0,0]}`
+
+func serverCall(t *testing.T, server *Server) func(request string) *jsonrpcMessage {
+	t.Helper()
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	t.Cleanup(server.Stop)
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+	return func(request string) *jsonrpcMessage {
+		t.Helper()
+		if _, err := clientConn.Write([]byte(request)); err != nil {
+			t.Fatal(err)
+		}
+		var resp jsonrpcMessage
+		if err := in.Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		return &resp
+	}
+}
+
+func TestDefaultSubscriptionLimit(t *testing.T) {
+	t.Parallel()
+	call := serverCall(t, newTestServer(log.New()))
+	for i := range rpccfg.DefaultSubscriptionLimit {
+		if resp := call(subscribeRequest); resp.Error != nil {
+			t.Fatalf("subscription %d rejected below the default limit: %v", i+1, resp.Error)
+		}
+	}
+	resp := call(subscribeRequest)
+	if resp.Error == nil || resp.Error.Code != ErrCodeServerOverloaded {
+		t.Fatalf("subscription above the default limit returned %v, want overload error", resp.Error)
+	}
+}
+
+// A connection holds at most the server's subscription limit; an unsubscribe frees a slot.
+func TestSubscriptionLimit(t *testing.T) {
+	t.Parallel()
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(2)
+	call := serverCall(t, server)
+
+	first := call(subscribeRequest)
+	if first.Error != nil {
+		t.Fatalf("first subscription rejected: %v", first.Error)
+	}
+	if second := call(subscribeRequest); second.Error != nil {
+		t.Fatalf("second subscription rejected: %v", second.Error)
+	}
+	third := call(subscribeRequest)
+	if third.Error == nil {
+		t.Fatal("third subscription accepted above the limit of 2")
+	}
+	if third.Error.Code != ErrCodeServerOverloaded {
+		t.Fatalf("error code %d, want %d", third.Error.Code, ErrCodeServerOverloaded)
+	}
+
+	if resp := call(`{"jsonrpc":"2.0","id":2,"method":"nftest_unsubscribe","params":[` + string(first.Result) + `]}`); resp.Error != nil {
+		t.Fatalf("unsubscribe failed: %v", resp.Error)
+	}
+	if again := call(subscribeRequest); again.Error != nil {
+		t.Fatalf("subscription rejected after a slot was freed: %v", again.Error)
+	}
+}
+
+// The subscribe calls of one batch count against the limit as the batch runs, before any of
+// them is registered, so a batch cannot take the connection past it.
+func TestSubscriptionLimitAppliesWithinBatch(t *testing.T) {
+	t.Parallel()
+	const limit = 3
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(limit)
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	batch := make([]map[string]any, limit+2)
+	for i := range batch {
+		batch[i] = map[string]any{"jsonrpc": "2.0", "id": i, "method": "nftest_subscribe", "params": []any{"someSubscription", 0, 0}}
+	}
+	if err := json.NewEncoder(clientConn).Encode(batch); err != nil {
+		t.Fatal(err)
+	}
+	var answers []jsonrpcMessage
+	if err := json.NewDecoder(clientConn).Decode(&answers); err != nil {
+		t.Fatal(err)
+	}
+	if len(answers) != len(batch) {
+		t.Fatalf("%d answers for %d calls", len(answers), len(batch))
+	}
+	for i, answer := range answers {
+		if accepted := answer.Error == nil; accepted != (i < limit) {
+			t.Errorf("call %d accepted: %v, want %v with limit %d", i, accepted, i < limit, limit)
+		}
+	}
+}
+
+// A subscribe call holds its slot while it runs, so a second request on the connection cannot
+// take the connection past the limit while the first is still pending.
+func TestSubscriptionLimitCountsPendingSubscribe(t *testing.T) {
+	t.Parallel()
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(1)
+	service := &notificationTestService{gotHangSubscriptionReq: make(chan struct{}, 1), unblockHangSubscription: make(chan struct{})}
+	if err := server.RegisterName("nftest2", service); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+	unblock := sync.OnceFunc(func() { close(service.unblockHangSubscription) })
+	defer unblock()
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+
+	if _, err := clientConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["hangSubscription",1]}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-service.gotHangSubscriptionReq:
+	case <-time.After(10 * time.Second):
+		t.Fatal("subscription callback did not start")
+	}
+	if _, err := clientConn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"nftest2_subscribe","params":["someSubscription",0,0]}`)); err != nil {
+		t.Fatal(err)
+	}
+	var second jsonrpcMessage
+	if err := in.Decode(&second); err != nil {
+		t.Fatal(err)
+	}
+	if string(second.ID) != "2" {
+		t.Fatalf("answer to request %s arrived before the pending subscribe returned", second.ID)
+	}
+	if second.Error == nil || second.Error.Code != ErrCodeServerOverloaded {
+		t.Fatalf("second subscription accepted while the first held the only slot: %v", second.Error)
+	}
+
+	unblock()
+	for {
+		var msg jsonrpcMessage
+		if err := in.Decode(&msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.isNotification() {
+			continue
+		}
+		if msg.Error != nil || len(msg.Result) == 0 {
+			t.Fatalf("pending subscription failed: %v", msg.Error)
+		}
+		return
+	}
+}
+
+// A subscribe call that fails gives its slot back at once, so the later calls of the same
+// batch can still take it.
+func TestSubscriptionLimitFreesSlotOfFailedSubscribeWithinBatch(t *testing.T) {
+	t.Parallel()
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(1)
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["failingSubscription"]},` +
+		`{"jsonrpc":"2.0","id":2,"method":"nftest_subscribe","params":["someSubscription",0,0]}]`
+	if _, err := clientConn.Write([]byte(batch)); err != nil {
+		t.Fatal(err)
+	}
+	var answers []jsonrpcMessage
+	if err := json.NewDecoder(clientConn).Decode(&answers); err != nil {
+		t.Fatal(err)
+	}
+	if len(answers) != 2 {
+		t.Fatalf("%d answers for 2 calls", len(answers))
+	}
+	if answers[0].Error == nil {
+		t.Fatal("failingSubscription did not fail")
+	}
+	if answers[1].Error != nil {
+		t.Fatalf("subscription after a failed one in the same batch rejected: %v", answers[1].Error)
 	}
 }

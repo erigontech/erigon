@@ -8,9 +8,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 // Cross-contract call addresses (raw, for Push)
@@ -240,4 +242,203 @@ func deployDeFiContracts(b testing.TB, statedb *state.IntraBlockState) {
 		Call(nil, rawTokenB, 0, 0, 0, 0, 0).Op(vm.POP).
 		Op(vm.STOP).Bytes()
 	deployContract(b, statedb, addrRouter, routerCode)
+}
+
+// BenchmarkDeepStacks recurses into itself until gas runs out, measuring
+// CallContext acquisition at depth, where every context carries a 32 KB Stack.
+// CALL consumes seven operands, so 3 or 507 of the pushed items stay live while
+// the child frame runs.
+func BenchmarkDeepStacks(b *testing.B) {
+	for _, pushes := range []int{8, 512} {
+		b.Run(fmt.Sprintf("pushes-%d", pushes), func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 10_000_000)
+			statedb := vmenv.IntraBlockState()
+
+			code := make([]byte, 0, pushes+3)
+			for range pushes {
+				code = append(code, byte(vm.PUSH0))
+			}
+			code = append(code, byte(vm.ADDRESS), byte(vm.GAS), byte(vm.CALL))
+			deployContract(b, statedb, addrContract, code)
+
+			const existingDepthCoverage = 16
+			if depth := tracedMaxDepth(b, statedb, addrContract, vmenv.Context.GasLimit); depth <= existingDepthCoverage {
+				b.Fatalf("call chain only reached depth %d, want > %d", depth, existingDepthCoverage)
+			}
+
+			callComplete(b, vmenv, addrContract, nil)
+			for b.Loop() {
+				callComplete(b, vmenv, addrContract, nil)
+			}
+		})
+	}
+}
+
+// BenchmarkDeepCallsWithMemory runs a STATICCALL chain where every frame
+// expands memory before calling the next, so all frames hold memory at once.
+// The shallow cases are shaped after mainnet router and aggregator call trees;
+// the deep one is a stress shape, not one observed on mainnet.
+func BenchmarkDeepCallsWithMemory(b *testing.B) {
+	for _, tc := range []struct {
+		name  string
+		depth int
+		words int
+	}{
+		{"defi/depth-8/1KiB", 8, 32},
+		{"aggregator/depth-16/4KiB", 16, 128},
+		{"stress/depth-64/8KiB", 64, 256},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 30_000_000)
+			statedb := vmenv.IntraBlockState()
+
+			addrs := makeAddrs(tc.depth)
+			for i, a := range addrs {
+				var next *common.Address
+				if i < len(addrs)-1 {
+					next = &addrs[i+1].raw
+				}
+				deployContract(b, statedb, a.interned, memChainCode(next, tc.words))
+			}
+
+			requireChainReachesLeaf(b, statedb, addrs[0].interned, addrs[len(addrs)-1].interned, tc.depth-1, vmenv.Context.GasLimit)
+
+			callComplete(b, vmenv, addrs[0].interned, nil)
+			for b.Loop() {
+				callComplete(b, vmenv, addrs[0].interned, nil)
+			}
+		})
+	}
+}
+
+// tracedEnv returns an EVM sharing statedb with the caller's benchmark EVM,
+// with the given tracer hooks wired in. It exists only for untimed
+// validation calls, so it never touches the config the timed loop runs with.
+func tracedEnv(statedb *state.IntraBlockState, gasLimit uint64, hooks *tracing.Hooks) *vm.EVM {
+	return runtime.NewEnv(&runtime.Config{
+		ChainConfig: cancunConfig(),
+		Origin:      addrSender,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 1,
+		Time:        1,
+		GasLimit:    gasLimit,
+		Difficulty:  uint256.NewInt(0),
+		State:       statedb,
+		EVMConfig:   vm.Config{Tracer: hooks},
+	})
+}
+
+// tracedMaxDepth runs one untimed call against addr with a call-depth tracer
+// wired in, and returns the deepest frame it reached (0 for the entry call
+// itself). A chain that breaks partway still returns without error and burns
+// gas, so the caller must compare this against the depth the chain was built
+// to reach.
+func tracedMaxDepth(b *testing.B, statedb *state.IntraBlockState, addr accounts.Address, gasLimit uint64) int {
+	b.Helper()
+	var maxDepth int
+	env := tracedEnv(statedb, gasLimit, &tracing.Hooks{
+		OnEnter: func(depth int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		},
+	})
+
+	snap := statedb.PushSnapshot()
+	if _, _, err := prepareAndCall(env, addr, nil); err != nil {
+		b.Fatal(err)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
+	return maxDepth
+}
+
+// memChainCode fills words of memory a word at a time, the way solidity grows
+// its free memory pointer, then hands the region to next as calldata. A leaf
+// (next == nil) returns instead of calling on.
+func memChainCode(next *common.Address, words int) []byte {
+	p := program.New()
+	for w := range words {
+		p.Push(0xFF).Push(w * 32).Op(vm.MSTORE)
+	}
+	if next == nil {
+		return p.Return(0, 32).Bytes()
+	}
+	return p.StaticCall(nil, *next, 0, words*32, 0, 32).Op(vm.POP, vm.STOP).Bytes()
+}
+
+// requireChainReachesLeaf proves the memChainCode chain rooted at entry reaches
+// leaf through wantDepth nested frames. Intermediate frames drop their
+// STATICCALL result, so a broken chain still completes the top-level call; only
+// the leaf's own 32-byte return tells it apart from an empty frame.
+func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry, leaf accounts.Address, wantDepth int, gasLimit uint64) {
+	b.Helper()
+	leafDepth, leafOutputLen := -1, -1
+	env := tracedEnv(statedb, gasLimit, &tracing.Hooks{
+		OnEnter: func(depth int, _ byte, _, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			if to == leaf {
+				leafDepth = depth
+			}
+		},
+		OnExit: func(depth int, output []byte, _ uint64, _ error, _ bool) {
+			if depth == leafDepth {
+				leafOutputLen = len(output)
+			}
+		},
+	})
+
+	snap := statedb.PushSnapshot()
+	if _, _, err := prepareAndCall(env, entry, nil); err != nil {
+		b.Fatal(err)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
+
+	const wantOutputLen = 32
+	if leafOutputLen != wantOutputLen {
+		b.Fatalf("call chain did not reach the leaf at %s (leaf output len=%d, want %d)", leaf, leafOutputLen, wantOutputLen)
+	}
+	if leafDepth != wantDepth {
+		b.Fatalf("call chain reached the leaf at %s at depth %d, want %d", leaf, leafDepth, wantDepth)
+	}
+}
+
+// BenchmarkCallReturnData measures calls whose callee returns data. The other
+// call benchmarks use leaves that STOP, so they never exercise the RETURN copy
+// or what the caller does with the returned bytes.
+func BenchmarkCallReturnData(b *testing.B) {
+	const callsPerOp = 200
+	rawLeaf := common.HexToAddress("0x7001")
+	leaf := accounts.InternAddress(rawLeaf)
+
+	for _, retSize := range []int{32, 1024} {
+		for _, op := range []vm.OpCode{vm.CALL, vm.STATICCALL} {
+			b.Run(fmt.Sprintf("%s/ret-%d", op, retSize), func(b *testing.B) {
+				b.ReportAllocs()
+				vmenv := benchConfig(b, 1_000_000_000)
+				statedb := vmenv.IntraBlockState()
+
+				leafCode := program.New().Push(42).Push(0).Op(vm.MSTORE).Return(0, retSize).Bytes()
+				deployContract(b, statedb, leaf, leafCode)
+
+				p := program.New()
+				for range callsPerOp {
+					if op == vm.CALL {
+						p.Call(nil, rawLeaf, 0, 0, 0, 0, retSize)
+					} else {
+						p.StaticCall(nil, rawLeaf, 0, 0, 0, retSize)
+					}
+					p.Op(vm.POP)
+				}
+				deployContract(b, statedb, addrContract, p.Op(vm.STOP).Bytes())
+
+				callComplete(b, vmenv, addrContract, nil)
+				for b.Loop() {
+					callComplete(b, vmenv, addrContract, nil)
+				}
+			})
+		}
+	}
 }

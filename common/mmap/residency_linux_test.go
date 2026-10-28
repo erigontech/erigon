@@ -51,7 +51,7 @@ func TestResidencyProbe(t *testing.T) {
 
 	m, err := OpenRo(f, len(data))
 	require.NoError(t, err)
-	defer m.Unmap()
+	t.Cleanup(func() { require.NoError(t, m.Unmap()) })
 
 	res, err := Resident(m)
 	require.NoError(t, err)

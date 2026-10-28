@@ -20,6 +20,10 @@ Based on best practices for execution clients, your local machine's firewall set
 | 8545     | TCP          | JSON-RPC (Public API)         | Block all traffic _except_ from explicitly defined trusted machines. This port should never be publicly exposed without strict controls. |
 | 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC Daemon and core node).                            |
 
+:::note
+Some hosting providers add firewall requirements and operational pitfalls on top of these. If you run on Hetzner Cloud or a Hetzner dedicated server, see the [Hetzner firewall note](/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note) for the ports their edge firewall must allow, and for the reserved IPv4 ranges worth blocking yourself so outbound dials do not trip their abuse detection.
+:::
+
 #### CORS Protection
 
 When exposing public RPC endpoints (like those on port 8545), use the following practice to mitigate cross-origin attacks:
@@ -37,6 +41,7 @@ The RPC Daemon is the primary external interface, making API security critical. 
 | Remove Admin APIs    | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only.                                             | Omit the `admin` and `debug` namespaces from `--http.api`.                                                                                                                           |
 | Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for HTTP requests and batch requests.                                                                                                               | Configure `--rpc.max.concurrency` (HTTP admission control: `0` = use `--db.read.concurrency`, `-1` = unlimited), `--rpc.batch.concurrency` and `--rpc.batch.limit`. |
 | Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                        | <p>Utilize the various <code>--rpc.subscription.filters.*</code> flags.</p><p><strong>Note</strong>: These are disabled by default because they increase the risk of OOM issues.</p> |
+| Subscription Limits  | Cap the subscriptions one WebSocket or IPC connection may hold, and the number of WebSocket connections, so that a client cannot pin unbounded memory by subscribing repeatedly.                           | `--rpc.subscription.limit` (default `1024` per connection, `0` = unlimited) and `--ws.max.connections` (default `0` = unlimited).                                                     |
 
 ### External Protection Layer (Recommended for Production)
 

@@ -25,9 +25,11 @@ import (
 
 type SubPoolType uint8
 
-const PendingSubPool SubPoolType = 1
-const BaseFeeSubPool SubPoolType = 2
-const QueuedSubPool SubPoolType = 3
+const (
+	PendingSubPool SubPoolType = 1
+	BaseFeeSubPool SubPoolType = 2
+	QueuedSubPool  SubPoolType = 3
+)
 
 func (sp SubPoolType) String() string {
 	switch sp {

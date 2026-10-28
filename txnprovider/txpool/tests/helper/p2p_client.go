@@ -24,9 +24,7 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 )
 
-var (
-	txChanSize = 5000
-)
+var txChanSize = 5000
 
 type TxMessage struct {
 	MessageID sentryproto.MessageId
@@ -103,7 +101,7 @@ func (p *p2pClient) Connect(ctx context.Context) (<-chan TxMessage, <-chan error
 	}
 
 	grpcServer := sentry.NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New(), nil, "")
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH69, grpcServer, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH69, grpcServer)
 	if err != nil {
 		return nil, nil, err
 	}

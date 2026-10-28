@@ -235,12 +235,17 @@ func (s *PartialDataColumnSidecar) GetHeader() *PartialDataColumnHeader {
 type PartialDataColumnPartsMetadata struct {
 	Available *solid.BitList `json:"available"`
 	Requests  *solid.BitList `json:"requests"`
+	version   clparams.StateVersion
 }
 
-func NewPartialDataColumnPartsMetadata() *PartialDataColumnPartsMetadata {
-	m := &PartialDataColumnPartsMetadata{}
+func NewPartialDataColumnPartsMetadata(version clparams.StateVersion) *PartialDataColumnPartsMetadata {
+	m := &PartialDataColumnPartsMetadata{version: version}
 	m.init()
 	return m
+}
+
+func (m *PartialDataColumnPartsMetadata) SetVersion(version clparams.StateVersion) {
+	m.version = version
 }
 
 func (m *PartialDataColumnPartsMetadata) init() {
@@ -259,6 +264,7 @@ func (m *PartialDataColumnPartsMetadata) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (m *PartialDataColumnPartsMetadata) DecodeSSZ(buf []byte, version int) error {
+	m.version = clparams.StateVersion(version)
 	m.init()
 	return ssz2.UnmarshalSSZ(buf, version, m.Available, m.Requests)
 }
@@ -270,11 +276,25 @@ func (m *PartialDataColumnPartsMetadata) EncodingSizeSSZ() int {
 
 func (m *PartialDataColumnPartsMetadata) HashSSZ() ([32]byte, error) {
 	m.init()
+	if m.version >= clparams.GloasVersion {
+		availableRoot, err := m.Available.HashSSZProgressive()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		requestsRoot, err := m.Requests.HashSSZProgressive()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		return merkle_tree.HashTreeRoot(availableRoot[:], requestsRoot[:])
+	}
 	return merkle_tree.HashTreeRoot(m.Available, m.Requests)
 }
 
 func (m *PartialDataColumnPartsMetadata) Clone() clonable.Clonable {
-	return NewPartialDataColumnPartsMetadata()
+	if m == nil {
+		return NewPartialDataColumnPartsMetadata(clparams.Phase0Version)
+	}
+	return NewPartialDataColumnPartsMetadata(m.version)
 }
 
 func (m *PartialDataColumnPartsMetadata) Static() bool {

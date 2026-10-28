@@ -19,26 +19,33 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -193,18 +200,18 @@ func TestWitnessCacheStorePublishes(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x42)
-	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)
-	api.storeWitness(7, hash, enc)
+	result := mkResult()
+	api.storeWitness(7, hash, result)
 
 	cached, ok := cache.Get(hash)
 	require.True(t, ok, "storeWitness must insert into the cache")
-	require.True(t, bytes.Equal(enc, cached.cachedJSON), "cached bytes must be the stored bytes")
+	require.Same(t, result, cached, "the cache must hold the stored result")
 
 	select {
 	case push := <-ch:
 		require.Equal(t, uint64(7), push.num)
 		require.Equal(t, hash, push.hash)
-		require.True(t, bytes.Equal(enc, push.json), "pushed bytes must be the identical cached bytes")
+		require.Same(t, result, push.result, "the push must carry the cached result")
 	case <-time.After(time.Second):
 		t.Fatal("storeWitness must publish to the feed")
 	}
@@ -219,13 +226,13 @@ func TestCacheAddAloneDoesNotPublish(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x77)
-	enc := json.RawMessage(`{"state":["0x02"],"codes":[],"keys":[],"headers":[]}`)
+	result := mkResult()
 
-	cache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	cache.Add(hash, result)
 	require.True(t, cache.Contains(hash), "Add caches")
 	require.Empty(t, ch, "Add alone must not publish")
 
-	cache.store(9, hash, enc)
+	cache.store(9, hash, result)
 	require.Len(t, ch, 1, "store caches and publishes")
 }
 
@@ -283,7 +290,7 @@ func TestBuildPathsPublish(t *testing.T) {
 }
 
 // requireBuildPublished asserts a build published (num, hash) exactly once carrying the
-// bytes it cached. A witness that lands in the cache with no push is the bypass this
+// result it cached. A witness that lands in the cache with no push is the bypass this
 // guards: the insert went somewhere other than store.
 func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
 	t.Helper()
@@ -293,7 +300,7 @@ func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResu
 		require.Equal(t, hash, push.hash)
 		cached, ok := cache.Get(hash)
 		require.True(t, ok, "a published witness must also be cached")
-		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+		require.Same(t, cached, push.result, "the push must carry the cached result")
 		require.Empty(t, ch, "one build publishes exactly once")
 	case <-time.After(30 * time.Second):
 		if cache.Contains(hash) {
@@ -388,9 +395,10 @@ func TestBuildAndCacheHeadCaptureStalePin(t *testing.T) {
 // must populate the cache and be byte-identical to the durable on-demand build that reads
 // the same parent commitment from history.
 func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	ctx := context.Background()
@@ -424,9 +432,9 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	cached, ok := api.witnessCache.Get(hash)
 	require.True(t, ok, "head-capture build must populate the cache")
 
-	wantBytes, err := want.MarshalFastJSON()
+	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
-	gotBytes, err := cached.MarshalFastJSON()
+	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
 }
@@ -434,6 +442,89 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 // TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
 // straight into the shared cache's mode fields: head-capture construction yields a
 // cache-only, head-capture cache; durable construction yields a recompute-capable one.
+func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) { headCaptureReadsParentRecords(t, false) })
+	t.Run("v3", func(t *testing.T) { headCaptureReadsParentRecords(t, true) })
+}
+
+func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	statecfg.ExperimentalCommitmentV3 = commitmentV3
+	if commitmentV3 {
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const buildNum = uint64(6)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, int(buildNum)-1)))
+	parentHash, _ := buildTestChainHeader(t, m, buildNum-1)
+	parentTx := func() kv.TemporalTx {
+		tx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(tx.Rollback)
+		return tx
+	}
+	pinA, recsA, pinB, pinC := parentTx(), parentTx(), parentTx(), parentTx()
+	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
+	hash, _ := buildTestChainHeader(t, m, buildNum)
+
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(buildNum)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.NoError(t, err)
+	wantBytes, err := jsonstream.Marshal(want)
+	require.NoError(t, err)
+
+	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), deleted [][]byte) (*ExecutionWitnessResult, bool) {
+		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, Deleted: deleted, Get: get})
+		committedTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer committedTx.Rollback()
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+		api.tryHeadCaptureBuild(ctx, committedTx, &rollingPin{tx: pinTx, num: buildNum - 1, hash: parentHash}, buildNum, hash)
+		return api.witnessCache.Get(hash)
+	}
+
+	served := 0
+	parentGet := func(k []byte) ([]byte, kv.Step, bool) {
+		v, step, err := recsA.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		served++
+		return v, step, true
+	}
+	got, ok := build(pinA, parentGet, [][]byte{})
+	require.True(t, ok, "a build over correct parent records is cached")
+	require.NotZero(t, served, "the build reads commitment through the parent records")
+	gotBytes, err := jsonstream.Marshal(got)
+	require.NoError(t, err)
+	require.Equal(t, wantBytes, gotBytes, "the witness over parent records matches the durable build")
+
+	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true }, nil)
+	require.False(t, ok, "wrong parent records fail a gate and cache nothing")
+
+	var kept []byte
+	for _, key := range want.Keys {
+		if len(key) != length.Addr {
+			continue
+		}
+		if v, _, err := pinC.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{}); err == nil && len(v) != 0 {
+			kept = key
+			break
+		}
+	}
+	require.NotNil(t, kept, "an account the block reads and keeps")
+	_, ok = build(pinC, parentGet, [][]byte{kept})
+	require.False(t, ok, "a verified deletion the collapse trace does not delete fails the build")
+}
+
 func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	cfg := &httpcfg.HttpCfg{WitnessCacheBlocks: 8, Dirs: m.Dirs}
@@ -454,9 +545,10 @@ func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec
 // module and asserts the cached witness bytes are identical to the on-demand build.
 func TestWitnessCacheBuilderParity(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -495,13 +587,65 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 	require.NoError(t, err)
 
-	// Compare the served form (rpc.fastJSONResult path): the cache stores a shell
-	// carrying only pre-marshaled bytes, so MarshalFastJSON is what a hit serves.
-	wantBytes, err := want.MarshalFastJSON()
+	// Compare the served form: the cache stores a shell carrying only pre-marshaled
+	// bytes, so MarshalFastJSONTo is what a hit serves.
+	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
-	gotBytes, err := cached.MarshalFastJSON()
+	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
+}
+
+func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const blockNum = uint64(3)
+	hash, _ := buildTestChainHeader(t, m, blockNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	require.True(t, api.buildAndCache(ctx, blockNum, hash))
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
+}
+
+func buildDurationSamples(t *testing.T) uint64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, witnessCacheBuildDuration.Write(&m))
+	return m.GetHistogram().GetSampleCount()
+}
+
+func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the head-capture builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
 }
 
 // insertHeadCaptureChain enables historical commitment, builds a module with no inserted
@@ -732,4 +876,134 @@ func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
 		defer recoverWitnessBuild(42)
 		panic("simulated build pipeline panic")
 	})
+}
+
+type panicGetTx struct {
+	kv.TemporalTx
+	rolledBack bool
+}
+
+func (tx *panicGetTx) GetOne(string, []byte) ([]byte, error) { panic("boom") }
+func (tx *panicGetTx) Rollback()                             { tx.rolledBack = true }
+
+type panicGetDB struct {
+	kv.TemporalRoDB
+	tx *panicGetTx
+}
+
+func (db panicGetDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) { return db.tx, nil }
+
+func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
+	tx := &panicGetTx{}
+	require.Panics(t, func() { _, _, _ = waitCommittedHead(context.Background(), panicGetDB{tx: tx}, 1, common.Hash{}) })
+	require.True(t, tx.rolledBack)
+}
+
+func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.EnableHistoricalCommitment()
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	return m, testChain
+}
+
+func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
+	previousAssert, previousCarry, previousSchema, previousV3 := dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousCarry, previousSchema, previousV3
+	})
+	dbg.AssertEnabled, dbg.CommitmentBranchCarry = true, true
+	commitmentdb.WantParentReads(true)
+	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+	m, testChain := newV3HistoryTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+
+	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
+	filled := metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()
+	used := witnessCacheParentRecordsCounter.GetValueUint64()
+	stateHits := mxParentStateHit.GetValueUint64()
+	warmed := mxWarmRecords.GetValueUint64()
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	deletions := 0
+	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
+		pin, err := openRollingPin(ctx, m.DB)
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(testChain.Slice(int(n)-1, int(n))), "block %d", n)
+		hash, _ := buildTestChainHeader(t, m, n)
+		parentHash, _ := buildTestChainHeader(t, m, n-1)
+		if r := commitmentdb.ParentRecordsFor(n, hash, parentHash); r != nil && len(r.Deleted) != 0 {
+			deletions++
+		}
+		if n%2 == 1 {
+			commitmentdb.PublishParentRecords(nil)
+		}
+
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+		func() {
+			committedTx, err := m.DB.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer committedTx.Rollback()
+			api.tryHeadCaptureBuild(ctx, committedTx, pin, n, hash)
+		}()
+		pin.close()
+		got, ok := api.witnessCache.Get(hash)
+		require.True(t, ok, "block %d head-capture build", n)
+
+		bn := rpc.BlockNumber(n)
+		want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		wantBytes, err := jsonstream.Marshal(want)
+		require.NoError(t, err)
+		gotBytes, err := jsonstream.Marshal(got)
+		require.NoError(t, err)
+		require.Equal(t, wantBytes, gotBytes, "block %d", n)
+	}
+	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()-adopted, "blocks validated one at a time adopt the carried records")
+	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
+	require.Positive(t, deletions, "some blocks hand their verified deletions to head-capture")
+	require.Positive(t, mxParentStateHit.GetValueUint64()-stateHits, "head-capture re-execution reads the validation's parent state")
+	require.Positive(t, mxWarmRecords.GetValueUint64()-warmed, "head-capture warms accessed paths the validation's records miss")
+	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()-filled, "records adopted from a block's deltas get their leaf refs")
+}
+
+func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+	m, testChain := newV3HistoryTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	require.NotEmpty(t, pin.warm, "the pin opens warm txs")
+	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
+	hash, _ := buildTestChainHeader(t, m, 2)
+	parentHash, _ := buildTestChainHeader(t, m, 1)
+	var panicked atomic.Bool
+	commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: 2, BlockHash: hash, ParentHash: parentHash, Get: func([]byte) ([]byte, kv.Step, bool) {
+		if panicked.CompareAndSwap(false, true) {
+			panic("simulated parent records panic")
+		}
+		return nil, 0, false
+	}})
+	failed := witnessCacheBuildFailOtherCounter.GetValueUint64()
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	committedTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 2, hash), "a warm worker panic fails the build")
+	_, ok := api.witnessCache.Get(hash)
+	require.False(t, ok)
+	require.Equal(t, failed+1, witnessCacheBuildFailOtherCounter.GetValueUint64(), "the failed build is counted once")
 }

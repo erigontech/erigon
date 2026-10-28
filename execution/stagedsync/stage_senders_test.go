@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestSenders(t *testing.T) {
@@ -48,7 +46,7 @@ func TestSenders(t *testing.T) {
 	defer tx.Rollback()
 	br := m.BlockReader
 
-	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
 	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
@@ -146,7 +144,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, exec.NewBlockReadAheader())
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", br, exec.NewBlockReadAheader())
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 

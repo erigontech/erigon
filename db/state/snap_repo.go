@@ -99,12 +99,6 @@ func (f *SnapshotRepo) IntegrateDirtyFiles(files []*FilesItem) {
 	}
 }
 
-func (f *SnapshotRepo) IntegrateMergedFiles(dfs []*FilesItem, mergedFile *FilesItem) {
-	if mergedFile != nil {
-		f.dirtyFiles.Set(mergedFile)
-	}
-}
-
 // DeleteFilesAfterMerge files are removed from repo and marked for deletion
 // from file system.
 func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*FilesItem) {
@@ -313,27 +307,24 @@ func (f *SnapshotRepo) CleanAfterMerge(merged *FilesItem, vf visibleFiles) {
 func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 	mf := make(map[statecfg.Accessors][]*FilesItem)
 	if f.accessors.Has(statecfg.AccessorBTree) {
-		mf[statecfg.AccessorBTree] =
-			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
-				file, _ := f.schema.BtIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
-				return []string{file}
-			})
+		mf[statecfg.AccessorBTree] = fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+			file, _ := f.schema.BtIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
+			return []string{file}
+		})
 	}
 
 	if f.accessors.Has(statecfg.AccessorHashMap) {
-		mf[statecfg.AccessorHashMap] =
-			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
-				file, _ := f.schema.AccessorIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)), 0)
-				return []string{file}
-			})
+		mf[statecfg.AccessorHashMap] = fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+			file, _ := f.schema.AccessorIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)), 0)
+			return []string{file}
+		})
 	}
 
 	if f.accessors.Has(statecfg.AccessorExistence) {
-		mf[statecfg.AccessorExistence] =
-			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
-				file, _ := f.schema.ExistenceFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
-				return []string{file}
-			})
+		mf[statecfg.AccessorExistence] = fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+			file, _ := f.schema.ExistenceFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
+			return []string{file}
+		})
 	}
 
 	return (*MissedFilesMap)(&mf)

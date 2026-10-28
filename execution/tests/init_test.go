@@ -27,9 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
-var (
-	cornersDir = filepath.Join(".", "test-corners")
-)
+var cornersDir = filepath.Join(".", "test-corners")
 
 func TestMatcherWhitelist(t *testing.T) {
 	dir := t.TempDir()

@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -78,7 +77,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
 	_, indiciesDB := setupStore(t)
@@ -107,7 +105,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -142,11 +139,11 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -175,11 +172,13 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if !errors.Is(err, io.EOF) {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 
@@ -204,7 +203,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
@@ -232,7 +230,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -268,11 +265,11 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -301,11 +298,13 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if !errors.Is(err, io.EOF) {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 

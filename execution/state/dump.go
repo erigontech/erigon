@@ -141,7 +141,7 @@ func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber 
 var ErrTooManyIterations = errors.New("[rpc] dumper: too many iterations protection triggered")
 
 func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
-	var emptyHash = common.Hash{}
+	emptyHash := common.Hash{}
 	var accountList []*DumpAccount
 	var addrList []common.Address
 	var acc accounts.Account
@@ -160,7 +160,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 	txNumForStorage := txNum
 
 	var nextKey []byte
-	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
+	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) // unlim because need skip empty vals
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 			if err := func() error {
 				t := trie.New(common.Hash{})
 				nextAcc, _ := kv.NextSubtree(addr[:])
-				r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
+				r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) // unlim because need skip empty vals
 				if err != nil {
 					return fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}

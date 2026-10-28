@@ -23,6 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 func TestGetContractCreator(t *testing.T) {
@@ -39,6 +41,23 @@ func TestGetContractCreator(t *testing.T) {
 		require.Equal(expectCreator, results.Creator)
 		require.Equal(expectCredByTx, results.Tx)
 	})
+	for _, tc := range []struct {
+		name            string
+		history, blocks prune.BlockAmount
+	}{
+		{"pruned history", prune.Distance(1), prune.ArchiveMode.Blocks},
+		{"pruned transactions", prune.ArchiveMode.History, prune.Distance(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := newBaseApiForTest(m)
+			base._pruneMode.Store(&prune.Mode{Initialised: true, History: tc.history, Blocks: tc.blocks})
+			api := NewOtterscanAPI(base, m.DB, 25)
+
+			result, err := api.GetContractCreator(m.Ctx, addr)
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, result)
+		})
+	}
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
 		results, err := api.GetContractCreator(m.Ctx, common.HexToAddress("0x1234"))

@@ -3,10 +3,13 @@ package stagedsync
 import (
 	"fmt"
 	"math"
+	"slices"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/bal"
@@ -25,6 +28,35 @@ type calcAccountState struct {
 	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
+}
+
+type calcHashes struct {
+	accounts map[accounts.Address][32]byte
+	slots    map[accounts.StorageKey][32]byte
+}
+
+func newCalcHashes() *calcHashes {
+	return &calcHashes{accounts: map[accounts.Address][32]byte{}, slots: map[accounts.StorageKey][32]byte{}}
+}
+
+func (h *calcHashes) account(addr accounts.Address) [32]byte {
+	hash, ok := h.accounts[addr]
+	if !ok {
+		address := addr.Value()
+		hash = keccak.Sum256(address[:])
+		h.accounts[addr] = hash
+	}
+	return hash
+}
+
+func (h *calcHashes) slot(key accounts.StorageKey) [32]byte {
+	hash, ok := h.slots[key]
+	if !ok {
+		k := key.Value()
+		hash = keccak.Sum256(k[:])
+		h.slots[key] = hash
+	}
+	return hash
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -85,7 +117,8 @@ type storageEnumerator interface {
 // asOfStateReader. Subsequent writes overwrite the local copy. At block boundary,
 // the accumulated state is fed to the trie's Updates buffer.
 type calcState struct {
-	accounts map[accounts.Address]*calcAccountState
+	accounts      map[accounts.Address]*calcAccountState
+	dirtyAccounts []accounts.Address
 	// storageState holds the accumulated value for each slot
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	// storageDirty tracks which slots were modified in the current block
@@ -107,6 +140,15 @@ type calcState struct {
 
 	logger    log.Logger
 	logPrefix string
+
+	feedUpdates []commitment.Update
+	feedSlots   []commitment.FeedSlot
+	feedValues  []byte
+	deleted     [][]byte
+
+	prefetch       func(plainKey []byte)
+	branchPrefetch *branchPrefetcher
+	hashes         *calcHashes
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -141,9 +183,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 		return acc
 	}
 
-	acc := &calcAccountState{
-		CodeHash: empty.CodeHash,
-	}
+	acc := &calcAccountState{CodeHash: empty.CodeHash}
 	if cs.domainReader != nil && !writesCoverBaseline(writes, addr) {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
 		if err != nil {
@@ -165,6 +205,21 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 	return acc
 }
 
+func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
+	if acc.dirty {
+		return
+	}
+	acc.dirty = true
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	if cs.hashes != nil {
+		cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr)})
+	}
+	if cs.prefetch != nil {
+		address := addr.Value()
+		cs.prefetch(address[:])
+	}
+}
+
 // ApplyWrites folds a tx's typed write collections into the local state.
 //
 // Self-destruct is applied before the field writes so the priority is explicit
@@ -180,7 +235,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if vw.Val {
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
-			acc.dirty = true
+			cs.markDirty(addr, acc)
 			cs.deleteStorageSubtree(addr)
 		}
 	}
@@ -190,7 +245,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Balance = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
 		}
@@ -198,7 +253,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Nonces() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Nonce = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, acc.Nonce != 0) {
 			acc.Deleted = false
 		}
@@ -206,7 +261,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.CodeHashes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Value()
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
 			acc.Deleted = false
 		}
@@ -214,7 +269,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Codes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
 			acc.Deleted = false
 		}
@@ -222,7 +277,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Incarnations() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Incarnation = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 	}
 	for addr, inner := range writes.Storages() {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
@@ -237,15 +292,28 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
+			if cs.hashes != nil {
+				cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr)})
+			}
 		}
 		for key, vw := range inner {
+			if !dirty[key] {
+				if cs.hashes != nil {
+					cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr), slot: cs.hashes.slot(key), storage: true})
+				}
+				if cs.prefetch != nil {
+					address, slotKey := addr.Value(), key.Value()
+					cs.prefetch(append(address[:], slotKey[:]...))
+				}
+			}
 			slots[key] = vw.Val
 			dirty[key] = true
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero
-	// write) must be all-zero — matching serial's DomainDel leaf removal — even
-	// though IBS emits the pre-SD IncarnationPath/BalancePath values.
+	// write) must be all-zero, matching serial's DomainDel leaf removal:
+	// Normalize drops its field writes, so it still holds the values loaded by
+	// ensureAccount or left by an earlier tx of the block.
 	for addr := range sdThisCall {
 		if acc, ok := cs.accounts[addr]; ok && acc.Deleted {
 			if !eip8246 {
@@ -300,13 +368,15 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct
 	// it here, gated exactly as the incremental path (Normalize).
-	for _, ac := range blockAccessList {
-		acc := cs.accounts[ac.Address]
+	for i := range blockAccessList {
+		ac := &blockAccessList[i]
+		addr := accounts.InternAddress(ac.Address)
+		acc := cs.accounts[addr]
 		if acc == nil || !acc.dirty || acc.Deleted {
 			continue
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
-			state.EIP161EmptyRemoval(emptyRemoval, isAura, ac.Address) {
+			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
 			acc.Deleted = true
 			acc.Incarnation = 0
 		}
@@ -318,40 +388,16 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
-	for addr, acc := range cs.accounts {
-		if !acc.dirty {
-			continue
-		}
+	cs.deleted = nil
+	n := len(cs.dirtyAccounts)
+	for _, dirtySlots := range cs.storageDirty {
+		n += len(dirtySlots)
+	}
+	updates.Grow(n)
+	for _, addr := range cs.dirtyAccounts {
 		address := addr.Value()
-		key := string(address[:])
-
-		// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
-		// when every field is actually zero; a Deleted account that still holds a
-		// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
-		// so emit a regular UPDATE with the real values instead.
-		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
-		switch {
-		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  uint256.Int{},
-				Nonce:    0,
-				CodeHash: empty.CodeHash,
-			})
-		case acc.Deleted && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.DeleteUpdate,
-				CodeHash: empty.CodeHash,
-			})
-		default:
-			// Either not Deleted, or Deleted-with-retained-values.
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash,
-			})
-		}
+		update := accountUpdateOf(cs.accounts[addr])
+		updates.TouchPlainKeyUnique(string(address[:]), &update)
 	}
 
 	for addr, dirtySlots := range cs.storageDirty {
@@ -360,21 +406,99 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		for key := range dirtySlots {
 			val := slots[key]
 			keyVal := key.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, address[:])
+			var composite [20 + 32]byte
+			copy(composite[:], address[:])
 			copy(composite[20:], keyVal[:])
 
-			vBytes := val.Bytes()
 			var u commitment.Update
-			if len(vBytes) == 0 {
+			if n := val.ByteLen(); n == 0 {
 				u.Flags = commitment.DeleteUpdate
 			} else {
 				u.Flags = commitment.StorageUpdate
-				u.StorageLen = int8(len(vBytes))
-				copy(u.Storage[:], vBytes)
+				u.StorageLen = int8(n)
+				val.WriteToSlice(u.Storage[:n])
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyUnique(string(composite[:]), &u)
 		}
+	}
+}
+
+func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
+	slots := 0
+	for _, dirty := range cs.storageDirty {
+		slots += len(dirty)
+	}
+	cs.deleted = [][]byte{}
+	feed.Keys = len(cs.dirtyAccounts) + slots
+	feed.Accounts = slices.Grow(feed.Accounts[:0], len(cs.dirtyAccounts)+len(cs.storageDirty))
+	cs.feedUpdates = slices.Grow(cs.feedUpdates[:0], len(cs.dirtyAccounts))
+	cs.feedSlots = slices.Grow(cs.feedSlots[:0], slots)
+	cs.feedValues = slices.Grow(cs.feedValues[:0], length.Hash*slots)
+	for addr, dirty := range cs.storageDirty {
+		if len(dirty) == 0 {
+			continue
+		}
+		slots := cs.storageState[addr]
+		start := len(cs.feedSlots)
+		for key := range dirty {
+			value := slots[key]
+			at, n := len(cs.feedValues), value.ByteLen()
+			if n == 0 {
+				address, slot := addr.Value(), key.Value()
+				cs.deleted = append(cs.deleted, append(address[:], slot[:]...))
+			}
+			cs.feedValues = cs.feedValues[:at+n]
+			value.WriteToSlice(cs.feedValues[at:])
+			cs.feedSlots = append(cs.feedSlots, commitment.FeedSlot{Hash: cs.hashes.slot(key), Value: cs.feedValues[at : at+n : at+n]})
+		}
+		account := commitment.FeedAccount{Hash: cs.hashes.account(addr), Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
+		if acc := cs.accounts[addr]; acc != nil && acc.dirty {
+			account.Update = cs.feedUpdate(addr, acc)
+		}
+		feed.Accounts = append(feed.Accounts, account)
+	}
+	for _, addr := range cs.dirtyAccounts {
+		if len(cs.storageDirty[addr]) != 0 {
+			continue
+		}
+		acc := cs.accounts[addr]
+		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: cs.hashes.account(addr), Update: cs.feedUpdate(addr, acc)})
+	}
+}
+
+func (cs *calcState) feedUpdate(addr accounts.Address, acc *calcAccountState) *commitment.Update {
+	cs.feedUpdates = append(cs.feedUpdates, accountUpdateOf(acc))
+	u := &cs.feedUpdates[len(cs.feedUpdates)-1]
+	if u.Deleted() {
+		address := addr.Value()
+		cs.deleted = append(cs.deleted, address[:])
+	}
+	return u
+}
+
+func accountUpdateOf(acc *calcAccountState) commitment.Update {
+	// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
+	// when every field is actually zero; a Deleted account that still holds a
+	// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
+	// so emit a regular UPDATE with the real values instead.
+	isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
+	switch {
+	case acc.Deleted && acc.Incarnation > 0 && isAllZero:
+		return commitment.Update{
+			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+			CodeHash: empty.CodeHash,
+		}
+	case acc.Deleted && isAllZero:
+		return commitment.Update{
+			Flags:    commitment.DeleteUpdate,
+			CodeHash: empty.CodeHash,
+		}
+	}
+	return commitment.Update{
+		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+		Balance:  acc.Balance,
+		Nonce:    acc.Nonce,
+		CodeHash: acc.CodeHash,
 	}
 }
 
@@ -382,9 +506,10 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 // accumulated state values. Called after commitment computation to
 // prepare for the next block.
 func (cs *calcState) ResetBlockFlags() {
-	for _, acc := range cs.accounts {
-		acc.dirty = false
+	for _, addr := range cs.dirtyAccounts {
+		cs.accounts[addr].dirty = false
 	}
+	cs.dirtyAccounts = cs.dirtyAccounts[:0]
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}

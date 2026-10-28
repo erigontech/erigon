@@ -1,0 +1,81 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package debug
+
+import (
+	"math"
+	"os"
+	"runtime/debug"
+
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
+)
+
+// defaultGoMemLimitShare
+// See: https://go.dev/doc/gc-guide#Suggested_uses
+// Do take advantage of the memory limit
+// For web-apps good rule of thumb: leave 5-10% headroom to account for memory sources the Go runtime is unaware of
+//
+// Erigon has such resources:
+// - mdbx dirty_space (C-owned): ~1G
+// - External CL: better don't predict it. Leave it out of estimate.
+// - OOM Killer and SWAP: Erigon recommends to disable SWAP on server and enable OOM-Killer (kill comes at 90%)
+// - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
+const defaultGoMemLimitShare = 0.8
+
+func goMemLimitIsSet() (set, off bool, limit datasize.ByteSize) {
+	current := debug.SetMemoryLimit(-1)
+	if current != math.MaxInt64 {
+		return true, false, datasize.ByteSize(uint64(current))
+	}
+	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
+		return true, true, 0
+	}
+	return false, false, 0
+}
+
+func goMemLimitFor(total uint64) (int64, bool) {
+	if total == 0 {
+		return 0, false
+	}
+	return int64(float64(total) * defaultGoMemLimitShare), true
+}
+
+func SetGoMemLimit(logger log.Logger) {
+	if set, off, limit := goMemLimitIsSet(); set {
+		if off {
+			logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
+		} else {
+			logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", limit.HR())
+		}
+		return
+	}
+
+	total := estimate.TotalMemory() // cgroups-aware
+	limit, ok := goMemLimitFor(total)
+	if !ok {
+		logger.Info("[mem] GOMEMLIMIT unset and available memory is unknown, leaving the heap unbounded")
+		return
+	}
+	debug.SetMemoryLimit(limit)
+	logger.Info("[mem] GOMEMLIMIT derived from available memory",
+		"available", datasize.ByteSize(total).HR(),
+		"GOMEMLIMIT", datasize.ByteSize(uint64(limit)).HR(),
+		"share", defaultGoMemLimitShare)
+}

@@ -41,13 +41,16 @@ type LatestBatchCache struct {
 	accounts map[common.Address][]byte // address → latest serialised account
 }
 
-var _ Cache = (*LatestBatchCache)(nil)    // compile-time interface check
-var _ CacheView = (*LatestBatchView)(nil) // compile-time interface check
+var (
+	_ Cache     = (*LatestBatchCache)(nil) // compile-time interface check
+	_ CacheView = (*LatestBatchView)(nil)  // compile-time interface check
+)
 
 func NewLatestBatchCache() *LatestBatchCache { return &LatestBatchCache{} }
 func (c *LatestBatchCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
 	return &LatestBatchView{cache: c, tx: tx}, nil
 }
+
 func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	if sc == nil {
 		return
@@ -74,12 +77,14 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 		}
 	}
 }
+
 func (c *LatestBatchCache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.accounts)
 }
-func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+
+func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx) ([]byte, error) {
 	// Check the in-memory account cache first (populated by OnNewBlock).
 	if len(k) == 20 {
 		c.mu.RLock()
@@ -94,10 +99,12 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, e
 	v, _, err := tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
-func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+
+func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx) ([]byte, error) {
 	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *LatestBatchCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
 	return &CacheValidationResult{Enabled: false}, nil
 }
@@ -107,14 +114,10 @@ type LatestBatchView struct {
 	tx    kv.TemporalTx
 }
 
-func (c *LatestBatchView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+func (c *LatestBatchView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx) }
 
 // The cache holds latest-state only, so historical reads always fall through.
 func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
-func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
-func (c *LatestBatchView) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}
+func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx) }

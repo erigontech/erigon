@@ -55,15 +55,10 @@ func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, ro
 	))
 
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-		nfw := &notFoundNoWriter{ResponseWriter: w, r: r} //nolint:govet
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
-		if isNotFound(nfw.code) || nfw.code == 0 {
-			start := time.Now()
-			beaconHandler.ArchiveApi.ServeHTTP(w, r)
-			log.Trace("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
-		} else {
-			log.Warn("[Beacon API] Request to unavailable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
-		}
+		start := time.Now()
+		beaconHandler.ArchiveApi.ServeHTTP(w, r)
+		log.Trace("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
 	})
 	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		log.Warn("[Beacon API] Not found", "method", r.Method, "path", r.URL.Path)

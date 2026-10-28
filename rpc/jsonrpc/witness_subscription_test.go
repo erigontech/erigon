@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func witnessTestNotifier(t *testing.T) (ctx context.Context, resc, closec chan any) {
@@ -80,7 +80,7 @@ func TestWitnessNotificationWireKeys(t *testing.T) {
 	b, err := json.Marshal(WitnessNotification{
 		BlockNumber: hexutil.Uint64(7),
 		BlockHash:   hashN(0x33),
-		Witness:     json.RawMessage(`{"state":[]}`),
+		Witness:     &ExecutionWitnessResult{State: []hexutil.Bytes{}},
 	})
 	require.NoError(t, err)
 
@@ -104,8 +104,8 @@ func TestWitnessSubscriptionDelivers(t *testing.T) {
 	require.NotNil(t, sub)
 
 	hash := hashN(0x11)
-	enc := json.RawMessage(`{"state":["0xabcd"],"codes":[],"keys":[],"headers":[]}`)
-	api.storeWitness(9, hash, enc)
+	result := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xab, 0xcd}}}
+	api.storeWitness(9, hash, result)
 
 	select {
 	case v := <-resc:
@@ -113,7 +113,7 @@ func TestWitnessSubscriptionDelivers(t *testing.T) {
 		require.Truef(t, ok, "notification payload must be WitnessNotification, got %T", v)
 		require.Equal(t, hexutil.Uint64(9), n.BlockNumber)
 		require.Equal(t, hash, n.BlockHash)
-		require.True(t, bytes.Equal(enc, n.Witness), "witness bytes must be delivered verbatim")
+		require.Same(t, result, n.Witness, "the cached result must be delivered")
 	case <-time.After(2 * time.Second):
 		t.Fatal("subscription did not deliver the published witness")
 	}
@@ -139,14 +139,15 @@ func TestWitnessSubscriptionWireDispatch(t *testing.T) {
 		2*time.Second, 10*time.Millisecond, "subscribe must register a feed subscriber")
 
 	hash := hashN(0x22)
-	enc := json.RawMessage(`{"state":["0x1234"],"codes":[],"keys":[],"headers":[]}`)
-	api.storeWitness(42, hash, enc)
+	result := &ExecutionWitnessResult{State: []hexutil.Bytes{{0x12, 0x34}}, Codes: []hexutil.Bytes{}}
+	api.storeWitness(42, hash, result)
 
 	select {
 	case n := <-ch:
 		require.Equal(t, hexutil.Uint64(42), n.BlockNumber)
 		require.Equal(t, hash, n.BlockHash)
-		require.True(t, bytes.Equal(enc, n.Witness), "witness bytes must survive the wire verbatim")
+		require.Equal(t, result.State, n.Witness.State, "the witness must survive the wire")
+		require.Equal(t, result.Codes, n.Witness.Codes)
 	case err := <-sub.Err():
 		t.Fatalf("subscription errored: %v", err)
 	case <-time.After(5 * time.Second):
@@ -156,4 +157,19 @@ func TestWitnessSubscriptionWireDispatch(t *testing.T) {
 	sub.Unsubscribe()
 	require.Eventually(t, func() bool { return cache.feed.subCount() == 0 },
 		2*time.Second, 10*time.Millisecond, "unsubscribe must tear the pump down and deregister the feed subscriber")
+}
+
+func TestWitnessNotificationFastJSONMatchesReflection(t *testing.T) {
+	for name, n := range map[string]WitnessNotification{
+		"nil witness": {BlockNumber: 1, BlockHash: hashN(1)},
+		"witness": {BlockNumber: 0x2a, BlockHash: hashN(2), Witness: &ExecutionWitnessResult{
+			State: []hexutil.Bytes{{0x12}}, Codes: []hexutil.Bytes{}, Keys: []hexutil.Bytes{{0x34}},
+		}},
+	} {
+		want, err := json.Marshal(n)
+		require.NoError(t, err, name)
+		got, err := jsonstream.Marshal(n)
+		require.NoError(t, err, name)
+		require.Equal(t, string(want), string(got), name)
+	}
 }

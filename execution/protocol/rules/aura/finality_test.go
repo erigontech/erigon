@@ -85,5 +85,4 @@ func TestRollingFinality(t *testing.T) {
 		assert.Equal(t, common.Hash{11}, f.headers.Front().hash)
 		assert.Equal(t, common.Hash{11}, *f.lastPushed)
 	})
-
 }

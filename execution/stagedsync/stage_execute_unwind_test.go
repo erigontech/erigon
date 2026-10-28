@@ -48,7 +48,7 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 10_000)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
 
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	br := freezeblocks.NewBlockReader(snaps)
@@ -138,7 +138,10 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	u := &UnwindState{ID: stages.Execution, UnwindPoint: unwindPoint, CurrentBlockNumber: failedBlock}
 	require.GreaterOrEqual(t, u.UnwindPoint, s.BlockNumber, "test must exercise the no-op-disk-unwind branch")
 
+	carryHead := commitTarget{blockNum: committedBlock, blockHash: common.Hash{byte(committedBlock)}}
+	storeBranchCarry(db, newPrefetchRecords(), carryHead, nil, 0)
 	require.NoError(t, UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger))
+	require.Nil(t, takeBranchCarry(db, carryHead.blockNum, carryHead.blockHash), "an execution unwind drops the branch carry")
 
 	// The failed block's first-time write must be gone, so a re-execution reads
 	// the committed value (absent here -> empty) and charges SSTORE_SET again.
@@ -189,7 +192,7 @@ func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) 
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 
 	// Block reader backed only by MDBX — the unwind range is at the tip, above any
 	// frozen snapshot boundary, so no snapshots are needed.

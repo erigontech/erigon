@@ -31,7 +31,7 @@ func UnmarshalCurvePointG1(input []byte, point *bn254.G1Affine) error {
 
 	isAllZeroes := true
 	for i := 0; i < 64; i += 8 {
-		if 0 != binary.BigEndian.Uint64(input[i:i+8]) {
+		if binary.BigEndian.Uint64(input[i:i+8]) != 0 {
 			isAllZeroes = false
 			break
 		}
@@ -73,7 +73,7 @@ func UnmarshalCurvePointG2(input []byte, point *bn254.G2Affine) error {
 
 	isAllZeroes := true
 	for i := 0; i < 32*4; i += 8 {
-		if 0 != binary.BigEndian.Uint64(input[i:i+8]) {
+		if binary.BigEndian.Uint64(input[i:i+8]) != 0 {
 			isAllZeroes = false
 			break
 		}

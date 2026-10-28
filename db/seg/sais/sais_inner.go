@@ -162,8 +162,8 @@ func induceSubS_32(text []int32, sa, freq, bucket []int32) {
 	b := bucket[cB]
 
 	top := len(sa)
-	for i := len(sa) - 1; i >= 0; i-- {
-		j := int(sa[i])
+	for i, v := range slices.Backward(sa) {
+		j := int(v)
 		if j == 0 {
 			continue
 		}
@@ -280,7 +280,7 @@ func expand_32(text []int32, freq, bucket, sa []int32, numLMS int) {
 	b := bucket[c] - 1
 	bucket[c] = b
 
-	for i := len(sa) - 1; i >= 0; i-- {
+	for i := range slices.Backward(sa) {
 		if i != int(b) {
 			sa[i] = 0
 			continue
@@ -341,8 +341,8 @@ func induceS_32(text []int32, sa, freq, bucket []int32) {
 	cB := int32(0)
 	b := bucket[cB]
 
-	for i := len(sa) - 1; i >= 0; i-- {
-		j := int(sa[i])
+	for i, v := range slices.Backward(sa) {
+		j := int(v)
 		if j >= 0 {
 			continue
 		}

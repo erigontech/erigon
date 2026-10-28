@@ -20,7 +20,53 @@ import (
 	"math"
 	"testing"
 	"unsafe"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+func TestFrameGasUsageRevert(t *testing.T) {
+	for _, typ := range []OpCode{CALLCODE, CREATE} {
+		for _, tc := range []struct {
+			name      string
+			ending    []byte
+			execution uint64
+		}{
+			{name: "revert", ending: []byte{byte(PUSH0), byte(PUSH0), byte(REVERT)}, execution: 12_110},
+			{name: "exceptional halt", ending: []byte{byte(INVALID)}, execution: 200_000},
+		} {
+			t.Run(typ.String()+"/"+tc.name, func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+				initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet / 2}
+				code := append([]byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE)}, tc.ending...)
+				var remaining mdgas.MdGas
+				var used mdgas.MdGasUsage
+				var err error
+				if typ == CREATE {
+					_, _, remaining, used, err = evm.Create(accounts.ZeroAddress, code, initial, uint256.Int{}, nil, false)
+				} else {
+					address := accounts.InternAddress(common.HexToAddress("0x1000"))
+					require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+					_, remaining, used, err = evm.CallCode(accounts.ZeroAddress, address, nil, initial, uint256.Int{})
+				}
+				require.Error(t, err)
+				require.Equal(t, mdgas.MdGas{Execution: initial.Execution - tc.execution, State: initial.State}, remaining)
+				require.Equal(t, mdgas.MdGasUsage{Execution: tc.execution}, used)
+			})
+		}
+	}
+}
 
 // TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
 // Execution = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
@@ -125,5 +171,85 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 	if got := unsafe.Sizeof(EVM{}); got > evmSizeClass {
 		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
 			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
+	}
+}
+
+func TestNestedCallsReuseOneFrameContext(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	caller := accounts.InternAddress(common.HexToAddress("0x1000"))
+	callee := accounts.InternAddress(common.HexToAddress("0x2000"))
+	call := []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH2), 0x20, 0x00, byte(GAS), byte(CALL), byte(POP)}
+	require.NoError(t, ibs.SetCode(caller, append(call, call...), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(callee, []byte{byte(STOP)}, tracing.CodeChangeUnspecified))
+
+	var nested []*CallContext
+	var parked []*CallContext
+	var evm *EVM
+	hooks := &tracing.Hooks{OnOpcode: func(_ uint64, _ byte, _, _ uint64, scope tracing.OpContext, _ []byte, depth int, _ error) {
+		switch depth {
+		case 1:
+			// Between the two CALLs the returned nested context sits in the
+			// spare slot; without the parking it would have gone to the pool.
+			parked = append(parked, evm.spareFrame)
+		case 2:
+			nested = append(nested, scope.(*CallContext))
+		}
+	}}
+	evm = NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, caller, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, nested, 2)
+	require.Same(t, nested[0], nested[1], "the second nested call reuses the first one's context")
+	// The pool would hand the same context back too, so the spare slot is what
+	// distinguishes parking from a pool round-trip.
+	require.Contains(t, parked, nested[0], "the returned nested context parks on the EVM")
+	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
+}
+
+func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	collision, err := evm.hasCreateCollision(addr)
+	require.NoError(t, err)
+	require.False(t, collision)
+	reads := ibs.VersionedReads()
+	_, nonceRead := reads.GetNonce(addr)
+	_, codeHashRead := reads.GetCodeHash(addr)
+	require.False(t, nonceRead || codeHashRead, "an absent account needs no nonce or code hash read")
+}
+
+func TestZeroUnpricedBaseFee(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		noBaseFee  bool
+		gasPrice   uint64
+		wantZeroed bool
+	}{
+		{name: "unpriced call skipping the fee checks", noBaseFee: true, gasPrice: 0, wantZeroed: true},
+		{name: "priced call skipping the fee checks", noBaseFee: true, gasPrice: 3, wantZeroed: false},
+		{name: "unpriced call under the fee checks", noBaseFee: false, gasPrice: 0, wantZeroed: false},
+		{name: "priced call under the fee checks", noBaseFee: false, gasPrice: 3, wantZeroed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockCtx := evmtypes.BlockContext{BaseFee: *uint256.NewInt(7)}
+			txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(tc.gasPrice)}
+
+			got := ZeroUnpricedBaseFee(blockCtx, txCtx, Config{NoBaseFee: tc.noBaseFee})
+
+			want := uint256.NewInt(7)
+			if tc.wantZeroed {
+				want = uint256.NewInt(0)
+			}
+			require.Equal(t, want, &got.BaseFee)
+		})
 	}
 }

@@ -20,47 +20,30 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func TestSyncingPayloadStartingBlockPinnedForSession(t *testing.T) {
-	var b syncingPayloadBuilder
-
-	first := b.build(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 100, LastNewBlockSeen: 200})
-	result, ok := first.(syncingResult)
+// The node pins the starting block for the whole session, so a client that
+// subscribes mid-sync gets where the session began, not where it joined.
+func TestSyncingPayloadStartingBlockComesFromTheNode(t *testing.T) {
+	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: true, StartingBlock: proto.Uint64(100), CurrentBlock: 150, LastNewBlockSeen: 210})
+	result, ok := payload.(syncingResult)
 	require.True(t, ok)
 	require.EqualValues(t, 100, result.StartingBlock)
-
-	second := b.build(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 150, LastNewBlockSeen: 210})
-	result, ok = second.(syncingResult)
-	require.True(t, ok)
-	require.EqualValues(t, 100, result.StartingBlock, "startingBlock must not move while the sync session lasts")
 	require.EqualValues(t, 150, result.CurrentBlock)
 	require.EqualValues(t, 210, result.HighestBlock)
 }
 
 func TestSyncingPayloadIsFalseOnceSynced(t *testing.T) {
-	var b syncingPayloadBuilder
-	b.build(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 100, LastNewBlockSeen: 200})
-
-	payload := b.build(&remoteproto.SyncingReply{Syncing: false, CurrentBlock: 200, LastNewBlockSeen: 200})
+	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: false, CurrentBlock: 200, LastNewBlockSeen: 200})
 	require.Equal(t, false, payload)
 }
 
-func TestSyncingPayloadNewSessionRecapturesStartingBlock(t *testing.T) {
-	var b syncingPayloadBuilder
-	b.build(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 100, LastNewBlockSeen: 200})
-	b.build(&remoteproto.SyncingReply{Syncing: false, CurrentBlock: 200, LastNewBlockSeen: 200})
-
-	payload := b.build(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 300, LastNewBlockSeen: 500})
+func TestSyncingPayloadWithoutAPinReportsTheCurrentBlock(t *testing.T) {
+	payload := syncingPayload(&remoteproto.SyncingReply{Syncing: true, CurrentBlock: 150, LastNewBlockSeen: 210})
 	result, ok := payload.(syncingResult)
 	require.True(t, ok)
-	require.EqualValues(t, 300, result.StartingBlock, "a new sync session must capture a fresh startingBlock")
-}
-
-func TestSyncingPayloadFirstObservationAlreadySynced(t *testing.T) {
-	var b syncingPayloadBuilder
-	payload := b.build(&remoteproto.SyncingReply{Syncing: false, CurrentBlock: 200, LastNewBlockSeen: 200})
-	require.Equal(t, false, payload)
+	require.EqualValues(t, 150, result.StartingBlock)
 }

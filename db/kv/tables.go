@@ -35,12 +35,12 @@ const ChangeSets3 = "ChangeSets3"
 
 const (
 
-	//HashedAccounts
+	// HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
+	// key - address hash + incarnation + storage key hash
+	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
 )
@@ -117,15 +117,6 @@ const (
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
-	// Stateless witnesses received over the wit protocol
-	// Renamed from BorWitnesses/BorWitnessSizes: the WIT side-protocol is not
-	// Polygon-specific, it only ever had a Polygon-prefixed name.
-	BorWitnessesDeprecated    = "BorWitnesses"
-	BorWitnessSizesDeprecated = "BorWitnessSizes"
-
-	Witnesses    = "Witnesses"    // block_num_u64 + block_hash -> witness
-	WitnessSizes = "WitnessSizes" // block_num_u64 + block_hash -> witness size (uint64)
-
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -147,11 +138,6 @@ const (
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
-
-	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
-	// persistent backing tier for the in-memory code cache so reads skip the
-	// CodeDomain decompression across restarts. Immutable (content-addressed).
-	TblCodeCache = "CodeCache"
 
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
@@ -273,7 +259,7 @@ const (
 	StatesProcessingProgress = "StatesProcessingProgress"
 	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
-	//Diagnostics tables
+	// Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 )
@@ -333,8 +319,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	Witnesses,
-	WitnessSizes,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -349,7 +333,6 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
-	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -452,15 +435,19 @@ var TxPoolTables = []string{
 	PoolInfo,
 	SenderLastActivity,
 }
+
 var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables
-var DownloaderTables = []string{
-	BittorrentCompletion,
-	BittorrentInfo,
-}
+
+var (
+	ConsensusTables  = ChaindataTables
+	DownloaderTables = []string{
+		BittorrentCompletion,
+		BittorrentInfo,
+	}
+)
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{
@@ -479,10 +466,6 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
-
-	// Renamed to Witnesses / WitnessSizes; dropped by `drop_bor_witness_tables`.
-	BorWitnessesDeprecated,
-	BorWitnessSizesDeprecated,
 }
 
 // Diagnostics tables
@@ -493,11 +476,15 @@ var DiagnosticsTables = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableCfgItem
-type Bucket string
+type (
+	TableCfg map[string]TableCfgItem
+	Bucket   string
+)
 
-type DBI uint32
-type TableFlags uint
+type (
+	DBI        uint32
+	TableFlags uint
+)
 
 const (
 	Default    TableFlags = 0x00
@@ -566,16 +553,18 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var TxpoolTablesCfg = TableCfg{}
-var SentryTablesCfg = TableCfg{}
-var ConsensusTablesCfg = TableCfg{}
-var DownloaderTablesCfg = TableCfg{}
-var DiagnosticsTablesCfg = TableCfg{}
-var MigrationsTablesCfg = TableCfg{Migrations: {}}
+var (
+	TxpoolTablesCfg      = TableCfg{}
+	SentryTablesCfg      = TableCfg{}
+	ConsensusTablesCfg   = TableCfg{}
+	DownloaderTablesCfg  = TableCfg{}
+	DiagnosticsTablesCfg = TableCfg{}
+	MigrationsTablesCfg  = TableCfg{Migrations: {}}
+)
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: // TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.MigrationsDB:
 		return MigrationsTablesCfg
@@ -593,6 +582,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
 }
+
 func sortBuckets() {
 	slices.Sort(ChaindataTables)
 }

@@ -1,7 +1,9 @@
 package ethapi
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,4 +69,55 @@ func TestStateOverrides_MovePrecompileSuccess(t *testing.T) {
 	require.False(t, atSrc, "precompile must be removed from source")
 	require.True(t, atDst, "precompile must be present at destination")
 	require.Equal(t, stub.Name(), got.Name())
+}
+
+func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000001"))
+	key := common.HexToHash("0x01")
+
+	for _, tc := range []struct {
+		name      string
+		stateDiff bool
+	}{
+		{name: "state"},
+		{name: "stateDiff", stateDiff: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := map[common.Hash]common.Hash{key: common.HexToHash("0x2a")}
+			account := Account{State: &storage}
+			if tc.stateDiff {
+				account = Account{StateDiff: &storage}
+			}
+
+			overrides := StateOverrides{addr: account}
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+
+			rules := &chain.Rules{IsSpuriousDragon: true}
+			require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
+
+			exists, err := ibs.Exist(addr)
+			require.NoError(t, err)
+			require.True(t, exists)
+
+			value, err := ibs.GetState(addr, accounts.InternKey(key))
+			require.NoError(t, err)
+			require.Equal(t, uint64(0x2a), value.Uint64())
+		})
+	}
+}
+
+func TestStateOverridesBalanceDecoding(t *testing.T) {
+	maxU256 := strings.Repeat("f", 64)
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	var so StateOverrides
+	require.NoError(t, json.Unmarshal([]byte(`{"0x00000000000000000000000000000000000000aa":{"balance":"0x`+maxU256+`"}}`), &so))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{}))
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, maxU256, balance.Hex()[2:])
 }

@@ -258,7 +258,6 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 		return err
 	}
 	return nil
-
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
@@ -419,6 +418,7 @@ func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
 	}
 	return s, true
 }
+
 func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
 	if from := tx.from; !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer

@@ -22,6 +22,31 @@
 {
 	// callstack is the current recursive call stack of the EVM execution.
 	callstack: [{}],
+	activeCalls: [],
+
+	enter: function(frame) {
+		var type = frame.getType();
+		if (type === 'SELFDESTRUCT' ||
+			(type !== 'CREATE' && type !== 'CREATE2' && isPrecompiled(frame.getTo()))) {
+			this.activeCalls.push(null);
+		} else {
+			var call = this.callstack[this.callstack.length - 1];
+			var stateGas = frame.getStateGas();
+			if (stateGas !== 0) {
+				call.stateGas = '0x' + bigInt(stateGas).toString(16);
+			}
+			this.activeCalls.push(call);
+		}
+	},
+
+	exit: function(result) {
+		var call = this.activeCalls.pop();
+		if (call && (call.gas !== undefined || call.type === 'CREATE' || call.type === 'CREATE2')) {
+			call.gasUsed = '0x' + bigInt(result.getGasUsed()).toString(16);
+			var stateGasUsed = result.getStateGasUsed();
+			call.stateGasUsed = (stateGasUsed < 0 ? '-0x' : '0x') + bigInt(stateGasUsed).abs().toString(16);
+		}
+	},
 
 		// descended tracks whether we've just descended from an outer transaction into
 		// an inner call.
@@ -50,8 +75,6 @@
 						type: op,
 						from: toHex(log.contract.getAddress()),
 						input: toHex(log.memory.slice(inOff, inEnd)),
-						gasIn: log.getGas(),
-						gasCost: log.getCost(),
 						value: '0x' + log.stack.peek(0).toString(16)
 					};
 					this.callstack.push(call);
@@ -68,8 +91,6 @@
 						type: op,
 						from: toHex(log.contract.getAddress()),
 						to: toHex(toAddress(log.stack.peek(0).toString(16))),
-						gasIn: log.getGas(),
-						gasCost: log.getCost(),
 						value: '0x' + db.getBalance(log.contract.getAddress()).toString(16)
 					});
 					return
@@ -92,8 +113,6 @@
 						from: toHex(log.contract.getAddress()),
 						to: toHex(to),
 						input: toHex(log.memory.slice(inOff, inEnd)),
-						gasIn: log.getGas(),
-						gasCost: log.getCost(),
 						outOff: log.stack.peek(4 + off).valueOf(),
 						outLen: log.stack.peek(5 + off).valueOf()
 					};
@@ -128,9 +147,6 @@
 
 					if (call.type == 'CREATE' || call.type == "CREATE2") {
 						// If the call was a CREATE, retrieve the contract address and output code
-						call.gasUsed = '0x' + bigInt(call.gasIn - call.gasCost - log.getGas()).toString(16);
-						delete call.gasIn; delete call.gasCost;
-
 						var ret = log.stack.peek(0);
 						if (!ret.equals(0)) {
 							call.to = toHex(toAddress(ret.toString(16)));
@@ -139,17 +155,12 @@
 							call.error = "internal failure"; // TODO(karalabe): surface these faults somehow
 						}
 					} else {
-						// If the call was a contract call, retrieve the gas usage and output
-						if (call.gas !== undefined) {
-							call.gasUsed = '0x' + bigInt(call.gasIn - call.gasCost + call.gas - log.getGas()).toString(16);
-						}
 						var ret = log.stack.peek(0);
 						if (!ret.equals(0)) {
 							call.output = toHex(log.memory.slice(call.outOff, call.outOff + call.outLen));
 						} else if (call.error === undefined) {
 							call.error = "internal failure"; // TODO(karalabe): surface these faults somehow
 						}
-						delete call.gasIn; delete call.gasCost;
 						delete call.outOff; delete call.outLen;
 					}
 					if (call.gas !== undefined) {
@@ -174,12 +185,9 @@
 		var call = this.callstack.pop();
 		call.error = log.getError();
 
-		// Consume all available gas and clean any leftovers
 		if (call.gas !== undefined) {
 			call.gas = '0x' + bigInt(call.gas).toString(16);
-			call.gasUsed = call.gas
 		}
-		delete call.gasIn; delete call.gasCost;
 		delete call.outOff; delete call.outLen;
 
 		// Flatten the failed call into its parent
@@ -198,6 +206,7 @@
 	// result is invoked when all the opcodes have been iterated over and returns
 	// the final result of the tracing.
 	result: function(ctx, db) {
+		this.isAmsterdam = ctx.stateGasUsed !== undefined;
 		var result = {
 			type: ctx.type,
 			from: toHex(ctx.from),
@@ -208,6 +217,14 @@
 			input: toHex(ctx.input),
 			output: toHex(ctx.output),
 		};
+		if (ctx.stateGas !== undefined) {
+			result.stateGas = '0x' + bigInt(ctx.stateGas).toString(16);
+		}
+		if (ctx.regularGasUsed !== undefined) {
+			result.regularGasUsed = '0x' + bigInt(ctx.regularGasUsed).toString(16);
+			result.stateGasUsed = '0x' + bigInt(ctx.stateGasUsed).toString(16);
+			result.gasRefund = '0x' + bigInt(ctx.gasRefund).toString(16);
+		}
 		if (this.callstack[0].calls !== undefined) {
 			result.calls = this.callstack[0].calls;
 		}
@@ -232,7 +249,11 @@
 			to: call.to,
 			value: call.value,
 			gas: call.gas,
+			stateGasReservoir: call.stateGas,
 			gasUsed: call.gasUsed,
+			regularGasUsed: call.regularGasUsed,
+			stateGasUsed: this.isAmsterdam ? call.stateGasUsed : undefined,
+			gasRefund: call.gasRefund,
 			input: call.input,
 			output: call.output,
 			error: call.error,
@@ -244,9 +265,7 @@
 			}
 		}
 		if (sorted.calls !== undefined) {
-			for (var i = 0; i < sorted.calls.length; i++) {
-				sorted.calls[i] = this.finalize(sorted.calls[i]);
-			}
+			sorted.calls = sorted.calls.map(this.finalize, this);
 		}
 		return sorted;
 	}

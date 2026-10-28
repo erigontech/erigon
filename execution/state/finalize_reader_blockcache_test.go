@@ -81,7 +81,8 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 	const finalTxNum uint64 = 30 // block-finalize / withdrawal txNum
 
 	domains.SetTxNum(preBlockTxNum)
-	require.NoError(t,
+	require.NoError(
+		t,
 		domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], preEnc, preBlockTxNum, nil),
 	)
 

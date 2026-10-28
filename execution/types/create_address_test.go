@@ -26,8 +26,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
-var testPrivHex = "289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032"
+var (
+	testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
+	testPrivHex = "289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032"
+)
 
 func checkAddr(t *testing.T, addr0, addr1 common.Address) {
 	t.Helper()

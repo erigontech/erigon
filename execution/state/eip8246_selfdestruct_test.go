@@ -41,7 +41,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	_, err := tx0.Selfdestruct(addr, true)
 	require.NoError(t, err)
 	require.NoError(t, tx0.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-	vm.FlushVersionedWrites(tx0.VersionedWrites(), true, "")
+	vm.FlushVersionedWrites(tx0.VersionedWrites(), true)
 	tx1 := New(reader)
 	defer tx1.Close()
 	tx1.SetTxContext(0, 1)
@@ -57,6 +57,31 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	exists, err := tx1.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists, "the preserved account still exists")
+}
+
+func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246B1"))
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(7)
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 0}, &account, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, account.Balance, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 1}, account.Balance, true)
+
+	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(ibs.Close)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 2)
+	ibs.eip8246 = true
+
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, account.Balance, bal)
 }
 
 // The block assembler runs every tx on one shared IBS (no per-tx Reset).
@@ -86,6 +111,32 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(100), bal, "EIP-8246: preserved balance must carry into a later-tx CREATE2 on the assembler's shared IBS")
+}
+
+// On a versioned IBS that caches state objects, the balance written before an
+// EIP-8246 SELFDESTRUCT must survive FinalizeTx.
+func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246C1"))
+	rules := &chain.Rules{IsAmsterdam: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+	ibs.eip8246 = true
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeTransfer))
+	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
+	require.NoError(t, err)
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 1)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), bal)
 }
 
 // getVersionedAccount must not treat a later Balance/Nonce/CodeHash write
@@ -147,7 +198,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		_, err := tx0.Selfdestruct(addr, true)
 		require.NoError(t, err)
 		require.NoError(t, tx0.MakeWriteSet(rules, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx0.VersionedWrites(), true, "")
+		vm.FlushVersionedWrites(tx0.VersionedWrites(), true)
 		tx1 := New(reader)
 		defer tx1.Close()
 		tx1.SetTxContext(0, 1)

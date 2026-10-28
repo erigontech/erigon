@@ -21,8 +21,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"runtime"
+	"math/bits"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,8 +40,14 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 	require.NotNil(t, p)
 	require.NotNil(t, p.template, "template HexPatriciaHashed allocated")
 	assert.Equal(t, int16(length.Addr), p.accountKeyLen)
-	assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+	assert.Equal(t, defaultParallelCommitmentWorkers, p.numWorkers)
 	assert.Nil(t, p.rootHash.Load())
+}
+
+func TestParallelCommitmentReadTxs(t *testing.T) {
+	concurrency := parallelMountConcurrency(defaultParallelCommitmentWorkers)
+
+	require.Equal(t, concurrency+1, ParallelCommitmentReadTxs())
 }
 
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
@@ -67,9 +75,9 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		assert.Equal(t, 4, p.numWorkers)
 
 		p.SetNumWorkers(0)
-		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+		assert.Equal(t, defaultParallelCommitmentWorkers, p.numWorkers)
 		p.SetNumWorkers(-3)
-		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+		assert.Equal(t, defaultParallelCommitmentWorkers, p.numWorkers)
 	})
 
 	t.Run("ResetContextPropagates", func(t *testing.T) {
@@ -253,38 +261,33 @@ func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 	assert.Contains(t, err.Error(), "ModeParallel")
 }
 
-func TestDFSSubtree(t *testing.T) {
-	t.Parallel()
-
-	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
-	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
-	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"), nil)
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil)
-
-	type kv struct{ hk, pk string }
-	var got []kv
-	err := dfsSubtree(pu.trie.root, nil, func(hk, pk []byte, _ *Update) error {
-		got = append(got, kv{hk: fmt.Sprintf("%x", hk), pk: string(pk)})
+// hashedKey passed to fn is mutated in place and must not be retained.
+func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
+	if node == nil {
 		return nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, []kv{
-		{hk: "0102", pk: "pk-D"},
-		{hk: "010203", pk: "pk-A"},
-		{hk: "010204", pk: "pk-B"},
-		{hk: "050607", pk: "pk-C"},
-	}, got)
-}
-
-func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
-	t.Parallel()
-
-	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
-	err := dfsSubtree(pu.trie.root, nil, func(_, _ []byte, _ *Update) error { return nil })
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "plainKey")
+	}
+	if node.plainKey != nil {
+		if err := fn(path, node.plainKey, node.update); err != nil {
+			return err
+		}
+	} else if node.bitmap == 0 {
+		return errors.New("ParallelPatriciaHashed: trie leaf without a plainKey")
+	}
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := byte(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		base := len(path)
+		path = append(path, nib)
+		path = append(path, child.ext...)
+		if err := dfsSubtree(child, path, fn); err != nil {
+			return err
+		}
+		path = path[:base]
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return nil
 }
 
 func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) [][]byte {
@@ -992,5 +995,137 @@ func TestVerifyParallel_StorageIncrementalDeletes(t *testing.T) {
 	k2, u2 := sparseBatch2(keys, 3, true)
 	for _, w := range []int{1, 2, 4, 8} {
 		requireIncrementalEquiv(t, keys, upds, k2, u2, w)
+	}
+}
+
+// Regression marker for #20961: a follow-up block that carries only part of an
+// account (here a balance write with no nonce write) must not make the trie
+// treat the rest of the account as zero.
+func Test_ModeParallel_SiblingConsistency(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	keys1, upds1 := NewUpdateBuilder().
+		Balance("00", 100).
+		Nonce("00", 1).
+		Balance("01", 200).
+		Nonce("01", 2).
+		Balance("02", 300).
+		Nonce("02", 3).
+		Build()
+	keys2, upds2 := NewUpdateBuilder().
+		Balance("00", 150).
+		Build()
+
+	directMs := NewMockState(t)
+	directTrie := NewHexPatriciaHashed(1, directMs, DefaultTrieConfig())
+	defer directTrie.Release()
+	directRoot := func(keys [][]byte, upds []Update) []byte {
+		require.NoError(t, directMs.applyPlainUpdates(keys, upds))
+		ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
+		defer ut.Close()
+		return processRoot(t, directTrie, ut)
+	}
+	directRoot(keys1, upds1)
+	wantRoot := directRoot(keys2, upds2)
+
+	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
+	parRoot := func(keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
+		require.NoError(t, parMs.applyPlainUpdates(keys, upds))
+		tr := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), 1, DefaultTrieConfig())
+		defer tr.Release()
+		tr.SetNumWorkers(2)
+		tr.ResetContext(parMs)
+		require.NoError(t, tr.RootTrie().SetState(blob))
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for i, k := range keys {
+			ut.TouchPlainKeyDirect(string(k), &upds[i])
+		}
+		root, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		state, err := tr.RootTrie().EncodeCurrentState(nil)
+		require.NoError(t, err)
+		return bytes.Clone(root), state
+	}
+	_, blob := parRoot(keys1, upds1, nil)
+	gotRoot, _ := parRoot(keys2, upds2, blob)
+
+	require.Equal(t, wantRoot, gotRoot,
+		"a carried balance-only update must not zero the account's untouched nonce")
+}
+
+type ctxLeaseCounter struct {
+	live atomic.Int64
+	peak atomic.Int64
+	made atomic.Int64
+}
+
+func (c *ctxLeaseCounter) wrap(inner TrieContextFactory) TrieContextFactory {
+	return func(ctx context.Context) (PatriciaContext, func()) {
+		pc, cleanup := inner(ctx)
+		c.made.Add(1)
+		for n := c.live.Add(1); ; {
+			peak := c.peak.Load()
+			if n <= peak || c.peak.CompareAndSwap(peak, n) {
+				break
+			}
+		}
+		return pc, func() {
+			if cleanup != nil {
+				cleanup()
+			}
+			c.live.Add(-1)
+		}
+	}
+}
+
+func TestParallelCommitment_ConcurrentReadContextsStayInReserve(t *testing.T) {
+	t.Parallel()
+
+	k1, u1, k2, u2 := collapseCorpus()
+
+	for _, grain := range []struct {
+		name string
+		g    uint32
+	}{{"auto", 0}, {"G2", 2}} {
+		for _, workers := range []int{1, 4, 8, 18} {
+			t.Run(fmt.Sprintf("%s/w%d", grain.name, workers), func(t *testing.T) {
+				t.Parallel()
+				ms := NewMockState(t)
+				ms.SetConcurrentCommitment(true)
+
+				lease := &ctxLeaseCounter{}
+				tr := NewParallelPatriciaHashed(lease.wrap(mockTrieCtxFactory(ms)), length.Addr, DefaultTrieConfig())
+				tr.SetNumWorkers(workers)
+				tr.SetForkGrain(grain.g)
+				tr.ResetContext(ms)
+				defer tr.Release()
+
+				var forks uint64
+				for _, batch := range []struct {
+					keys [][]byte
+					upds []Update
+				}{{k1, u1}, {k2, u2}} {
+					require.NoError(t, ms.applyPlainUpdates(batch.keys, batch.upds))
+					ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+					for _, k := range batch.keys {
+						ut.TouchPlainKey(string(k), nil, nil)
+					}
+					_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+					ut.Close()
+					require.NoError(t, err)
+					forks += tr.Forks()
+				}
+
+				require.Zero(t, lease.live.Load(), "every read context must be released")
+				reserve := parallelMountConcurrency(workers) + 1
+				require.LessOrEqual(t, int(lease.peak.Load()), reserve,
+					"peak concurrent read contexts must fit the reserve ParallelCommitmentReadTxs sizes for this worker count")
+				t.Logf("grain %s workers %d: reserve %d, peak %d, opened %d, forks %d",
+					grain.name, workers, reserve, lease.peak.Load(), lease.made.Load(), forks)
+			})
+		}
 	}
 }

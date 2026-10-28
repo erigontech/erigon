@@ -53,7 +53,7 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 
 	ioCode := NewVersionedIO(4)
 	rsCode := ReadSet{}
-	rsCode.SetCode(addr, VersionedRead[[]byte]{ReadHeader: readStorage, Val: code.Bytes})
+	rsCode.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: readStorage, Val: code})
 	ioCode.RecordReads(Version{TxIndex: 3}, rsCode)
 	require.Equal(t, VersionValid, vm.ValidateVersion(3, ioCode, validateEqualVersion, true, false, false, ""),
 		"CodePath tiebreaker: the flushed bytes match, so the cold read stays valid")
@@ -67,7 +67,7 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 
 	ioCodeStale := NewVersionedIO(4)
 	rsCodeStale := ReadSet{}
-	rsCodeStale.SetCode(addr, VersionedRead[[]byte]{ReadHeader: readStorage, Val: []byte{0xde, 0xad}})
+	rsCodeStale.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: readStorage, Val: accounts.NewCode([]byte{0xde, 0xad})})
 	ioCodeStale.RecordReads(Version{TxIndex: 3}, rsCodeStale)
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioCodeStale, validateEqualVersion, true, false, false, ""),
 		"CodePath: a genuinely different flushed value still invalidates")

@@ -18,9 +18,11 @@ package jsonrpc
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func syntheticWitness(totalBytes, avgNode int) *ExecutionWitnessResult {
@@ -37,46 +39,28 @@ func syntheticWitness(totalBytes, avgNode int) *ExecutionWitnessResult {
 }
 
 // BenchmarkWitnessServeOnDemand is the serialization the rpc layer runs when it
-// serves a freshly built result: MarshalFastJSON marshals the struct fields.
+// serves a freshly built result: MarshalFastJSONTo marshals the struct fields.
 func BenchmarkWitnessServeOnDemand(b *testing.B) {
 	for _, mb := range []int{6, 15, 25} {
 		w := syntheticWitness(mb*1_000_000, 200)
-		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) {
-			b.ReportAllocs()
-			var out int
-			for i := 0; i < b.N; i++ {
-				buf, err := w.MarshalFastJSON()
-				if err != nil {
-					b.Fatal(err)
-				}
-				out = len(buf)
-			}
-			b.ReportMetric(float64(out)/1e6, "MB_json")
-		})
+		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) { serveWitness(b, w) })
 	}
 }
 
-// BenchmarkWitnessServeCacheHit is what a cache hit serves: the builder marshaled
-// the JSON once (off-path), so MarshalFastJSON on the stored shell returns those
-// bytes verbatim — no per-hit marshal.
-func BenchmarkWitnessServeCacheHit(b *testing.B) {
-	for _, mb := range []int{6, 15, 25} {
-		enc, err := syntheticWitness(mb*1_000_000, 200).MarshalFastJSON()
-		if err != nil {
+// serveWitness writes w the way the rpc layer does: into a pooled stream over a writer.
+func serveWitness(b *testing.B, w *ExecutionWitnessResult) {
+	rec := httptest.NewRecorder()
+	b.ReportAllocs()
+	for b.Loop() {
+		rec.Body.Reset()
+		s := jsonstream.Get(rec)
+		if err := w.MarshalFastJSONTo(s); err != nil {
 			b.Fatal(err)
 		}
-		shell := &ExecutionWitnessResult{cachedJSON: enc}
-		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) {
-			b.ReportAllocs()
-			var out int
-			for i := 0; i < b.N; i++ {
-				buf, err := shell.MarshalFastJSON()
-				if err != nil {
-					b.Fatal(err)
-				}
-				out = len(buf)
-			}
-			b.ReportMetric(float64(out)/1e6, "MB_json")
-		})
+		if err := s.Flush(); err != nil {
+			b.Fatal(err)
+		}
+		jsonstream.Put(s)
 	}
+	b.ReportMetric(float64(rec.Body.Len())/1e6, "MB_json")
 }

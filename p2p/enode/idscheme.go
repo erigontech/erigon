@@ -54,7 +54,7 @@ func SignV4(r *enr.Record, privkey *ecdsa.PrivateKey) error {
 	cpy.Set(Secp256k1(privkey.PublicKey))
 
 	h := keccak.NewFastKeccak()
-	rlp.Encode(h, cpy.AppendElements(nil))
+	_ = rlp.Encode(h, cpy.AppendElements(nil))
 	sig, err := crypto.Sign(h.Sum(nil), privkey)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func (V4ID) Verify(r *enr.Record, sig []byte) error {
 	}
 
 	h := keccak.NewFastKeccak()
-	rlp.Encode(h, r.AppendElements(nil))
+	_ = rlp.Encode(h, r.AppendElements(nil))
 	if !crypto.VerifySignature(entry, h.Sum(nil), sig) {
 		return enr.ErrInvalidSig
 	}
@@ -114,7 +114,7 @@ func (v *Secp256k1) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	*v = (Secp256k1)(*pk)
+	*v = Secp256k1(*pk)
 	return nil
 }
 
@@ -151,7 +151,9 @@ func (NullID) Verify(r *enr.Record, sig []byte) error {
 
 func (NullID) NodeAddr(r *enr.Record) []byte {
 	var id ID
-	r.Load(enr.WithEntry("nulladdr", &id))
+	if err := r.Load(enr.WithEntry("nulladdr", &id)); err != nil {
+		return nil
+	}
 	return id[:]
 }
 

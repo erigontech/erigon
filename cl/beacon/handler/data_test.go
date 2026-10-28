@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -100,15 +101,23 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 	}
 
 	if c.forkmode == 1 {
-		sm.OnHeadState(postState)
+		require.NoError(c.t, sm.OnHeadState(postState))
 		var s *state.CachingBeaconState
-		for s == nil {
-			sm.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// ViewHeadState returns ErrNotSynced until OnHeadState above has taken effect.
+		var viewErr error
+		for range 1000 {
+			viewErr = sm.ViewHeadState(func(headState *state.CachingBeaconState) error {
 				s = headState
 				return nil
 			})
+			if viewErr == nil {
+				break
+			}
+			time.Sleep(time.Millisecond)
 		}
-		s.SetSlot(789274827847783)
+		require.NoError(c.t, viewErr)
+		require.NotNil(c.t, s)
+		require.NoError(c.t, s.SetSlot(789274827847783))
 
 		fcu.HeadSlotVal = 128
 		fcu.HeadVal = common.Hash{1, 2, 3}
@@ -131,7 +140,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 1, Root: common.Hash{1, 2, 3}}
 		fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.Hash{1, 2, 3}}
 	}
-	sm.OnHeadState(postState)
+	require.NoError(c.t, sm.OnHeadState(postState))
 
 	return []beacontest.HarnessOption{
 		beacontest.WithTesting(c.t),

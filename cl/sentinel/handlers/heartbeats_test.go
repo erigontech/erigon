@@ -20,10 +20,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
+	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
@@ -36,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -49,6 +53,16 @@ var (
 	attnetsTestVal  = [8]byte{1, 5, 6}
 	syncnetsTestVal = [1]byte{56}
 )
+
+type rawSSZ []byte
+
+func (r rawSSZ) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, r...), nil
+}
+
+func (r rawSSZ) EncodingSizeSSZ() int {
+	return len(r)
+}
 
 func newkey() *ecdsa.PrivateKey {
 	key, err := crypto.GenerateKey()
@@ -70,36 +84,33 @@ func testLocalNode(t *testing.T) *enode.LocalNode {
 	return ln
 }
 
-func TestPing(t *testing.T) {
-	ctx := context.Background()
+func newHeartbeatTestStream(t *testing.T, protocolID protocol.ID) (network.Stream, host.Host) {
+	t.Helper()
+	ctx := t.Context()
 
-	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	localHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host.Close() })
+	t.Cleanup(func() { localHost.Close() })
 
-	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	remoteHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	t.Cleanup(func() { remoteHost.Close() })
 
-	err = host.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
+	err = localHost.Connect(ctx, peer.AddrInfo{
+		ID:    remoteHost.ID(),
+		Addrs: remoteHost.Addrs(),
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
-
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
-
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
 		indiciesDB,
-		host,
-		peersPool,
+		localHost,
 		&clparams.NetworkConfig{},
 		testLocalNode(t),
 		beaconCfg,
@@ -108,16 +119,27 @@ func TestPing(t *testing.T) {
 	)
 	c.Start()
 
-	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.PingProtocolV1))
+	stream, err := remoteHost.NewStream(ctx, localHost.ID(), protocolID)
 	require.NoError(t, err)
+	return stream, localHost
+}
 
-	_, err = stream.Write(nil)
+func requireResponseCode(t *testing.T, stream network.Stream, expected byte) {
+	t.Helper()
+	responseCode := make([]byte, 1)
+	_, err := stream.Read(responseCode)
 	require.NoError(t, err)
+	require.Equal(t, expected, responseCode[0])
+}
 
-	firstByte := make([]byte, 1)
-	_, err = stream.Read(firstByte)
+func TestPing(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+
+	err := ssz_snappy.EncodeAndWrite(stream, &cltypes.Ping{Id: 1})
 	require.NoError(t, err)
-	require.Equal(t, firstByte[0], byte(0))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(SuccessfulResponsePrefix))
 
 	p := &cltypes.Ping{}
 
@@ -125,64 +147,116 @@ func TestPing(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPingRejectsEmptyRequest(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestPingRejectsTruncatedRequest(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 7))))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestPingRejectsOversizedRequest(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 9))))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestPingRejectsTrailingBytes(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	var request bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, &cltypes.Ping{Id: 1}))
+	require.NoError(t, request.WriteByte(0))
+	_, err := stream.Write(request.Bytes())
+	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
 func TestGoodbye(t *testing.T) {
-	ctx := context.Background()
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	sendGoodbye(t, stream, 0)
+}
 
-	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { host.Close() })
+func TestGoodbyeLogsAgentVersionForHighReason(t *testing.T) {
+	stream, localHost := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	const agentVersion = "remote-client/v1.2.3"
+	require.NoError(t, localHost.Peerstore().Put(stream.Conn().LocalPeer(), "AgentVersion", agentVersion))
 
-	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	records := make(chan *log.Record, 16)
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.ChannelHandler(records))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
 
-	err = host.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	require.NoError(t, err)
+	sendGoodbye(t, stream, 251)
 
-	peersPool := peers.NewPool(host)
-	beaconDB, indiciesDB := setupStore(t)
-
-	f := forkchoicemock.NewForkChoiceStorageMock(t)
-	ethClock := getEthClock(t)
-	_, beaconCfg := clparams.GetConfigsByNetwork(1)
-	c := NewConsensusHandlers(
-		ctx,
-		beaconDB,
-		indiciesDB,
-		host,
-		peersPool,
-		&clparams.NetworkConfig{},
-		testLocalNode(t),
-		beaconCfg,
-		ethClock,
-		nil, f, nil, nil, nil, true,
-	)
-	c.Start()
-
-	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.GoodbyeProtocolV1))
-	require.NoError(t, err)
-
-	req := &cltypes.Ping{}
-	var reqBuf bytes.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&reqBuf, req); err != nil {
-		return
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case record := <-records:
+			if record.Msg != "Received goodbye message from peer" {
+				continue
+			}
+			require.Equal(t, log.LvlWarn, record.Lvl)
+			require.Equal(t, []any{"v", agentVersion}, record.Ctx)
+			return
+		case <-deadline:
+			t.Fatal("goodbye warning was not logged")
+		}
 	}
+}
 
-	_, err = stream.Write(reqBuf.Bytes())
-	require.NoError(t, err)
+func sendGoodbye(t *testing.T, stream network.Stream, reason uint64) {
+	t.Helper()
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, &cltypes.Ping{Id: reason}))
+	require.NoError(t, stream.CloseWrite())
 
-	firstByte := make([]byte, 1)
-	_, err = stream.Read(firstByte)
-	require.NoError(t, err)
-	require.Equal(t, firstByte[0], byte(0))
+	requireResponseCode(t, stream, byte(SuccessfulResponsePrefix))
 
 	p := &cltypes.Ping{}
 
-	err = ssz_snappy.DecodeAndReadNoForkDigest(stream, p, clparams.Phase0Version)
+	require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(stream, p, clparams.Phase0Version))
+}
+
+func TestGoodbyeRejectsOversizedRequest(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 9))))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestGoodbyeRejectsTrailingBytes(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	var request bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, &cltypes.Ping{Id: 1}))
+	require.NoError(t, request.WriteByte(0))
+	_, err := stream.Write(request.Bytes())
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestGoodbyeRejectsMaxDeclaredLength(t *testing.T) {
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	var header [binary.MaxVarintLen64]byte
+	headerLen := binary.PutUvarint(header[:], 16*1024*1024)
+
+	require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+	_, err := stream.Write(header[:headerLen])
+	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
 }
 
 func TestMetadataV2(t *testing.T) {
@@ -202,7 +276,6 @@ func TestMetadataV2(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -214,7 +287,6 @@ func TestMetadataV2(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&nc,
 		testLocalNode(t),
 		beaconCfg,
@@ -260,7 +332,6 @@ func TestMetadataV1(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -273,7 +344,6 @@ func TestMetadataV1(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&nc,
 		testLocalNode(t),
 		beaconCfg,
@@ -301,8 +371,9 @@ func TestMetadataV1(t *testing.T) {
 	require.Equal(t, attnetsTestVal, p.Attnets)
 }
 
-func TestStatus(t *testing.T) {
-	ctx := context.Background()
+func newStatusTestStream(t *testing.T, protocolID protocol.ID) (network.Stream, *cltypes.Status) {
+	t.Helper()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -318,44 +389,28 @@ func TestStatus(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
-
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
-
-	// Create mock for PeerDasStateReader
 	ctrl := gomock.NewController(t)
-	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
-	mockPeerDasStateReader.EXPECT().
-		GetEarliestAvailableSlot().
-		Return(uint64(0)).
-		AnyTimes()
-	mockPeerDasStateReader.EXPECT().
-		GetRealCgc().
-		Return(uint64(0)).
-		AnyTimes()
-	mockPeerDasStateReader.EXPECT().
-		GetAdvertisedCgc().
-		Return(uint64(0)).
-		AnyTimes()
-
-	// Create a simple HTTP handler for the handshake
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	peerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
+	peerDasStateReader.EXPECT().GetEarliestAvailableSlot().Return(uint64(0)).AnyTimes()
+	peerDasStateReader.EXPECT().GetRealCgc().Return(uint64(0)).AnyTimes()
+	peerDasStateReader.EXPECT().GetAdvertisedCgc().Return(uint64(0)).AnyTimes()
 
 	ethClock := getEthClock(t)
-	hs := handshake.New(ctx, ethClock, &clparams.MainnetBeaconConfig, handler, mockPeerDasStateReader)
+	hs := handshake.New(ctx, ethClock, &clparams.MainnetBeaconConfig, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), peerDasStateReader)
 	forkDigest, err := ethClock.CurrentForkDigest()
 	require.NoError(t, err)
-	s := &cltypes.Status{
+	status := &cltypes.Status{
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  common.Hash{1, 2, 4},
 		HeadRoot:       common.Hash{1, 2, 4},
 		FinalizedEpoch: 1,
 		HeadSlot:       1,
 	}
-	hs.SetStatus(s)
+	hs.SetStatus(status)
 	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -363,17 +418,21 @@ func TestStatus(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&nc,
 		testLocalNode(t),
 		beaconCfg,
-		getEthClock(t),
-		hs, f, nil, nil, mockPeerDasStateReader, true,
+		ethClock,
+		hs, f, nil, nil, peerDasStateReader, true,
 	)
 	c.Start()
 
-	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.StatusProtocolV1))
+	stream, err := host1.NewStream(ctx, host.ID(), protocolID)
 	require.NoError(t, err)
+	return stream, status
+}
+
+func TestStatus(t *testing.T) {
+	stream, expectedStatus := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV1))
 
 	// Send a Status request body (per eth2 spec the requester sends its own Status).
 	reqStatus := &cltypes.Status{
@@ -382,18 +441,80 @@ func TestStatus(t *testing.T) {
 		FinalizedEpoch: 2,
 		HeadSlot:       2,
 	}
-	err = ssz_snappy.EncodeAndWrite(stream, reqStatus)
+	err := ssz_snappy.EncodeAndWrite(stream, reqStatus)
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 
-	firstByte := make([]byte, 1)
-	_, err = stream.Read(firstByte)
-	require.NoError(t, err)
-	require.Equal(t, firstByte[0], byte(0))
+	requireResponseCode(t, stream, byte(SuccessfulResponsePrefix))
 
 	p := &cltypes.Status{}
 
 	err = ssz_snappy.DecodeAndReadNoForkDigest(stream, p, clparams.Phase0Version)
 	require.NoError(t, err)
 
-	require.Equal(t, s, p)
+	require.Equal(t, expectedStatus, p)
+}
+
+func TestStatusRejectsEmptyRequest(t *testing.T) {
+	stream, _ := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV1))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestStatusRejectsTruncatedRequest(t *testing.T) {
+	stream, _ := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV1))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 83))))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestStatusRejectsOversizedRequest(t *testing.T) {
+	stream, _ := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV1))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 85))))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestStatusV2(t *testing.T) {
+	stream, expectedStatus := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV2))
+	earliestAvailableSlot := uint64(9)
+	requestStatus := &cltypes.Status{
+		FinalizedRoot:         common.Hash{9, 8, 7},
+		HeadRoot:              common.Hash{9, 8, 7},
+		FinalizedEpoch:        2,
+		HeadSlot:              2,
+		EarliestAvailableSlot: &earliestAvailableSlot,
+	}
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, requestStatus))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(SuccessfulResponsePrefix))
+
+	responseStatus := &cltypes.Status{}
+	require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(stream, responseStatus, clparams.FuluVersion))
+	earliestAvailableSlot = 0
+	expectedStatus.EarliestAvailableSlot = &earliestAvailableSlot
+	require.Equal(t, expectedStatus, responseStatus)
+}
+
+func TestStatusV2RejectsEmptyRequest(t *testing.T) {
+	stream, _ := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV2))
+	require.NoError(t, stream.CloseWrite())
+
+	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+}
+
+func TestStatusV2RejectsInvalidRequestSize(t *testing.T) {
+	for _, size := range []int{91, 93} {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			stream, _ := newStatusTestStream(t, protocol.ID(communication.StatusProtocolV2))
+			require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, size))))
+			require.NoError(t, stream.CloseWrite())
+
+			requireResponseCode(t, stream, byte(InvalidRequestPrefix))
+		})
+	}
 }

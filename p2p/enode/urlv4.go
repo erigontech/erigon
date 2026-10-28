@@ -158,8 +158,8 @@ func (n *Node) URLv4() string {
 		nodeid string
 		key    ecdsa.PublicKey
 	)
-	n.Load(&scheme)
-	n.Load((*Secp256k1)(&key))
+	_ = n.Load(&scheme)
+	_ = n.Load((*Secp256k1)(&key))
 	switch {
 	case scheme == "v4" || key != ecdsa.PublicKey{}:
 		nodeid = fmt.Sprintf("%x", crypto.FromECDSAPub(&key)[1:])

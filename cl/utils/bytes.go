@@ -200,12 +200,6 @@ func BitsOnCount(b []byte) int {
 	return count
 }
 
-func MergeBitlists(a, b []byte) {
-	for i := range b {
-		a[i] |= b[i]
-	}
-}
-
 func ExtractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 	if len(beaconState) < 48 {
 		return 0, errors.New("checkpoint sync read failed, too short")

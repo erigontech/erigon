@@ -76,7 +76,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	if err != nil {
 		return nil, err
 	}
-	agg, err := dbstate.New(r.dirs).Logger(r.logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
+	agg, err := dbstate.New(r.dirs).Logger(r.logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -83,6 +83,9 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+	if ExperimentalCommitmentV3 {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	}
 }
 
 type SchemaGen struct {
@@ -190,16 +193,22 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 // commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
 // default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.CommitmentV3Records {
+		return version.V3_0
+	}
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
 	return version.V2_2
 }
 
-// ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
-// (commitment.ModeParallel + VariantParallelHexPatricia). Default false; the
-// COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
-var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
+const DefaultParallelCommitment = true
+
+var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
+
+const DefaultCommitmentV3 = false
+
+var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
@@ -325,11 +334,11 @@ var Schema = SchemaGen{
 		LargeValues: true,
 
 		Accessors:   AccessorHashMap,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblRCacheHistoryVals,
-			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
@@ -379,6 +388,17 @@ var Schema = SchemaGen{
 		Name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
 	},
+}
+
+const CommitmentV3Accessors = AccessorBTree | AccessorExistence
+
+func EnableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = true
+	c.Accessors = CommitmentV3Accessors
+	c.FileVersion.DataKV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
+	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
+	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
+	c.Hist.FileVersion.DataV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
 }
 
 func EnableHistoricalCommitment() {

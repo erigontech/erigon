@@ -82,6 +82,14 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	g.bitCount += log2golomb
 }
 
+// Reset empties the encoding, keeping the words allocated. They are zeroed
+// because every append path ORs into the word it lands on.
+func (g *GolombRice) Reset() {
+	clear(g.data)
+	g.data = g.data[:0]
+	g.bitCount = 0
+}
+
 // Bits returns current number of bits in the compact encoding of the hash function representation
 func (g *GolombRice) Bits() int {
 	return g.bitCount
@@ -179,8 +187,6 @@ func (g *GolombRice) Data() []uint64 {
 	return g.data
 }
 
-const maxDataSize = 0xFFFFFFFFFFFF
-
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
 func (g *GolombRice) Write(w io.Writer) error {
 	var numBuf [8]byte
@@ -188,9 +194,8 @@ func (g *GolombRice) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&g.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(g.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&g.data[0])), len(g.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil

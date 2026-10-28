@@ -92,7 +92,6 @@ func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 }
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
-
 	row, bm, enc := encodeCellRow(b, 16)
 
 	be := NewBranchEncoder(1024)
@@ -354,6 +353,17 @@ func BenchmarkHashSort_ModeDirect(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkContractHashFromPrefix(b *testing.B) {
+	prefix := make([]byte, 34)
+	for i := range prefix {
+		prefix[i] = byte(i * 37)
+	}
+	prefix[0] = 0x1a
+	for b.Loop() {
+		_, _ = ContractHashFromPrefix(prefix)
 	}
 }
 

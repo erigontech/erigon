@@ -43,7 +43,7 @@ func TestClose_KeepsDomainRamForReaders(t *testing.T) {
 
 	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
-	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(tx))
 
 	const txNum = 7
 	const cumGas = 21000

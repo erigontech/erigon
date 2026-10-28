@@ -61,7 +61,7 @@ func RegisterGossipServices(
 	// gloas
 	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
+	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
 
 	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)

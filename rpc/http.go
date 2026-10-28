@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,7 @@ type httpConn struct {
 	closeCh   chan any
 	mu        sync.Mutex // protects headers
 	headers   http.Header
+	auth      HTTPAuth
 }
 
 // httpConn implements ServerCodec, but it is treated specially by Client
@@ -82,6 +84,8 @@ func (hc *httpConn) ReadBatch() ([]*jsonrpcMessage, bool, error) {
 	return nil, false, io.EOF
 }
 
+func (hc *httpConn) takeRelease() func() { return nil }
+
 func (hc *httpConn) Close() {
 	hc.closeOnce.Do(func() { close(hc.closeCh) })
 }
@@ -99,25 +103,62 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 		return nil, err
 	}
 
-	initctx := context.Background()
-	headers := make(http.Header, 2)
-	headers.Set("accept", contentType)
-	headers.Set("content-type", contentType)
-	return newClient(initctx, func(context.Context) (ServerCodec, error) {
-		hc := &httpConn{
-			client:  client,
-			headers: headers,
-			url:     endpoint,
-			closeCh: make(chan any),
-		}
-		return hc, nil
-	}, logger)
+	cfg := &clientConfig{httpClient: client}
+	return newClient(context.Background(), cfg, newClientTransportHTTP(endpoint, cfg), logger)
 }
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	return DialHTTPWithClient(endpoint, client, logger)
+	return DialHTTPWithClient(endpoint, nil, logger)
+}
+
+func newClientTransportHTTP(endpoint string, cfg *clientConfig) reconnectFunc {
+	headers := make(http.Header, 2+len(cfg.httpHeaders))
+	headers.Set("accept", contentType)
+	headers.Set("content-type", contentType)
+	setHeaders(headers, cfg.httpHeaders)
+
+	client := cfg.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	hc := &httpConn{
+		client:  client,
+		headers: headers,
+		url:     endpoint,
+		auth:    cfg.httpAuth,
+		closeCh: make(chan any),
+	}
+	return func(context.Context) (ServerCodec, error) {
+		return hc, nil
+	}
+}
+
+// NewContextWithHeaders wraps the given context, adding HTTP headers. These headers will
+// be applied by Client when making a request using the returned context.
+func NewContextWithHeaders(ctx context.Context, h http.Header) context.Context {
+	if len(h) == 0 {
+		return ctx
+	}
+	prev, _ := ctx.Value(mdHeaderKey{}).(http.Header)
+	return context.WithValue(ctx, mdHeaderKey{}, setHeaders(setHeaders(http.Header{}, prev), h))
+}
+
+type mdHeaderKey struct{}
+
+// headersFromContext is used to extract http.Header from context.
+func headersFromContext(ctx context.Context) http.Header {
+	source, _ := ctx.Value(mdHeaderKey{}).(http.Header)
+	return source
+}
+
+// setHeaders sets all headers from src in dst.
+func setHeaders(dst http.Header, src http.Header) http.Header {
+	for key, values := range src {
+		dst[http.CanonicalHeaderKey(key)] = values
+	}
+	return dst
 }
 
 func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
@@ -158,11 +199,18 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 		return nil, err
 	}
 	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 
 	// set headers
 	hc.mu.Lock()
 	req.Header = hc.headers.Clone()
 	hc.mu.Unlock()
+	setHeaders(req.Header, headersFromContext(ctx))
+	if hc.auth != nil {
+		if err := hc.auth(req.Header); err != nil {
+			return nil, err
+		}
+	}
 
 	// do request
 	resp, err := hc.client.Do(req)
@@ -178,7 +226,7 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
+		return nil, HTTPError{Status: resp.Status, StatusCode: resp.StatusCode, Body: respBody}
 	}
 
 	if len(respBody) == 0 {
@@ -195,7 +243,7 @@ type httpServerConn struct {
 	r *http.Request
 }
 
-func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
+func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) ServerCodec {
 	conn := &httpServerConn{Writer: w, r: r}
 	// if the request is a GET request, and the body is empty, we turn the request into fake json rpc request, see below
 	// https://www.jsonrpc.org/historical/json-rpc-over-http.html#encoded-parameters
@@ -222,9 +270,50 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 		conn.Reader = buf
 	} else {
 		// it's a post request or whatever, so just process it like normal
-		conn.Reader = io.LimitReader(r.Body, maxRequestContentLength)
+		conn.Reader = io.LimitReader(body, maxRequestContentLength)
 	}
-	return NewCodec(conn)
+	// The body holds one message, so it can be read in one go and checked once.
+	// ServeHTTP holds the body's budget charge for the whole request.
+	readFrame := func() ([]byte, func(), error) {
+		// The hint stops at the uncharged size: a declared size costs the peer nothing
+		// until the bytes arrive, so it must not drive an allocation.
+		hint := 0
+		if r.ContentLength > 0 {
+			hint = int(min(r.ContentLength, smallBodyLimit))
+		}
+		frame, err := readAllBody(conn, hint)
+		if err != nil {
+			return nil, nil, err
+		}
+		if skipJSONSpace(frame, 0) == len(frame) {
+			// An empty body carries no message, which is not an error. The decoder
+			// used to report this as EOF and callers rely on that.
+			return nil, nil, io.EOF
+		}
+		return frame, nil, nil
+	}
+	return newFuncCodec(conn, newJSONEncoder(conn), nil, readFrame)
+}
+
+// readAllBody reads r to the end, sizing the buffer from the hint when there is
+// one so that a large body does not have to be grown into.
+func readAllBody(r io.Reader, hint int) ([]byte, error) {
+	// A byte past the hint, so a body of exactly hint bytes sees EOF without the
+	// buffer doubling right at the end.
+	buf := make([]byte, 0, max(hint+1, 512))
+	for {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
+		}
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return buf, nil
+			}
+			return buf, err
+		}
+	}
 }
 
 // Close does nothing and always returns nil.
@@ -283,6 +372,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body := s.ingress.reader(r.Body)
+	defer body.release()
+
 	// Create request-scoped context.
 	connInfo := PeerInfo{Transport: "http", RemoteAddr: r.RemoteAddr}
 	connInfo.HTTP.Version = r.Proto
@@ -312,28 +404,51 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("content-type", contentType)
-	codec := newHTTPServerConn(r, w)
+	codec := newHTTPServerConn(r, w, body)
 	defer codec.Close()
-	var stream jsonstream.Stream
+	var stream *jsonstream.Stream
+	var sent *sentWriter
 	if !s.disableStreaming {
-		stream = jsonstream.New(w)
+		sent = &sentWriter{w: w}
+		stream = jsonstream.Get(sent)
+		defer jsonstream.Put(stream)
 	}
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)
 	if errorMsg != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		codec.WriteJSON(ctx, errorMsg)
+		if *overloaded {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		if err := codec.WriteJSON(ctx, errorMsg); err != nil {
+			s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+		}
 		return
 	}
 
 	if !s.disableStreaming {
+		// Codec writes (batches) never share a request with a buffered answer, so a non-empty buffer is the whole response.
+		if !sent.sent && len(stream.Buffer()) > 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(len(stream.Buffer())))
+		}
 		// If the inner DB gate rejected the request, the JSON-RPC error body is already
 		// buffered in the stream. Set 503 before flushing so the status is correct.
 		if *overloaded {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		stream.Flush()
+		if err := stream.Flush(); err != nil {
+			// The status is already sent, so this is the only place a truncated
+			// reply can show up.
+			undeliveredGauge.Inc()
+			if common.FastContextErr(ctx) != nil {
+				s.logger.Trace("rpc: client stopped reading", "url", r.URL.String())
+			} else {
+				s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+			}
+		}
 	}
 }
 
@@ -403,4 +518,14 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	return false
+}
+
+type sentWriter struct {
+	w    io.Writer
+	sent bool
+}
+
+func (s *sentWriter) Write(p []byte) (int, error) {
+	s.sent = true
+	return s.w.Write(p)
 }

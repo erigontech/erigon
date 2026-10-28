@@ -55,9 +55,11 @@ func newTestBus() (event.EventBus, *testPool) {
 
 // --- Event types ---
 
-type FileCreated struct{ Path string }
-type FileDeleted struct{ Path string }
-type DownloadComplete struct{ Path string }
+type (
+	FileCreated      struct{ Path string }
+	FileDeleted      struct{ Path string }
+	DownloadComplete struct{ Path string }
+)
 
 // --- Event-driven provider ---
 
@@ -72,6 +74,7 @@ func (p *eventProvider) Configure(ctx context.Context, opts ...app.Option) error
 	p.tracker.record(p.name + ":configure")
 	return nil
 }
+
 func (p *eventProvider) Initialize(ctx context.Context, opts ...app.Option) error {
 	p.tracker.record(p.name + ":initialize")
 	return nil
@@ -81,6 +84,7 @@ func (p *eventProvider) Activate(ctx context.Context) error {
 	p.tracker.record(p.name + ":activate")
 	return nil
 }
+
 func (p *eventProvider) Deactivate(ctx context.Context) error {
 	p.tracker.record(p.name + ":deactivate")
 	return nil

@@ -29,6 +29,8 @@ var CliFlags = []cli.Flag{
 	&SentinelServerPort,
 	&SentinelServerAddr,
 	&SentinelTcpPort,
+	&SentinelQUICPort,
+	&SentinelQUICDisable,
 	&NoDiscovery,
 	&LocalDiscovery,
 	&BootnodesFlag,
@@ -48,8 +50,18 @@ var (
 	}
 	SentinelTcpPort = cli.UintFlag{
 		Name:  "sentinel.tcp.port",
-		Usage: "sets lightclient tcp port",
+		Usage: "sets lightclient TCP port",
 		Value: 4001,
+	}
+	SentinelQUICPort = cli.UintFlag{
+		Name:  "sentinel.quic.port",
+		Usage: "sets lightclient QUIC port",
+		Value: 4002,
+	}
+	SentinelQUICDisable = cli.BoolFlag{
+		Name:  "sentinel.quic.disable",
+		Usage: "Disable the QUIC transport for the lightclient libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed (e.g. some Docker/Kubernetes setups)",
+		Value: false,
 	}
 	SentinelServerPort = cli.IntFlag{
 		Name:  "sentinel.port",
@@ -73,13 +85,13 @@ var (
 	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: "",
 	}
 
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: "",
 	}
 )

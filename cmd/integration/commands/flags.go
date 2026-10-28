@@ -40,11 +40,13 @@ var (
 	chaindata                    string
 	databaseVerbosity            int
 	referenceChaindata           string
-	block, pruneTo, unwind       uint64
+	block, unwind                uint64
+	limit                        uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
 	reset, squeeze, yes          bool
+	skipFilesDBGapCheck          bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
@@ -69,6 +71,7 @@ var (
 	convertNibblesV2 bool
 	convertRestore   bool
 	convertContinue  bool
+	convertV3        bool
 )
 
 func must(err error) {
@@ -109,11 +112,12 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
 
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&limit, "limit", 0, "execute at most this many blocks past current progress, then stop (0 = unlimited, overridden by --block if --block is lower)")
+}
+
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
-}
-func withPruneTo(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
 }
 
 func withUnwindEvery(cmd *cobra.Command) {
@@ -136,6 +140,7 @@ func withConvertFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&convertSqueeze, "squeeze", false, "target state for the value squeeze axis: true = squeezed (offsets), false = unsqueezed (plain keys inline)")
 	cmd.Flags().BoolVar(&convertNibblesV2, "nibbles.v2", false, "target state for the key encoding axis: true = V2 (prefix-sort trie locality), false = V1 (compact bytes)")
 	cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")
+	cmd.Flags().BoolVar(&convertV3, "v3", false, "convert legacy hex-patricia commitment files into commitment v3 records (v3.0 .kv with .bt and .kvei); files must be unsqueezed; verifies every reachable record against the state root after the swap")
 	cmd.Flags().BoolVar(&convertContinue, "continue", false, "Resume a prior interrupted conversion. Skips files whose converted shard already exists in <datadir>/snap/rebuild/domain/. Flags --squeeze and --nibbles.v2 MUST match the original interrupted run; mismatch produces mixed-encoding output. Mutually exclusive with --restore.")
 }
 
@@ -173,7 +178,8 @@ func withDataDir(cmd *cobra.Command) {
 }
 
 func withExperimentalCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
+	def := statecfg.ExperimentalParallelCommitment
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

@@ -37,12 +37,12 @@ func fixedFormat(s fmt.State, c rune, typeName string, b []byte) {
 		}
 		fallthrough
 	case 'v', 's':
-		s.Write(hexb)
+		_, _ = s.Write(hexb)
 	case 'q':
 		q := []byte{'"'}
-		s.Write(q)
-		s.Write(hexb)
-		s.Write(q)
+		_, _ = s.Write(q)
+		_, _ = s.Write(hexb)
+		_, _ = s.Write(q)
 	case 'd':
 		fmt.Fprint(s, b)
 	default:

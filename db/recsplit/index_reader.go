@@ -69,6 +69,7 @@ func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
 	}
 	return r.OrdinalLookup(id), true
 }
+
 func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	if r.index.Empty() {
 		return 0, false

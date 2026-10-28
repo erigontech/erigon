@@ -202,7 +202,6 @@ func TestGenerateChain(t *testing.T) {
 	if len(block2Receipts) > 1 && block2Receipts[1].CumulativeGasUsed != 42000 {
 		t.Errorf("block 2 receipt 2 cumulative gas: got %d, want 42000", block2Receipts[1].CumulativeGasUsed)
 	}
-
 }
 
 func TestGenerateChainAttachesBlockAccessList(t *testing.T) {

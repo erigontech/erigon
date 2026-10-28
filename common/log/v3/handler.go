@@ -89,7 +89,7 @@ const DefaultLogMaxSize = 1 << 27 // 128 Mb
 // already exists, FileHandler will append to the given file. If it does not,
 // FileHandler will create the file with mode 0644.
 func FileHandler(path string, fmtr Format, maxFileSize uint64) (Handler, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}

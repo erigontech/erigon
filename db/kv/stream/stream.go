@@ -83,6 +83,7 @@ func (it *ArrStream[V]) Next() (V, error) {
 	it.i++
 	return v, nil
 }
+
 func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	v := it.arr[it.i:]
 	it.i = len(it.arr)
@@ -157,6 +158,7 @@ func Union[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 func (m *UnionUno[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
+
 func (m *UnionUno[T]) advanceX() {
 	if m.err != nil {
 		return
@@ -166,6 +168,7 @@ func (m *UnionUno[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
+
 func (m *UnionUno[T]) advanceY() {
 	if m.err != nil {
 		return
@@ -180,7 +183,7 @@ func (m *UnionUno[T]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *UnionUno[T]) Next() (res T, err error) {
+func (m *UnionUno[T]) Next() (res T, _ error) {
 	if m.err != nil {
 		return res, m.err
 	}
@@ -209,6 +212,7 @@ func (m *UnionUno[T]) Next() (res T, err error) {
 	m.advanceY()
 	return k, err
 }
+
 func (m *UnionUno[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
@@ -238,9 +242,11 @@ func Intersect[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	m.advance()
 	return m
 }
+
 func (m *Intersected[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHasNext && m.yHasNext)
 }
+
 func (m *Intersected[T]) advance() {
 	m.advanceX()
 	m.advanceY()
@@ -267,7 +273,6 @@ func (m *Intersected[T]) advance() {
 				m.advanceX()
 				continue
 			}
-
 		}
 	}
 	m.xHasNext = false
@@ -282,6 +287,7 @@ func (m *Intersected[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
+
 func (m *Intersected[T]) advanceY() {
 	if m.err != nil {
 		return
@@ -291,6 +297,7 @@ func (m *Intersected[T]) advanceY() {
 		m.yNextK, m.err = m.y.Next()
 	}
 }
+
 func (m *Intersected[T]) Next() (T, error) {
 	if m.err != nil {
 		return m.xNextK, m.err
@@ -300,6 +307,7 @@ func (m *Intersected[T]) Next() (T, error) {
 	m.advance()
 	return k, err
 }
+
 func (m *Intersected[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
@@ -326,6 +334,7 @@ func (m *TransformedDuo[K, V]) Next() (K, V, error) {
 	}
 	return m.transform(k, v)
 }
+
 func (m *TransformedDuo[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -349,6 +358,7 @@ func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
 	}
 	return m.transform(k, v)
 }
+
 func (m *TransformedDuoV[K, V, VR]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -372,6 +382,7 @@ func FilterDuo[K, V any](it Duo[K, V], filter func(K, V) bool) *FilteredDuo[K, V
 	i.advance()
 	return i
 }
+
 func (m *FilteredDuo[K, V]) advance() {
 	if m.err != nil {
 		return
@@ -397,6 +408,7 @@ func (m *FilteredDuo[K, V]) Next() (k K, v V, err error) {
 	m.advance()
 	return k, v, err
 }
+
 func (m *FilteredDuo[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -419,6 +431,7 @@ func Filter[T any](it Uno[T], filter func(T) bool) *Filtered[T] {
 	i.advance()
 	return i
 }
+
 func (m *Filtered[T]) advance() {
 	if m.err != nil {
 		return
@@ -443,6 +456,7 @@ func (m *Filtered[T]) Next() (k T, err error) {
 	m.advance()
 	return k, err
 }
+
 func (m *Filtered[T]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -504,6 +518,7 @@ type PaginatedDuo[K, V any] struct {
 func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
 	return &PaginatedDuo[K, V]{nextPage: f}
 }
+
 func (it *PaginatedDuo[K, V]) HasNext() bool {
 	if it.err != nil || it.i < len(it.keys) {
 		return true
@@ -538,16 +553,19 @@ type Traced[T any] struct {
 func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
 	return &Traced[T]{it: it, logger: logger, prefix: prefix}
 }
+
 func (m *Traced[T]) HasNext() bool {
 	res := m.it.HasNext()
 	log.Warn(m.prefix, "hasNext", res)
 	return res
 }
+
 func (m *Traced[T]) Next() (k T, err error) {
 	k, err = m.it.Next()
 	log.Warn(m.prefix, "next", k)
 	return k, err
 }
+
 func (m *Traced[T]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -564,11 +582,13 @@ type TracedDuo[K, V any] struct {
 func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedDuo[K, V] {
 	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
 }
+
 func (m *TracedDuo[K, V]) HasNext() bool {
 	res := m.it.HasNext()
 	log.Warn(m.prefix, "hasNext", res)
 	return res
 }
+
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
 	switch typedK := any(k).(type) {
@@ -579,6 +599,7 @@ func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	}
 	return k, v, err
 }
+
 func (m *TracedDuo[K, V]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -623,6 +644,7 @@ func Union2[K cmp.Ordered, V any](x, y Duo[K, V], asc order.By, limit int) Duo[K
 func (m *UnionDuo[K, V]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
+
 func (m *UnionDuo[K, V]) advanceX() {
 	if m.err != nil {
 		return
@@ -632,6 +654,7 @@ func (m *UnionDuo[K, V]) advanceX() {
 		m.xNextK, m.xNextV, m.err = m.x.Next()
 	}
 }
+
 func (m *UnionDuo[K, V]) advanceY() {
 	if m.err != nil {
 		return
@@ -646,7 +669,7 @@ func (m *UnionDuo[K, V]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
+func (m *UnionDuo[K, V]) Next() (res K, resV V, _ error) {
 	if m.err != nil {
 		return res, resV, m.err
 	}
@@ -675,6 +698,7 @@ func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
 	m.advanceY()
 	return k, v, err
 }
+
 func (m *UnionDuo[K, V]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()

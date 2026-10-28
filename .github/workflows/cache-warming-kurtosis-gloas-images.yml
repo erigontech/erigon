@@ -38,6 +38,12 @@ permissions:
 
 jobs:
   warm:
+    # test-kurtosis-gloas.yml calls changes.yml, which reads the PR file
+    # list. A nested call can only narrow the caller's grant, so this must
+    # be granted here or the whole called workflow fails validation.
+    permissions:
+      contents: read
+      pull-requests: read
     uses: ./.github/workflows/test-kurtosis-gloas.yml
     with:
       cl-images-only: true

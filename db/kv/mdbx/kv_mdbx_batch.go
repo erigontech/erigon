@@ -61,7 +61,7 @@ func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
 	db.batchMu.Unlock()
 
 	err := <-errCh
-	if errors.Is(err, trySolo) {
+	if errors.Is(err, errTrySolo) {
 		err = db.Update(context.Background(), fn)
 	}
 	return err
@@ -104,7 +104,7 @@ func (b *batch) run() {
 
 retry:
 	for len(b.calls) > 0 {
-		var failIdx = -1
+		failIdx := -1
 		err := b.db.Update(context.Background(), func(tx kv.RwTx) error {
 			for i, c := range b.calls {
 				if err := safelyCall(c.fn, tx); err != nil {
@@ -122,7 +122,7 @@ retry:
 			c := b.calls[failIdx]
 			b.calls[failIdx], b.calls = b.calls[len(b.calls)-1], b.calls[:len(b.calls)-1]
 			// tell the submitter re-run it solo, continue with the rest of the batch
-			c.err <- trySolo
+			c.err <- errTrySolo
 			continue retry
 		}
 
@@ -134,10 +134,10 @@ retry:
 	}
 }
 
-// trySolo is a special sentinel error value used for signaling that a
+// errTrySolo is a special sentinel error value used for signaling that a
 // transaction function should be re-run. It should never be seen by
 // callers.
-var trySolo = errors.New("batch function returned an error and should be re-run solo")
+var errTrySolo = errors.New("batch function returned an error and should be re-run solo")
 
 type panicked struct {
 	reason any

@@ -57,17 +57,18 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion6,
 		dbSchemaVersion7,
 		dropLegacyE2Tables,
-		dropBorWitnessTables,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},
 }
 
-type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
-type Migration struct {
-	Name string
-	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
-}
+type (
+	Callback  func(tx kv.RwTx, progress []byte, isDone bool) error
+	Migration struct {
+		Name string
+		Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
+	}
+)
 
 var (
 	ErrMigrationNonUniqueName   = errors.New("please provide unique migration name")
@@ -186,7 +187,8 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 				if kv.DBSchemaVersion.Major != major {
 					return fmt.Errorf(
 						"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
-						major, kv.DBSchemaVersion.Major, chaindata)
+						major, kv.DBSchemaVersion.Major, chaindata,
+					)
 				}
 			}
 		}

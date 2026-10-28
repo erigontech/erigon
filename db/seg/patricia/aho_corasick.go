@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"slices"
+
+	"github.com/erigontech/erigon/common/bitutil"
 )
 
 // Match is a single pattern occurrence: its associated value and the [Start, End)
@@ -284,11 +286,7 @@ func bsearchEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
 	return -1
 }
 
-const (
-	swarOnes  = 0x0101010101010101
-	swarHighs = 0x8080808080808080
-	swarPad   = 8 // tail slack in wideByte so the last word load stays in bounds
-)
+const swarPad = 8 // tail slack in wideByte so the last word load stays in bounds
 
 // swarEdge finds b in labels[lo:hi] and returns the parallel children entry, or
 // -1. It tests eight labels per word, so a wide state costs a couple of
@@ -296,10 +294,9 @@ const (
 // labels carries eight bytes of tail padding to keep the last word in bounds;
 // a hit in that padding, or in the next state's labels, lands at k >= hi.
 func swarEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
-	bcast := uint64(b) * swarOnes
+	pat := bitutil.Broadcast(b)
 	for i := lo; i < hi; i += 8 {
-		v := binary.LittleEndian.Uint64(labels[i:]) ^ bcast
-		if z := (v - swarOnes) &^ v & swarHighs; z != 0 {
+		if z := bitutil.HasZero(binary.LittleEndian.Uint64(labels[i:]) ^ pat); z != 0 {
 			// borrows only propagate up, so the lowest flagged byte is a real hit
 			if k := i + int32(bits.TrailingZeros64(z)>>3); k < hi {
 				return children[k]

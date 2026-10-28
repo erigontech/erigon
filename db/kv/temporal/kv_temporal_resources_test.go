@@ -23,7 +23,7 @@ func TestTemporalTx_AbandonedIteratorsRollbackCleanly(t *testing.T) {
 
 	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
-	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
 	defer agg.Close()
 
 	temporalDb, err := New(mdbxDb, agg, nil)

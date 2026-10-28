@@ -23,15 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/ssz"
-)
-
-// Mock data
-var (
-	mockRoot  = common.HexToHash("0x01")
-	mockEpoch = uint64(12345)
 )
 
 func TestNewDynamicListSSZ(t *testing.T) {
@@ -166,7 +159,7 @@ func TestProgressiveListSSZDecodeEnforcesLimit(t *testing.T) {
 			require.NoError(t, err)
 			err = tc.list.DecodeSSZ(encoded, 0)
 			require.Error(t, err)
-			assert.True(t, errors.Is(err, ssz.ErrTooBigList), "expected ErrTooBigList, got %v", err)
+			assert.ErrorIs(t, err, ssz.ErrTooBigList, "expected ErrTooBigList, got %v", err)
 		})
 	}
 }

@@ -37,9 +37,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return err
 	}
 
-	// Consume additional rate-limit tokens proportional to the requested block count.
+	if req.StartSlot+req.Count < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
+
+	// Consume additional rate-limit tokens proportional to the blocks we may serve.
 	// The wrapper already consumed 1 token for admission.
-	if cost := min(int(req.Count), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := int(min(req.Count, MaxRequestsBlocks)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -49,8 +53,12 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	written := uint64(0)
-	for slot := req.StartSlot; slot < req.StartSlot+MaxRequestsBlocks; slot++ {
+	// Serve only blocks in [start_slot, start_slot+count): empty slots are left out, not replaced by
+	// later blocks. Search up to MAX_REQUEST_BLOCKS_DENEB slots and answer with at most
+	// MaxRequestsBlocks blocks; the spec allows a response with fewer blocks than requested.
+	endSlot := req.StartSlot + min(req.Count, c.beaconConfig.MaxRequestBlocksDeneb)
+	written := 0
+	for slot := req.StartSlot; slot < endSlot && written < MaxRequestsBlocks; slot++ {
 		block, err := c.beaconDB.ReadBlockBySlot(c.ctx, tx, slot)
 		if err != nil {
 			return err
@@ -76,9 +84,6 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 		written++
-		if written >= req.Count {
-			break
-		}
 	}
 
 	return nil

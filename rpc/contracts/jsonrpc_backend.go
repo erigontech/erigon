@@ -76,7 +76,11 @@ func (b JsonRpcBackend) NonceAt(ctx context.Context, account common.Address, blo
 }
 
 func (b JsonRpcBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
-	return b.client.GasPrice()
+	gasPrice, err := b.client.GasPrice()
+	if err != nil {
+		return nil, err
+	}
+	return gasPrice.ToBig(), nil
 }
 
 func (b JsonRpcBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (uint64, error) {

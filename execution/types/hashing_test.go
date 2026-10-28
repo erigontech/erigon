@@ -83,7 +83,6 @@ func checkDeriveSha(t *testing.T, list DerivableList) {
 	deriveSha := DeriveSha(list)
 	if !hashesEqual(legacySha, deriveSha) {
 		t.Errorf("unexpected hash: %v (expected: %v)\n", deriveSha.Hex(), legacySha.Hex())
-
 	}
 }
 
@@ -127,33 +126,3 @@ var (
 		BaseFee:     uint256.NewInt(7),
 	}
 )
-
-func BenchmarkLegacySmallList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkCurrentSmallList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkLegacyLargeList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkCurrentLargeList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkRlpHashHeader(b *testing.B) {
-	for b.Loop() {
-		RlpHash(benchHeader)
-	}
-}

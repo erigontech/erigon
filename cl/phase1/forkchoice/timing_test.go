@@ -79,6 +79,12 @@ func TestGetPayloadAttestationDueMs(t *testing.T) {
 	require.Equal(t, uint64(9000), f.getPayloadAttestationDueMs(10))
 }
 
+func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {
+	require.Zero(t, computeShufflingDependentSlot(0, 1, 32))
+	require.Zero(t, computeShufflingDependentSlot(1, 1, 32))
+	require.Equal(t, uint64(31), computeShufflingDependentSlot(2, 1, 32))
+}
+
 func TestShouldApplyProposerBoost_PreGloas(t *testing.T) {
 	// Mainnet config: 12s slots, 3 intervals, GLOAS not activated
 	// Threshold: 12/3 = 4 seconds into slot
@@ -241,8 +247,7 @@ func TestRecordBlockTimeliness_PostGloas_BetweenDeadlines(t *testing.T) {
 	require.True(t, timeliness[clparams.PtcTimelinessIndex], "block timely for PTC (5000ms < 9000ms)")
 }
 
-func TestRecordBlockTimeliness_WrongSlot(t *testing.T) {
-	// Block slot doesn't match current slot — should not record
+func TestRecordBlockTimeliness_LateKnownBlockRecordsFalseVector(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 24) // time=24 → slot 2
 
 	block := &cltypes.BeaconBlock{Slot: 0} // block for slot 0
@@ -250,8 +255,10 @@ func TestRecordBlockTimeliness_WrongSlot(t *testing.T) {
 
 	f.recordBlockTimeliness(block, blockRoot)
 
-	_, ok := f.getBlockTimeliness(blockRoot)
-	require.False(t, ok, "should not record timeliness for wrong slot")
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.False(t, timeliness[clparams.AttestationTimelinessIndex])
+	require.False(t, timeliness[clparams.PtcTimelinessIndex])
 }
 
 func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {

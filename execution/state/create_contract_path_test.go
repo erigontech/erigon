@@ -19,7 +19,9 @@ package state
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,4 +53,31 @@ func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 	if _, ok := ibs.versionedWrites.GetCreateContract(plain); ok {
 		t.Fatal("non-contract account creation must not set CreateContractPath")
 	}
+}
+
+// CreateAccount records its balance and incarnation reads only for conflict
+// detection; Reset turns detection back on.
+func TestNoConflictDetectionCreateAccountRecordsNoConflictReads(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	defer ibs.Close()
+	conflictReads := func() (balance, incarnation bool) {
+		reads := ibs.VersionedReads()
+		_, balance = reads.GetBalance(addr)
+		_, incarnation = reads.GetIncarnation(addr)
+		return balance, incarnation
+	}
+
+	startNoMaterializeTx(ibs, vm, 0)
+	ibs.SetNoConflictDetection()
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	balance, incarnation := conflictReads()
+	require.False(t, balance, "no conflict detection records no balance read")
+	require.False(t, incarnation, "no conflict detection records no incarnation read")
+
+	startNoMaterializeTx(ibs, vm, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	balance, incarnation = conflictReads()
+	require.True(t, balance, "after Reset the balance read is recorded again")
+	require.True(t, incarnation, "after Reset the incarnation read is recorded again")
 }

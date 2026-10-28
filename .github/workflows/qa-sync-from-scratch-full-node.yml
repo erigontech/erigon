@@ -41,6 +41,9 @@ jobs:
       RETIREMENT_SETTLE_SECONDS: 300 # a full -> minimal backlog is tens of GB to unlink
 
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Check out repository
         uses: actions/checkout@v7
         with:

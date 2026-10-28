@@ -90,3 +90,165 @@ func Test_RenameNewVersions(t *testing.T) {
 	mustDirNotExist(t, heimdallDir)
 	mustDirNotExist(t, d.Chaindata)
 }
+
+func Test_RenameVersions_SkipCaplinSidecarDirs(t *testing.T) {
+	tests := []struct {
+		name string
+		walk func(d *Dirs) error
+		// sidecar goes into CaplinBlobs and CaplinColumnData and must survive
+		sidecar string
+		// control goes into SnapCaplin and must become controlAfter, or be
+		// deleted when controlAfter is empty
+		control      string
+		controlAfter string
+	}{
+		{
+			name:         "old_versions_rename_pass",
+			walk:         func(d *Dirs) error { return d.RenameOldVersions(false) },
+			sidecar:      "v1-something.seg",
+			control:      "v1-000001-000002-headers.seg",
+			controlAfter: "v1.0-000001-000002-headers.seg",
+		},
+		{
+			name:         "new_versions_rename_pass",
+			walk:         func(d *Dirs) error { return d.RenameNewVersions() },
+			sidecar:      "v1.0-something.seg",
+			control:      "v1.0-000001-000002-headers.seg",
+			controlAfter: "v1-000001-000002-headers.seg",
+		},
+		{
+			name:    "new_versions_delete_pass",
+			walk:    func(d *Dirs) error { return d.RenameNewVersions() },
+			sidecar: "v2.0-something.seg",
+			control: "v2.0-000001-000002-headers.seg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := New(t.TempDir())
+
+			blobFile := filepath.Join(d.CaplinBlobs, tt.sidecar)
+			columnFile := filepath.Join(d.CaplinColumnData, tt.sidecar)
+			controlFile := filepath.Join(d.SnapCaplin, tt.control)
+			touch(t, blobFile)
+			touch(t, columnFile)
+			touch(t, controlFile)
+
+			require.NoError(t, tt.walk(&d))
+
+			mustExist(t, blobFile)
+			mustExist(t, columnFile)
+
+			mustNotExist(t, controlFile)
+			if tt.controlAfter != "" {
+				mustExist(t, filepath.Join(d.SnapCaplin, tt.controlAfter))
+			}
+		})
+	}
+}
+
+// The commitment special case keys off the directory a file sits in, not the
+// entry the walk started from — d.Snap is walked recursively and the Snap*
+// subdirs are no longer separate roots.
+func Test_RenameVersions_CommitmentInIndexDirs(t *testing.T) {
+	tests := []struct {
+		name string
+		walk func(d *Dirs) error
+		// removed lands in SnapIdx, SnapHistory and SnapAccessors; removedAfter
+		// is the name it would carry had it been renamed instead
+		removed      string
+		removedAfter string
+		// kept lands in SnapDomain, which the special case excludes
+		kept      string
+		keptAfter string
+	}{
+		{
+			name:         "old_versions",
+			walk:         func(d *Dirs) error { return d.RenameOldVersions(false) },
+			removed:      "v1-commitment.0-1024.efi",
+			removedAfter: "v1.0-commitment.0-1024.efi",
+			kept:         "v1-commitment.0-1024.kv",
+			keptAfter:    "v1.0-commitment.0-1024.kv",
+		},
+		{
+			name:         "new_versions",
+			walk:         func(d *Dirs) error { return d.RenameNewVersions() },
+			removed:      "v1.0-commitment.0-1024.efi",
+			removedAfter: "v1-commitment.0-1024.efi",
+			kept:         "v1.0-commitment.0-1024.kv",
+			keptAfter:    "v1-commitment.0-1024.kv",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := New(t.TempDir())
+
+			var removedFiles []string
+			for _, indexDir := range []string{d.SnapIdx, d.SnapHistory, d.SnapAccessors} {
+				p := filepath.Join(indexDir, tt.removed)
+				touch(t, p)
+				removedFiles = append(removedFiles, p)
+			}
+			keptFile := filepath.Join(d.SnapDomain, tt.kept)
+			touch(t, keptFile)
+
+			require.NoError(t, tt.walk(&d))
+
+			for _, p := range removedFiles {
+				mustNotExist(t, p)
+				mustNotExist(t, filepath.Join(filepath.Dir(p), tt.removedAfter))
+			}
+			mustNotExist(t, keptFile)
+			mustExist(t, filepath.Join(d.SnapDomain, tt.keptAfter))
+		})
+	}
+}
+
+// WalkDir roots on Lstat, so a symlinked snapshots/ is descended only because the
+// Snap* subdirs are named in VersionedDirs. db/datadir/reset handles that layout
+// deliberately, so collapsing them onto d.Snap would silently skip the whole tree.
+func Test_RenameOldVersions_SymlinkedSnapshotsDir(t *testing.T) {
+	base := t.TempDir()
+	external := t.TempDir()
+	require.NoError(t, os.Symlink(external, filepath.Join(base, SnapDir)))
+
+	d := New(base)
+	require.NoError(t, os.MkdirAll(d.SnapDomain, 0o755))
+
+	oldName := filepath.Join(d.SnapDomain, "v1-accounts.0-1.kv")
+	newName := filepath.Join(d.SnapDomain, "v1.0-accounts.0-1.kv")
+	touch(t, oldName)
+
+	require.NoError(t, d.RenameOldVersions(false))
+
+	mustNotExist(t, oldName)
+	mustExist(t, newName)
+}
+
+// A stale v1-*.torrent with nothing to rename still has to reset the downloader,
+// or its DB keeps indexing the torrents that were just deleted.
+func Test_RenameOldVersions_TorrentOnlyResetsDownloader(t *testing.T) {
+	t.Run("torrent_only", func(t *testing.T) {
+		d := New(t.TempDir())
+		torrent := filepath.Join(d.Downloader, "v1-000001-000002-headers.seg.torrent")
+		touch(t, torrent)
+
+		require.NoError(t, d.RenameOldVersions(false))
+
+		mustNotExist(t, torrent)
+		mustDirNotExist(t, d.Downloader)
+	})
+
+	t.Run("nothing_stale", func(t *testing.T) {
+		d := New(t.TempDir())
+		keep := filepath.Join(d.Snap, "v1.0-000001-000002-headers.seg")
+		touch(t, keep)
+
+		require.NoError(t, d.RenameOldVersions(false))
+
+		mustExist(t, keep)
+		mustDirExist(t, d.Downloader)
+	})
+}

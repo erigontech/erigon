@@ -96,10 +96,7 @@ func (u *BitList) CopyTo(target IterableSSZ[byte]) {
 }
 
 func (u *BitList) Copy() *BitList {
-	n := NewBitList(u.l, u.c)
-	n.u = make([]byte, len(u.u), cap(u.u))
-	copy(n.u, u.u)
-	return n
+	return &BitList{u: slices.Clone(u.u), l: u.l, c: u.c}
 }
 
 // Range allows us to do something to each bit in the list, just like a Power Rangers roll call.

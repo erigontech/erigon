@@ -11,10 +11,10 @@ func TestBitvectorSetGetBits(t *testing.T) {
 
 	v := NewBitVector(10)
 
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
-	v.SetBitAt(9, true)
-	v.SetBitAt(10, false)
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
+	require.NoError(v.SetBitAt(9, true))
+	require.Error(v.SetBitAt(10, false), "index 10 is out of range for a cap-10 vector")
 
 	require.True(v.GetBitAt(2), "BitVector SetBitAt did not set the bit correctly")
 	require.True(v.GetBitAt(4), "BitVector SetBitAt did not set the bit correctly")
@@ -29,9 +29,9 @@ func TestBitvectorGetOnIndices(t *testing.T) {
 
 	v := NewBitVector(10)
 
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
-	v.SetBitAt(9, true)
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
+	require.NoError(v.SetBitAt(9, true))
 
 	indices := v.GetOnIndices()
 
@@ -43,9 +43,9 @@ func TestBitvectorCopy(t *testing.T) {
 
 	v := NewBitVector(10)
 
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
-	v.SetBitAt(9, true)
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
+	require.NoError(v.SetBitAt(9, true))
 
 	c := v.Copy()
 
@@ -62,9 +62,9 @@ func TestBitvectorEncodingSizeSSZ(t *testing.T) {
 
 	v := NewBitVector(10)
 
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
-	v.SetBitAt(9, true)
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
+	require.NoError(v.SetBitAt(9, true))
 
 	size := v.EncodingSizeSSZ()
 
@@ -76,9 +76,9 @@ func TestBitvectorEncodeSSZ(t *testing.T) {
 
 	v := NewBitVector(24)
 
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
-	v.SetBitAt(9, true)
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
+	require.NoError(v.SetBitAt(9, true))
 
 	var (
 		buf []byte = make([]byte, 0, 1)
@@ -90,9 +90,9 @@ func TestBitvectorEncodeSSZ(t *testing.T) {
 
 	// try more zero padding
 	v = NewBitVector(33)
-	v.SetBitAt(9, true)
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
+	require.NoError(v.SetBitAt(9, true))
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
 	buf, err = v.EncodeSSZ(buf) // intentionally reusing the buffer
 	require.NoError(err, "BitVector EncodeSSZ failed")
 	require.Equal([]byte{byte(0b00010100), byte(0b00000010), 0, 0, 0}, buf, "BitVector EncodeSSZ did not encode the bits correctly")
@@ -121,9 +121,9 @@ func TestBitvectorJson(t *testing.T) {
 
 	// marshal
 	v := NewBitVector(20)
-	v.SetBitAt(2, true)
-	v.SetBitAt(4, true)
-	v.SetBitAt(9, true)
+	require.NoError(v.SetBitAt(2, true))
+	require.NoError(v.SetBitAt(4, true))
+	require.NoError(v.SetBitAt(9, true))
 
 	j, err := v.MarshalJSON()
 	require.NoError(err, "BitVector MarshalJSON failed")
@@ -144,14 +144,14 @@ func TestBitvectorUnion(t *testing.T) {
 	v1 := NewBitVector(10)
 	v2 := NewBitVector(10)
 
-	v1.SetBitAt(2, true)
-	v1.SetBitAt(4, true)
-	v1.SetBitAt(9, true)
+	require.NoError(v1.SetBitAt(2, true))
+	require.NoError(v1.SetBitAt(4, true))
+	require.NoError(v1.SetBitAt(9, true))
 
-	v2.SetBitAt(1, true)
-	v2.SetBitAt(4, true)
-	v2.SetBitAt(9, true)
-	v2.SetBitAt(3, true)
+	require.NoError(v2.SetBitAt(1, true))
+	require.NoError(v2.SetBitAt(4, true))
+	require.NoError(v2.SetBitAt(9, true))
+	require.NoError(v2.SetBitAt(3, true))
 
 	u, err := v1.Union(v2)
 	require.NoError(err, "BitVector Union failed")

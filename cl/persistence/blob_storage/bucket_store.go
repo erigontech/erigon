@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/spf13/afero"
@@ -35,6 +37,7 @@ import (
 
 const (
 	subdivisionSlot = 10_000
+	listBatch       = 64
 	rwLocksCount    = 64
 	tmpSuffix       = ".tmp"
 )
@@ -48,7 +51,9 @@ var ErrPruneNotStarted = errors.New("prune did not start")
 // The caller picks the slot granularity. Reads need none: a write lands by rename, so a
 // reader sees the old file or the new one and never a partial. Writes do — see write.
 type bucketStore struct {
-	fs afero.Fs
+	fs         afero.Fs
+	pruneMutex sync.RWMutex
+	pruneFloor uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
 	bucketLocks []sync.RWMutex
@@ -69,6 +74,19 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 	return dir, file
 }
 
+func (b *bucketStore) startWrite(slot uint64) bool {
+	b.pruneMutex.RLock()
+	if slot < b.pruneFloor {
+		b.pruneMutex.RUnlock()
+		return false
+	}
+	return true
+}
+
+func (b *bucketStore) finishWrite() {
+	b.pruneMutex.RUnlock()
+}
+
 // write encodes v onto a temp file and renames it onto the target, so a failure
 // never leaves a partial file where a reader would take it for a complete one.
 // created reports whether the target was absent beforehand.
@@ -77,6 +95,14 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 // (slot, root, idx) would share it and interleave into one file. Callers must
 // hold that slot's lock.
 func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
+	if !b.startWrite(slot) {
+		return false, nil
+	}
+	defer b.finishWrite()
+	return b.writeAdmitted(slot, root, idx, v)
+}
+
+func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
 	l := b.forBucket(slot / subdivisionSlot)
 	l.RLock()
 	defer l.RUnlock()
@@ -93,11 +119,11 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 	}
 	tmp := file + tmpSuffix
 	if err := b.encodeTo(tmp, v); err != nil {
-		b.fs.Remove(tmp)
+		b.removeTemp(tmp)
 		return false, err
 	}
 	if err := b.fs.Rename(tmp, file); err != nil {
-		b.fs.Remove(tmp)
+		b.removeTemp(tmp)
 		if created || !isSharingViolation(err) {
 			return false, err
 		}
@@ -113,20 +139,22 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 	return created, nil
 }
 
+// removeTemp best-effort deletes the temp file; the caller already holds the
+// real error.
+func (b *bucketStore) removeTemp(tmp string) {
+	if err := b.fs.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Debug("failed to remove temp file after write failure", "path", tmp, "err", err)
+	}
+}
+
 func (b *bucketStore) encodeTo(path string, v ssz.Marshaler) error {
 	fh, err := b.fs.Create(path)
 	if err != nil {
 		return err
 	}
 	defer fh.Close()
-	// EncodeAndWrite flushes in a defer and discards that error, so a short write is
-	// only observable on the writer it was handed.
-	w := &errWriter{w: fh}
-	if err := ssz_snappy.EncodeAndWrite(w, v); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(fh, v); err != nil {
 		return err
-	}
-	if w.err != nil {
-		return w.err
 	}
 	if err := fh.Sync(); err != nil {
 		return err
@@ -185,33 +213,94 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 	return err
 }
 
-type errWriter struct {
-	w   io.Writer
-	err error
+// EarliestStoredSlot returns where the lowest bucket holding a sidecar starts, which can be
+// below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
+// cannot be read is skipped, since its sidecars cannot be served either, but when no readable
+// bucket holds a sidecar the first read error is returned, so an unreadable store is not
+// mistaken for an empty one.
+func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
+	entries, err := afero.ReadDir(b.fs, ".")
+	if err != nil {
+		return 0, err
+	}
+	buckets := make([]uint64, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		bucket, err := strconv.ParseUint(name, 10, 64)
+		if err != nil || strconv.FormatUint(bucket, 10) != name {
+			continue
+		}
+		buckets = append(buckets, bucket)
+	}
+	slices.Sort(buckets)
+	var firstErr error
+	for _, bucket := range buckets {
+		stored, err := b.holdsSidecar(strconv.FormatUint(bucket, 10))
+		if err != nil {
+			log.Warn("[blob_storage] skipping unreadable column bucket", "bucket", bucket, "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("column bucket %d: %w", bucket, err)
+			}
+			continue
+		}
+		if stored {
+			return bucket * subdivisionSlot, nil
+		}
+	}
+	return 0, firstErr
 }
 
-func (e *errWriter) Write(p []byte) (int, error) {
-	n, err := e.w.Write(p)
-	if err == nil && n < len(p) {
-		err = io.ErrShortWrite
+// holdsSidecar reads the bucket in small batches and stops at the first entry that is a
+// stored sidecar, since a bucket holds one file per root and column.
+func (b *bucketStore) holdsSidecar(dir string) (bool, error) {
+	f, err := b.fs.Open(dir)
+	if err != nil {
+		return false, err
 	}
-	if err != nil && e.err == nil {
-		e.err = err
+	defer f.Close()
+	for {
+		files, err := f.Readdir(listBatch)
+		if slices.ContainsFunc(files, isStoredSidecar) {
+			return true, nil
+		}
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
 	}
-	return n, err
+}
+
+func isStoredSidecar(f os.FileInfo) bool {
+	return !f.IsDir() && !strings.HasSuffix(f.Name(), tmpSuffix)
 }
 
 // pruneBelow removes every bucket that ends before slot. It attempts all of them and
 // returns the first failure, so one bucket that cannot be removed — an open file blocks
 // its directory on Windows — does not stop the rest.
 func (b *bucketStore) pruneBelow(slot uint64) error {
-	cutoff := slot / subdivisionSlot
-	if cutoff == 0 {
+	if slot == 0 {
 		return nil
 	}
+	b.pruneMutex.Lock()
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
+		b.pruneMutex.Unlock()
 		return fmt.Errorf("%w: %w", ErrPruneNotStarted, err)
+	}
+	if slot > b.pruneFloor {
+		b.pruneFloor = slot
+	}
+	effectiveFloor := b.pruneFloor
+	b.pruneMutex.Unlock()
+
+	cutoff := effectiveFloor / subdivisionSlot
+	if cutoff == 0 {
+		return nil
 	}
 	var firstErr error
 	for _, entry := range entries {

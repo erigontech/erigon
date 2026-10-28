@@ -225,7 +225,6 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 
 	if m.isPrevFromDb {
 		k, v, err := m.getNextOnDb(Dup)
-
 		if err != nil {
 			return nil, nil, err
 		}
@@ -285,7 +284,6 @@ func (m *memoryMutationCursor) Put(k, v []byte) error {
 
 func (m *memoryMutationCursor) Append(k []byte, v []byte) error {
 	return m.mutation.Append(m.table, bytes.Clone(k), bytes.Clone(v))
-
 }
 
 func (m *memoryMutationCursor) AppendDup(k []byte, v []byte) error {
@@ -416,9 +414,11 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 func (m *memoryMutationCursor) Prev() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+
 func (m *memoryMutationCursor) PrevDup() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+
 func (m *memoryMutationCursor) PrevNoDup() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }

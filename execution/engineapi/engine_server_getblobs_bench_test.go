@@ -56,18 +56,7 @@ func BenchmarkEngineGetBlobsV3(b *testing.B) {
 	// getBlobs rejects more than 128 hashes per call (-38004), so 128 is the largest payload it serves.
 	const maxBlobs = 128
 
-	logger := testlog.Logger(b, log.LvlError)
-	ctx := context.Background()
-
-	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, b.TempDir())
-	require.NoError(b, err)
-	b.Cleanup(func() { require.NoError(b, eat.Close()) })
-
-	rpcClient, err := rpc.DialHTTP(eat.JsonRpcUrl, logger)
-	require.NoError(b, err)
-	b.Cleanup(rpcClient.Close)
-
-	hashes := submitBlobTxns(ctx, b, eat, rpcClient, maxBlobs)
+	ctx, eat, hashes := setupGetBlobsBenchmark(b, maxBlobs)
 
 	require.Eventually(b, func() bool {
 		resp, err := eat.EngineApiClient.GetBlobsV3(ctx, hashes)
@@ -82,12 +71,6 @@ func BenchmarkEngineGetBlobsV3(b *testing.B) {
 		return true
 	}, 30*time.Second, 100*time.Millisecond, "all %d blobs should become queryable", maxBlobs)
 
-	// Measure the server's response latency over real JSON-RPC WITHOUT the client-side decode:
-	// issue a raw JWT-authenticated POST and drain the body to io.Discard. The client never
-	// hex-decodes the multi-MB payload into structs — in production that cost is the consensus
-	// layer's, not erigon's — so the timing reflects what the node is actually charged for.
-	// The default transport advertises Accept-Encoding: gzip, as stock CL http clients do.
-	httpClient := &http.Client{Transport: jwt.NewHttpRoundTripper(http.DefaultTransport, eat.JwtSecret)}
 	for _, tc := range []struct {
 		name   string
 		hashes []common.Hash
@@ -96,54 +79,113 @@ func BenchmarkEngineGetBlobsV3(b *testing.B) {
 		{fmt.Sprintf("blobs=%d", maxBlobs), hashes},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			reqBody, err := json.Marshal(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      1,
-				"method":  "engine_getBlobsV3",
-				"params":  []any{tc.hashes},
-			})
-			require.NoError(b, err)
-
-			getBlobsRaw := func() (int64, error) {
-				req, err := http.NewRequestWithContext(ctx, http.MethodPost, eat.EngineApiUrl, bytes.NewReader(reqBody))
-				if err != nil {
-					return 0, err
-				}
-				req.Header.Set("Content-Type", "application/json")
-				httpResp, err := httpClient.Do(req)
-				if err != nil {
-					return 0, err
-				}
-				n, err := io.Copy(io.Discard, httpResp.Body)
-				_ = httpResp.Body.Close()
-				if err != nil {
-					return 0, err
-				}
-				if httpResp.StatusCode != http.StatusOK {
-					return 0, fmt.Errorf("unexpected status %d", httpResp.StatusCode)
-				}
-				return n, nil
-			}
-
 			minRespBytes := int64(len(tc.hashes)) * params.BlobSize * 2
-			respBytes, err := getBlobsRaw()
-			require.NoError(b, err)
-			require.Greater(b, respBytes, minRespBytes, "response must carry the blobs")
-			b.Logf("getBlobsV3 over JSON-RPC: %d blobs, %d cell proofs/blob, ~%d KiB response (client decode excluded)", len(tc.hashes), params.CellsPerExtBlob, respBytes/1024)
-
-			b.SetBytes(respBytes)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				n, err := getBlobsRaw()
-				if err != nil {
-					b.Fatal(err)
-				}
-				if n < minRespBytes {
-					b.Fatalf("short response: %d bytes", n)
-				}
-			}
+			benchmarkGetBlobsHTTP(b, ctx, eat, "engine_getBlobsV3", []any{tc.hashes}, minRespBytes)
 		})
+	}
+}
+
+func BenchmarkEngineGetBlobsV4(b *testing.B) {
+	const maxBlobs = 128
+	ctx, eat, hashes := setupGetBlobsBenchmark(b, maxBlobs)
+	emptySelection := make(hexutil.Bytes, params.CellsPerExtBlob/8)
+	require.Eventually(b, func() bool {
+		resp, err := eat.EngineApiClient.GetBlobsV4(ctx, hashes, emptySelection)
+		if err != nil || len(resp) != len(hashes) {
+			return false
+		}
+		for _, bundle := range resp {
+			if bundle == nil {
+				return false
+			}
+		}
+		return true
+	}, 30*time.Second, 100*time.Millisecond, "all %d blobs should become queryable", maxBlobs)
+
+	for _, blobs := range []int{6, maxBlobs} {
+		for _, cells := range []int{8, 64, int(params.CellsPerExtBlob)} {
+			b.Run(fmt.Sprintf("blobs=%d/cells=%d", blobs, cells), func(b *testing.B) {
+				cellIndices := make(hexutil.Bytes, params.CellsPerExtBlob/8)
+				for i := range cells {
+					cellIndices[i/8] |= 1 << (i % 8)
+				}
+				resp, err := eat.EngineApiClient.GetBlobsV4(ctx, hashes[:blobs], cellIndices)
+				require.NoError(b, err)
+				require.Len(b, resp, blobs)
+				for _, bundle := range resp {
+					require.NotNil(b, bundle)
+					require.Len(b, bundle.BlobCells, cells)
+					require.Len(b, bundle.Proofs, cells)
+				}
+				minRespBytes := int64(blobs*cells) * (int64(params.BytesPerCell) + int64(len(goethkzg.KZGProof{}))) * 2
+				benchmarkGetBlobsHTTP(b, ctx, eat, "engine_getBlobsV4", []any{hashes[:blobs], cellIndices}, minRespBytes)
+			})
+		}
+	}
+}
+
+func setupGetBlobsBenchmark(b *testing.B, blobs int) (context.Context, engineapitester.EngineApiTester, []common.Hash) {
+	b.Helper()
+	logger := testlog.Logger(b, log.LvlError)
+	ctx := context.Background()
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, b.TempDir())
+	require.NoError(b, err)
+	b.Cleanup(func() { require.NoError(b, eat.Close()) })
+
+	rpcClient, err := rpc.DialHTTP(eat.JsonRpcUrl, logger)
+	require.NoError(b, err)
+	b.Cleanup(rpcClient.Close)
+
+	return ctx, eat, submitBlobTxns(ctx, b, eat, rpcClient, blobs)
+}
+
+func benchmarkGetBlobsHTTP(b *testing.B, ctx context.Context, eat engineapitester.EngineApiTester, method string, rpcParams []any, minRespBytes int64) {
+	b.Helper()
+	httpClient := &http.Client{Transport: jwt.NewHttpRoundTripper(http.DefaultTransport, eat.JwtSecret)}
+	reqBody, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  method,
+		"params":  rpcParams,
+	})
+	require.NoError(b, err)
+
+	getBlobsRaw := func() (int64, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, eat.EngineApiUrl, bytes.NewReader(reqBody))
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		httpResp, err := httpClient.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		n, err := io.Copy(io.Discard, httpResp.Body)
+		_ = httpResp.Body.Close()
+		if err != nil {
+			return 0, err
+		}
+		if httpResp.StatusCode != http.StatusOK {
+			return 0, fmt.Errorf("unexpected status %d", httpResp.StatusCode)
+		}
+		return n, nil
+	}
+
+	respBytes, err := getBlobsRaw()
+	require.NoError(b, err)
+	require.Greater(b, respBytes, minRespBytes, "response must carry the requested data")
+	b.Logf("%s over JSON-RPC: ~%d KiB response (client decode excluded)", method, respBytes/1024)
+	b.SetBytes(respBytes)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		n, err := getBlobsRaw()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if n < minRespBytes {
+			b.Fatalf("short response: %d bytes", n)
+		}
 	}
 }
 

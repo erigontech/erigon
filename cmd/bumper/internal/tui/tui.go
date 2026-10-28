@@ -567,6 +567,7 @@ func equal(a, b schema.Schema) bool {
 	}
 	return true
 }
+
 func eqGroup(x, y schema.Group) bool {
 	if len(x) != len(y) {
 		return false

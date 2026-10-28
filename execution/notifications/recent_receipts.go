@@ -72,6 +72,10 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, isUnw
 		if bn < from || bn >= to {
 			continue
 		}
+		var blockTimestamp uint64
+		if header := r.headers[bn]; header != nil {
+			blockTimestamp = header.Time
+		}
 
 		reply := make([]*LogNotification, 0, len(receipts))
 		for _, receipt := range receipts {
@@ -80,8 +84,9 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, isUnw
 			}
 			for _, l := range receipt.Logs {
 				reply = append(reply, &LogNotification{
-					Log:     l,
-					Removed: isUnwind,
+					Log:            l,
+					BlockTimestamp: blockTimestamp,
+					Removed:        isUnwind,
 				})
 			}
 		}

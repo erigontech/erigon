@@ -271,6 +271,48 @@ func TestT8n(t *testing.T) {
 	}
 }
 
+// A stdin input that cannot be decoded, or that carries no "env" section, must
+// fail with a numbered error. Both used to be ignored, so the tool reached
+// `prestate.Env = *inputData.Env` with a nil env and panicked (exit code 2).
+func TestT8nStdinInputError(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stdin       string
+		expExitCode int
+	}{
+		{
+			name:        "malformed json",
+			stdin:       `{"alloc":`,
+			expExitCode: 10,
+		},
+		{
+			name:        "missing env section",
+			stdin:       `{"alloc":{},"txs":[]}`,
+			expExitCode: 10,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tt := cmdtest.NewTestCmd(t, nil)
+			tt.Run("evm-test", "t8n",
+				"--input.alloc=stdin", "--input.txs=stdin", "--input.env=stdin",
+				"--state.fork=London")
+			if _, err := tt.InputLine(tc.stdin); err != nil {
+				t.Logf("writing stdin: %v", err)
+			}
+			tt.CloseStdin()
+			_ = tt.Output()
+			tt.WaitExit()
+			if stderr := tt.StderrText(); strings.Contains(stderr, "panic") {
+				t.Fatalf("tool panicked instead of reporting an error:\n%s", stderr)
+			}
+			if have := tt.ExitStatus(); have != tc.expExitCode {
+				t.Fatalf("wrong exit code, have %d, want %d", have, tc.expExitCode)
+			}
+		})
+	}
+}
+
 func TestEvmRun(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")

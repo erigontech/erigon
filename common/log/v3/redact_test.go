@@ -62,7 +62,6 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 		t.Fatalf("expected host IP to be redacted, got: %s", out)
 	}
 	mustContain(t, out, "--http.addr <redacted-ip>")
-
 }
 
 func TestRedactArgsStandaloneValues(t *testing.T) {

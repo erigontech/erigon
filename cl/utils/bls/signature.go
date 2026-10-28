@@ -27,11 +27,6 @@ type Signature struct {
 	affine *blst.P2Affine
 }
 
-// NewSignature creates a new empty signature.
-func NewSignature() *Signature {
-	return &Signature{affine: new(blst.P2Affine)}
-}
-
 // NewSignatureFromBytes creates a new signature from a 96 bytes long slice.
 func NewSignatureFromBytes(b []byte) (*Signature, error) {
 	if len(b) != signatureLength {

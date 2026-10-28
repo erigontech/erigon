@@ -53,13 +53,13 @@ func setup2CacheTest(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 
 	tmpDir, err := os.MkdirTemp("", "erigon-2cache-test-*")
 	require.NoError(t, err)
-	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+	t.Cleanup(func() { _ = dir.RemoveAll(tmpDir) })
 
 	dirs := datadir.New(tmpDir)
 	rawDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, lgr), dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(lgr).Open(context.Background(), rawDb)
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(lgr).Open(context.Background())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

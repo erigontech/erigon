@@ -1,13 +1,13 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -113,22 +113,6 @@ func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash
 	return ibs, addr
 }
 
-// BenchmarkGetStateObjectAfterCodeRead measures the rebuild every account-field
-// read falls through to. Cost growing with code size means the bytes are hashed.
-func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
-	for _, codeLen := range []int{32, 1024, 24576} {
-		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
-			ibs, addr := committedCodeIBS(b, codeLen, nil)
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := ibs.getStateObject(addr, false); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
 // TestCommittedCodeHashComesFromAccountRecord pins the account record as the
 // authority for committed code. The CodeDomain is keyed by address, so it can
 // hold bytes the account no longer owns — a cleared 7702 delegation leaves them.
@@ -226,4 +210,27 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	require.Equal(t, priorCode, so.code.Bytes)
 	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
 	require.Equal(t, cellHash, so.data.CodeHash)
+}
+
+// refreshCode no longer derives a missing hash from the bytes, so a producer
+// storing code without its hash must trip the assertion instead of leaving a
+// nil code hash in the account record.
+func TestRefreshCodeAssertsHashPresent(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Bytes: []byte{0x60, 0x00}}, true)
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 7)
+	ibs.SetVersion(0)
+
+	assert.Panics(t, func() { _, _ = refreshCode(ibs, addr) })
 }

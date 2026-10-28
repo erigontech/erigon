@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,5 +120,5 @@ func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
-	assert.Error(err, errors.New("acc not found"))
+	assert.EqualError(err, "acc not found")
 }

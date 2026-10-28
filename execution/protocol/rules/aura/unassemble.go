@@ -42,6 +42,7 @@ func (u unAssembledHeaders) Pop() *unAssembledHeader {
 	u.l.Remove(e)
 	return e.Value.(*unAssembledHeader)
 }
+
 func (u unAssembledHeaders) Front() *unAssembledHeader {
 	e := u.l.Front()
 	if e == nil {

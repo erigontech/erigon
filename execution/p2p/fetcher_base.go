@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -376,8 +377,8 @@ func (f *FetcherBase) fetchBodies(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[*eth.BlockBodiesPacket66])
-	observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+	messages := make(chan *DecodedInboundMessage[BlockBodiesEnvelope])
+	observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
 		select {
 		case <-ctx.Done():
 			return
@@ -408,25 +409,15 @@ func (f *FetcherBase) fetchBodies(
 		return nil, err
 	}
 
-	if err := f.validateBodies(message.BlockBodiesPacket, headers); err != nil {
+	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, len(headers))
+	if err != nil {
 		return nil, err
 	}
 
 	return &FetcherResponse[[]*types.Body]{
-		Data:      message.BlockBodiesPacket,
+		Data:      bodies,
 		TotalSize: messageSize,
 	}, nil
-}
-
-func (f *FetcherBase) validateBodies(bodies []*types.Body, headers []*types.Header) error {
-	if len(bodies) > len(headers) {
-		return &ErrTooManyBodies{
-			requested: len(headers),
-			received:  len(bodies),
-		}
-	}
-
-	return nil
 }
 
 func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)) (TData, error) {
@@ -449,6 +440,36 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	}
 
 	return data, nil
+}
+
+func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Body, error) {
+	if len(encodedBodies) == 0 {
+		return nil, nil
+	}
+
+	stream := rlp.NewBytesStream(encodedBodies)
+	defer rlp.PutStream(stream)
+
+	bodies := make([]*types.Body, 0, maxBodies)
+	for stream.Remaining() > 0 {
+		if len(bodies) == maxBodies {
+			return nil, &ErrTooManyBodies{
+				requested: maxBodies,
+				received:  maxBodies + 1,
+			}
+		}
+
+		body := new(types.Body)
+		if err := stream.Decode(body); err != nil {
+			if rlp.IsInvalidRLPError(err) {
+				err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
+			}
+			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
+		}
+		bodies = append(bodies, body)
+	}
+
+	return bodies, nil
 }
 
 func awaitResponse[TPacket any](
@@ -481,8 +502,8 @@ func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMe
 	}
 }
 
-func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
-	return func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
+func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
+	return func(message *DecodedInboundMessage[BlockBodiesEnvelope]) bool {
 		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }

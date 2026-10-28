@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestDecodeAndValidateBlockAccessList(t *testing.T) {
@@ -46,7 +45,7 @@ func TestDecodeAndValidateBlockAccessList(t *testing.T) {
 	require.Error(t, err)
 
 	oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}})
 	require.NoError(t, err)
 	require.NoError(t, payload.BlockAccessList.SetBytes(oversized))

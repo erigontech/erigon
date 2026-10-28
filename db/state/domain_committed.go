@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
@@ -103,7 +101,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+	if len(branch) == 0 || commitment.IsCommitmentStateKey(prefix) ||
 		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
 
 		return branch, nil // do not transform, return as is
@@ -189,8 +187,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 			return 0, false
 		}
 
-		k, _ := itemGetter.Next(nil)
-		if !bytes.Equal(fullKey, k) {
+		if itemGetter.MatchCmp(fullKey) != 0 {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
 				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 
@@ -202,7 +199,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
-		_, _, offset, ok, err := item.bindex.Get(fullKey, itemGetter)
+		_, _, offset, ok, err := item.bindex.Get(fullKey, nil, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
 				"key", hex.EncodeToString(fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
@@ -373,7 +370,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
-			var found bool
 			auxBuf := keyBuf[:0]
 			if isStorage {
 				plainKey := len(key) == length.Addr+length.Hash
@@ -382,9 +378,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
 					// Optimised key referencing a state file record (file number and offset within the file)
+					var found bool
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
-						dt.d.logger.Crit("valTransform: lost storage full key",
+						dt.d.logger.Crit(
+							"valTransform: lost storage full key",
 							"shortened", hex.EncodeToString(key),
 							"merging", rng.String("", dt.d.stepSize),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
@@ -430,9 +428,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				// Non-optimised key originating from a database record
 				auxBuf = append(auxBuf[:0], key...)
 			} else {
+				var found bool
 				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
 				if !found {
-					dt.d.logger.Crit("valTransform: lost account full key",
+					dt.d.logger.Crit(
+						"valTransform: lost account full key",
 						"shortened", hex.EncodeToString(key),
 						"merging", rng.String("", dt.d.stepSize),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -99,7 +100,14 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 		return nil
 	}
 
-	// Marshal json g
+	// Difficulty is required on read, and genesiswrite defaults it into the
+	// header only, so a spec without one would write a record it cannot read.
+	if g != nil && g.Difficulty == nil {
+		spec := *g
+		spec.Difficulty = params.GenesisDifficulty
+		g = &spec
+	}
+
 	val, err := jsoniter.ConfigFastest.Marshal(g)
 	if err != nil {
 		return err
