@@ -21,19 +21,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/estimate"
 )
 
 const deferredWritesPerWorker = 4096
 
-var defaultParallelCommitmentWorkers = max(1, dbg.EnvInt("PARALLEL_COMMITMENT_WORKERS", estimate.IOWorkers()))
+var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
@@ -85,10 +83,9 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 }
 
 // ParallelCommitmentReadTxs returns the maximum read transactions held by nested parallel trie workers.
-// One per leased execution context, plus the base trie's own; a parked walker holds no lease. Sized
-// without the GOMAXPROCS cap: the reservation is made at startup, and a fold under raised Ps runs them all.
+// One per leased execution context, plus the base trie's own; a parked walker holds no lease.
 func ParallelCommitmentReadTxs() int {
-	return defaultParallelCommitmentWorkers + 1
+	return parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1
 }
 
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {

@@ -23,6 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBALCommitmentWarmupWorkersDefault(t *testing.T) {
+	require.Equal(t, 1, balCommitmentWarmupWorkersDefault(1))
+	require.Equal(t, 6, balCommitmentWarmupWorkersDefault(6))
+	require.Equal(t, runtime.GOMAXPROCS(-1), balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
+}
+
 func TestBALCommitmentWarmupReaders(t *testing.T) {
 	previousEnabled, previousWorkers := ReadAhead, TrieBALWarmupers
 	t.Cleanup(func() {
