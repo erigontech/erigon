@@ -29,8 +29,8 @@ type LayeredDomainReader struct {
 // layers nothing, giving the plain sd+files path.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
 	l := &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
-	if c, ok := sd.(cachedCommittedReader); ok && roTx != nil {
-		l.cached = c.CachedCommittedReader(roTx)
+	if roTx != nil {
+		l.cached = sd.CachedCommittedReader(roTx)
 	}
 	return l
 }
@@ -60,10 +60,6 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 		}
 	}
 	return l.roTx.GetAsOf(name, k, ts)
-}
-
-type cachedCommittedReader interface {
-	CachedCommittedReader(tx kv.TemporalTx) func(domain kv.Domain, key []byte) ([]byte, uint64, bool)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
