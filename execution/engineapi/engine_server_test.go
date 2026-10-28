@@ -319,6 +319,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		wrongBlockHash      bool
 		blobHashes          []common.Hash
 		l2                  bool
+		busy                bool
 		wantStatus          engine_types.EngineStatus
 		wantErr             string
 		wantLatestValidHash *common.Hash
@@ -333,6 +334,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		{name: "gas limit above the parent's with a wrong block hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wrongBlockHash: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block hash"},
 		{name: "gas limit above the parent's with a wrong blob hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{{0x01}}, wantStatus: engine_types.InvalidStatus, wantErr: "mismatch blob hashes"},
 		{name: "5 txs above an unvalidated parent's gas limit", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "5 txs above an unvalidated parent's gas limit, execution module busy", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, busy: true, wantStatus: engine_types.SyncingStatus},
 		{name: "4 txs above the payload's own gas limit, below the parent's", txCount: 4, gasLimit: 3 * 16_800, time: 1001, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 16800 gas each"},
 		{name: "valid header on a validated parent", txCount: 4, gasLimit: parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.AcceptedStatus},
 		{name: "valid Cancun header on a validated parent", txCount: 4, gasLimit: parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{}, wantStatus: engine_types.AcceptedStatus},
@@ -388,6 +390,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 				currentHeaderFunc:      func(context.Context) (*types.Header, error) { return parent, nil },
 				isValidatedFunc:        func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
 				addSendersRecoveryFunc: func(common.Hash, *exec.SendersRecovery) { recovered = true },
+				readyFunc:              func(context.Context) (bool, error) { return !test.busy, nil },
 			}
 			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
@@ -410,7 +413,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			if bad {
 				require.Equal(t, parentHash, latestValidAncestor)
 			}
-			require.Equal(t, test.wantStatus == engine_types.AcceptedStatus && !test.stored && test.lookupErr == nil, recovered, "senders are recovered early only for a payload without a header error that goes to the block validation")
+			require.Equal(t, test.wantStatus == engine_types.AcceptedStatus && !test.stored && test.lookupErr == nil, recovered, "senders are recovered early only for a payload that can be valid and goes to the block validation")
 		})
 	}
 }

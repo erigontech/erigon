@@ -450,9 +450,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			headerErr = merge.VerifyHeaderWithParent(e.config, &header, parent)
 		}
 	}
-	// A stored block with a gas limit that is invalid for the parent was stored without the cap. It
-	// takes the normal path, which validates and removes it as any stored invalid block.
-	if !e.config.AllowAA && uint64(len(req.Transactions)) > gasLimit/minTxBlockGas && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
+	// A payload above the capped bound has a gas limit above what the parent allows, so it is invalid.
+	// A stored block with such a gas limit was stored without the cap. It takes the normal path, which
+	// validates and removes it as any stored invalid block.
+	aboveCappedBound := !e.config.AllowAA && uint64(len(req.Transactions)) > gasLimit/minTxBlockGas
+	if aboveCappedBound && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
 		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
 	}
 
@@ -492,7 +494,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var sendersRecovery *exec.SendersRecovery
 	// With a non-empty BAL the exec workers recover the senders themselves.
 	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
-	if headerErr == nil && invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
+	if headerErr == nil && !aboveCappedBound && invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
