@@ -1815,7 +1815,7 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 // GetAsOf reads key as of ts from sd.mem; with a tx, a miss goes on to the shared state cache, then tx.
-func (sd *SharedDomains) GetAsOf(domain kv.Domain, tx kv.TemporalTx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (sd *SharedDomains) GetAsOf(tx kv.TemporalTx, domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if v, ok, err = sd.mem.GetAsOf(domain, key, ts); err != nil || ok || tx == nil {
 		return v, ok, err
 	}

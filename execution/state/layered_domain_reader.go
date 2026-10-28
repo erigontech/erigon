@@ -39,7 +39,7 @@ func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader
 // baseGetAsOf reads the committed base without the prior-block window: sd.mem, then (with a tx) the shared
 // state cache and the domain files.
 func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	return l.sd.GetAsOf(name, l.roTx, k, ts)
+	return l.sd.GetAsOf(l.roTx, name, k, ts)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
