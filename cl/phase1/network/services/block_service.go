@@ -79,6 +79,7 @@ type blockJob struct {
 	retryDelay          time.Duration
 	storageErrorLogged  bool
 	finishPayloadImport func()
+	elColumnsStarted    atomic.Bool
 }
 
 type blockJobAttempt struct {
@@ -181,11 +182,12 @@ type blockValidationContext struct {
 }
 
 type blockService struct {
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	engine          execution_client.ExecutionEngine
-	syncedData      *synced_data.SyncedDataManager
-	ethClock        eth_clock.EthereumClock
-	beaconCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	engine               execution_client.ExecutionEngine
+	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
+	syncedData           *synced_data.SyncedDataManager
+	ethClock             eth_clock.EthereumClock
+	beaconCfg            *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, seenBlock]
@@ -239,7 +241,7 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
-	return &blockService{
+	b := &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
 		ethClock:        ethClock,
@@ -252,6 +254,10 @@ func newBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
+	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
+	}
+	return b
 }
 
 func (b *blockService) Names() []string {
@@ -282,7 +288,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
-	go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), msg)
+	b.startELColumnsImport(ctx, msg)
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if waitsForBlockDependency(err) {
 			b.ScheduleBlockForLaterProcessing(msg)
@@ -1185,6 +1191,9 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
 				}
 				authenticated = true
+				if job.elColumnsStarted.CompareAndSwap(false, true) {
+					b.startELColumnsImport(ctx, job.block)
+				}
 			}
 			return b.processAndStoreBlock(ctx, job.block)
 		}

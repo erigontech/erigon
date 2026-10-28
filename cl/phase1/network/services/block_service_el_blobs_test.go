@@ -1,8 +1,10 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -11,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -87,4 +90,35 @@ func TestImportColumnsFromELBlobsSkipsWhenNotNeeded(t *testing.T) {
 		engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.FuluVersion).Return(nil, nil, errors.New("unavailable"))
 		b.importColumnsFromELBlobs(t.Context(), block)
 	})
+}
+
+func TestQueuedUnknownParentBlockStartsELColumnsImportOnce(t *testing.T) {
+	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	var started []*cltypes.SignedBeaconBlock
+	service.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+	transient := errors.New("transient")
+	store.OnBlockErr = transient
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, transient)
+	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
+
+	// The retry authenticates the block again; the import must not start twice.
+	store.OnBlockErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Len(t, started, 1)
+}
+
+func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
+	service, _, _, root, job := parkUnknownParentBlockForRetry(t, false)
+	started := 0
+	service.startELColumnsImport = func(context.Context, *cltypes.SignedBeaconBlock) { started++ }
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+
+	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrBlockInvalid)
+	require.Zero(t, started)
 }
