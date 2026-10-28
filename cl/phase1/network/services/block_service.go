@@ -1142,17 +1142,17 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	attempt := job.attempt
 	needsImportClaim := job.finishPayloadImport == nil
 	block := job.block
-	pendingBlockWrite := job.pendingBlockWrite != nil
-	if pendingBlockWrite {
+	hasPendingBlockWrite := job.pendingBlockWrite != nil
+	if hasPendingBlockWrite {
 		block = job.pendingBlockWrite
 	}
 	job.mu.Unlock()
 	authenticated := false
 	accepted := false
-	var storageErr error
+	var blockErr error
 	if store == nil {
 		store = func(ctx context.Context) error {
-			if !pendingBlockWrite && needsImportClaim {
+			if !hasPendingBlockWrite && needsImportClaim {
 				block := job.block.Block
 				parentHeader, ok := b.forkchoiceStore.GetHeader(block.ParentRoot)
 				if !ok {
@@ -1170,13 +1170,13 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 				}
 				authenticated = true
 			}
-			accepted, storageErr = b.processAndStoreBlock(ctx, block, pendingBlockWrite)
-			return storageErr
+			accepted, blockErr = b.processAndStoreBlock(ctx, block, hasPendingBlockWrite)
+			return blockErr
 		}
-	} else if pendingBlockWrite {
-		accepted, storageErr = b.processAndStoreBlock(ctx, block, true)
+	} else if hasPendingBlockWrite {
+		accepted, blockErr = b.processAndStoreBlock(ctx, block, true)
 	}
-	err := storageErr
+	err := blockErr
 	if err == nil {
 		err = store(ctx)
 	}
@@ -1188,7 +1188,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		return
 	}
 	if accepted {
-		if storageErr == nil {
+		if blockErr == nil {
 			job.pendingBlockWrite = nil
 		} else if job.pendingBlockWrite == nil {
 			job.pendingBlockWrite = block

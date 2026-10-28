@@ -274,8 +274,14 @@ func TestPendingGossipWriteKeepsAcceptedBlockOnJobReuse(t *testing.T) {
 }
 
 func TestPendingGossipWriteSurvivesStoreCompletion(t *testing.T) {
-	for _, storeErr := range []error{nil, forkchoice.ErrBlockInvalid} {
-		t.Run(fmt.Sprint(storeErr), func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		storeErr error
+	}{
+		{name: "callback succeeds"},
+		{name: "callback rejects block", storeErr: forkchoice.ErrBlockInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
 			service := api.(*blockService)
 			processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
@@ -288,7 +294,7 @@ func TestPendingGossipWriteSurvivesStoreCompletion(t *testing.T) {
 				if calls == 1 {
 					require.ErrorIs(t, service.ProcessMessage(ctx, nil, block), errBlockStorage)
 				}
-				return storeErr
+				return tc.storeErr
 			})
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
