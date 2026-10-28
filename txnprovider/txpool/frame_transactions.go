@@ -108,12 +108,16 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidati
 		if txn.TxType() != FrameTxnType {
 			continue
 		}
+		if generation, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && generation == batch.generation {
+			batch.results[txn] = frameValidationResult{reason: txpoolcfg.InvalidFrame}
+			continue
+		}
 		batch.results[txn] = frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
 	}
 	p.lock.Unlock()
 	for _, txn := range txns.Txns {
 		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
-			batch.results[txn] = p.simulateFrameResult(ctx, txn, stateBlockHash)
+			batch.results[txn] = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
 		}
 	}
 	return batch
@@ -151,8 +155,8 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 	return reasons, nil
 }
 
-func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, stateBlockHash common.Hash) frameValidationResult {
-	validation, err := p.simulateFrame(ctx, txn, stateBlockHash)
+func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {
+	validation, err := p.simulateFrame(ctx, txn, generation, stateBlockHash)
 	if err != nil {
 		// Backend failures do not establish invalidity. A retryable per-transaction
 		// discard lets the rest of the batch or block update continue.
@@ -165,7 +169,7 @@ func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, stateBlo
 	return frameValidationResult{validation: validation, reason: txpoolcfg.Success}
 }
 
-func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash common.Hash) (*protocol.FrameValidation, error) {
+func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) (*protocol.FrameValidation, error) {
 	if p.ethBackend == nil {
 		return nil, errors.New("frame validation backend is unavailable")
 	}
@@ -180,6 +184,15 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Another request may have established invalidity while this one waited.
+	// Publish rejections before releasing the gate so its waiters can reuse them.
+	hash := string(txn.IDHash[:])
+	p.lock.Lock()
+	rejectedAt, rejected := p.frameRejections.Get(hash)
+	p.lock.Unlock()
+	if rejected && rejectedAt == generation {
+		return nil, nil
+	}
 	var data bytes.Buffer
 	if err := txn.Txn.MarshalBinary(&data); err != nil {
 		return nil, err
@@ -193,6 +206,11 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, stateBlockHash
 		return nil, err
 	}
 	if !reply.Valid {
+		p.lock.Lock()
+		if generation == p.stateGeneration {
+			p.frameRejections.Add(hash, generation)
+		}
+		p.lock.Unlock()
 		return nil, nil
 	}
 	if len(reply.Payer) != 20 || len(reply.MaxCost) > 32 || len(reply.PayerBalance) > 32 {
@@ -357,7 +375,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 	ctx, cancel := context.WithTimeout(ctx, frameValidationTimeout)
 	defer cancel()
 	for _, mt := range pending {
-		result := p.simulateFrameResult(ctx, mt.TxnSlot, stateBlockHash)
+		result := p.simulateFrameResult(ctx, mt.TxnSlot, generation, stateBlockHash)
 		p.lock.Lock()
 		if generation != p.stateGeneration {
 			// The newer block update also picks up parked transactions.

@@ -169,6 +169,7 @@ type TxPool struct {
 	blobs                   *blobStore
 	frameValidationGate     chan struct{}
 	frameReservations       map[common.Address]frameReservation
+	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
 	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
@@ -208,6 +209,10 @@ func New(
 		return nil, err
 	}
 	discardHistory, err := simplelru.NewLRU[string, txpoolcfg.DiscardReason](10_000, nil)
+	if err != nil {
+		return nil, err
+	}
+	frameRejections, err := simplelru.NewLRU[string, uint64](10_000, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +264,7 @@ func New(
 		auths:                   make(map[AuthAndNonce]*metaTxn),
 		blobs:                   newBlobStore(),
 		frameValidationGate:     make(chan struct{}, 1),
+		frameRejections:         frameRejections,
 		senderLastActivity:      make(map[uint64]uint64),
 	}
 	// Seed the EWMA block time with 12 s (Ethereum mainnet slot time). The tracker adjusts
@@ -645,6 +651,11 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	}
 	if _, ok := p.minedBlobTxnsByHash[hashS]; ok {
 		return true, nil
+	}
+	if generation, ok := p.frameRejections.Get(hashS); ok {
+		// A new state generation permits another attempt even if a rejected
+		// transaction's persisted pool row has not been removed yet.
+		return generation == p.stateGeneration, nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
 		// Retryable failures may clear before the discarded pool row is removed.
@@ -1955,6 +1966,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	p.byHash[hashStr] = mt
 	p.reserveFrame(mt.TxnSlot.frameValidation)
 	p.discardReasonsLRU.Remove(hashStr)
+	p.frameRejections.Remove(hashStr)
 
 	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
 		if dbg.AssertEnabled {

@@ -316,6 +316,71 @@ func TestFramePoolValidationErrorIsolated(t *testing.T) {
 	}
 }
 
+func TestFramePoolRejectionCache(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		name := "remote"
+		if local {
+			name = "local"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.started.Store(true)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.valid = false
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			add := func(want txpoolcfg.DiscardReason) {
+				var txns TxnSlots
+				txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], local)
+				if local {
+					reasons, err := pool.AddLocalTxns(ctx, txns)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{want}, reasons)
+				} else {
+					pool.AddRemoteTxns(ctx, txns, nil, nil)
+					require.NoError(t, pool.processRemoteTxns(ctx))
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+					require.Empty(t, pool.unprocessedRemoteByHash)
+				}
+			}
+			known := func(want bool) {
+				require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+					got, err := pool.IdHashKnown(tx, frame.IDHash[:])
+					require.NoError(t, err)
+					require.Equal(t, want, got)
+					return nil
+				}))
+			}
+
+			add(txpoolcfg.InvalidFrame)
+			add(txpoolcfg.InvalidFrame)
+			require.Len(t, backend.calls, 1, "the same rejected frame must not be simulated again against unchanged state")
+			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+			known(true)
+
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			known(false)
+			backend.valid = true
+			add(txpoolcfg.Success)
+			require.Len(t, backend.calls, 2)
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+		})
+	}
+}
+
+func TestFramePoolRejectionCacheWithinBatch(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.valid = false
+	var txns TxnSlots
+	for range 2 {
+		txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame, txpoolcfg.InvalidFrame}, reasons)
+	require.Len(t, backend.calls, 1, "duplicates prepared before simulation must share the rejection")
+}
+
 func TestFramePoolValidationReleasesLock(t *testing.T) {
 	for _, local := range []bool{true, false} {
 		name := "remote"
@@ -585,6 +650,9 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash)
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 			require.Empty(t, pool.frameReservations)
+			if failure == "invalid prefix" {
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			}
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 				persisted, err := tx.Has(kv.PoolTransaction, frame.IDHash[:])
 				require.NoError(t, err)
