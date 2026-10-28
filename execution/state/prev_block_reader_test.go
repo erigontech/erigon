@@ -55,8 +55,8 @@ func (d cachedDomains) GetAsOf(kv.Domain, []byte, uint64) ([]byte, bool, error) 
 	return nil, false, nil
 }
 
-func (d cachedDomains) CachedCommitted(kv.Domain, kv.TemporalTx, []byte) ([]byte, uint64, bool) {
-	return d.val, d.txNum, true
+func (d cachedDomains) CachedCommittedReader(kv.TemporalTx) func(kv.Domain, []byte) ([]byte, uint64, bool) {
+	return func(kv.Domain, []byte) ([]byte, uint64, bool) { return d.val, d.txNum, true }
 }
 
 type countingAsOfTx struct {
