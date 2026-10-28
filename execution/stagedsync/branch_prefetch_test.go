@@ -122,6 +122,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	p := &branchPrefetcher{work: make(chan prefetchItem, 16)}
 	cc := &commitmentCalculator{
 		state:         &calcState{branchPrefetch: p},
+		signalCtx:     context.Background(),
 		pending:       map[uint64]*pendingBlock{},
 		computedAhead: map[uint64]bool{},
 		balRoots:      map[uint64][]byte{},

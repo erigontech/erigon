@@ -979,7 +979,7 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	for _, account := range feed.Accounts {
 		distinct[account.Hash] = struct{}{}
 	}
-	require.Len(t, want, 7)
+	require.Len(t, want, 8)
 	require.Len(t, distinct, len(feed.Accounts))
 	require.Equal(t, len(want), feed.Keys)
 	require.Equal(t, want, got)
