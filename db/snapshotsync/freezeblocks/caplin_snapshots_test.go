@@ -533,31 +533,31 @@ func TestBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 1, "the reindexed segment must be published")
 }
 
-// Caplin's own gap-filtered scan keeps a segment past a gap out of the dirty set.
-func TestOpenFolderDropsSegmentsPastGap(t *testing.T) {
+// OpenFolder opens every typed segment, as EL's does: a covered segment and one past a gap
+// enter the dirty set, and visibility hides them.
+func TestOpenFolderOpensEveryBeaconBlocksSegment(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
 	dirs := datadir.New(t.TempDir())
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
 
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
 
-	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn))
+	var dirty int
+	sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(*snapshotsync.DirtySegment) bool {
+		dirty++
+		return true
+	})
+	require.Equal(t, 3, dirty)
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
 
 	view := sn.View()
 	defer view.Close()
-	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
-}
-
-func dirtyBeaconBlocksTo(sn *CaplinSnapshots) (to uint64) {
-	sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(seg *snapshotsync.DirtySegment) bool {
-		to = max(to, seg.To())
-		return true
-	})
-	return to
+	require.Len(t, view.BeaconBlocks(), 1)
 }
 
 func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
@@ -579,7 +579,7 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
 
-	files, _, err := snapshotsync.SegmentsCaplin(dirs.Snap)
+	files, err := snapshotsync.AllTypedSegments(dirs.Snap, sn.Types())
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 	list := make([]string, 0, len(files))
@@ -604,54 +604,19 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 	require.NoError(t, eg.Wait())
 }
 
-// BaseRoSnapshots.BuildMissedIndices is promoted onto CaplinSnapshots and reopens the
-// folder after indexing. Go embedding has no virtual dispatch, so that reopen must not
-// reach the unfiltered base scan.
-func TestPromotedBuildMissedIndicesKeepsGapFilter(t *testing.T) {
+func TestCaplinBuildMissingIndicesIndexesPastGap(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
 	dirs := datadir.New(t.TempDir())
-	writeIndexSalt(t, dirs)
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
-
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
-	require.NoError(t, sn.OpenFolder())
-	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn), "the segment past the gap must not be dirty")
-
-	require.NoError(t, sn.BuildMissedIndices(t.Context(), "test", nil, dirs, nil, log.New()))
-
-	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn), "the reopen after indexing must keep the gap filter")
-
-	view := sn.View()
-	defer view.Close()
-	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
-}
-
-// Caplin's own BuildMissingIndices reopens through the gap-filtered scan, so it is a
-// correct delegation target for the shadow above.
-func TestCaplinBuildMissingIndicesKeepsGapFilter(t *testing.T) {
-	const limit = snaptype.CaplinMergeLimit
-
-	dirs := datadir.New(t.TempDir())
-	writeIndexSalt(t, dirs)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, false)
 
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
 
-	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn))
-	require.Len(t, caplinIdxFiles(t, dirs), 2, "both segments on disk must end up indexed")
-}
-
-func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
-	t.Helper()
-	salt := make([]byte, 4)
-	binary.BigEndian.PutUint32(salt, 1)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), salt, 0o600))
+	require.Len(t, caplinIdxFiles(t, dirs), 2)
+	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
 }
 
 // Without a count from the blocks, a slot whose count row is missing from the blob store
