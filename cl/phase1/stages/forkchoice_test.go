@@ -2,50 +2,593 @@ package stages
 
 import (
 	"context"
+	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
-	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
-	headSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	headState := state.New(config)
-	headState.SetVersion(clparams.FuluVersion)
-	require.NoError(t, headState.SetSlot(headSlot))
-	emitter := beaconevents.NewEventEmitter()
-	events := make(chan *beaconevents.EventStream, 1)
-	subscription := emitter.State().Subscribe(events)
-	defer subscription.Unsubscribe()
-	cfg := &Cfg{
-		beaconCfg: config,
-		ethClock:  eth_clock.NewEthereumClock(0, common.Hash{}, config),
-		emitter:   emitter,
+type pausingHeadView struct {
+	synced_data.SyncedData
+	entered chan struct{}
+	release chan struct{}
+}
+
+type recordingHeadPublish struct {
+	synced_data.SyncedData
+	copyCalls  int
+	ownedCalls int
+	ownedState *state.CachingBeaconState
+	ownedRoot  common.Hash
+}
+
+func (s *recordingHeadPublish) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	s.copyCalls++
+	return s.SyncedData.OnHeadStateWithBlockRoot(newState, blockRoot)
+}
+
+func (s *recordingHeadPublish) OnOwnedHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	s.ownedCalls++
+	s.ownedState = newState
+	s.ownedRoot = blockRoot
+	return s.SyncedData.OnOwnedHeadStateWithBlockRoot(newState, blockRoot)
+}
+
+func (s *pausingHeadView) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
+	return s.SyncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		close(s.entered)
+		<-s.release
+		return fn(headState)
+	})
+}
+
+type statusSentinel struct {
+	sentinelproto.SentinelClient
+}
+
+func (*statusSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (*statusSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	return &sentinelproto.PeerCount{Active: 1}, nil
+}
+
+func (*statusSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+type noOpAttestationDataProducer struct {
+	attestation_producer.AttestationDataProducer
+}
+
+func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+	return solid.AttestationData{}, nil
+}
+
+type lockOrderFixture struct {
+	cfg        *Cfg
+	syncedData *synced_data.SyncedDataManager
+	headState  *state.CachingBeaconState
+	headRoot   common.Hash
+	view       *pausingHeadView
+}
+
+func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
+	return newLockOrderFixtureWithConfig(t, slot, nil, common.Hash{}, false)
+}
+
+func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_client.ExecutionEngine, executionHash common.Hash, gloas bool) lockOrderFixture {
+	t.Helper()
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.GloasForkEpoch = math.MaxUint64
+	if gloas {
+		beaconCfg.AltairForkEpoch = 0
+		beaconCfg.BellatrixForkEpoch = 0
+		beaconCfg.CapellaForkEpoch = 0
+		beaconCfg.DenebForkEpoch = 0
+		beaconCfg.ElectraForkEpoch = 0
+		beaconCfg.FuluForkEpoch = 0
+		beaconCfg.GloasForkEpoch = 0
+		beaconCfg.InitializeForkSchedule()
+	}
+	genesisTime := uint64(time.Now().Unix()) - slot*beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
+	headState := state.New(&beaconCfg)
+	headState.SetGenesisTime(genesisTime)
+	require.NoError(t, headState.SetSlot(slot))
+	headState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: slot})
+	if executionHash != (common.Hash{}) {
+		if gloas {
+			headState.SetVersion(clparams.GloasVersion)
+			headState.SetLatestBlockHash(executionHash)
+		} else {
+			headState.SetVersion(clparams.FuluVersion)
+			header := cltypes.NewEth1Header(clparams.FuluVersion)
+			header.BlockHash = executionHash
+			headState.SetLatestExecutionPayloadHeader(header)
+		}
 	}
 
-	require.NoError(t, emitNextPaylodAttributesEvent(cfg, headSlot, common.Hash{}, headState))
+	manager := synced_data.NewSyncedDataManager(&beaconCfg, true)
+	emitter := beaconevents.NewEventEmitter()
+	graph, err := fork_graph.NewForkGraphDisk(
+		headState,
+		manager,
+		afero.NewMemMapFs(),
+		beacon_router_configuration.RouterConfiguration{},
+	)
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		clock,
+		headState,
+		engine,
+		pool.NewOperationsPool(&beaconCfg),
+		graph,
+		emitter,
+		manager,
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	headRoot := graph.AnchorRoot()
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, headRoot))
 
-	require.Len(t, events, 1)
-	attrs := (<-events).Data.(*beaconevents.PayloadAttributesData).Data.PayloadAttributes
-	require.NotNil(t, attrs.TargetGasLimit)
-	require.Equal(t, hexutil.Uint64(200_000_000), *attrs.TargetGasLimit)
+	viewEntered := make(chan struct{})
+	releaseView := make(chan struct{})
+	pausedView := &pausingHeadView{
+		SyncedData: manager,
+		entered:    viewEntered,
+		release:    releaseView,
+	}
+	return lockOrderFixture{
+		cfg: &Cfg{
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock),
+			ethClock:   clock,
+			beaconCfg:  &beaconCfg,
+			forkChoice: store,
+			syncedData: pausedView,
+			emitter:    emitter,
+		},
+		syncedData: manager,
+		headState:  headState,
+		headRoot:   headRoot,
+		view:       pausedView,
+	}
+}
+
+func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, operationDone <-chan error) {
+	t.Helper()
+	select {
+	case err := <-operationDone:
+		// An operation that never takes the synced-data lock cannot invert the order.
+		require.NoError(t, err)
+		return
+	case <-fixture.view.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation neither completed nor entered the synced head-state view")
+	}
+
+	writerDone := make(chan error, 1)
+	go func() {
+		writerDone <- fixture.syncedData.OnHeadStateWithBlockRoot(fixture.headState, fixture.headRoot)
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	slashingDone := make(chan error, 1)
+	go func() {
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(cltypes.NewAttesterSlashing(clparams.Phase0Version), true)
+	}()
+	select {
+	case err := <-slashingDone:
+		t.Fatalf("lock-order setup failed: attester slashing completed before the queued writer: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	close(fixture.view.release)
+	select {
+	case err := <-operationDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation deadlocked: synced-data read lock waited for fork choice while fork choice waited behind a queued synced-data writer")
+	}
+	require.NoError(t, <-writerDone)
+	<-slashingDone
+}
+
+func TestComputeForkChoiceDoesNotInvertSyncedDataLockOrder(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+		done <- err
+	}()
+
+	requireLockOrderOperationCompletes(t, fixture, done)
+}
+
+func TestComputeForkChoiceFallsBackWithoutSyncedHeadState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	fixture.syncedData.UnsetHeadState()
+
+	headSlot, headRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, fixture.headState.Slot(), headSlot)
+	require.Equal(t, fixture.headRoot, headRoot)
+}
+
+func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
+	executionHash := common.Hash{0x41}
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.Phase0Version).
+		Return(nil, nil).Times(2)
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+	require.NoError(t, err)
+	require.Equal(t, executionHash, fixture.cfg.executionHead)
+	fixture.cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(fixture.cfg.ethClock.GenesisTime() + fixture.cfg.beaconCfg.SecondsPerSlot))
+
+	_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, executionHash, fixture.cfg.executionHead)
+}
+
+func TestComputeForkChoiceRecordsExecutionHeadWithoutEngine(t *testing.T) {
+	executionHash := common.Hash{0x41}
+	fixture := newLockOrderFixtureWithConfig(t, 0, nil, executionHash, false)
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, executionHash, fixture.cfg.executionHead)
+}
+
+func newGloasCanonicalForkChoiceFixture(t *testing.T, full bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope, *testExecutionEngine) {
+	t.Helper()
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusNotValidated, false)
+	headBlock := graph.parents[headRoot]
+	envelope := graph.envelopes[headRoot]
+	delete(graph.parents, headRoot)
+	if !full {
+		delete(graph.envelopes, headRoot)
+	}
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	if full {
+		cfg.forkChoice.MarkPayloadStatus(headRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNotValidated)
+	}
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GenesisTime().Return(uint64(0)).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().Return(headBlock.Block.Slot).AnyTimes()
+	clock.EXPECT().GetCurrentEpoch().Return(headBlock.Block.Slot / cfg.beaconCfg.SlotsPerEpoch).AnyTimes()
+	clock.EXPECT().CurrentForkDigest().Return(common.Bytes4{}, nil).AnyTimes()
+	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion).AnyTimes()
+	cfg.ethClock = clock
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, cfg.beaconCfg, clock)
+	return cfg, graph, headRoot, headBlock, envelope, engine
+}
+
+func TestComputeForkChoiceSendsGloasFullExecutionHeadWithoutVerification(t *testing.T) {
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	require.False(t, cfg.forkChoice.IsPayloadVerified(headRoot))
+
+	headSlot, returnedRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, headRoot, returnedRoot)
+	require.Equal(t, headBlock.Block.Slot, headSlot)
+	require.Equal(t, []common.Hash{bid.BlockHash}, engine.forkChoiceHeads)
+	require.Equal(t, bid.BlockHash, cfg.executionHead)
+}
+
+func TestComputeForkChoiceSendsGloasEmptyExecutionHead(t *testing.T) {
+	cfg, _, _, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, false)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{bid.ParentBlockHash}, engine.forkChoiceHeads)
+	require.Equal(t, bid.ParentBlockHash, cfg.executionHead)
+}
+
+func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
+	executionHash := common.Hash{0x41}
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, true)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.GloasVersion).
+		Return(nil, nil)
+
+	_, computedRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, fixture.headRoot, computedRoot)
+	require.Equal(t, executionHash, fixture.cfg.executionHead)
+}
+
+func TestComputeForkChoiceRecordsGloasExecutionHeadAfterTimeout(t *testing.T) {
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	previousWake := sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: time.Now()}
+	cfg.sleepForSlotLastWake = previousWake
+	engine.forkChoiceErr = execution_client.ErrForkChoiceUpdateTimeout
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, bid.BlockHash, cfg.executionHead)
+	previousWake.executionHead = bid.BlockHash
+	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
+}
+
+type busyOnceExecutionModule struct {
+	execmodule.ExecutionModule
+	forkChoiceCalls int
+}
+
+func (m *busyOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+	m.forkChoiceCalls++
+	if m.forkChoiceCalls == 1 {
+		return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
+	}
+	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, nil
+}
+
+func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	module := &busyOnceExecutionModule{}
+	direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+	require.NoError(t, err)
+	engine.forkChoiceFn = direct.ForkChoiceUpdate
+
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		previousExecutionHead := cfg.executionHead
+		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		require.NoError(t, err)
+		require.Equal(t, 1, module.forkChoiceCalls)
+		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")
+		require.Equal(t, bid.BlockHash, cfg.sleepForSlotLastWake.executionHead)
+		require.Equal(t, started, cfg.sleepForSlotLastWake.at)
+
+		wake, changed, err := waitForNextSlotOrHeadChange(
+			t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg, cfg.forkChoice,
+			sleepForSlotSyncedDataFake{head: headRoot},
+			sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
+			cfg.sleepForSlotLastWake, cfg.executionHead,
+		)
+		require.NoError(t, err)
+		require.True(t, changed, "the unapplied execution head must wake fork choice before the next slot")
+		require.Equal(t, bid.BlockHash, wake.executionHead)
+		require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval, "the re-send must stay throttled")
+
+		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		require.NoError(t, err)
+		require.Equal(t, 2, module.forkChoiceCalls)
+		require.Equal(t, bid.BlockHash, cfg.executionHead)
+	})
+}
+
+func TestComputeForkChoiceKeepsGloasExecutionHeadAfterFatalError(t *testing.T) {
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	previousHash := common.Hash{0x42}
+	previousWake := sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: time.Now()}
+	wantErr := errors.New("fork choice failed")
+	cfg.executionHead = previousHash
+	cfg.sleepForSlotLastWake = previousWake
+	engine.forkChoiceErr = wantErr
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, previousHash, cfg.executionHead)
+	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
+}
+
+func TestGloasExecutionHeadChangeBypassesThrottleAfterDifferentStageDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stageFull bool
+	}{
+		{"FULL wake, EMPTY stage, FULL poll", false},
+		{"EMPTY wake, FULL stage, EMPTY poll", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, tc.stageFull)
+			bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+			wakeHead, stageHead := bid.BlockHash, bid.ParentBlockHash
+			if tc.stageFull {
+				wakeHead, stageHead = stageHead, wakeHead
+			}
+
+			synctest.Test(t, func(t *testing.T) {
+				started := time.Now()
+				cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: wakeHead, at: started}
+				_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+				require.NoError(t, err)
+				require.Equal(t, []common.Hash{stageHead}, engine.forkChoiceHeads)
+				require.Equal(t, stageHead, cfg.executionHead)
+				require.Equal(t, headRoot, cfg.sleepForSlotLastWake.root)
+				require.Equal(t, started, cfg.sleepForSlotLastWake.at)
+
+				ready := true
+				wake, changed, err := waitForNextSlotOrHeadChange(
+					t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg,
+					sleepForSlotForkChoiceFake{head: headRoot, executionHead: wakeHead, ready: &ready},
+					sleepForSlotSyncedDataFake{head: headRoot},
+					sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
+					cfg.sleepForSlotLastWake, cfg.executionHead,
+				)
+				require.NoError(t, err)
+				require.True(t, changed)
+				require.Equal(t, wakeHead, wake.executionHead)
+				require.Equal(t, sleepForSlotHeadPollInterval, time.Since(started), "the next poll must compare with the stage's decision, not the triggering wake")
+			})
+		})
+	}
+}
+
+func TestGloasExecutionHeadChangeWakesAndSendsFullHash(t *testing.T) {
+	cfg, graph, headRoot, headBlock, envelope, engine := newGloasCanonicalForkChoiceFixture(t, false)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, bid.ParentBlockHash, cfg.executionHead)
+	require.NoError(t, graph.DumpEnvelopeOnDisk(headRoot, envelope))
+	cfg.forkChoice.MarkPayloadStatus(headRoot, bid.BlockHash, execution_client.PayloadStatusNotValidated)
+
+	wake, changed, err := waitForNextSlotOrHeadChange(
+		t.Context(), headBlock.Block.Slot+1, sleepForSlotConfig(0), cfg.forkChoice,
+		sleepForSlotSyncedDataFake{head: headRoot},
+		sleepForSlotClockFake{currentEpoch: 0, currentSlot: headBlock.Block.Slot, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)},
+		sleepForSlotWake{}, cfg.executionHead,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, bid.BlockHash, wake.executionHead)
+
+	engine.forkChoiceHeads = nil
+	_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{bid.BlockHash}, engine.forkChoiceHeads)
+	require.Equal(t, bid.BlockHash, cfg.executionHead)
+}
+
+func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) {
+	fixture := newLockOrderFixture(t, clparams.MainnetBeaconConfig.SlotsPerEpoch*5)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	done := make(chan error, 1)
+	go func() {
+		done <- postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
+	}()
+
+	requireLockOrderOperationCompletes(t, fixture, done)
+	_, err = checkpoint_sync.ReadLocalFinalizedState(fixture.cfg.dirs, fixture.cfg.beaconCfg)
+	require.NoError(t, err)
+}
+
+func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 1)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	recorder := &recordingHeadPublish{SyncedData: fixture.syncedData}
+	fixture.cfg.syncedData = recorder
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+
+	require.Equal(t, 1, recorder.ownedCalls)
+	require.Zero(t, recorder.copyCalls)
+	require.Equal(t, fixture.headRoot, recorder.ownedRoot)
+	require.NoError(t, fixture.cfg.forkChoice.ViewStateAtBlockRoot(fixture.headRoot, func(current *state.CachingBeaconState) error {
+		require.NotSame(t, current, recorder.ownedState)
+		return nil
+	}))
+	require.NoError(t, fixture.syncedData.ViewHeadState(func(head *state.CachingBeaconState) error {
+		require.Same(t, recorder.ownedState, head)
+		return nil
+	}))
+}
+
+func TestPayloadAttributesStageOwnershipAtGloas(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	config.AltairForkEpoch = 0
+	config.BellatrixForkEpoch = 0
+	config.CapellaForkEpoch = 0
+	config.DenebForkEpoch = 0
+	config.ElectraForkEpoch = 0
+	config.FuluForkEpoch = 0
+	config.GloasForkEpoch = 1
+	config.InitializeForkSchedule()
+	firstGloasSlot := config.GloasForkEpoch * config.SlotsPerEpoch
+	for _, test := range []struct {
+		name        string
+		headSlot    uint64
+		headVersion clparams.StateVersion
+		wantEvents  int
+	}{
+		{name: "before boundary", headSlot: firstGloasSlot - 2, headVersion: clparams.FuluVersion, wantEvents: 1},
+		{name: "at boundary", headSlot: firstGloasSlot - 1, headVersion: clparams.FuluVersion},
+		{name: "after boundary", headSlot: firstGloasSlot, headVersion: clparams.GloasVersion},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			headState := state.New(&config)
+			headState.SetVersion(test.headVersion)
+			require.NoError(t, headState.SetSlot(test.headSlot))
+			emitter := beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 1)
+			subscription := emitter.State().Subscribe(events)
+			defer subscription.Unsubscribe()
+			cfg := &Cfg{
+				beaconCfg: &config,
+				ethClock:  eth_clock.NewEthereumClock(0, common.Hash{}, &config),
+				emitter:   emitter,
+			}
+
+			require.NoError(t, emitNextPaylodAttributesEvent(cfg, test.headSlot, common.Hash{}, headState))
+			require.Len(t, events, test.wantEvents)
+		})
+	}
 }
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {

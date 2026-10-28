@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -133,7 +134,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	bal := types.BlockAccessList{
 		{Address: balanceOnly, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}},
 		{Address: storageOnly, StorageChanges: []types.SlotChanges{{Slot: slotA, Changes: change}, {Slot: slotB, Changes: change}}},
-		{Address: readOnly, StorageReads: []accounts.StorageKey{slotA}},
+		{Address: readOnly, StorageReads: []common.Hash{slotA.Value()}},
 	}
 
 	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: bal})
@@ -165,7 +166,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	db, tx, doms := setupStepTest(t)
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	p := cc.state.branchPrefetch

@@ -465,7 +465,7 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 
 	r, w := state.NewNoopReader(), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
-	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
+	statedb := state.NewForSequentialCommitment(r)
 	statedb.SetTrace(false)
 
 	hasConstructorAllocation := false

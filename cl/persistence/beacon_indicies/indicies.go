@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // Encoder options must not change the output: these bytes are copied verbatim into
@@ -66,6 +67,30 @@ func WriteHighestFinalized(tx kv.RwTx, slot uint64) error {
 
 func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
 	val, err := tx.GetOne(kv.HighestFinalized, kv.HighestFinalizedKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(val) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64FromBytes4(val), nil
+}
+
+var highestCustodyGroupCountKey = []byte("HighestCustodyGroupCount")
+
+func WriteHighestCustodyGroupCount(tx kv.RwTx, cgc uint64) error {
+	highest, err := ReadHighestCustodyGroupCount(tx)
+	if err != nil {
+		return err
+	}
+	if cgc <= highest {
+		return nil
+	}
+	return tx.Put(kv.DatabaseInfo, highestCustodyGroupCountKey, base_encoding.Encode64ToBytes4(cgc))
+}
+
+func ReadHighestCustodyGroupCount(tx kv.Tx) (uint64, error) {
+	val, err := tx.GetOne(kv.DatabaseInfo, highestCustodyGroupCountKey)
 	if err != nil {
 		return 0, err
 	}
@@ -363,8 +388,10 @@ func WriteBeaconBlockAndIndicies(tx kv.RwTx, block *cltypes.SignedBeaconBlock, c
 	return nil
 }
 
+// PruneBlocks deletes at most snaptype.CaplinMergeLimit blocks below to, so one call
+// never holds a long write transaction; periodic callers delete the rest later.
 func PruneBlocks(tx kv.RwTx, to uint64) error {
-	_, _, err := PruneBlocksLimit(tx, to, 0)
+	_, _, err := PruneBlocksLimit(tx, to, snaptype.CaplinMergeLimit)
 	return err
 }
 

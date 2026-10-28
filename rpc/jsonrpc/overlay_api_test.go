@@ -17,7 +17,11 @@
 package jsonrpc
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -27,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -153,6 +159,7 @@ func TestOverlayGetLogsReplaysFailedTxWithCodeOverride(t *testing.T) {
 	require.Len(t, logs, 2)
 	require.Equal(t, failedTarget, logs[0].Address, "originally failed transaction should be replayed under the code override and emit one log")
 	require.Equal(t, controlTarget, logs[1].Address, "positive-control transaction should emit one log")
+	require.Equal(t, []hexutil.Uint{0, 1}, []hexutil.Uint{logs[0].TxIndex, logs[1].TxIndex})
 }
 
 // The rules parameter is optional: a request with state overrides and no rules must not crash.
@@ -196,6 +203,43 @@ func TestOverlayGetLogsSkipsFailedTxWithoutOverrides(t *testing.T) {
 	require.Equal(t, hexutil.Uint(1), logs[0].TxIndex, "the log must come from the control transaction, not from a gas-capped replay of the failed one")
 }
 
+func newOverlayGetLogsSingleLogSetup(t *testing.T) (overlayGetLogsTestSetup, filters.FilterCriteria) {
+	target := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	logCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
+	setup := newOverlayGetLogsTestSetup(t, map[common.Address][]byte{target: logCode}, target, 21_100, target)
+	return setup, filters.FilterCriteria{FromBlock: setup.blockNumber, ToBlock: setup.blockNumber, Addresses: []common.Address{target}}
+}
+
+func TestOverlayGetLogsReturnsBlockReplayError(t *testing.T) {
+	setup, crit := newOverlayGetLogsSingleLogSetup(t)
+	overrides := ethapi.StateOverrides{
+		accounts.InternAddress(crit.Addresses[0]): {State: &map[common.Hash]common.Hash{}, StateDiff: &map[common.Hash]common.Hash{}},
+	}
+
+	_, err := setup.api.GetLogs(setup.m.Ctx, crit, &overrides, setup.rules)
+	require.ErrorContains(t, err, "has both 'state' and 'stateDiff'")
+}
+
+type failWorkerBeginDB struct {
+	kv.TemporalRoDB
+	begins atomic.Int32
+}
+
+func (db *failWorkerBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	if db.begins.Add(1) > 1 {
+		return nil, errors.New("worker begin failed")
+	}
+	return db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
+}
+
+func TestOverlayGetLogsReturnsWorkerBeginError(t *testing.T) {
+	setup, crit := newOverlayGetLogsSingleLogSetup(t)
+	setup.api.db = &failWorkerBeginDB{TemporalRoDB: setup.m.DB}
+
+	_, err := setup.api.GetLogs(setup.m.Ctx, crit, nil, setup.rules)
+	require.ErrorContains(t, err, "worker begin failed")
+}
+
 func TestCallConstructorReturnsOverlayError(t *testing.T) {
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 	base := newBaseApiForTest(m)
@@ -206,7 +250,7 @@ func TestCallConstructorReturnsOverlayError(t *testing.T) {
 		NewOtterscanAPI(base, m.DB, 25),
 	)
 	code := hexutil.Bytes{byte(vm.INVALID)}
-	result, err := api.CallConstructor(m.Ctx, contractAddress, &code)
+	result, err := api.CallConstructor(m.Ctx, contractAddress, code)
 	require.Nil(t, result)
 	var invalidOpcode *vm.ErrInvalidOpCode
 	require.ErrorAs(t, err, &invalidOpcode)
@@ -223,8 +267,36 @@ func TestCallConstructorRejectsNonContract(t *testing.T) {
 	)
 	code := hexutil.Bytes{byte(vm.STOP)}
 	for _, addr := range []common.Address{bankAddress, common.HexToAddress("0xdead")} {
-		result, err := api.CallConstructor(m.Ctx, addr, &code)
+		result, err := api.CallConstructor(m.Ctx, addr, code)
 		require.Nil(t, result)
 		require.Error(t, err)
+	}
+}
+
+func TestCallConstructorRequiresCode(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(
+		base,
+		m.DB,
+		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
+		NewOtterscanAPI(base, m.DB, 25),
+	)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("overlay", api))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for name, params := range map[string][]any{
+		"omitted": {contractAddress},
+		"null":    {contractAddress, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", params...)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+		})
 	}
 }

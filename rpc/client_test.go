@@ -34,6 +34,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -214,6 +215,51 @@ func TestClientBatchSendsRunInOrder(t *testing.T) {
 	defer svc.mu.Unlock()
 	if !slices.Equal(svc.order, []int{0, 1, 2, 3}) {
 		t.Fatalf("batch ran its sends in order %v, want 0 1 2 3", svc.order)
+	}
+}
+
+// syncSendService answers true only when both of its calls run at the same time.
+type syncSendService struct {
+	arrived atomic.Int32
+	both    chan struct{}
+}
+
+func (s *syncSendService) SendRawTransactionSync() bool {
+	if s.arrived.Add(1) == 2 {
+		close(s.both)
+	}
+	select {
+	case <-s.both:
+		return true
+	case <-time.After(time.Second):
+		return false
+	}
+}
+
+// A sync send waits for its receipt, so a batch of them must not wait for each receipt in turn.
+func TestClientBatchSyncSendsRunConcurrently(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	server.batchConcurrency = 2
+	svc := &syncSendService{both: make(chan struct{})}
+	if err := server.RegisterName("eth", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	batch := make([]BatchElem, 2)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "eth_sendRawTransactionSync", Result: new(bool)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	for i, elem := range batch {
+		if elem.Error != nil || !*elem.Result.(*bool) {
+			t.Fatalf("call %d did not overlap the other one: result %v, err %v", i, *elem.Result.(*bool), elem.Error)
+		}
 	}
 }
 
@@ -1076,14 +1122,10 @@ func (reverseService) Echo(ctx context.Context, s string) (string, error) {
 }
 
 // pipeClient returns a client whose server side is the returned writer and decoder.
-func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.Decoder) {
+func pipeClient(t *testing.T) (*Client, io.Writer, *json.Decoder) {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	cfg := new(clientConfig)
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	client, err := newClient(context.Background(), cfg, newClientTransportIO(inR, outW), log.New())
+	client, err := newClient(context.Background(), newClientTransportIO(inR, outW), log.New())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		inW.Close() // ends the client's read loop, which Close waits for

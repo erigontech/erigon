@@ -636,7 +636,7 @@ jobs:
           config=.github/workflows/kurtosis/glamsterdam-caplin.io
           export TEST_URL="https://raw.githubusercontent.com/${TEST_REPOSITORY}/${TEST_REF}/.github/workflows/kurtosis/caplin-glamsterdam-block-production.io"
           yq -i '.assertoor_params.tests[0].file = strenv(TEST_URL)' "$config"
-          images=$(yq -r '[.participants[].vc_image, .ethereum_genesis_generator_params.image, .assertoor_params.image] | join(" ")' "$config")
+          images=$(yq -r '[.participants[].vc_image, .ethereum_genesis_generator_params.image, .assertoor_params.image, .spamoor_params.image] | join(" ")' "$config")
           echo "UNCACHED_IMAGES=${UNCACHED_IMAGES} ${images}" >> "$GITHUB_ENV"
 
       # An uncovered tag would otherwise be pulled inside `kurtosis run`, where a

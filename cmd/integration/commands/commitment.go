@@ -201,7 +201,7 @@ Examples:
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -220,7 +220,7 @@ Examples:
 		if txnumFlag > 0 {
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
-			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+			if err := readBranch(reader, prefix, stepSize); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
 			}
@@ -233,7 +233,7 @@ Examples:
 			}
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
-			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+			if err := readBranch(reader, prefix, stepSize); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
 			}
@@ -241,9 +241,7 @@ Examples:
 	},
 }
 
-func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
-	Info(msg string, ctx ...any)
-},
+func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64,
 ) error {
 	compactKey := nibbles.HexToCompact(prefix)
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
@@ -286,7 +284,7 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if !statecfg.ExperimentalCommitmentV3 {
 		return errors.New("verify reads v3 commitment records; run with COMMITMENT_V3=true")
 	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 	if err != nil {
 		return err
 	}
@@ -322,7 +320,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -478,14 +476,14 @@ var cmdCommitmentPrint = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		defer db.Close()
 
-		if err := printCommitment(db, cmd.Context(), logger); err != nil {
+		if err := printCommitment(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -494,7 +492,7 @@ var cmdCommitmentPrint = &cobra.Command{
 	},
 }
 
-func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -601,7 +599,7 @@ Examples:
 			}
 		}
 
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
 		}
@@ -733,7 +731,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}
@@ -859,7 +857,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}

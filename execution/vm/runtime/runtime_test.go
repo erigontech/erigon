@@ -285,6 +285,61 @@ func TestInnerCreatedCodeOutlivesNextCall(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
+// A tracer that never sees call outputs must not turn off the identity output buffer.
+func TestIdentityReusesOutputBufferUnderEnterTracer(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	const calls = 100
+	p := program.New().Mstore([]byte{1}, 1024)
+	for range calls {
+		p.StaticCall(nil, 0x4, 0, 1024, 0, 0).Op(vm.POP)
+	}
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	cfg.EVMConfig.Tracer = &tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}
+
+	allocs := testing.AllocsPerRun(3, func() {
+		_, _, err := Call(address, nil, cfg)
+		require.NoError(t, err)
+	})
+	require.Less(t, allocs, float64(calls))
+}
+
+// An identity call with too little gas fails on the buffer-reusing path too.
+func TestIdentityOutOfGasFails(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	// 1024 bytes cost 15 + 3*32 = 111 gas; 50 is not enough.
+	p := program.New().Mstore([]byte{1}, 1024).
+		StaticCall(uint256.NewInt(50), 0x4, 0, 1024, 0, 0).
+		Push0().Op(vm.MSTORE).Return(0, 32)
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, make([]byte, 32), ret, "STATICCALL to identity with too little gas must return 0")
+}
+
+// The identity output must not change when the caller later overwrites the input memory.
+func TestIdentityReturnDataOutlivesInputMemory(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	input := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(address, program.New().
+		Mstore(input, 0).
+		StaticCall(nil, 0x4, 0, 32, 0, 0).Op(vm.POP).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Push(32).Push(0).Push(32).Op(vm.RETURNDATACOPY).
+		Return(32, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, input, ret)
+}
+
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
@@ -450,43 +505,6 @@ func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 		GasLimit:   100000,
 	}
 }
-
-// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
-type FakeChainHeaderReader struct{}
-
-func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-
-func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
-}
-func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
-func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
-
-// GetHeader returns a fake header with the parentHash equal to the number - 1
-func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return &types.Header{
-		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     *uint256.NewInt(number),
-		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
-		Time:       number,
-		Nonce:      types.BlockNonce{0x1},
-		Extra:      []byte{},
-		GasLimit:   100000,
-	}
-}
-
-func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return nil
-}
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	return nil
-}
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64 { return 0 }
 
 type dummyChain struct {
 	counter int
@@ -1141,7 +1159,6 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 	}
 	versioned := func() *state.IntraBlockState {
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		return ibs
 	}
 	was := dbg.TraceTransactionIO

@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -78,6 +78,8 @@ type blockJob struct {
 	retryAfter          time.Time
 	retryDelay          time.Duration
 	storageErrorLogged  bool
+	finishPayloadImport func()
+	elColumnsStarted    atomic.Bool
 }
 
 type blockJobAttempt struct {
@@ -180,10 +182,12 @@ type blockValidationContext struct {
 }
 
 type blockService struct {
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	syncedData      *synced_data.SyncedDataManager
-	ethClock        eth_clock.EthereumClock
-	beaconCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	engine               execution_client.ExecutionEngine
+	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
+	syncedData           *synced_data.SyncedDataManager
+	ethClock             eth_clock.EthereumClock
+	beaconCfg            *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, seenBlock]
@@ -208,12 +212,14 @@ func NewBlockService(
 	ctx context.Context,
 	db kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	engine execution_client.ExecutionEngine,
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
 	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	b.engine = engine
 	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
 	return b
@@ -235,7 +241,7 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
-	return &blockService{
+	b := &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
 		ethClock:        ethClock,
@@ -248,6 +254,10 @@ func newBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
+	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
+	}
+	return b
 }
 
 func (b *blockService) Names() []string {
@@ -274,19 +284,19 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	if err := b.validateFirstGossip(ctx, msg, func() { b.ScheduleBlockForLaterProcessing(msg) }, true); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg, nil, false) }, true); err != nil {
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
+	b.startELColumnsImport(ctx, msg)
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-			errors.Is(err, forkchoice.ErrParentEnvelopePending) || errors.Is(err, forkchoice.ErrBlockTooEarly) {
+		if waitsForBlockDependency(err) {
 			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}
 		// Retain canceled imports too: gossip validation has already marked the block as seen.
 		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
-			job, _ := b.scheduleBlockForLaterProcessing(msg, nil)
+			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true)
 			job.logStorageErrorOnce(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
@@ -296,6 +306,56 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	return nil
+}
+
+// importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
+// (engine_getBlobsV2), so the block need not wait for them on gossip.
+func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments.Len() == 0 || b.engine == nil {
+		return
+	}
+	peerDas := b.forkchoiceStore.GetPeerDas()
+	if peerDas == nil {
+		return
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return
+	}
+	if available, err := peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || available {
+		return
+	}
+	versionedHashes := make([]common.Hash, 0, block.Block.Body.BlobKzgCommitments.Len())
+	for i := range block.Block.Body.BlobKzgCommitments.Len() {
+		hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i)))
+		if err != nil {
+			return
+		}
+		versionedHashes = append(versionedHashes, hash)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(b.beaconCfg.SecondsPerSlot)*time.Second)
+	defer cancel()
+	blobs, proofs, err := b.engine.GetBlobs(ctx, versionedHashes, block.Version())
+	if err != nil {
+		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
+		return
+	}
+	if err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs); err != nil {
+		log.Debug("[blockService] columns not built from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
+		return
+	}
+	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
+}
+
+func waitsForBlockDependency(err error) bool {
+	return errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) ||
+		errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+		errors.Is(err, forkchoice.ErrParentEnvelopePending) ||
+		errors.Is(err, forkchoice.ErrBlockTooEarly)
+}
+
+func shouldRetainBlockImportClaim(err error) bool {
+	return waitsForBlockDependency(err) || shouldBackOffBlockRetry(err)
 }
 
 func shouldBackOffBlockRetry(err error) bool {
@@ -712,19 +772,29 @@ func waitForBlockValidationContext(ctx context.Context, call *blockValidationCon
 }
 
 func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {
-	// Epoch processing and fork upgrades only run at epoch boundaries, so advancing the
-	// parent state within its epoch cannot change anything read here; skip the costly copy.
-	// The epoch is taken from the header because fetching a non-head parent state replays it.
+	// Advancing the parent changes none of the values read here within an epoch. From Fulu on,
+	// crossing an epoch without a fork upgrade only shifts the proposer lookahead. The header is
+	// checked first because fetching a non-head parent state replays it.
 	epoch := slot / b.beaconCfg.SlotsPerEpoch
-	if parentHeader, ok := b.forkchoiceStore.GetHeader(parentRoot); ok && parentHeader.Slot/b.beaconCfg.SlotsPerEpoch == epoch {
+	if parentHeader, ok := b.forkchoiceStore.GetHeader(parentRoot); ok &&
+		b.parentStateReadableInPlace(parentHeader.Slot/b.beaconCfg.SlotsPerEpoch, epoch) {
 		var validationContext *blockValidationContext
 		if err := b.forkchoiceStore.ViewStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
-			if state.Epoch(parentState) != epoch {
+			if state.Epoch(parentState) == epoch {
+				var err error
+				validationContext, err = readBlockValidationContext(parentState, parentState.GetLatestExecutionPayloadBid(), slot)
+				return err
+			}
+			version := b.beaconCfg.GetCurrentStateVersion(epoch)
+			if parentState.Version() != version {
 				return nil
 			}
-			var err error
-			validationContext, err = readBlockValidationContext(parentState, parentState.GetLatestExecutionPayloadBid(), slot)
-			return err
+			expectedProposer, ok := parentState.ProposerIndexFromLookahead(slot)
+			if !ok {
+				return nil
+			}
+			validationContext = blockValidationContextFromState(parentState, parentState.GetLatestExecutionPayloadBid(), expectedProposer)
+			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("%w: view parent block state: %w", ErrIgnore, err)
 		}
@@ -733,7 +803,7 @@ func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slo
 		}
 	}
 
-	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(parentRoot, true)
+	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(parentRoot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: get parent block state: %w", ErrIgnore, err)
 	}
@@ -748,19 +818,34 @@ func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slo
 	return readBlockValidationContext(parentState, bid, slot)
 }
 
+func (b *blockService) parentStateReadableInPlace(parentEpoch, epoch uint64) bool {
+	if parentEpoch == epoch {
+		return true
+	}
+	version := b.beaconCfg.GetCurrentStateVersion(epoch)
+	return parentEpoch < epoch && epoch-parentEpoch <= b.beaconCfg.MinSeedLookahead &&
+		version >= clparams.FuluVersion && b.beaconCfg.GetCurrentStateVersion(parentEpoch) == version
+}
+
 // readBlockValidationContext reads the context from a state already in the epoch of slot.
 func readBlockValidationContext(s *state.CachingBeaconState, bid *cltypes.ExecutionPayloadBid, slot uint64) (*blockValidationContext, error) {
-	validationContext := &blockValidationContext{latestBlockHash: s.GetLatestBlockHash()}
-	if bid != nil {
-		validationContext.latestExecutionPayloadBidBlockHash = bid.BlockHash
-		validationContext.hasLatestExecutionPayloadBid = true
-	}
 	expectedProposer, err := s.GetBeaconProposerIndexForSlot(slot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: get expected proposer: %w", ErrIgnore, err)
 	}
-	validationContext.expectedProposer = expectedProposer
-	return validationContext, nil
+	return blockValidationContextFromState(s, bid, expectedProposer), nil
+}
+
+func blockValidationContextFromState(s *state.CachingBeaconState, bid *cltypes.ExecutionPayloadBid, expectedProposer uint64) *blockValidationContext {
+	validationContext := &blockValidationContext{
+		expectedProposer: expectedProposer,
+		latestBlockHash:  s.GetLatestBlockHash(),
+	}
+	if bid != nil {
+		validationContext.latestExecutionPayloadBidBlockHash = bid.BlockHash
+		validationContext.hasLatestExecutionPayloadBid = true
+	}
+	return validationContext
 }
 
 func (b *blockService) finishBlockValidationContext(key blockValidationContextKey, call *blockValidationContextCall, validationContext *blockValidationContext, err error) {
@@ -854,15 +939,15 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // ScheduleBlockForLaterProcessing schedules a block for later processing.
 func (b *blockService) ScheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	b.scheduleBlockForLaterProcessing(block, nil)
+	b.scheduleBlockForLaterProcessing(block, nil, true)
 }
 
 func (b *blockService) SchedulePublishedBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) PublishedBlockJob {
-	job, generation := b.scheduleBlockForLaterProcessing(block, store)
+	job, generation := b.scheduleBlockForLaterProcessing(block, store, true)
 	return &publishedBlockJobHandle{job: job, generation: generation}
 }
 
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) (*blockJob, uint64) {
+func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error, holdImport bool) (*blockJob, uint64) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -884,9 +969,19 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		job = newFailedBlockJob(block, store, ErrPublishedBlockJobStopped)
 		return job, job.storeGeneration
 	}
+	if holdImport {
+		job.finishPayloadImport = b.forkchoiceStore.BeginPayloadImport(block.Block.Slot)
+	}
+	retained := false
+	defer func() {
+		if !retained && job.finishPayloadImport != nil {
+			job.finishPayloadImport()
+		}
+	}()
 	for {
 		existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
 		if !loaded {
+			retained = true
 			return job, jobGeneration
 		}
 		existing, generation := b.reuseScheduledBlockJob(blockRoot, existingValue.(*blockJob), job, store)
@@ -902,6 +997,10 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	current, ok := b.blocksScheduledForLaterExecution.Load(key)
 	if !ok || current != existing {
 		return nil, 0
+	}
+	if existing.finishPayloadImport == nil && job.finishPayloadImport != nil {
+		existing.finishPayloadImport = job.finishPayloadImport
+		job.finishPayloadImport = nil
 	}
 	if store == nil {
 		return existing, existing.storeGeneration
@@ -925,6 +1024,8 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	finishImport := b.forkchoiceStore.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -980,13 +1081,6 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 		}
 	}()
 	start := time.Now()
-	block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-		if err := b.forkchoiceStore.OnAttestation(a, true, false); err != nil {
-			log.Debug("bad attestation received", "err", err)
-		}
-
-		return true
-	})
 	block.Block.Body.AttesterSlashings.Range(func(idx int, a *cltypes.AttesterSlashing, total int) bool {
 		if err := b.forkchoiceStore.OnAttesterSlashing(a, false); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
 			log.Debug("bad attester slashing received", "err", err)
@@ -1041,7 +1135,7 @@ func (b *blockService) stopPublishedBlockJobs() {
 				job.terminal = true
 				close(job.attempt.done)
 			}
-			b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+			b.removeScheduledBlock(key.([32]byte), job)
 		}
 		job.mu.Unlock()
 		return true
@@ -1063,7 +1157,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 			job.terminal = true
 			close(job.attempt.done)
 		}
-		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		b.removeScheduledBlock(key, job)
 		job.mu.Unlock()
 		return
 	}
@@ -1075,9 +1169,34 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	store := job.store
 	generation := job.storeGeneration
 	attempt := job.attempt
+	needsImportClaim := job.finishPayloadImport == nil
 	job.mu.Unlock()
+	authenticated := false
 	if store == nil {
-		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
+		store = func(ctx context.Context) error {
+			if needsImportClaim {
+				block := job.block.Block
+				parentHeader, ok := b.forkchoiceStore.GetHeader(block.ParentRoot)
+				if !ok {
+					return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, block.ParentRoot)
+				}
+				if parentHeader.Slot >= block.Slot {
+					return fmt.Errorf("%w: %w", forkchoice.ErrBlockInvalid, ErrBlockYoungerThanParent)
+				}
+				validationContext, err := b.blockValidationContext(ctx, block.ParentRoot, block.Slot)
+				if err != nil {
+					return err
+				}
+				if block.ProposerIndex != validationContext.expectedProposer {
+					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
+				}
+				authenticated = true
+				if job.elColumnsStarted.CompareAndSwap(false, true) {
+					b.startELColumnsImport(ctx, job.block)
+				}
+			}
+			return b.processAndStoreBlock(ctx, job.block)
+		}
 	}
 	err := store(ctx)
 	job.logStorageErrorOnce(err)
@@ -1103,6 +1222,12 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.retryAfter = time.Now().Add(job.retryDelay)
 	}
 	terminal := latest && (err == nil || errors.Is(err, forkchoice.ErrBlockInvalid))
+	if !terminal && authenticated && shouldRetainBlockImportClaim(err) && job.finishPayloadImport == nil {
+		current, ok := b.blocksScheduledForLaterExecution.Load(key)
+		if ok && current == job {
+			job.finishPayloadImport = b.forkchoiceStore.BeginPayloadImport(job.block.Block.Slot)
+		}
+	}
 	if terminal {
 		job.completedGeneration = generation
 		job.terminal = true
@@ -1110,11 +1235,17 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.attempt = &blockJobAttempt{done: make(chan struct{})}
 	}
 	if terminal {
-		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		b.removeScheduledBlock(key, job)
 	}
 	job.mu.Unlock()
 	if err != nil {
 		log.Trace("Failed to process and store block", "block", job.block, "error", err)
 		return
+	}
+}
+
+func (b *blockService) removeScheduledBlock(key [32]byte, job *blockJob) {
+	if b.blocksScheduledForLaterExecution.CompareAndDelete(key, job) && job.finishPayloadImport != nil {
+		job.finishPayloadImport()
 	}
 }

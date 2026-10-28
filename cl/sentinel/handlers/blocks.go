@@ -17,11 +17,14 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -61,6 +64,9 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	for slot := req.StartSlot; slot < endSlot && written < MaxRequestsBlocks; slot++ {
 		block, err := c.beaconDB.ReadBlockBySlot(c.ctx, tx, slot)
 		if err != nil {
+			if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+				break
+			}
 			return err
 		}
 		if block == nil {
@@ -123,6 +129,9 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	var block *cltypes.SignedBeaconBlock
 	req.Range(func(index int, blockRoot common.Hash, length int) bool {
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+			block, err = nil, nil
+		}
 		if err != nil {
 			return false
 		}

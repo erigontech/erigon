@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -198,6 +200,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
 			require.Equal(t, receivedReceipt.GasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
 			require.Zero(t, received.GasRefund)
+			require.False(t, ibs.AccessedAddr(recipient), "tracing does not build a block access list")
 		})
 	}
 }
@@ -245,4 +248,124 @@ func TestAssembleTracerAcceptsNonNegativeLimit(t *testing.T) {
 func TestAssembleTracerIgnoresLimitForNamedTracer(t *testing.T) {
 	callTracer := "callTracer"
 	require.NoError(t, assembleWithLogConfig(t, &logger.LogConfig{Limit: -1}, &callTracer))
+}
+
+// On the versioned path the next transaction index of the same state reads the finalized
+// writes, and the log index keeps counting across transactions.
+func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0201"))
+	key := accounts.InternKey(common.HexToHash("0x11"))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoConflictDetection()
+	ibs.SetTxContext(0, 0)
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{}))
+
+	ibs.SetTxContext(0, 1)
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), got)
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	require.Equal(t, hexutil.Uint(1), ibs.Logs()[1].Index)
+}
+
+type emptyAccountReader struct {
+	*state.NoopReader
+	addr accounts.Address
+}
+
+func (r emptyAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr == r.addr {
+		acc := accounts.NewAccount()
+		return &acc, nil
+	}
+	return nil, nil
+}
+
+// An existing account a transaction touches and leaves empty is gone for the next transaction
+// of the same request (EIP-161), as with FinalizeTx on the materializing path.
+func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0202"))
+	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoConflictDetection()
+	ibs.SetTxContext(1, 0)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
+
+	ibs.SetTxContext(1, 1)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// An account deleted under EIP-161 by one transaction, recreated empty by the next (a zero-value
+// call to a precompile) and deleted again, stays gone for the transaction after that.
+func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0203"))
+	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoConflictDetection()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
+
+	ibs.SetTxContext(1, 1)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, ibs.CreateAccount(addr, false))
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
+
+	ibs.SetTxContext(1, 2)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func BenchmarkTraceTxAccountReads(b *testing.B) {
+	for _, count := range []int{1, 100, 1000} {
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			sender := accounts.InternAddress(common.HexToAddress("0x1111"))
+			recipient := accounts.InternAddress(common.HexToAddress("0x2222"))
+			code := make([]byte, 0, count*5+1)
+			for i := range count {
+				code = append(code, byte(vm.PUSH2), byte((i+0x3000)>>8), byte(i+0x3000), byte(vm.BALANCE), byte(vm.POP))
+			}
+			code = append(code, byte(vm.STOP))
+			ibs := state.NewPooled(state.NewNoopReader())
+			defer state.ReleasePooled(ibs)
+			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), 10_000_000,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
+			txn := types.NewTransaction(0, recipient.Value(), uint256.NewInt(0), 10_000_000, uint256.NewInt(0), nil)
+			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000}
+			name := "callTracer"
+			config := &tracersConfig.TraceConfig{Tracer: &name}
+			b.ReportAllocs()
+			for b.Loop() {
+				ibs.Reset()
+				VersionedCallState(ibs)
+				if err := ibs.SetCode(recipient, code, tracing.CodeChangeUnspecified); err != nil {
+					b.Fatal(err)
+				}
+				_, err := TraceTx(b.Context(), nil, txn, msg, blockCtx, protocol.NewEVMTxContext(msg),
+					uint256.NewInt(0), common.Hash{}, 0, ibs, config, chain.TestChainOsakaConfig,
+					jsonstream.New(io.Discard), time.Minute, nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

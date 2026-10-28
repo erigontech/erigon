@@ -114,6 +114,8 @@ func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http
 	// allow localhost if no allowedOrigins are specified.
 	if len(origins.ToSlice()) == 0 {
 		origins.Add("http://localhost")
+		origins.Add("http://127.0.0.1")
+		origins.Add("http://[::1]")
 		if hostname, err := os.Hostname(); err == nil {
 			origins.Add("http://" + hostname)
 		}
@@ -158,8 +160,7 @@ func (e wsHandshakeError) Unwrap() error {
 }
 
 func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, logger log.Logger) bool {
-	it := allowedOrigins.Iterator()
-	for origin := range it.C {
+	for _, origin := range allowedOrigins.ToSlice() {
 		if ruleAllowsOrigin(origin, browserOrigin, logger) {
 			return true
 		}
@@ -230,7 +231,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 	if err != nil {
 		return nil, err
 	}
-	return newClient(ctx, cfg, connect, logger)
+	return newClient(ctx, connect, logger)
 }
 
 func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, error) {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
@@ -51,11 +53,11 @@ type panickingPayloadAttestationForkchoice struct {
 	forkchoice.ForkChoiceStorage
 }
 
-func (*panickingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (*panickingPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, forkchoice.PayloadAttestationSignatureVerifier) error {
 	panic("validation panic")
 }
 
-func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ bool) error {
+func (f *blockingPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ forkchoice.PayloadAttestationSignatureVerifier) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -80,13 +82,44 @@ type retryPayloadAttestationForkchoice struct {
 	releaseFirst chan struct{}
 }
 
+type signatureVerifierPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	verifiers   chan forkchoice.PayloadAttestationSignatureVerifier
+	signature   []byte
+	signingRoot []byte
+	publicKey   []byte
+}
+
+func (f *signatureVerifierPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(
+	ctx context.Context,
+	_ *cltypes.PayloadAttestationMessage,
+	verifySignature forkchoice.PayloadAttestationSignatureVerifier,
+) error {
+	f.verifiers <- verifySignature
+	if verifySignature == nil {
+		return nil
+	}
+	return verifySignature(ctx, f.signature, f.signingRoot, f.publicKey)
+}
+
+func receivePayloadAttestationVerifier(t *testing.T, verifiers <-chan forkchoice.PayloadAttestationSignatureVerifier) forkchoice.PayloadAttestationSignatureVerifier {
+	t.Helper()
+	select {
+	case verifier := <-verifiers:
+		return verifier
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for signature verifier")
+		return nil
+	}
+}
+
 type retryablePayloadAttestationForkchoice struct {
 	forkchoice.ForkChoiceStorage
 	first error
 	calls atomic.Int32
 }
 
-func (f *retryablePayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryablePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, forkchoice.PayloadAttestationSignatureVerifier) error {
 	if f.calls.Add(1) == 1 {
 		return f.first
 	}
@@ -99,7 +132,7 @@ type candidatePayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
-func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, _ bool) error {
+func (f *candidatePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, _ forkchoice.PayloadAttestationSignatureVerifier) error {
 	candidate := msg.Signature[0]
 	f.started <- candidate
 	<-f.release
@@ -109,7 +142,7 @@ func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ co
 	return nil
 }
 
-func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, forkchoice.PayloadAttestationSignatureVerifier) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -145,6 +178,253 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 	service.pending.stopAndWait()
 
 	return service, forkchoiceMock, ethClockMock
+}
+
+func TestPayloadAttestationServiceSelectsSignatureVerifierByIngress(t *testing.T) {
+	saveSignatureGlobals(t)
+	var batchCalls atomic.Int32
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		batchCalls.Add(1)
+		return true, nil
+	}
+
+	setup := func(t *testing.T) (*payloadAttestationService, *signatureVerifierPayloadAttestationForkchoice, *cltypes.PayloadAttestationMessage, common.Hash) {
+		ctrl := gomock.NewController(t)
+		service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+		root := common.HexToHash("0x1234")
+		msg := newTestPayloadAttestationMessage(100, 42, root)
+		fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+		forkchoiceStore := &signatureVerifierPayloadAttestationForkchoice{
+			ForkChoiceStorage: fcu,
+			verifiers:         make(chan forkchoice.PayloadAttestationSignatureVerifier, 1),
+			signature:         []byte{1},
+			signingRoot:       []byte{2},
+			publicKey:         []byte{3},
+		}
+		service.forkchoiceStore = forkchoiceStore
+		batchVerifier := NewBatchSignatureVerifier(t.Context(), nil)
+		batchVerifier.Start()
+		service.batchSignatureVerifier = batchVerifier
+		return service, forkchoiceStore, msg, root
+	}
+	t.Run("gossip", func(t *testing.T) {
+		service, forkchoiceStore, msg, _ := setup(t)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, service.ProcessMessage(ctx, nil, msg))
+		require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		require.Equal(t, int32(1), batchCalls.Load())
+	})
+
+	t.Run("REST", func(t *testing.T) {
+		batchCalls.Store(0)
+		service, forkchoiceStore, msg, _ := setup(t)
+		require.NoError(t, service.ProcessRESTMessage(t.Context(), msg, func() error { return nil }))
+		require.Nil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		require.Zero(t, batchCalls.Load())
+	})
+
+	t.Run("pending", func(t *testing.T) {
+		batchCalls.Store(0)
+		service, forkchoiceStore, msg, root := setup(t)
+		require.Equal(t, pendingJobRemove, service.tryProcessPendingAttestation(t.Context(), pendingPayloadAttestationKey{blockRoot: root}, msg))
+		require.Nil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		require.Zero(t, batchCalls.Load())
+	})
+}
+
+func TestPayloadAttestationServiceBatchSignatureOutcomes(t *testing.T) {
+	key, err := bls.GenerateKey()
+	require.NoError(t, err)
+	signingRoot := make([]byte, 32)
+	otherRoot := make([]byte, 32)
+	signingRoot[0], otherRoot[0] = 1, 2
+	publicKey := bls.CompressPublicKey(key.PublicKey())
+	validSignature := key.Sign(signingRoot).Bytes()
+	invalidSignature := key.Sign(otherRoot).Bytes()
+
+	setup := func(t *testing.T, signature []byte, startVerifier bool) (*payloadAttestationService, *cltypes.PayloadAttestationMessage, *BatchSignatureVerifier, *signatureVerifierPayloadAttestationForkchoice) {
+		ctrl := gomock.NewController(t)
+		service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+		blockRoot := common.HexToHash("0x1234")
+		msg := newTestPayloadAttestationMessage(100, 42, blockRoot)
+		fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+		forkchoiceStore := &signatureVerifierPayloadAttestationForkchoice{
+			ForkChoiceStorage: fcu,
+			verifiers:         make(chan forkchoice.PayloadAttestationSignatureVerifier, 1),
+			signature:         signature,
+			signingRoot:       signingRoot,
+			publicKey:         publicKey,
+		}
+		service.forkchoiceStore = forkchoiceStore
+		banStarted := make(chan struct{})
+		releaseBan := make(chan struct{})
+		t.Cleanup(func() { close(releaseBan) })
+		batchVerifier := NewBatchSignatureVerifier(t.Context(), &blockingBanSentinel{
+			started: banStarted,
+			release: releaseBan,
+		})
+		if startVerifier {
+			batchVerifier.Start()
+		}
+		service.batchSignatureVerifier = batchVerifier
+		return service, msg, batchVerifier, forkchoiceStore
+	}
+
+	t.Run("invalid gossip is rejected", func(t *testing.T) {
+		service, msg, _, _ := setup(t, invalidSignature, true)
+		err := service.ProcessMessage(t.Context(), nil, msg)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrIgnore)
+		require.NotContains(t, strings.ToLower(err.Error()), "ignore")
+	})
+
+	t.Run("valid gossip is accepted", func(t *testing.T) {
+		service, msg, _, _ := setup(t, validSignature, true)
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, msg))
+	})
+
+	t.Run("invalid batch enables immediate verification for its slot only", func(t *testing.T) {
+		service, msg, _, forkchoiceStore := setup(t, invalidSignature, true)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		err := service.ProcessMessage(ctx, nil, msg)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrIgnore)
+		require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+
+		batchVerifier := NewBatchSignatureVerifier(t.Context(), nil)
+		service.batchSignatureVerifier = batchVerifier
+		sameSlot := newTestPayloadAttestationMessage(msg.Data.Slot, msg.ValidatorIndex+1, msg.Data.BeaconBlockRoot)
+		require.NoError(t, service.validatePayloadAttestation(ctx, sameSlot, true))
+		require.Nil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		require.Empty(t, batchVerifier.payloadAttestationVerify)
+
+		nextSlotCtx, nextSlotCancel := context.WithCancel(ctx)
+		nextSlot := newTestPayloadAttestationMessage(msg.Data.Slot+1, msg.ValidatorIndex+2, msg.Data.BeaconBlockRoot)
+		nextSlotResult := make(chan error, 1)
+		go func() {
+			nextSlotResult <- service.validatePayloadAttestation(nextSlotCtx, nextSlot, true)
+		}()
+		require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		waitForQueuedVerification(t, batchVerifier.payloadAttestationVerify, 1)
+		nextSlotCancel()
+		select {
+		case err := <-nextSlotResult:
+			require.ErrorIs(t, err, ErrIgnore)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for next-slot validation")
+		}
+	})
+
+	t.Run("raw fallback error enables immediate verification", func(t *testing.T) {
+		saveSignatureGlobals(t)
+		rawErr := errors.New("malformed signature")
+		blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return false, rawErr }
+		service, msg, _, forkchoiceStore := setup(t, validSignature, true)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		err := service.ProcessMessage(ctx, nil, msg)
+		require.ErrorIs(t, err, rawErr)
+		require.NotErrorIs(t, err, ErrIgnore)
+		require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		next := newTestPayloadAttestationMessage(msg.Data.Slot, msg.ValidatorIndex+1, msg.Data.BeaconBlockRoot)
+		require.NoError(t, service.validatePayloadAttestation(ctx, next, true))
+		require.Nil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+	})
+
+	t.Run("older invalid result does not replace newer fallback slot", func(t *testing.T) {
+		service, msg, batchVerifier, forkchoiceStore := setup(t, invalidSignature, false)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		startVerification := func(msg *cltypes.PayloadAttestationMessage) chan error {
+			result := make(chan error, 1)
+			go func() {
+				result <- service.validatePayloadAttestation(ctx, msg, true)
+			}()
+			require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+			waitForQueuedVerification(t, batchVerifier.payloadAttestationVerify, 1)
+			return result
+		}
+		takeQueuedVerification := func() *AggregateVerificationData {
+			select {
+			case queued := <-batchVerifier.payloadAttestationVerify:
+				return queued
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting to drain payload attestation verification")
+				return nil
+			}
+		}
+		completeInvalidVerification := func(queued *AggregateVerificationData, result <-chan error) {
+			callbacks, err := batchVerifier.processSignatureVerification([]*AggregateVerificationData{queued})
+			require.ErrorIs(t, err, ErrInvalidBlsSignature)
+			require.Empty(t, callbacks)
+			select {
+			case err := <-result:
+				require.Error(t, err)
+				require.NotErrorIs(t, err, ErrIgnore)
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for invalid payload attestation result")
+			}
+		}
+
+		older := newTestPayloadAttestationMessage(msg.Data.Slot, msg.ValidatorIndex+1, msg.Data.BeaconBlockRoot)
+		olderResult := startVerification(older)
+		olderVerification := takeQueuedVerification()
+		newer := newTestPayloadAttestationMessage(msg.Data.Slot+1, msg.ValidatorIndex, msg.Data.BeaconBlockRoot)
+		newerResult := startVerification(newer)
+		newerVerification := takeQueuedVerification()
+		completeInvalidVerification(newerVerification, newerResult)
+		completeInvalidVerification(olderVerification, olderResult)
+
+		latest := newTestPayloadAttestationMessage(newer.Data.Slot, msg.ValidatorIndex+2, msg.Data.BeaconBlockRoot)
+		require.NoError(t, service.validatePayloadAttestation(ctx, latest, true))
+		require.Nil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+	})
+
+	t.Run("cancellation is retryable ignore", func(t *testing.T) {
+		service, msg, batchVerifier, forkchoiceStore := setup(t, invalidSignature, false)
+		ctx, cancel := context.WithCancel(t.Context())
+		result := make(chan error, 1)
+		go func() {
+			result <- service.validatePayloadAttestation(ctx, msg, true)
+		}()
+		waitForQueuedVerification(t, batchVerifier.payloadAttestationVerify, 1)
+		cancel()
+		var err error
+		select {
+		case err = <-result:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for canceled payload attestation validation")
+		}
+		require.ErrorIs(t, err, ErrIgnore)
+		require.ErrorIs(t, err, ErrAttestationRetryable)
+
+		queued := <-batchVerifier.payloadAttestationVerify
+		<-queued.waiterDone
+		callbacks, err := batchVerifier.processSignatureVerification([]*AggregateVerificationData{queued})
+		require.ErrorIs(t, err, ErrInvalidBlsSignature)
+		require.Empty(t, callbacks)
+		require.Empty(t, batchVerifier.peerBanQueue)
+		require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+
+		nextCtx, nextCancel := context.WithCancel(t.Context())
+		defer nextCancel()
+		next := newTestPayloadAttestationMessage(msg.Data.Slot, msg.ValidatorIndex+1, msg.Data.BeaconBlockRoot)
+		nextResult := make(chan error, 1)
+		go func() {
+			nextResult <- service.validatePayloadAttestation(nextCtx, next, true)
+		}()
+		require.NotNil(t, receivePayloadAttestationVerifier(t, forkchoiceStore.verifiers))
+		waitForQueuedVerification(t, batchVerifier.payloadAttestationVerify, 1)
+		nextCancel()
+		select {
+		case err := <-nextResult:
+			require.ErrorIs(t, err, ErrIgnore)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for validation after cancellation")
+		}
+	})
 }
 
 func TestPayloadAttestationServiceBoundsKnownBlockValidation(t *testing.T) {
@@ -749,7 +1029,7 @@ type coordinatedPayloadAttestationForkchoice struct {
 	firstErr     error
 }
 
-func (f *coordinatedPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *coordinatedPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, forkchoice.PayloadAttestationSignatureVerifier) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -758,7 +1038,7 @@ func (f *coordinatedPayloadAttestationForkchoice) OnPayloadAttestationMessage(co
 	return nil
 }
 
-func (f *consumeOncePayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *consumeOncePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, forkchoice.PayloadAttestationSignatureVerifier) error {
 	if f.calls.Add(1) == 1 {
 		return nil
 	}
@@ -1087,6 +1367,61 @@ func TestPayloadAttestationServiceRetainsPendingRetryableValidation(t *testing.T
 			require.Zero(t, service.pending.count.Load())
 		})
 	}
+}
+
+type notCurrentSlotPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+}
+
+func (notCurrentSlotPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, forkchoice.PayloadAttestationSignatureVerifier) error {
+	return forkchoice.ErrPayloadAttestationNotCurrentSlot
+}
+
+func TestPayloadAttestationServiceAcceptsGossipNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, msg))
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+	_, pooled := service.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: 100, ValidatorIndex: 42})
+	require.True(t, pooled)
+}
+
+func TestPayloadAttestationServicePublishesRESTMessageNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	published := false
+
+	require.NoError(t, service.ProcessRESTMessage(t.Context(), msg, func() error {
+		published = true
+		return nil
+	}))
+
+	require.True(t, published)
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+}
+
+func TestPayloadAttestationServiceCompletesPendingMessageNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	require.NoError(t, service.queuePendingAttestation(root, msg))
+
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
 }
 
 func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
