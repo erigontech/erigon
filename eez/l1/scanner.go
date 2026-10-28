@@ -90,13 +90,14 @@ var RegistryTopics = [][]common.Hash{{
 // Scan returns the batches of [from, to] that settled something for the
 // rollup, in L1 order, and the last block it read. That block is below to
 // when the source refused the range and the scanner narrowed it; the caller
-// continues from the block after it.
+// continues from the block after it. Later calls keep the narrowed width.
 func (s *Scanner) Scan(ctx context.Context, from, to uint64) ([]ScannedBatch, uint64, error) {
 	hi := min(to, from+s.chunk-1)
 	for {
 		batches, err := s.scanRange(ctx, from, hi)
 		if errors.Is(err, ErrRangeTooWide) && hi > from {
 			hi = from + (hi-from)/2
+			s.chunk = hi - from + 1
 			continue
 		}
 		return batches, hi, err
