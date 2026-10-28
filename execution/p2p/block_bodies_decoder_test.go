@@ -69,6 +69,39 @@ func TestDecodeBlockBodiesResponseRejectsMismatchBeforeTransactionDecode(t *test
 	require.Nil(t, decoded)
 }
 
+func TestDecodeBlockBodiesResponseRejectsWithdrawalPresenceMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		expected []*types.Withdrawal
+		actual   []*types.Withdrawal
+	}{
+		{name: "unexpected", actual: []*types.Withdrawal{}},
+		{name: "missing", expected: []*types.Withdrawal{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := newMockHeaderForBody(1, &types.Body{Withdrawals: test.expected})
+			encoded, err := rlp.EncodeToBytes(&types.Body{Withdrawals: test.actual})
+			require.NoError(t, err)
+
+			decoded, err := decodeBlockBodiesResponse(encoded, []*types.Header{header})
+			require.ErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+			require.False(t, rlp.IsInvalidRLPError(err))
+			require.Nil(t, decoded)
+		})
+	}
+}
+
+func TestDecodeBlockBodiesResponseRejectsTrailingFieldBeforeMismatch(t *testing.T) {
+	header := newMockHeaderForBody(1, &types.Body{})
+	header.TxHash = common.Hash{1}
+	body := rlpTestList(bytes.Repeat([]byte{rlp.EmptyListCode}, 4))
+
+	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
+	require.ErrorIs(t, err, rlp.ErrMoreThanOneValue)
+	require.NotErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+	require.Nil(t, decoded)
+}
+
 func TestDecodeBlockBodiesResponseRejectsTransactionAmplification(t *testing.T) {
 	const transactionCount = 4096
 

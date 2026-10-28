@@ -100,66 +100,44 @@ func deriveShaRawValues(encoded []byte, unwrapStringValues bool) (common.Hash, e
 		return empty.RootHash, nil
 	}
 
-	builder := newRawDeriveShaBuilder(firstDerivationIndex(count))
-	indexAfterZero := nextDerivationIndex(0, count)
-
 	// Raw values arrive in numeric order. Hold index 0 so the builder receives
 	// RLP-encoded keys in lexicographic order: 1 through 127, then 0, then 128 onward.
-	var zeroValue []byte
-	for i := 0; len(encoded) > 0; i++ {
-		kind, content, rest, err := rlp.Split(encoded)
+	zeroValue := encoded
+	_, _, encoded, err = rlp.Split(encoded)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	zeroValue = zeroValue[:len(zeroValue)-len(encoded)]
+
+	builder := newRawDeriveShaBuilder(adjustIndex(0, count))
+	for position := range count {
+		index := adjustIndex(position, count)
+		input := encoded
+		if index == 0 {
+			input = zeroValue
+		}
+		kind, content, rest, err := rlp.Split(input)
 		if err != nil {
 			return common.Hash{}, err
 		}
-		value := encoded[:len(encoded)-len(rest)]
+		value := input[:len(input)-len(rest)]
 		if unwrapStringValues && kind != rlp.List {
 			// Typed transactions are RLP strings in block bodies, but their trie
 			// values exclude the string wrapper. Legacy transactions remain lists.
 			value = content
 		}
 
-		if i == 0 {
-			zeroValue = value
-		} else {
-			if i == indexAfterZero {
-				builder.addValue(zeroValue, indexAfterZero)
-			}
-			builder.addValue(value, nextDerivationIndex(i, count))
+		if index != 0 {
+			encoded = rest
 		}
-		encoded = rest
-	}
-	if indexAfterZero < 0 {
-		builder.addValue(zeroValue, indexAfterZero)
+		nextIndex := -1
+		if position+1 < count {
+			nextIndex = adjustIndex(position+1, count)
+		}
+		builder.addValue(value, nextIndex)
 	}
 
 	return builder.root(), nil
-}
-
-// RLP-encoded trie indices sort as 1 through 127, then 0, then 128 and above.
-func firstDerivationIndex(count int) int {
-	if count <= 0 {
-		return -1
-	}
-	if count == 1 {
-		return 0
-	}
-	return 1
-}
-
-func nextDerivationIndex(index, count int) int {
-	switch {
-	case index == 0 && count > 128:
-		return 128
-	case index == 0:
-		return -1
-	case index < 127 && index < count-1:
-		return index + 1
-	case index <= 127:
-		return 0
-	case index < count-1:
-		return index + 1
-	}
-	return -1
 }
 
 type rawDeriveShaBuilder struct {

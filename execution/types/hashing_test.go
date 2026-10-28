@@ -80,10 +80,17 @@ func TestDeriveShaRawTransactions(t *testing.T) {
 	for _, count := range []uint64{0, 1, 2, 127, 128, 129, 255, 256, 257, 1000} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			transactions := genTransactions(count)
-			if count == 2 {
-				transactions[1] = NewEIP1559Transaction(
+			var typedIndices []int
+			switch count {
+			case 2:
+				typedIndices = []int{1}
+			case 129:
+				typedIndices = []int{0, 128}
+			}
+			for _, index := range typedIndices {
+				transactions[index] = NewEIP1559Transaction(
 					*uint256.NewInt(1),
-					1,
+					uint64(index),
 					common.Address{1},
 					uint256.NewInt(2),
 					21_000,
