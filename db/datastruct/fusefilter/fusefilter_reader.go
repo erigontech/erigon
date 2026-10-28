@@ -226,6 +226,7 @@ func (r *Reader) probe(v uint64, pr *mmap.Probe) {
 		}
 	}
 }
+
 func (r *Reader) Close() {
 	if r == nil {
 		return

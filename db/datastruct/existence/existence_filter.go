@@ -19,11 +19,12 @@ package existence
 import (
 	"bufio"
 	"fmt"
-	"github.com/erigontech/erigon/common/mmap"
 	"hash"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/erigontech/erigon/common/mmap"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 

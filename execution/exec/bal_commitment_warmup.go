@@ -332,7 +332,8 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
 func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	started := time.Now()
-	var accs, slots [][]byte
+	accs := make([][]byte, 0, len(bal))
+	var slots [][]byte
 	for i := range bal {
 		addr := bal[i].Address
 		accs = append(accs, bytes.Clone(addr[:]))
