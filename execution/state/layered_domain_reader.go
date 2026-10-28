@@ -22,27 +22,18 @@ type LayeredDomainReader struct {
 	sd         execctx.DomainReader
 	roTx       kv.TemporalTx
 	prevBlocks *PrevBlockList
-	cached     func(domain kv.Domain, key []byte) ([]byte, uint64, bool)
 }
 
 // NewLayeredDomainReader composes the window + sd + files. A nil prevBlocks
 // layers nothing, giving the plain sd+files path.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
-	return newLayeredDomainReader(sd, roTx, prevBlocks)
-}
-
-func newLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
-	l := &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
-	if c, ok := sd.(cachedCommittedReader); ok && roTx != nil {
-		l.cached = c.CachedCommittedReader(roTx)
-	}
-	return l
+	return &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
 }
 
 // CloneWithTx returns a copy bound to tx — each concurrent user carries its own
 // files-fallback tx rather than sharing the base reader's.
 func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader {
-	return newLayeredDomainReader(l.sd, tx, l.prevBlocks)
+	return &LayeredDomainReader{sd: l.sd, roTx: tx, prevBlocks: l.prevBlocks}
 }
 
 // baseGetAsOf reads sd.mem, then the shared state cache, then the domain files — the
@@ -58,8 +49,8 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 	if l.roTx == nil {
 		return nil, false, nil
 	}
-	if l.cached != nil && name != kv.CommitmentDomain {
-		if v, txNum, hit := l.cached(name, k); hit && txNum < ts {
+	if c, isCached := l.sd.(cachedCommittedReader); isCached && name != kv.CommitmentDomain {
+		if v, txNum, hit := c.CachedCommitted(name, l.roTx, k); hit && txNum < ts {
 			return v, len(v) > 0, nil
 		}
 	}
@@ -67,7 +58,7 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 }
 
 type cachedCommittedReader interface {
-	CachedCommittedReader(tx kv.TemporalTx) func(domain kv.Domain, key []byte) ([]byte, uint64, bool)
+	CachedCommitted(domain kv.Domain, tx kv.TemporalTx, key []byte) ([]byte, uint64, bool)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
