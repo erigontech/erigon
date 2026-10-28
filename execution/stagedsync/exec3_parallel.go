@@ -157,6 +157,31 @@ type parallelExecutor struct {
 	currentChangeSetHash common.Hash
 }
 
+// blockVMBuilder builds and registers a block's version map.
+type blockVMBuilder interface {
+	buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) *state.VersionMap
+}
+
+// buildBlockVersionMap builds the block's version map, seeds its EIP-161 removals,
+// and registers it in the prev-block chain at construction — before the block
+// executes — so a later block's seed resolves accounts created by earlier
+// dispatched-but-unsealed blocks. Safe because exec is block-ordered: a worker
+// reads only blocks before its own, already sealed; only the seed reads an
+// unsealed earlier block, through the version map's own locking.
+func (pe *parallelExecutor) buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) *state.VersionMap {
+	vm := state.NewVersionMap(bal)
+	vm.SetBaseTxNum(firstTxNum)
+	if len(bal) > 0 {
+		base := state.PrevBlockBase(committedBase, pe.prevBlocks, blockNum)
+		vm.SeedEmptyRemovals(bal,
+			blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(blockNum),
+			pe.cfg.chainConfig.Aura != nil,
+			base)
+	}
+	pe.prevBlocks.PushHead(blockNum, lastTxNum, vm)
+	return vm
+}
+
 // stopKind classifies why the executor was asked to stop. It maps directly
 // to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
 type stopKind uint8
@@ -366,6 +391,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
 	pe.prevBlocks = state.NewPrevBlockList()
+	pe.vmBuilder = pe
 
 	// Register the fan-out consumers and maxBlockNum BEFORE run() starts the execLoop
 	// goroutine: execLoop's exit path (closeApplyChannels) reads pe.consumers, so
@@ -3910,10 +3936,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Block fully finalized: every tx sealed, block-end writes in the versionMap.
-		// Publish it as an overlay so the next block reads its writes before apply
-		// drains them to sd.mem; dropped on commit.
-		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
+		// The version map is registered in the prev-block chain at construction
+		// (buildBlockVersionMap), not here; the apply loop drops it on commit.
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,

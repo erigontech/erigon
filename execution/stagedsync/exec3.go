@@ -487,7 +487,11 @@ type txExecutor struct {
 	progress         *Progress
 	taskExecMetrics  *exec.WorkerMetrics
 	blockExecMetrics *blockExecMetrics
-	hooks            *tracing.Hooks
+
+	// vmBuilder builds and registers each block's version map; set by the
+	// parallel executor before dispatch.
+	vmBuilder blockVMBuilder
+	hooks     *tracing.Hooks
 
 	// blockSrc, when non-nil, overrides the default DB-backed block source —
 	// e.g. an ephemeral single-block source with no DB behind it.
@@ -805,22 +809,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, te.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
-			// The block's version map is constructed once here and shared by both
-			// consumers that run in parallel: the executor populates it, the commitment
-			// calculator reads it post-seal via GetAccount. Seeding it from the BAL here
-			// also lets the calculator's reads see the BAL without a second derivation.
-			blockVersionMap := state.NewVersionMap(dbBAL)
-			blockVersionMap.SetBaseTxNum(blockStartTxNum)
-			// Stamp the EIP-161 empty-account removals into the seed as data (the BAL
-			// carries no removal field), so the calculator reads the deletion via
-			// GetAccount with no EIP knowledge. Blocks are sequential, so the shared
-			// domain already holds the prior block's state as the base for untouched fields.
-			if len(dbBAL) > 0 {
-				blockVersionMap.SeedEmptyRemovals(dbBAL,
-					b.NumberU64() != 0 && te.cfg.chainConfig.IsEIP161Enabled(b.NumberU64()),
-					te.cfg.chainConfig.Aura != nil,
-					state.NewReaderV3(te.doms.AsGetter(execRoTx)))
-			}
+			// Built and registered via the executor's factory (buildBlockVersionMap);
+			// committedBase is the chain tail for untouched fields.
+			committedBase := state.NewReaderV3(te.doms.AsGetter(execRoTx))
+			blockVersionMap := te.vmBuilder.buildBlockVersionMap(b.NumberU64(), blockStartTxNum, inputTxNum-1, dbBAL, committedBase)
 
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
