@@ -80,6 +80,8 @@ func TestRPCErrorMapping(t *testing.T) {
 	}{
 		{"query returned more than 10000 results", l1.ErrRangeTooWide},
 		{"Log response size exceeded. You can make eth_getLogs requests with up to a 2K block range", l1.ErrRangeTooWide},
+		{"query block range exceeds server limit, narrow your filter: 1000", l1.ErrRangeTooWide},
+		{"query returns too many logs, narrow your filter: 20000", l1.ErrRangeTooWide},
 		{"finalized block not found", l1.ErrNotFound},
 		{"unknown block", l1.ErrNotFound},
 	} {

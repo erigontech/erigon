@@ -168,6 +168,7 @@ var rangeTooWide = []string{
 	"block range too large",
 	"too many results",
 	"exceed maximum block range",
+	"narrow your filter",
 }
 
 var notFound = []string{"not found", "unknown block", "finalized block"}
