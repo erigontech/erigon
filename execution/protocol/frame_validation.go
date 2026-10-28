@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -93,9 +95,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 		return nil, err
 	}
 	validation.Dependencies = make([]common.Address, 0, len(validation.dependencies))
-	for address := range validation.dependencies {
-		validation.Dependencies = append(validation.Dependencies, address)
-	}
+	validation.Dependencies = slices.AppendSeq(validation.Dependencies, maps.Keys(validation.dependencies))
 	return &validation.FrameValidation, nil
 }
 
