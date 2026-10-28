@@ -139,6 +139,48 @@ func TestValidateBackfilledGloasEnvelopeSignature(t *testing.T) {
 	}
 }
 
+func TestGloasEnvelopeSignatureVerifiable(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	envelopeSlot := 2 * cfg.SlotsPerEpoch
+	envelopeEpoch := state.GetEpochAtSlot(cfg, envelopeSlot)
+	cfg.GloasForkEpoch = envelopeEpoch
+
+	for _, tc := range []struct {
+		name         string
+		builderIndex uint64
+		depositEpoch uint64
+		signingKey   string
+		setValidator bool
+		mutate       func(*state.CachingBeaconState, *cltypes.SignedBeaconBlock)
+		want         bool
+	}{
+		{name: "self build", builderIndex: clparams.BuilderIndexSelfBuild, signingKey: backfillProposerKey, setValidator: true, want: true},
+		{name: "self build proposer outside validator set", builderIndex: clparams.BuilderIndexSelfBuild, signingKey: backfillProposerKey, setValidator: true, mutate: func(_ *state.CachingBeaconState, block *cltypes.SignedBeaconBlock) { block.Block.ProposerIndex = 1 }},
+		{name: "known builder", depositEpoch: envelopeEpoch - 1, signingKey: backfillBuilderKey, setValidator: true, want: true},
+		{name: "builder deposited in envelope epoch", depositEpoch: envelopeEpoch, signingKey: backfillOtherKey, setValidator: true},
+		{name: "builder deposited after envelope epoch", depositEpoch: envelopeEpoch + 1, signingKey: backfillOtherKey, setValidator: true},
+		{name: "builder index outside registry", builderIndex: 1, depositEpoch: envelopeEpoch - 1, signingKey: backfillOtherKey, setValidator: true},
+		{name: "nil builders list", depositEpoch: envelopeEpoch - 1, signingKey: backfillBuilderKey, setValidator: true, mutate: func(anchorState *state.CachingBeaconState, _ *cltypes.SignedBeaconBlock) {
+			anchorState.SetBuilders(nil)
+		}},
+		{name: "no validator", builderIndex: clparams.BuilderIndexSelfBuild, signingKey: backfillProposerKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchorState, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, envelopeSlot, tc.builderIndex, tc.depositEpoch, tc.signingKey)
+			if tc.mutate != nil {
+				tc.mutate(anchorState, block)
+			}
+			downloader := NewBackwardBeaconDownloader(t.Context(), nil, nil, nil, nil, cfg)
+			t.Cleanup(downloader.reqInterval.Stop)
+			if tc.setValidator {
+				downloader.SetGloasEnvelopeSignatureValidator(anchorState)
+			}
+
+			require.Equal(t, tc.want, downloader.GloasEnvelopeSignatureVerifiable(block, envelope))
+		})
+	}
+}
+
 func TestSetGloasEnvelopeSignatureValidatorWiresRangeFilter(t *testing.T) {
 	cfg := gloasFromGenesisConfig()
 	envelopeSlot := 2 * cfg.SlotsPerEpoch

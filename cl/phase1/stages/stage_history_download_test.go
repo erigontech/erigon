@@ -87,8 +87,9 @@ func TestBlobHistoryDownloadIgnoresNilConfiguredDownloader(t *testing.T) {
 }
 
 type failingHistoryDownloader struct {
-	err      error
-	finished bool
+	err                              error
+	finished                         bool
+	gloasEnvelopeSignatureVerifiable bool
 }
 
 func (d *failingHistoryDownloader) Finished() bool                             { return d.finished }
@@ -103,6 +104,9 @@ func (*failingHistoryDownloader) SetOnInitialGloasBlock(common.Hash, func(*cltyp
 }
 func (*failingHistoryDownloader) SetSlotToDownload(uint64)  {}
 func (*failingHistoryDownloader) SetThrottle(time.Duration) {}
+func (d *failingHistoryDownloader) GloasEnvelopeSignatureVerifiable(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) bool {
+	return d.gloasEnvelopeSignatureVerifiable
+}
 
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.
@@ -259,68 +263,102 @@ func TestHistoryDownloadPersistsInitialGloasBlockWithoutPayloadClassification(t 
 	}))
 }
 
-func TestHistoryDownloadStoresDownloadedEnvelopeSignature(t *testing.T) {
-	cfg, _, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
-	block.Block.Slot = bid.Slot
-	block.Block.Body.GetSignedExecutionPayloadBid().Message = bid
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	envelope.Message.BeaconBlockRoot = blockRoot
+func TestHistoryDownloadStoresOnlyVerifiableEnvelopeSignatures(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		verifiable bool
+	}{
+		{name: "verifiable signature is stored", verifiable: true},
+		{name: "unverifiable signature is not stored"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, _, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+			block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+			block.Block.Slot = bid.Slot
+			block.Block.Body.GetSignedExecutionPayloadBid().Message = bid
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = blockRoot
 
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	dirs := datadir.New(t.TempDir())
-	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, cfg, dirs, log.New())
-	t.Cleanup(snapshots.Close)
-	stop := errors.New("stop after downloaded block")
-	downloader := &oneBlockHistoryDownloader{
-		failingHistoryDownloader: failingHistoryDownloader{err: stop},
-		block:                    block,
-		envelope:                 envelope,
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			dirs := datadir.New(t.TempDir())
+			snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, cfg, dirs, log.New())
+			t.Cleanup(snapshots.Close)
+			stop := errors.New("stop after downloaded block")
+			downloader := &oneBlockHistoryDownloader{
+				failingHistoryDownloader: failingHistoryDownloader{err: stop, gloasEnvelopeSignatureVerifiable: test.verifiable},
+				block:                    block,
+				envelope:                 envelope,
+			}
+
+			err = SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+				beaconCfg:    cfg,
+				downloader:   downloader,
+				startingRoot: blockRoot,
+				startingSlot: block.Block.Slot,
+				indiciesDB:   db,
+				sn:           snapshots,
+				logger:       log.New(),
+			}, t.Context(), log.New())
+			require.ErrorIs(t, err, stop)
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				storedBlock, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+				require.NoError(t, err)
+				require.NotEmpty(t, storedBlock)
+				blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
+				require.NoError(t, err)
+				require.NotNil(t, blockNumber)
+				require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
+				blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
+				require.NoError(t, err)
+				require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
+				signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot)
+				require.NoError(t, err)
+				require.Equal(t, test.verifiable, found)
+				if found {
+					require.Equal(t, envelope.Signature, signature)
+				}
+				return nil
+			}))
+		})
 	}
-
-	err = SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
-		beaconCfg:    cfg,
-		downloader:   downloader,
-		startingRoot: blockRoot,
-		startingSlot: block.Block.Slot,
-		indiciesDB:   db,
-		sn:           snapshots,
-		logger:       log.New(),
-	}, t.Context(), log.New())
-	require.ErrorIs(t, err, stop)
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, envelope.Signature, signature)
-		return nil
-	}))
 }
 
-func TestWriteDownloadedBlockStoresSignatureForSnapshottedBlock(t *testing.T) {
-	cfg, _, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
-	block.Block.Slot = bid.Slot
-	block.Block.Body.GetSignedExecutionPayloadBid().Message = bid
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	envelope.Message.BeaconBlockRoot = blockRoot
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+func TestWriteDownloadedBlockStoresOnlyVerifiableSignaturesForSnapshottedBlock(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		verifiable bool
+	}{
+		{name: "verifiable signature is stored", verifiable: true},
+		{name: "unverifiable signature is not stored"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, _, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+			block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+			block.Block.Slot = bid.Slot
+			block.Block.Body.GetSignedExecutionPayloadBid().Message = bid
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = blockRoot
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return writeDownloadedBlock(tx, block, envelope, true)
-	}))
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		storedBlock, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
-		require.NoError(t, err)
-		require.Empty(t, storedBlock)
-		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, envelope.Signature, signature)
-		return nil
-	}))
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return writeDownloadedBlock(tx, block, envelope, true, test.verifiable)
+			}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				storedBlock, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+				require.NoError(t, err)
+				require.Empty(t, storedBlock)
+				signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot)
+				require.NoError(t, err)
+				require.Equal(t, test.verifiable, found)
+				if found {
+					require.Equal(t, envelope.Signature, signature)
+				}
+				return nil
+			}))
+		})
+	}
 }
 
 func TestWriteDownloadedBlockPreservesExistingEnvelopeSignature(t *testing.T) {
@@ -347,7 +385,7 @@ func TestWriteDownloadedBlockPreservesExistingEnvelopeSignature(t *testing.T) {
 				return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot, existingSignature)
 			}))
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				return writeDownloadedBlock(tx, block, envelope, test.inSnapshots)
+				return writeDownloadedBlock(tx, block, envelope, test.inSnapshots, true)
 			}))
 			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 				signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot)
@@ -376,7 +414,7 @@ func TestWriteDownloadedBlockReplacesMalformedExistingEnvelopeSignature(t *testi
 		return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), malformedSignature)
 	}))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return writeDownloadedBlock(tx, block, envelope, false)
+		return writeDownloadedBlock(tx, block, envelope, false, true)
 	}))
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		storedBlock, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
