@@ -121,7 +121,7 @@ const (
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
 
-	// HistoryVi validates history value index files (.vi). Re-derives every value's
+	// HistoryVi validates history value accessor files (.vi). Re-derives every value's
 	// offset in the .v file by walking the paired .ef and .v the way the index was
 	// built, and compares it with what the .vi answers. Catches an .vi that does not
 	// belong to its .v as well as a corrupt one.

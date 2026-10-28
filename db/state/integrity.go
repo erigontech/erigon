@@ -18,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -254,14 +253,14 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 	return nil
 }
 
-// IntegrityHistoryValueIndex re-derives every .v offset the way buildVI does and
+// IntegrityHistoryValueAccessor re-derives every .v offset the way buildVI does and
 // compares it with what the .vi answers. It also covers a v1 .vi, which is asked
 // the same question by txNum+key.
-func (at *AggregatorRoTx) IntegrityHistoryValueIndex(ctx context.Context, domain kv.Domain, failFast bool, fromStep uint64) error {
-	return at.d[domain].ht.IntegrityHistoryValueIndex(ctx, failFast, fromStep)
+func (at *AggregatorRoTx) IntegrityHistoryValueAccessor(ctx context.Context, domain kv.Domain, failFast bool, fromStep uint64) error {
+	return at.d[domain].ht.IntegrityHistoryValueAccessor(ctx, failFast, fromStep)
 }
 
-func (ht *HistoryRoTx) IntegrityHistoryValueIndex(ctx context.Context, failFast bool, fromStep uint64) error {
+func (ht *HistoryRoTx) IntegrityHistoryValueAccessor(ctx context.Context, failFast bool, fromStep uint64) error {
 	fromTxNum := fromStep * ht.h.stepSize
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
@@ -274,7 +273,7 @@ func (ht *HistoryRoTx) IntegrityHistoryValueIndex(ctx context.Context, failFast 
 			continue
 		}
 		g.Go(func() error {
-			err := ht.checkValueIndexOfFile(ctx, efItem, logEvery)
+			err := ht.checkValueAccessorOfFile(ctx, efItem, logEvery)
 			if err != nil && !failFast {
 				log.Warn(err.Error())
 				return nil
@@ -285,23 +284,13 @@ func (ht *HistoryRoTx) IntegrityHistoryValueIndex(ctx context.Context, failFast 
 	return g.Wait()
 }
 
-func (ht *HistoryRoTx) checkValueIndexOfFile(ctx context.Context, efItem visibleFile, logEvery *time.Ticker) error {
+func (ht *HistoryRoTx) checkValueAccessorOfFile(ctx context.Context, efItem visibleFile, logEvery *time.Ticker) error {
 	vItem, ok := ht.pairedFile(efItem)
 	if !ok {
 		return fmt.Errorf("[integrity] no .v file paired with %s", efItem.src.decompressor.FileName())
 	}
-	vi := vItem.src.vi
-	if vi.Empty() {
-		return nil
-	}
 	hist := vItem.src.decompressor
-	pageSize := uint64(hist.CompressedPageValuesCount())
-	if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		pageSize = uint64(ht.h.HistoryValuesOnCompressedPage)
-	}
-	if pageSize == 0 {
-		pageSize = 1
-	}
+	pageSize := ht.h.valuesPerPage(hist)
 
 	efReader := ht.iit.dataReader(efItem.src.decompressor)
 	efReader.Reset(0)
@@ -322,14 +311,14 @@ func (ht *HistoryRoTx) checkValueIndexOfFile(ctx context.Context, efItem visible
 			if err != nil {
 				return err
 			}
-			got, ok := vi.Lookup(keyOrdinal, rank, txNum, key)
+			got, ok := vItem.src.vOffset(keyOrdinal, rank, txNum, key)
 			if !ok {
-				return fmt.Errorf("[integrity] %s: no offset for key %x at txNum %d (run %d, item %d)",
-					vi.FilePath(), common.Shorten(key, 8), txNum, keyOrdinal, rank)
+				return fmt.Errorf("[integrity] .vi of %s: no offset for key %x at txNum %d (run %d, item %d)",
+					hist.FileName(), common.Shorten(key, 8), txNum, keyOrdinal, rank)
 			}
 			if got != valOffset {
-				return fmt.Errorf("[integrity] %s: key %x at txNum %d resolves to offset %d, .v holds it at %d",
-					vi.FilePath(), common.Shorten(key, 8), txNum, got, valOffset)
+				return fmt.Errorf("[integrity] .vi of %s: key %x at txNum %d resolves to offset %d, .v holds it at %d",
+					hist.FileName(), common.Shorten(key, 8), txNum, got, valOffset)
 			}
 			value++
 			if value%pageSize == 0 {
@@ -341,7 +330,7 @@ func (ht *HistoryRoTx) checkValueIndexOfFile(ctx context.Context, efItem visible
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[integrity] HistoryVi: %s, prefix=%x", vi.FilePath(), common.Shorten(key, 8)))
+				log.Info(fmt.Sprintf("[integrity] HistoryVi: %s, prefix=%x", hist.FileName(), common.Shorten(key, 8)))
 			default:
 			}
 		}

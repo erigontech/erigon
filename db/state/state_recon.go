@@ -31,7 +31,7 @@ type ReconItem struct {
 	startTxNum  uint64
 	endTxNum    uint64
 	histFileIdx int // index into HistoryRoTx.files; -1 if not found
-	// position of `key` in the .ef file, which addresses the history value index
+	// position of `key` in the .ef file, which addresses the .vi accessor
 	keyOrdinal uint64
 }
 

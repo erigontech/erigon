@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 )
 
-func HistoryValueIndexFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep uint64, logger log.Logger) error {
+func HistoryValueAccessorFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep uint64, logger log.Logger) error {
 	start := time.Now()
 	defer func() { logger.Info("[integrity] HistoryVi done", "dur", time.Since(start)) }()
 
@@ -39,7 +39,7 @@ func HistoryValueIndexFiles(ctx context.Context, db kv.TemporalRwDB, failFast bo
 				return err
 			}
 			defer tx.Rollback()
-			return state.AggTx(tx).IntegrityHistoryValueIndex(ctx, d, failFast, fromStep)
+			return state.AggTx(tx).IntegrityHistoryValueAccessor(ctx, d, failFast, fromStep)
 		})
 	}
 	return g.Wait()

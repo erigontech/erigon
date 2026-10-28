@@ -590,7 +590,7 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 
 // iiSeekResult locates a key's next txNum at or above the requested one, plus
 // where that value sits: the key's ordinal in the .ef file and the rank of the
-// txNum in that key's list. The history value index is addressed by the pair,
+// txNum in that key's list. The .vi accessor is addressed by the pair,
 // and only the .vi built from fileIdx's .ef can resolve it.
 type iiSeekResult struct {
 	txNum      uint64

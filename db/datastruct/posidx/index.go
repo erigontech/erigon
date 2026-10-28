@@ -83,6 +83,7 @@ var ErrCorrupt = errors.New("corrupt paged index")
 // read the mapping and the two sequences, so they are safe to call concurrently.
 type Index struct {
 	f         *os.File
+	filePath  string
 	m         mmap.Ro
 	starts    *eliasfano32.EliasFano
 	pages     *eliasfano32.EliasFano
@@ -97,7 +98,7 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	idx := &Index{f: f}
+	idx := &Index{f: f, filePath: path}
 	defer func() {
 		if idx.m == nil && idx.f != nil { // Close already took it on the error paths below
 			f.Close()
@@ -193,6 +194,8 @@ func (i *Index) runEnd(run uint64) uint64 {
 }
 
 func (i *Index) Empty() bool { return i == nil || i.pages == nil }
+
+func (i *Index) FilePath() string { return i.filePath }
 
 // DisableReadAhead - usage: `defer i.MadvSequential().DisableReadAhead()`.
 func (i *Index) DisableReadAhead() {

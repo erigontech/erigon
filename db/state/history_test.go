@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -303,7 +304,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			for j := range ints {
 				// .ef is walked in key order, so keyWords index is the key ordinal
 				// and j the rank of that txNum in the key's list
-				off, ok := sf.historyIdx.Lookup(uint64(i), uint64(j), ints[j], []byte(keyWords[i]))
+				off, ok := sf.historyIdx.Get(uint64(i), uint64(j))
 				require.True(ok)
 				gh.Reset(off)
 				w, _ := gh.Next(nil)
@@ -2371,4 +2372,99 @@ func TestHistoryStreamsKeepInvariant2(t *testing.T) {
 		defer it.Close()
 		streamtest.RequireInvariant2KV(t, it)
 	})
+}
+
+// A v1 .vi is a perfect hash over txNum+key. Read-only consumers cannot rebuild
+// accessors, so a datadir holding them has to keep working.
+func TestHistoryVOffsetV1(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "v1.vi")
+	keys := [][]byte{[]byte("aaa"), []byte("bbb"), []byte("ccc")}
+	txNums := []uint64{5, 9, 11}
+
+	salt := uint32(1)
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount: len(keys), BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: path, LeafSize: 8, NoFsync: true,
+	}, log.New())
+	require.NoError(t, err)
+	defer rs.Close()
+	for i, k := range keys {
+		require.NoError(t, rs.AddKey(historyKey(txNums[i], k, nil), uint64(i)*100))
+	}
+	require.NoError(t, rs.Build(t.Context()))
+
+	idx, err := recsplit.OpenIndex(path)
+	require.NoError(t, err)
+	defer idx.Close()
+	item := &FilesItem{index: idx}
+	for i, k := range keys {
+		off, ok := item.vOffset(0, 0, txNums[i], k) // position is ignored by v1
+		require.True(t, ok)
+		require.Equal(t, uint64(i)*100, off)
+	}
+}
+
+// recsplit Lookup panics on a keyless index, so an empty v1 .vi must miss instead.
+func TestHistoryVOffsetV1Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "empty.vi")
+	salt := uint32(1)
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount: 0, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: path, LeafSize: 8, NoFsync: true,
+	}, log.New())
+	require.NoError(t, err)
+	defer rs.Close()
+	require.NoError(t, rs.Build(t.Context()))
+
+	idx, err := recsplit.OpenIndex(path)
+	require.NoError(t, err)
+	defer idx.Close()
+	_, ok := (&FilesItem{index: idx}).vOffset(0, 0, 5, []byte("aaa"))
+	require.False(t, ok)
+}
+
+// The II and history file lists are chosen independently, so a positional .vi
+// can be reached from an .ef built over another range. Answering that would
+// return a different key's value, so the .v file has to be found by pairing the
+// range rather than by covering the txNum.
+func TestPairedFileRejectsUnpairedRange(t *testing.T) {
+	ht := &HistoryRoTx{files: visibleFiles{
+		{startTxNum: 0, endTxNum: 128, i: 0},
+		{startTxNum: 128, endTxNum: 192, i: 1},
+	}}
+
+	f, ok := ht.pairedFile(visibleFile{startTxNum: 128, endTxNum: 192})
+	require.True(t, ok)
+	require.Equal(t, 1, f.i)
+
+	_, ok = ht.pairedFile(visibleFile{startTxNum: 128, endTxNum: 256})
+	require.False(t, ok, "an .ef covering a different range must not be answered positionally")
+}
+
+// The check has to agree with buildVI on every offset of a real file set, and
+// has to reject a .vi whose page offsets do not describe its .v.
+func TestIntegrityHistoryValueAccessor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	ht := h.beginForTests()
+	defer ht.Close()
+	require.NotEmpty(t, ht.files)
+
+	require.NoError(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
+
+	// hand each file the neighbour's .vi: both open fine, and both then describe
+	// a .v they were not built from
+	require.GreaterOrEqual(t, len(ht.files), 2)
+	a, b := ht.files[0].src, ht.files[1].src
+	a.vAccessor, b.vAccessor = b.vAccessor, a.vAccessor
+	require.Error(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
+	a.vAccessor, b.vAccessor = b.vAccessor, a.vAccessor
 }

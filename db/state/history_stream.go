@@ -145,10 +145,10 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		historyItem := hi.hc.files[top.histFileIdx]
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		offset, ok := historyItem.src.vi.Lookup(keyOrdinal, rank, txNum, hi.nextKey)
+		offset, ok := historyItem.src.vOffset(keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
-			return fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
-				historyItem.src.vi.FilePath(), hi.nextKey, txNum, top.g.FileName())
+			return fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",
+				historyItem.src.decompressor.FileName(), hi.nextKey, txNum, top.g.FileName())
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
@@ -476,10 +476,10 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		historyItem := hi.hc.files[top.histFileIdx]
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		offset, ok := historyItem.src.vi.Lookup(keyOrdinal, rank, txNum, hi.nextKey)
+		offset, ok := historyItem.src.vOffset(keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
-			return fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
-				historyItem.src.vi.FilePath(), hi.nextKey, txNum, top.g.FileName())
+			return fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",
+				historyItem.src.decompressor.FileName(), hi.nextKey, txNum, top.g.FileName())
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
@@ -845,7 +845,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				compressedPageValuesCount,
 				true,
 			)
-			offset, ok := historyItem.src.vi.Lookup(ht.keyOrdinal, ht.rank, txNum, ht.key)
+			offset, ok := historyItem.src.vOffset(ht.keyOrdinal, ht.rank, txNum, ht.key)
 			if !ok { // shouldn't since key/txNum in ef
 				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}

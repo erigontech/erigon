@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -122,7 +123,7 @@ func (df *DirtyFiles) endTxNumMinimax(current uint64) uint64 {
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
-	vi                   *HistoryValueIndex
+	vAccessor            *posidx.Index // v2 .vi; a v1 .vi opens into `index`
 	bindex               *btindex.BtIndex
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
@@ -152,7 +153,7 @@ func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
 func (i *FilesItem) MadvNormal() {
 	i.decompressor.MadvNormal()
 	i.index.MadvNormal()
-	i.vi.MadvNormal()
+	i.vAccessor.MadvNormal()
 	//i.bindex.MadvNormal()
 	//i.existence.MadvNormal()
 }
@@ -160,13 +161,13 @@ func (i *FilesItem) MadvNormal() {
 func (i *FilesItem) EnableReadAhead() {
 	i.decompressor.MadvSequential()
 	i.index.MadvSequential()
-	i.vi.MadvSequential()
+	i.vAccessor.MadvSequential()
 }
 
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
 	i.index.DisableReadAhead()
-	i.vi.DisableReadAhead()
+	i.vAccessor.DisableReadAhead()
 	//i.bindex.DisableReadAhead()
 	//i.existence.DisableReadAhead()
 }
@@ -225,8 +226,8 @@ func (i *FilesItem) closeFiles() {
 	i.decompressor = nil
 	i.index.Close()
 	i.index = nil
-	i.vi.Close()
-	i.vi = nil
+	i.vAccessor.Close()
+	i.vAccessor = nil
 	i.bindex.Close()
 	i.bindex = nil
 	i.existence.Close()
@@ -240,8 +241,8 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 	if i.index != nil {
 		relativePaths = append(relativePaths, i.index.FilePath())
 	}
-	if i.vi != nil {
-		relativePaths = append(relativePaths, i.vi.FilePath())
+	if i.vAccessor != nil {
+		relativePaths = append(relativePaths, i.vAccessor.FilePath())
 	}
 	if i.bindex != nil {
 		relativePaths = append(relativePaths, i.bindex.FilePath())
@@ -277,16 +278,16 @@ func (i *FilesItem) closeFilesAndRemove() {
 		}
 		i.index = nil
 	}
-	if i.vi != nil {
-		path := i.vi.FilePath()
-		i.vi.Close()
+	if i.vAccessor != nil {
+		path := i.vAccessor.FilePath()
+		i.vAccessor.Close()
 		if err := dir.RemoveFile(path); err != nil {
 			log.Trace("remove after close", "err", err, "file", path)
 		}
 		if err := dir.RemoveFile(path + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", path)
 		}
-		i.vi = nil
+		i.vAccessor = nil
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
@@ -508,9 +509,13 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 			}
 		}
 
-		if item.vi == nil {
+		if item.index == nil && item.vAccessor == nil {
 			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string, fileVer version.Version) (err error) {
-				item.vi, err = OpenHistoryValueIndex(fPath, fileVer)
+				if fileVer.Less(version.V2_0) {
+					item.index, err = h.openHashMapAccessor(fPath)
+					return err
+				}
+				item.vAccessor, err = posidx.Open(fPath)
 				return err
 			}, tag, h.logger)
 		}
@@ -664,7 +669,7 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(statecfg.AccessorHashMap) && item.index == nil && item.vi == nil {
+	if l.Has(statecfg.AccessorHashMap) && item.index == nil && item.vAccessor == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
