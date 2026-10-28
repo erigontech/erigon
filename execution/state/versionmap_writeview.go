@@ -11,8 +11,9 @@ import (
 // versionMapWriteView is a read-only WriteSetView over a tx's versionMap slice.
 // The key-set (which cells the tx wrote) comes from keys; the values are read
 // from the versionMap floor at the tx's txIndex rather than from a copied
-// WriteSet. Yielded VersionedWrite values are fresh, never pointers into the
-// map, so a consumer cannot mutate the map through the view.
+// WriteSet. A yielded VersionedWrite is scratch the iterator reuses for every
+// element, never a pointer into the map: a consumer reads it inside the loop body
+// and retains nothing.
 type versionMapWriteView struct {
 	keys  WriteSetView
 	vm    *VersionMap
@@ -29,12 +30,13 @@ func NewVersionMapWriteView(keys WriteSetView, vm *VersionMap, txIdx int) WriteS
 
 func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint256.Int]) bool) {
+		var vw VersionedWrite[uint256.Int]
 		for addr, kw := range v.keys.Balances() {
-			vw := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, valStatus: kw.valStatus}, Val: kw.Val}
+			vw = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, valStatus: kw.valStatus}, Val: kw.Val}
 			if val, res, ok := v.vm.ReadBalance(addr, v.txIdx+1); ok && res.Status() != MVReadResultNone {
 				vw.Val, vw.valStatus = val, res.ValStatus()
 			}
-			if !yield(addr, vw) {
+			if !yield(addr, &vw) {
 				return
 			}
 		}
@@ -43,12 +45,14 @@ func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedW
 
 func (v *versionMapWriteView) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint64]) bool) {
+		var vw VersionedWrite[uint64]
 		for addr, kw := range v.keys.Nonces() {
 			val, ok := versionedUpdateNonce(v.vm, addr, v.txIdx+1)
 			if !ok {
 				val = kw.Val
 			}
-			if !yield(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: val}) {
+			vw = VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: val}
+			if !yield(addr, &vw) {
 				return
 			}
 		}
@@ -57,12 +61,14 @@ func (v *versionMapWriteView) Nonces() iter.Seq2[accounts.Address, *VersionedWri
 
 func (v *versionMapWriteView) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint64]) bool) {
+		var vw VersionedWrite[uint64]
 		for addr, kw := range v.keys.Incarnations() {
 			val, ok := versionedUpdateIncarnation(v.vm, addr, v.txIdx+1)
 			if !ok {
 				val = kw.Val
 			}
-			if !yield(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: val}) {
+			vw = VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: val}
+			if !yield(addr, &vw) {
 				return
 			}
 		}
@@ -71,12 +77,14 @@ func (v *versionMapWriteView) Incarnations() iter.Seq2[accounts.Address, *Versio
 
 func (v *versionMapWriteView) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.CodeHash]) bool) {
+		var vw VersionedWrite[accounts.CodeHash]
 		for addr, kw := range v.keys.CodeHashes() {
 			val, ok := versionedUpdateCodeHash(v.vm, addr, v.txIdx+1)
 			if !ok {
 				val = kw.Val
 			}
-			if !yield(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: val}) {
+			vw = VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: val}
+			if !yield(addr, &vw) {
 				return
 			}
 		}
@@ -85,12 +93,14 @@ func (v *versionMapWriteView) CodeHashes() iter.Seq2[accounts.Address, *Versione
 
 func (v *versionMapWriteView) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.Code]) bool) {
+		var vw VersionedWrite[accounts.Code]
 		for addr, kw := range v.keys.Codes() {
 			code := kw.Val
 			if val, ok := versionedUpdateCode(v.vm, addr, v.txIdx+1); ok {
 				code = val
 			}
-			if !yield(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code}) {
+			vw = VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code}
+			if !yield(addr, &vw) {
 				return
 			}
 		}
@@ -99,12 +109,14 @@ func (v *versionMapWriteView) Codes() iter.Seq2[accounts.Address, *VersionedWrit
 
 func (v *versionMapWriteView) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
 	return func(yield func(accounts.Address, *VersionedWrite[bool]) bool) {
+		var vw VersionedWrite[bool]
 		for addr, kw := range v.keys.SelfDestructs() {
 			val := kw.Val
 			if sd, res, ok := v.vm.ReadSelfDestruct(addr, v.txIdx+1); ok && res.resolved() {
 				val = sd
 			}
-			if !yield(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: val}) {
+			vw = VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: val}
+			if !yield(addr, &vw) {
 				return
 			}
 		}
