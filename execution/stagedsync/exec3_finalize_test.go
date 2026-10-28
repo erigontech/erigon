@@ -778,7 +778,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		r.TxOut = copyWrites(s.txOut)
 
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(r.TxOut, false, "")
+		vm.FlushVersionedWrites(r.TxOut, false)
 		be := &blockExecutor{coinbase: s.coinbase}
 		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
 
@@ -805,7 +805,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		r.TxOut = copyWrites(s.txOut)
 
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(r.TxOut, false, "")
+		vm.FlushVersionedWrites(r.TxOut, false)
 		be := &blockExecutor{coinbase: s.coinbase}
 		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
 		_, res, ok := vm.ReadSelfDestruct(s.burntAddr, 1)

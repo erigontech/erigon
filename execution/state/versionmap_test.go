@@ -1567,7 +1567,7 @@ func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
 			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
 			if test.earlier != "" {
 				first := storageWrite(0, 0, ValueChanged)
-				vm.FlushVersionedWrites(first, false, "")
+				vm.FlushVersionedWrites(first, false)
 				if test.earlier == "validated" {
 					vm.MarkWritesValidated(first, func(accounts.Address) bool { return false })
 				}
@@ -1581,7 +1581,7 @@ func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
 					Val:         *uint256.NewInt(1),
 				})
 			}
-			vm.FlushVersionedWrites(rerun, false, "")
+			vm.FlushVersionedWrites(rerun, false)
 
 			val, res, ok := vm.ReadStorage(addr, slot, 2)
 			require.True(t, ok)

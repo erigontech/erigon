@@ -938,7 +938,7 @@ func TestVersionedRead_KeptCheckUsesTheDestructOfTheRecordedAbsence(t *testing.T
 	destruct.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: Version{TxIndex: 2}}})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(recreation, false, "")
+		vm.FlushVersionedWrites(recreation, false)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -946,7 +946,7 @@ func TestVersionedRead_KeptCheckUsesTheDestructOfTheRecordedAbsence(t *testing.T
 	ibs.SetTxContext(1, 3)
 	ibs.SetWaitCommit(func(int) bool {
 		vm.MarkWritesComplete(recreation)
-		vm.FlushVersionedWrites(destruct, true, "")
+		vm.FlushVersionedWrites(destruct, true)
 		return true
 	})
 	account, _, _, err := ibs.getVersionedAccount(addr, true)
@@ -969,7 +969,7 @@ func TestVersionedRead_UnresolvedBalanceAtDestructIsWaitedFor(t *testing.T) {
 	recreation.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 1}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(recreation, false, "")
+		vm.FlushVersionedWrites(recreation, false)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -1001,14 +1001,14 @@ func TestVersionedRead_DeletedBalanceKeepsRecordedAbsence(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
 	removal := &WriteSet{}
 	removal.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}, valStatus: ValueDeleted}, Val: *uint256.NewInt(5)})
-	vm.FlushVersionedWrites(removal, true, "")
+	vm.FlushVersionedWrites(removal, true)
 	recreated := &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash}
 	recreation := &WriteSet{}
 	recreation.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 1}}, Val: recreated})
 	recreation.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: recreated.Balance})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(recreation, true, "")
+		vm.FlushVersionedWrites(recreation, true)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
