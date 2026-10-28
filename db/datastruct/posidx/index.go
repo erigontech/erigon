@@ -181,11 +181,11 @@ func (i *Index) Get(run, item uint64) (uint64, bool) {
 	if i.pages == nil || run >= i.starts.Count() {
 		return 0, false
 	}
-	ordinal := i.starts.Get(run) + item
-	if ordinal >= min(i.runEnd(run), i.itemCount) { // a corrupt start can point past the items
+	start, end := i.starts.Get(run), min(i.runEnd(run), i.itemCount) // a corrupt start can point past the items
+	if start >= end || item >= end-start {
 		return 0, false
 	}
-	return i.pages.Get(ordinal / i.pageSize), true
+	return i.pages.Get((start + item) / i.pageSize), true
 }
 
 // runEnd is where run's items stop: the next run's start, or the item count for

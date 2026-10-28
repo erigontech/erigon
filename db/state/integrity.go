@@ -265,6 +265,18 @@ func (ht *HistoryRoTx) IntegrityHistoryValueAccessor(ctx context.Context, failFa
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
+	// a .vi that fails to open hides its .v and .ef from the visible lists walked below
+	for _, item := range ht.h.dirtyFiles.Items() {
+		if item.decompressor == nil || item.endTxNum <= fromTxNum || item.index != nil || item.vAccessor != nil {
+			continue
+		}
+		err := fmt.Errorf("[integrity] %s has no .vi accessor open", item.decompressor.FileName())
+		if failFast {
+			return err
+		}
+		log.Warn(err.Error())
+	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 

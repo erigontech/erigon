@@ -732,7 +732,7 @@ type HistoryTraceKeyFiles struct {
 	efbuf, v, histKey []byte
 	seqItr            stream.U64 // stores iterator returned by multiencseq.SequenceReader#Iterator
 	histReader        *seg.PagedReader
-	// where the first value of this key in this file sits, for the value index
+	// where the first value of this key in this file sits, for the .vi accessor
 	keyOrdinal, rank uint64
 }
 
@@ -781,8 +781,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		}
 		historyItem, ok := ht.hc.pairedFile(item)
 		if !ok {
-			moveToNextFileFn()
-			continue
+			return fmt.Errorf("HistoryTraceKeyFiles: no .v file paired with .ef txNums %d-%d", item.startTxNum, item.endTxNum)
 		}
 
 		if ht.seqItr == nil {

@@ -17,6 +17,7 @@
 package posidx
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -89,6 +90,8 @@ func TestOutOfRange(t *testing.T) {
 	require.False(t, ok, "run past the end")
 	_, ok = idx.Get(0, 1<<40)
 	require.False(t, ok, "item past the end")
+	_, ok = idx.Get(1, math.MaxUint64)
+	require.False(t, ok, "item that wraps the ordinal into another run")
 }
 
 func TestEmpty(t *testing.T) {

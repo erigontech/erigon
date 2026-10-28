@@ -2443,6 +2443,20 @@ func TestPairedFileRejectsUnpairedRange(t *testing.T) {
 	require.False(t, ok, "an .ef covering a different range must not be answered positionally")
 }
 
+// Values pruned from the DB live only in files, so an unpaired .ef range must
+// fail the trace rather than be skipped.
+func TestHistoryTraceKeyFilesUnpairedRange(t *testing.T) {
+	ht := &HistoryTraceKeyFiles{
+		hc: &HistoryRoTx{
+			files: visibleFiles{{startTxNum: 0, endTxNum: 128}},
+			iit:   &InvertedIndexRoTx{files: visibleFiles{{startTxNum: 0, endTxNum: 64}}},
+		},
+		toTxNum: 100,
+		hasNext: true,
+	}
+	require.Error(t, ht.advance())
+}
+
 // The check has to agree with buildVI on every offset of a real file set, and
 // has to reject a .vi whose page offsets do not describe its .v.
 func TestIntegrityHistoryValueAccessor(t *testing.T) {
@@ -2467,4 +2481,10 @@ func TestIntegrityHistoryValueAccessor(t *testing.T) {
 	a.vAccessor, b.vAccessor = b.vAccessor, a.vAccessor
 	require.Error(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
 	a.vAccessor, b.vAccessor = b.vAccessor, a.vAccessor
+
+	// a .vi that failed to open hides its .v and .ef from the visible lists
+	acc := a.vAccessor
+	a.vAccessor = nil
+	require.Error(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
+	a.vAccessor = acc
 }
