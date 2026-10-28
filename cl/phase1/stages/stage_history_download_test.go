@@ -360,7 +360,7 @@ func TestWriteDownloadedBlockPreservesExistingEnvelopeSignature(t *testing.T) {
 	}
 }
 
-func TestWriteDownloadedBlockPreservesMalformedExistingEnvelopeSignature(t *testing.T) {
+func TestWriteDownloadedBlockReplacesMalformedExistingEnvelopeSignature(t *testing.T) {
 	cfg, _, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
 	block.Block.Slot = bid.Slot
@@ -382,12 +382,17 @@ func TestWriteDownloadedBlockPreservesMalformedExistingEnvelopeSignature(t *test
 		storedBlock, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
 		require.NoError(t, err)
 		require.NotEmpty(t, storedBlock)
+		executionBlockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
+		require.NoError(t, err)
+		require.NotNil(t, executionBlockNumber)
+		require.Equal(t, envelope.Message.Payload.BlockNumber, *executionBlockNumber)
 		executionHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
 		require.NoError(t, err)
 		require.Equal(t, envelope.Message.Payload.BlockHash, executionHash)
-		storedSignature, err := tx.GetOne(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+		storedSignature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, blockRoot)
 		require.NoError(t, err)
-		require.Equal(t, malformedSignature, storedSignature)
+		require.True(t, found)
+		require.Equal(t, envelope.Signature, storedSignature)
 		return nil
 	}))
 }

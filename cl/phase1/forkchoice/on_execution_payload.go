@@ -1677,9 +1677,6 @@ func (f *ForkChoiceStore) readExecutionPayloadEnvelopeIndexState(ctx context.Con
 		indexState.blockNumber = bytes.Clone(blockNumber)
 		indexState.blockHash = bytes.Clone(blockHash)
 		indexState.signature, indexState.signatureFound, err = beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slot, blockRoot)
-		if errors.Is(err, beacon_indicies.ErrInvalidExecutionPayloadEnvelopeSignatureLength) {
-			return nil
-		}
 		return err
 	})
 	return indexState, err

@@ -117,7 +117,7 @@ func TestExecutionPayloadEnvelopeSignatureRoundTrip(t *testing.T) {
 	}))
 }
 
-func TestReadExecutionPayloadEnvelopeSignatureRejectsWrongLength(t *testing.T) {
+func TestReadExecutionPayloadEnvelopeSignatureTreatsWrongLengthAsAbsent(t *testing.T) {
 	for _, length := range []int{0, 95, 97} {
 		t.Run(fmt.Sprintf("length=%d", length), func(t *testing.T) {
 			db := setupTestDB(t)
@@ -129,9 +129,44 @@ func TestReadExecutionPayloadEnvelopeSignatureRejectsWrongLength(t *testing.T) {
 				return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, root), make([]byte, length))
 			}))
 			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-				_, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
-				require.ErrorContains(t, err, "invalid execution payload envelope signature length")
+				signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+				require.NoError(t, err)
 				require.False(t, found)
+				require.Zero(t, signature)
+				return nil
+			}))
+		})
+	}
+}
+
+func TestWriteExecutionPayloadEnvelopeSignatureIfAbsent(t *testing.T) {
+	validSignature := common.Bytes96{1}
+	for _, test := range []struct {
+		name     string
+		stored   []byte
+		expected common.Bytes96
+	}{
+		{name: "malformed row is replaced", stored: make([]byte, 95), expected: common.Bytes96{2}},
+		{name: "valid row is kept", stored: validSignature[:], expected: validSignature},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			defer db.Close()
+
+			const slot = uint64(12)
+			root := common.Hash{1}
+			replacement := common.Bytes96{2}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, root), test.stored); err != nil {
+					return err
+				}
+				return WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx, slot, root, replacement)
+			}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, test.expected, signature)
 				return nil
 			}))
 		})
