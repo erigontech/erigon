@@ -186,7 +186,7 @@ func (p *Provider) FinalizeUnwind() error {
 				continue
 			}
 			// Regen rewrote the file; the seed's .torrent sidecar now claims
-			// a stale hash and the downloader would yank the .kv to .part.
+			// a stale hash and the downloader would discard the .kv and re-fetch it.
 			_ = dir.RemoveFile(pair.finalPath + ".torrent")
 			regenBaseNames = append(regenBaseNames, filepath.Base(pair.finalPath))
 			// Inventory write-through for the new truncated file. The

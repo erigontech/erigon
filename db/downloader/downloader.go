@@ -1911,7 +1911,7 @@ func (d *Downloader) testStartSingleDownloadNoWait(
 	return err
 }
 
-// Moves data aside so a download can't reuse it. Only legal while the initial download is
+// Discards data so a download can't reuse it. Only legal while the initial download is
 // incomplete: after that the local files are what this node built or restored, and nothing may
 // remove them.
 func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metainfo.Hash) (err error) {
@@ -1926,12 +1926,12 @@ func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metai
 	// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
 	// the existing name earlier.
 	panicif.True(ok)
-	// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
-	// to wait until another torrent is fetched, and then we mistake a non-partial file with
-	// the correct size as being complete.
-	from := d.filePathForName(name)
-	to := from + ".part"
-	err = os.Rename(from, to)
+	// Unlink rather than move aside: the client downloads into "<name>.part", so parking the
+	// data there hands the client its inode and the new bytes land in place. Readers that
+	// already mapped it — the aggregator, holding accessors built for the old layout — would
+	// then decode foreign bytes. Unlinking keeps their mapping valid on the detached inode
+	// until they reopen.
+	err = dir.RemoveFile(d.filePathForName(name))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			err = nil
@@ -1939,7 +1939,7 @@ func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metai
 		return
 	}
 	d.log(log.LvlWarn, "invalidated local snapshot data, will re-download",
-		"name", name, "renamed_to", to, "preverified", preverifiedInfoHash)
+		"name", name, "preverified", preverifiedInfoHash)
 	return
 }
 

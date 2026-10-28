@@ -777,8 +777,8 @@ func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, p
 	return
 }
 
-// Renaming data to .part leaves a hole in the snapshot tier, so it must be logged at warn or louder.
-func TestInvalidateDataRenamesLocalFile(t *testing.T) {
+// Discarding data leaves a hole in the snapshot tier, so it must be logged at warn or louder.
+func TestInvalidateDataDiscardsLocalFile(t *testing.T) {
 	require := require.New(t)
 	d, logs, name, path := newLocalSnapshotTest(t)
 	differentPreverifiedInfoHash := snaptype.Hex2InfoHash("aa")
@@ -787,8 +787,21 @@ func TestInvalidateDataRenamesLocalFile(t *testing.T) {
 	require.True(download)
 
 	require.NoFileExists(path)
-	require.FileExists(path + ".part")
 	requireLoggedForName(t, logs, "invalidated local snapshot data", name)
+}
+
+// The torrent client downloads into "<name>.part" (UsePartFiles), so data left
+// at that path becomes the client's scratch file and is rewritten in place. The
+// aggregator may still hold that inode mmap'd with accessors built for the old
+// layout, so the invalidated bytes must not be parked there.
+func TestInvalidateDataLeavesNothingAtTheDownloadTarget(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+
+	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+	require.True(download)
+
+	require.NoFileExists(path + ".part")
 }
 
 // A stale metainfo doesn't rescue the data while the initial download is incomplete.
@@ -802,7 +815,7 @@ func TestInvalidateDataWithStaleMetainfo(t *testing.T) {
 	require.True(download)
 
 	require.NoFileExists(path)
-	require.FileExists(path + ".part")
+	require.NoFileExists(path + ".part")
 }
 
 // Once preverified.toml exists, local data is kept whatever the manifest says.
@@ -1402,7 +1415,7 @@ func TestInitialDownloadCompletingMidRunKeepsLocalData(t *testing.T) {
 	writeLocalSnapshot(t, d, beforeName, localSnapshotState{data: true, metainfo: "none"})
 	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), beforeName)
 	require.True(download)
-	require.FileExists(d.filePathForName(beforeName) + ".part")
+	require.NoFileExists(d.filePathForName(beforeName))
 
 	markInitialDownloadComplete(t, d)
 
