@@ -291,7 +291,7 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	}
 	sender, err := t.Tx().Sender(*t.signer)
 	if err != nil {
-		return accounts.NilAddress, err
+		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
 	t.sender = sender
 	if RecoversSenders(t.Header) {
@@ -320,6 +320,9 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
+			if _, err := t.TxSender(); err != nil {
+				return nil, err
+			}
 			if t.signer == nil {
 				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 			}
