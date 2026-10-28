@@ -61,7 +61,7 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainRea
 // serves both the in-batch and persisted-history modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
 	if hr.sd != nil {
-		if enc, ok, err = hr.sd.GetAsOf(hr.ttx, domain, key, hr.txNum); err == nil {
+		if enc, ok, err = hr.sd.GetAsOf(domain, hr.ttx, key, hr.txNum); err == nil {
 			return enc, ok, nil
 		}
 	}

@@ -175,9 +175,9 @@ func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if c.context != nil {
 		if len(key) == 20 {
-			return c.context.GetAsOf(nil, kv.AccountsDomain, key, ts)
+			return c.context.GetAsOf(kv.AccountsDomain, nil, key, ts)
 		}
-		return c.context.GetAsOf(nil, kv.StorageDomain, key, ts)
+		return c.context.GetAsOf(kv.StorageDomain, nil, key, ts)
 	}
 	return nil, false, nil
 }
