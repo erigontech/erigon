@@ -85,10 +85,14 @@ func TestRequireStateHistory(t *testing.T) {
 type countingAsOfTx struct {
 	kv.TemporalTx
 	reads int
+	err   error
 }
 
 func (tx *countingAsOfTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
 	tx.reads++
+	if tx.err != nil {
+		return nil, false, tx.err
+	}
 	return tx.TemporalTx.GetAsOf(domain, key, ts)
 }
 
@@ -128,4 +132,31 @@ func TestHistoryReaderV3ReadsUnchangedAccountFromStateCache(t *testing.T) {
 	require.NotNil(t, acc)
 	require.Equal(t, uint64(1), acc.Nonce)
 	require.Zero(t, tx.reads)
+}
+
+// SetTx rebinds the in-batch read, so a later read is served by the new tx; a tx read error is not retried.
+func TestHistoryReaderV3SetTxRebindsTheAsOfRead(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	first, second := &countingAsOfTx{TemporalTx: roTx}, &countingAsOfTx{TemporalTx: roTx}
+	r := NewHistoryReaderV3WithSharedDomains(first, sd, 10)
+	_, err = r.ReadAccountData(accounts.InternAddress(common.Address{0xdd}))
+	require.NoError(t, err)
+	r.SetTx(second)
+	_, err = r.ReadAccountData(accounts.InternAddress(common.Address{0xdd}))
+	require.NoError(t, err)
+	require.Equal(t, 1, first.reads)
+	require.Equal(t, 1, second.reads)
+
+	second.err = errors.New("pruned")
+	_, err = r.ReadAccountData(accounts.InternAddress(common.Address{0xee}))
+	require.ErrorIs(t, err, second.err)
+	require.Equal(t, 2, second.reads, "a tx read error must not be retried")
 }
