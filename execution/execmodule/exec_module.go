@@ -610,7 +610,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			doms.Close()
 		}
 		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
-			return ValidationResult{ValidationStatus: ExecutionStatusTooFarAway, ValidationError: "domain ahead of blocks"}, nil
+			return ValidationResult{ValidationStatus: ExecutionStatusTooFarAway}, nil
 		}
 		return ValidationResult{}, err
 	}
