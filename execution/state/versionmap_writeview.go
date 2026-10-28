@@ -138,9 +138,12 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			scratch = scratch[:len(inner)]
 			i := 0
 			for key, kw := range inner {
-				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				if !ok {
-					val = kw.Val
+				// On a BAL block a net-zero write is not materialized, so the map holds no value of it.
+				val := kw.Val
+				if kw.valStatus != ValueUnchanged {
+					if mapVal, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1); ok {
+						val = mapVal
+					}
 				}
 				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 				out[key] = &scratch[i]

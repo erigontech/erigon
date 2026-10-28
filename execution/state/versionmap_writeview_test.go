@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -272,4 +273,32 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
 	empty.FlushVersionedWrites(w, true)
 	require.True(t, hasAddr(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
+}
+
+// On a BAL block a net-zero storage write is not materialized in the version map, so the cell at the
+// writer's index is the access list's, which can disagree with the tx. The view must publish the
+// value the tx wrote.
+func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	addr := getAddress(3)
+	key := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: txIdx + 1, Value: *uint256.NewInt(42)}}}}}})
+	keys := &WriteSet{}
+	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: txIdx}, valStatus: ValueUnchanged},
+		Val:         *uint256.NewInt(5),
+	})
+
+	vm.FlushVersionedWrites(keys, false)
+
+	published := 0
+	for _, inner := range NewVersionMapWriteView(keys, vm, txIdx).Storages() {
+		for _, vw := range inner {
+			require.Equal(t, *uint256.NewInt(5), vw.Val)
+			published++
+		}
+	}
+	require.Equal(t, 1, published)
 }

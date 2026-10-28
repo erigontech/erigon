@@ -231,6 +231,7 @@ type VersionMap struct {
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
+	bal      types.BlockAccessList
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -307,9 +308,30 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
+		bal:    changes,
 	}
 	vm.WriteChanges(changes)
 	return vm
+}
+
+// seededStorage returns the value the access list seeds for addr's slot key at txIdx.
+func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
+	for i := range vm.bal {
+		if vm.bal[i].Address != addr.Value() {
+			continue
+		}
+		for _, slotChanges := range vm.bal[i].StorageChanges {
+			if slotChanges.Slot != key {
+				continue
+			}
+			for _, change := range slotChanges.Changes {
+				if int(change.Index)-1 == txIdx {
+					return change.Value, true
+				}
+			}
+		}
+	}
+	return uint256.Int{}, false
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -1122,7 +1144,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // per-tx flush can be skipped without taking the write lock (and thus without parking the
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
 // is omitted from the BAL and folded away by StoragesChanged, so it is never materialized and
-// counts as already-present, unless an earlier run of the tx left a cell the flush removes.
+// counts as already-present, unless an earlier run of the tx left a cell the flush resets or removes.
 // Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
 // Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
@@ -1255,15 +1277,23 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 			for key, vw := range inner {
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
-				// StoragesChanged, so it is never materialized here (nor sealed below), and the cell
-				// an earlier run of the tx left is removed. A reader resolves the floor, which
-				// already holds this unchanged value. Before the seal only the access list seeds a
-				// Done cell, so a Done cell stays.
+				// StoragesChanged, so it is never materialized here (nor sealed below). The slot
+				// must read as the access list seeds it, so a cell an earlier run of the tx left
+				// goes back to the seed or away. Before the seal a Done cell holds the seed.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
 					if cells := e.Storage[key]; cells != nil {
 						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
-							cells.Delete(vw.Version.TxIndex)
-							releaseCellStorage(c)
+							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
+								// As in flushCell, a changed value needs a new version, so that the
+								// readers of the earlier value are invalidated.
+								if !c.Value.Eq(&seed) {
+									c.incarnation = vw.Version.Incarnation
+								}
+								c.Value, c.flag, c.valStatus = seed, FlagDone, ValueChanged
+							} else {
+								cells.Delete(vw.Version.TxIndex)
+								releaseCellStorage(c)
+							}
 						}
 					}
 					continue

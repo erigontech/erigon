@@ -1529,8 +1529,8 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 // On a BAL block a net-zero storage write is not materialized, so a later reader resolves the
 // floor. A cell that an earlier run of the tx left with a changed value must go too, whether it is
 // still an estimate or already validated: the reader would wait for it forever, or take its stale
-// value. A cell from the block access list stays.
-func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
+// value. A slot the access list seeds at the tx keeps the access list's value.
+func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	other := accounts.InternAddress([20]byte{0xaa})
@@ -1544,29 +1544,44 @@ func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
 		return ws
 	}
 	for _, test := range []struct {
-		name       string
-		earlier    string
-		balValue   uint64
-		otherWrite bool
-		wantIdx    int
-		wantVal    uint64
+		name         string
+		balValue     uint64
+		balAccount   bool
+		balNeighbors bool
+		earlier      string
+		earlierValue uint64
+		otherWrite   bool
+		wantIdx      int
+		wantVal      uint64
 	}{
 		{name: "no earlier cell", wantIdx: originIndex, wantVal: 5},
+		{name: "no earlier cell, account in the access list", balAccount: true, wantIdx: originIndex, wantVal: 5},
 		{name: "earlier cell is an estimate", earlier: "estimate", wantIdx: originIndex, wantVal: 5},
 		{name: "earlier cell is validated", earlier: "validated", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell, the access list seeds the slot of another account and another slot", balNeighbors: true, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
 		{name: "cell from the block access list", balValue: 42, wantIdx: 1, wantVal: 42},
 		{name: "cell from the block access list, another slot written", balValue: 42, otherWrite: true, wantIdx: 1, wantVal: 42},
+		{name: "cell from the block access list, validated", balValue: 42, earlier: "validated", earlierValue: 42, wantIdx: 1, wantVal: 42},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			bal := types.BlockAccessList{{Address: other.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
-			if test.balValue != 0 {
+			switch {
+			case test.balValue != 0:
 				bal = types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(test.balValue)}}}}}}
+			case test.balAccount:
+				bal = types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+			case test.balNeighbors:
+				seeded := []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}
+				bal = types.BlockAccessList{
+					{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{0x05}), Changes: seeded}}},
+					{Address: other.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: seeded}}},
+				}
 			}
 			vm := NewVersionMap(bal)
 			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
 			if test.earlier != "" {
-				first := storageWrite(0, 0, ValueChanged)
+				first := storageWrite(0, test.earlierValue, ValueChanged)
 				vm.FlushVersionedWrites(first, false)
 				if test.earlier == "validated" {
 					vm.MarkWritesValidated(first, func(accounts.Address) bool { return false })
@@ -1585,8 +1600,43 @@ func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
 
 			val, res, ok := vm.ReadStorage(addr, slot, 2)
 			require.True(t, ok)
+			require.Equal(t, MVReadResultDone, res.Status())
 			require.Equal(t, test.wantIdx, res.DepIdx())
 			require.Equal(t, *uint256.NewInt(test.wantVal), val)
 		})
 	}
+}
+
+// A net-zero re-run that resets a cell to the access list's value must not leave the version under
+// which an earlier run published another value there: a reader of that value would stay valid.
+func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	storageWrite := func(incarnation Incarnation, val uint64, status valueStatus) *WriteSet {
+		ws := &WriteSet{}
+		ws.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 1, Incarnation: incarnation}, valStatus: status},
+			Val:         *uint256.NewInt(val),
+		})
+		return ws
+	}
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}}}}})
+	for incarnation, val := range []uint64{42, 9} {
+		ws := storageWrite(Incarnation(incarnation), val, ValueChanged)
+		vm.FlushVersionedWrites(ws, false)
+		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+	}
+	reads := ReadSet{}
+	reads.SetStorage(addr, slot, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: *uint256.NewInt(9)})
+	require.Equal(t, VersionValid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
+
+	vm.FlushVersionedWrites(storageWrite(2, 5, ValueUnchanged), false)
+
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
+	val, res, ok := vm.ReadStorage(addr, slot, 2)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, 1, res.DepIdx())
+	require.Equal(t, *uint256.NewInt(42), val)
 }
