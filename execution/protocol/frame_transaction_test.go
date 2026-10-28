@@ -627,6 +627,105 @@ func TestFrameTransactionCancellation(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestFrameTransactionFeeSettlement(t *testing.T) {
+	t.Parallel()
+	// Three frames and the encoded nonce cost 12,000 + 3*475 + 3*16 = 13,473
+	// intrinsic gas. The approvals use 107 and 3,007 gas; each Sstore emits two PUSH1s.
+	for _, test := range []struct {
+		name                       string
+		code                       []byte
+		dataLen                    int
+		blob                       bool
+		wantBlockGas               mdgas.MdGas
+		wantReceiptGas, wantRefund uint64
+		wantPayerBalance           uint64
+		wantCoinbaseBalance        uint64
+		wantBurnBalance            uint64
+		wantBlobGas                uint64
+	}{
+		{
+			name: "unused budgets", code: program.New().Op(vm.STOP).Bytes(),
+			wantBlockGas: mdgas.MdGas{Execution: 19_587}, wantReceiptGas: 19_587,
+			wantPayerBalance: 9_902_065, wantCoinbaseBalance: 58_761, wantBurnBalance: 39_174,
+		},
+		{
+			name: "capped storage refund", code: program.New().Sstore(0, 1).Sstore(0, 0).Op(vm.STOP).Bytes(),
+			wantBlockGas: mdgas.MdGas{Execution: 31_799}, wantReceiptGas: 25_440, wantRefund: 6_359,
+			wantPayerBalance: 9_872_800, wantCoinbaseBalance: 76_320, wantBurnBalance: 50_880,
+		},
+		{
+			name: "calldata floor plus state gas", dataLen: 512,
+			code:         program.New().Sstore(0, 1).Sstore(0, 0).Sstore(1, 1).Op(vm.STOP).Bytes(),
+			wantBlockGas: mdgas.MdGas{Execution: 46_385, State: 97_920}, wantReceiptGas: 144_305, wantRefund: 10_000,
+			wantPayerBalance: 9_278_475, wantCoinbaseBalance: 432_915, wantBurnBalance: 288_610,
+		},
+		{
+			name: "blob fee survives storage refund", blob: true,
+			code:         program.New().Sstore(0, 1).Sstore(0, 0).Op(vm.STOP).Bytes(),
+			wantBlockGas: mdgas.MdGas{Execution: 31_799}, wantReceiptGas: 25_440, wantRefund: 6_359,
+			wantPayerBalance: 8_955_296, wantCoinbaseBalance: 76_320, wantBurnBalance: 50_880, wantBlobGas: 131_072,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			sender := accounts.InternAddress(tx.SenderAddress)
+			payer, target := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+			coinbase, burn := common.HexToAddress("0x4000"), common.HexToAddress("0x5000")
+			require.NoError(t, ibs.SetBalance(accounts.InternAddress(payer), uint256.Int{10_000_000}, tracing.BalanceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveExecution).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(payer), program.New().Push(types.FrameApprovePayment).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(target), test.code, tracing.CodeChangeUnspecified))
+			evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
+			blockCtx, config := evm.Context, evm.Config()
+			blockCtx.BaseFee.SetUint64(2)
+			blockCtx.BlobBaseFee.SetUint64(7)
+			blockCtx.Coinbase = accounts.InternAddress(coinbase)
+			config.NoBaseFee = false
+			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
+			tx.Fees = types.FrameFees{FeeCap: uint256.Int{11}, TipCap: uint256.Int{3}}
+			tx.Frames = []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 5_000}},
+				{Mode: types.FrameSender, Target: &target, Data: make([]byte, test.dataLen), Limits: mdgas.MdGas{Execution: 100_000, State: 200_000}},
+			}
+			if test.blob {
+				tx.BlobVersionedHashes = []common.Hash{{1}}
+				tx.Fees.BlobFeeCap.SetUint64(13)
+			}
+			msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
+			require.NoError(t, err)
+			const blockGas, blockBlobGas = 30_000_000, 262_144
+			gp := NewGasPool(blockGas, blockBlobGas)
+			result, err := ApplyMessage(evm, msg, gp, true, false, nil)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			require.Equal(t, &payer, result.Payer)
+			require.Equal(t, test.wantReceiptGas, result.ReceiptGasUsed)
+			require.Equal(t, test.wantRefund, result.GasRefund)
+			require.Equal(t, test.wantBlockGas.Execution, result.BlockExecutionGasUsed)
+			require.Equal(t, test.wantBlockGas.State, result.BlockStateGasUsed)
+			require.Equal(t, test.wantBlockGas.Total(), result.MaxGasUsed)
+			require.Equal(t, blockGas-test.wantBlockGas.Execution, gp.ExecutionGasAvailable())
+			require.Equal(t, blockGas-test.wantBlockGas.State, gp.StateGasAvailable())
+			require.Equal(t, blockBlobGas-test.wantBlobGas, gp.BlobGas())
+			for _, account := range []struct {
+				address common.Address
+				balance uint64
+			}{
+				{tx.SenderAddress, 10_000_000},
+				{payer, test.wantPayerBalance},
+				{coinbase, test.wantCoinbaseBalance},
+				{burn, test.wantBurnBalance},
+			} {
+				balance, err := ibs.GetBalance(accounts.InternAddress(account.address))
+				require.NoError(t, err)
+				require.Equal(t, uint256.Int{account.balance}, balance, "balance of %s", account.address)
+			}
+		})
+	}
+}
+
 func TestFrameTransactionFeeSettlementHook(t *testing.T) {
 	evm, tx := frameTestEnv(t)
 	sender := accounts.InternAddress(tx.SenderAddress)
