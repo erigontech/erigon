@@ -340,6 +340,9 @@ func (p *TxPool) refreshFramePayers(cacheView kvcache.CacheView) error {
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
+	if len(p.all.senderIDFrameTxn) == 0 {
+		return nil
+	}
 	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
 	touched := make(map[common.Address]struct{})
 	nonceSlots := make(map[common.Hash]struct{})
@@ -357,11 +360,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		}
 	}
 	var pending []*metaTxn
-	for _, mt := range p.byHash {
+	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
-		if previous == nil {
-			continue
-		}
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		first := &frame.Frames[0]
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
