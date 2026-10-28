@@ -410,7 +410,7 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
-          eels_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].ref // empty' erigon-full/test-fixtures.json)
+          eels_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].consumer_ref // .[$t].ref // empty' erigon-full/test-fixtures.json)
           eels_ref_arg=""
           if [ -n "$eels_ref" ]; then
             eels_ref_arg="--sim.buildarg branch=$eels_ref"
