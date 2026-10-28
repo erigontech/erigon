@@ -1814,21 +1814,6 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
-// AsOfReader returns a read of a key as of ts through sd.mem, the shared state cache, then tx. Bind it once per
-// tx: building the cache view can read the DB.
-func (sd *SharedDomains) AsOfReader(tx kv.TemporalTx) func(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
-	view := sd.cacheViewFor(tx)
-	return func(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
-		if v, ok, err := sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
-			return v, ok, err
-		}
-		if v, hit := view.GetAsOf(domain, key, ts); hit {
-			return v, len(v) > 0, nil // an empty value is a cached absence
-		}
-		return tx.GetAsOf(domain, key, ts)
-	}
-}
-
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return sd.mem.GetAsOf(domain, key, ts)
 }
@@ -2063,7 +2048,7 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 type DomainReader interface {
 	membatchwithdb.DomainReader
 	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
-	AsOfReader(tx kv.TemporalTx) func(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error)
+	AsOfGetter(tx kv.TemporalTx) *AsOfGetter
 	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 }
 

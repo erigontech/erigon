@@ -21,7 +21,7 @@ import (
 type LayeredDomainReader struct {
 	sd         execctx.DomainReader
 	prevBlocks *PrevBlockList
-	asOf       func(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) // sd's as-of read bound to the tx
+	asOf       *execctx.AsOfGetter // nil without a tx
 }
 
 // NewLayeredDomainReader composes the window + sd. A nil prevBlocks layers nothing;
@@ -29,7 +29,7 @@ type LayeredDomainReader struct {
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
 	l := &LayeredDomainReader{sd: sd, prevBlocks: prevBlocks}
 	if roTx != nil {
-		l.asOf = sd.AsOfReader(roTx)
+		l.asOf = sd.AsOfGetter(roTx)
 	}
 	return l
 }
@@ -46,7 +46,7 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 	if l.asOf == nil {
 		return l.sd.GetAsOf(name, k, ts)
 	}
-	return l.asOf(name, k, ts)
+	return l.asOf.GetAsOf(name, k, ts)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
