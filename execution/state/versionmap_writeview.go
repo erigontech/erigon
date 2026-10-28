@@ -11,9 +11,8 @@ import (
 // versionMapWriteView is a read-only WriteSetView over a tx's versionMap slice.
 // The key-set (which cells the tx wrote) comes from keys; the values are read
 // from the versionMap floor at the tx's txIndex rather than from a copied
-// WriteSet. A yielded VersionedWrite is scratch the iterator reuses for every
-// element, never a pointer into the map: a consumer reads it inside the loop body
-// and retains nothing.
+// WriteSet. Yielded VersionedWrite values are reused per element, never pointers
+// into the map, so a consumer cannot mutate the map through the view.
 type versionMapWriteView struct {
 	keys  WriteSetView
 	vm    *VersionMap
