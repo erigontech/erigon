@@ -1327,14 +1327,14 @@ type blockTx struct {
 
 // newHistoricalBaseChain starts a node from a fixed genesis and mines one block
 // for each entry of blocks.
-func newHistoricalBaseChain(t *testing.T, cfg *chain.Config, genesisSlot0 uint64, blocks [][]blockTx) (*execmoduletester.ExecModuleTester, common.Address) {
+func newHistoricalBaseChain(t *testing.T, cfg *chain.Config, genesisSlot0 int64, blocks [][]blockTx) (*execmoduletester.ExecModuleTester, common.Address) {
 	t.Helper()
 	senderKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(senderKey.PublicKey)
 	slotStore := types.GenesisAccount{Balance: new(big.Int), Code: slotStoreCode}
 	if genesisSlot0 != 0 {
-		slotStore.Storage = map[common.Hash]common.Hash{{}: common.BigToHash(new(big.Int).SetUint64(genesisSlot0))}
+		slotStore.Storage = map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(genesisSlot0))}
 	}
 	alloc := types.GenesisAlloc{
 		sender:               {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
@@ -1370,9 +1370,8 @@ func newHistoricalBaseChain(t *testing.T, cfg *chain.Config, genesisSlot0 uint64
 // A simulation on an old block must start from that block's state, not from the
 // latest state, even when a simulated write matches the latest value. Each case
 // is compared with the same request on a node whose latest block is the old one.
-// The old block is either genesis or block 1, which sets slot 0 to its base value
-// instead of genesis, and the state root is computed with and without commitment
-// history.
+// The old block is genesis or block 1 (which sets slot 0 to its base value), and
+// the state root is computed with and without commitment history.
 func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 	slotStore, recipient, balanceReader := slotStoreAddress, transferRecipient, balanceReaderAddress
 	slotValue := func(v int64) hexutil.Bytes { h := common.BigToHash(big.NewInt(v)); return h[:] }
@@ -1392,7 +1391,7 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name                  string
-		baseSlot0             uint64
+		baseSlot0             int64
 		headTxs               []blockTx
 		simulatedBlocks       [][]ethapi.CallArgs
 		wantReturnData        []string
@@ -1445,61 +1444,63 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 		},
 	} {
 		for _, cfg := range simulateOverrideConfigs {
-			for baseNumber := range 2 {
-				for _, commitmentHistory := range []bool{false, true} {
-					name := fmt.Sprintf("%s/%s/base_%d/commitment_history_%t", cfg.name, tc.name, baseNumber, commitmentHistory)
-					t.Run(name, func(t *testing.T) {
-						if commitmentHistory {
-							previousSchema := statecfg.Schema
-							statecfg.EnableHistoricalCommitment()
-							t.Cleanup(func() { statecfg.Schema = previousSchema })
-						}
-						genesisSlot0, baseBlocks := tc.baseSlot0, [][]blockTx(nil)
-						if baseNumber == 1 {
-							genesisSlot0, baseBlocks = 0, [][]blockTx{{{to: &slotStore, data: slotValue(int64(tc.baseSlot0))}}}
-						}
-						node, sender := newHistoricalBaseChain(t, cfg.cfg, genesisSlot0, append(baseBlocks, tc.headTxs))
-						baseNode, _ := newHistoricalBaseChain(t, cfg.cfg, genesisSlot0, baseBlocks)
-						if commitmentHistory {
-							require.NoError(t, node.DB.Update(t.Context(), func(tx kv.RwTx) error {
-								return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-							}))
-						}
-						deployed := types.CreateAddress(sender, uint64(baseNumber))
-						buildRequest := func() SimulationRequest {
-							gas := hexutil.Uint64(1_000_000)
-							req := SimulationRequest{}
-							for _, calls := range tc.simulatedBlocks {
-								block := SimulatedBlock{}
-								for _, call := range calls {
-									if tc.callsDeployedContract && call.Data == nil {
-										call.To = &deployed
-									}
-									if call.From == nil {
-										call.From = &sender
-									}
-									call.Gas = &gas
-									block.Calls = append(block.Calls, call)
+			for _, variant := range []struct {
+				baseNumber        uint64
+				commitmentHistory bool
+			}{{0, false}, {0, true}, {1, false}, {1, true}} {
+				baseNumber, commitmentHistory := variant.baseNumber, variant.commitmentHistory
+				name := fmt.Sprintf("%s/%s/base_%d/commitment_history_%t", cfg.name, tc.name, baseNumber, commitmentHistory)
+				t.Run(name, func(t *testing.T) {
+					if commitmentHistory {
+						previousSchema := statecfg.Schema
+						statecfg.EnableHistoricalCommitment()
+						t.Cleanup(func() { statecfg.Schema = previousSchema })
+					}
+					genesisSlot0, baseBlocks := tc.baseSlot0, [][]blockTx(nil)
+					if baseNumber == 1 {
+						genesisSlot0, baseBlocks = 0, [][]blockTx{{{to: &slotStore, data: slotValue(tc.baseSlot0)}}}
+					}
+					node, sender := newHistoricalBaseChain(t, cfg.cfg, genesisSlot0, append(baseBlocks, tc.headTxs))
+					baseNode, _ := newHistoricalBaseChain(t, cfg.cfg, genesisSlot0, baseBlocks)
+					if commitmentHistory {
+						require.NoError(t, node.DB.Update(t.Context(), func(tx kv.RwTx) error {
+							return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+						}))
+					}
+					deployed := types.CreateAddress(sender, baseNumber)
+					buildRequest := func() SimulationRequest {
+						gas := hexutil.Uint64(1_000_000)
+						req := SimulationRequest{}
+						for _, calls := range tc.simulatedBlocks {
+							block := SimulatedBlock{}
+							for _, call := range calls {
+								if tc.callsDeployedContract && call.Data == nil {
+									call.To = &deployed
 								}
-								req.BlockStateCalls = append(req.BlockStateCalls, block)
+								if call.From == nil {
+									call.From = &sender
+								}
+								call.Gas = &gas
+								block.Calls = append(block.Calls, call)
 							}
-							return req
+							req.BlockStateCalls = append(req.BlockStateCalls, block)
 						}
-						historical, err := newEthApiForTest(newBaseApiForTest(node), node.DB, nil, nil).SimulateV1(t.Context(), buildRequest(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(baseNumber)))
-						require.NoError(t, err)
-						atBase, err := newEthApiForTest(newBaseApiForTest(baseNode), baseNode.DB, nil, nil).SimulateV1(t.Context(), buildRequest(), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
-						require.NoError(t, err)
-						require.Len(t, historical, len(tc.wantReturnData))
-						for i := range historical {
-							require.Len(t, historical[i].Calls, 1)
-							call := historical[i].Calls[0]
-							require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(call.Status), "block %d: %v", i, call.Error)
-							require.Equal(t, tc.wantReturnData[i], call.ReturnData, "block %d return data", i)
-							require.NotEqual(t, common.Hash{}, historical[i].StateRoot, "block %d state root", i)
-							require.Equal(t, atBase[i].StateRoot, historical[i].StateRoot, "block %d state root", i)
-						}
-					})
-				}
+						return req
+					}
+					historical, err := newEthApiForTest(newBaseApiForTest(node), node.DB, nil, nil).SimulateV1(t.Context(), buildRequest(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(baseNumber)))
+					require.NoError(t, err)
+					atBase, err := newEthApiForTest(newBaseApiForTest(baseNode), baseNode.DB, nil, nil).SimulateV1(t.Context(), buildRequest(), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+					require.NoError(t, err)
+					require.Len(t, historical, len(tc.wantReturnData))
+					for i := range historical {
+						require.Len(t, historical[i].Calls, 1)
+						call := historical[i].Calls[0]
+						require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(call.Status), "block %d: %v", i, call.Error)
+						require.Equal(t, tc.wantReturnData[i], call.ReturnData, "block %d return data", i)
+						require.NotEqual(t, common.Hash{}, historical[i].StateRoot, "block %d state root", i)
+						require.Equal(t, atBase[i].StateRoot, historical[i].StateRoot, "block %d state root", i)
+					}
+				})
 			}
 		}
 	}
