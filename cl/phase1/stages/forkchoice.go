@@ -112,9 +112,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	return
 }
 
-// updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
-// It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
-// and then marks the new chain segments as canonical.
+// updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
+// block or the trusted anchor as canonical, once the required block indices are available.
 func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
 	type canonicalEntry struct {
 		slot uint64
@@ -122,12 +121,14 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	}
 	currentRoot := headRoot
 	currentSlot := headSlot
-	// Accepted blocks can be visible before their indices are committed. The trusted
-	// anchor can come from a checkpoint state, so it is allowed to lack block indices.
+	// The trusted anchor can come from a checkpoint state without block indices.
 	var anchorRoot common.Hash
 	if cfg.forkChoice != nil {
 		anchorRoot = cfg.forkChoice.AnchorRoot()
 	}
+	// Accepted blocks may not have their indices yet. Wait for the required ancestry
+	// before marking the head canonical: later updates stop at that head and would
+	// leave any canonical ancestors from the old fork unchanged.
 	storedSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, headRoot)
 	if err != nil {
 		return fmt.Errorf("failed to read block slot by block root: %w", err)

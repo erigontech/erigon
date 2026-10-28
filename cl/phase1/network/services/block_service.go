@@ -78,7 +78,8 @@ type blockJob struct {
 	retryDelay          time.Duration
 	storageErrorLogged  bool
 	finishPayloadImport func()
-	// Jobs share an unsigned block root, so retain the accepted copy with its validated signature.
+	// Block roots exclude the block signature, so different signed copies can share a job.
+	// Retain the accepted copy to preserve its validated signature on retries.
 	pendingBlockWrite *cltypes.SignedBeaconBlock
 }
 
@@ -982,6 +983,8 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 }
 
 // processAndStoreBlock reports whether fork choice accepted the block, even if persistence fails.
+// If accepted is true, block must be the exact copy previously accepted by fork choice;
+// its header may already have been pruned.
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, accepted bool) (bool, error) {
 	finishImport := b.forkchoiceStore.BeginPayloadImport(block.Block.Slot)
 	defer finishImport()
@@ -1114,8 +1117,8 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.mu.Unlock()
 		return
 	}
-	// The expiry bounds validation retries. An accepted block must keep its storage
-	// retry until the write succeeds, even if fork choice has since pruned its header.
+	// A pending write for an accepted block must survive job expiry until storage succeeds,
+	// even if fork choice has since pruned the block's header.
 	if job.pendingBlockWrite == nil && now.Sub(job.creationTime) > blockJobExpiry {
 		if !job.terminal {
 			job.attempt.err = ErrPublishedBlockJobExpired
