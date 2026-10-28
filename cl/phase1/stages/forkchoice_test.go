@@ -593,12 +593,7 @@ func TestPayloadAttributesStageOwnershipAtGloas(t *testing.T) {
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	defer db.Close()
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	root100 := common.Hash{0x10}
 	root101a := common.Hash{0x11, 0xaa}
@@ -612,22 +607,12 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	state101b := common.Hash{0xb1}
 	state102b := common.Hash{0xb2}
 
-	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
-		t.Helper()
-		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
-		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
-		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
-		}
-	}
+	writeTestBlockIndices(t, tx, root100, common.Hash{0x99}, state100, 100, true)
+	writeTestBlockIndices(t, tx, root101a, root100, state101a, 101, true)
+	writeTestBlockIndices(t, tx, root102a, root101a, state102a, 102, true)
 
-	writeBlock(root100, common.Hash{0x99}, state100, 100, true)
-	writeBlock(root101a, root100, state101a, 101, true)
-	writeBlock(root102a, root101a, state102a, 102, true)
-
-	writeBlock(root101b, root100, state101b, 101, false)
-	writeBlock(root102b, root101b, state102b, 102, false)
+	writeTestBlockIndices(t, tx, root101b, root100, state101b, 101, false)
+	writeTestBlockIndices(t, tx, root102b, root101b, state102b, 102, false)
 
 	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
@@ -641,12 +626,7 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 
 func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	defer db.Close()
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	root100 := common.Hash{0x10}
 	root101a := common.Hash{0x11, 0xaa}
@@ -659,23 +639,13 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	state103a := common.Hash{0xa3}
 	state102b := common.Hash{0xb2}
 
-	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
-		t.Helper()
-		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
-		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
-		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
-		}
-	}
+	writeTestBlockIndices(t, tx, root100, common.Hash{0x99}, state100, 100, true)
+	writeTestBlockIndices(t, tx, root101a, root100, common.Hash{0xa1}, 101, true)
+	writeTestBlockIndices(t, tx, root102a, root101a, common.Hash{0xa2}, 102, true)
+	writeTestBlockIndices(t, tx, root103a, root102a, state103a, 103, true)
 
-	writeBlock(root100, common.Hash{0x99}, state100, 100, true)
-	writeBlock(root101a, root100, common.Hash{0xa1}, 101, true)
-	writeBlock(root102a, root101a, common.Hash{0xa2}, 102, true)
-	writeBlock(root103a, root102a, state103a, 103, true)
-
-	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
-	writeBlock(root102b, root101b, state102b, 102, false)
+	writeTestBlockIndices(t, tx, root101b, root100, common.Hash{0xb1}, 101, false)
+	writeTestBlockIndices(t, tx, root102b, root101b, state102b, 102, false)
 
 	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
@@ -689,12 +659,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 
 func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	defer db.Close()
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	root100 := common.Hash{0x10}
 	root101a := common.Hash{0x11, 0xaa}
@@ -706,23 +671,13 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	state102a := common.Hash{0xa2}
 	state103b := common.Hash{0xb3}
 
-	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
-		t.Helper()
-		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
-		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
-		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
-		}
-	}
+	writeTestBlockIndices(t, tx, root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
+	writeTestBlockIndices(t, tx, root101a, root100, common.Hash{0xa1}, 101, true)
+	writeTestBlockIndices(t, tx, root102a, root101a, state102a, 102, true)
 
-	writeBlock(root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
-	writeBlock(root101a, root100, common.Hash{0xa1}, 101, true)
-	writeBlock(root102a, root101a, state102a, 102, true)
-
-	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
-	writeBlock(root102b, root101b, common.Hash{0xb2}, 102, false)
-	writeBlock(root103b, root102b, state103b, 103, false)
+	writeTestBlockIndices(t, tx, root101b, root100, common.Hash{0xb1}, 101, false)
+	writeTestBlockIndices(t, tx, root102b, root101b, common.Hash{0xb2}, 102, false)
+	writeTestBlockIndices(t, tx, root103b, root102b, state103b, 103, false)
 
 	reorg := drainReorgEvent(t, tx, 103, root103b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
@@ -736,31 +691,16 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 
 func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	defer db.Close()
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	root100 := common.Hash{0x10}
 	root101 := common.Hash{0x11}
 	root102 := common.Hash{0x12}
 
-	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
-		t.Helper()
-		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
-		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
-		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
-		}
-	}
+	writeTestBlockIndices(t, tx, root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
+	writeTestBlockIndices(t, tx, root101, root100, common.Hash{0xa1}, 101, true)
 
-	writeBlock(root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
-	writeBlock(root101, root100, common.Hash{0xa1}, 101, true)
-
-	writeBlock(root102, root101, common.Hash{0xa2}, 102, false)
+	writeTestBlockIndices(t, tx, root102, root101, common.Hash{0xa2}, 102, false)
 
 	reorg := drainReorgEvent(t, tx, 102, root102)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
@@ -768,12 +708,7 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 
 func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	defer db.Close()
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	root100 := common.Hash{0x10}
 	root101a := common.Hash{0x11, 0xaa}
@@ -782,19 +717,9 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	state101a := common.Hash{0xa1}
 	state101b := common.Hash{0xb1}
 
-	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
-		t.Helper()
-		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
-		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
-		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
-		}
-	}
-
-	writeBlock(root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
-	writeBlock(root101a, root100, state101a, 101, true)
-	writeBlock(root101b, root100, state101b, 101, false)
+	writeTestBlockIndices(t, tx, root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
+	writeTestBlockIndices(t, tx, root101a, root100, state101a, 101, true)
+	writeTestBlockIndices(t, tx, root101b, root100, state101b, 101, false)
 
 	reorg := drainReorgEvent(t, tx, 101, root101b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
@@ -822,15 +747,6 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 			root101b := common.Hash{0x11, 0xbb}
 			root102b := common.Hash{0x12, 0xbb}
 
-			writeBlock := func(tx kv.RwTx, root, parent common.Hash, slot uint64, canonical bool) {
-				t.Helper()
-				require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-				require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parent))
-				require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, common.Hash{byte(slot)}))
-				if canonical {
-					require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
-				}
-			}
 			requireCanonical := func(root101, root102 common.Hash) {
 				t.Helper()
 				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
@@ -843,14 +759,14 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 				}))
 			}
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				writeBlock(tx, root100, common.Hash{}, 100, true)
-				writeBlock(tx, root101a, root100, 101, true)
-				writeBlock(tx, root102a, root101a, 102, true)
+				writeTestBlockIndices(t, tx, root100, common.Hash{}, common.Hash{100}, 100, true)
+				writeTestBlockIndices(t, tx, root101a, root100, common.Hash{101}, 101, true)
+				writeTestBlockIndices(t, tx, root102a, root101a, common.Hash{102}, 102, true)
 				if pendingSlot != 101 {
-					writeBlock(tx, root101b, root100, 101, false)
+					writeTestBlockIndices(t, tx, root101b, root100, common.Hash{101}, 101, false)
 				}
 				if pendingSlot != 102 {
-					writeBlock(tx, root102b, root101b, 102, false)
+					writeTestBlockIndices(t, tx, root102b, root101b, common.Hash{102}, 102, false)
 				}
 				return nil
 			}))
@@ -863,9 +779,9 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 				if pendingSlot == 101 {
-					writeBlock(tx, root101b, root100, 101, false)
+					writeTestBlockIndices(t, tx, root101b, root100, common.Hash{101}, 101, false)
 				} else {
-					writeBlock(tx, root102b, root101b, 102, false)
+					writeTestBlockIndices(t, tx, root102b, root101b, common.Hash{102}, 102, false)
 				}
 				return nil
 			}))
@@ -886,9 +802,7 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fixture := newLockOrderFixture(t, anchorSlot)
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			tx := mdbxtest.BeginRw(t, db)
 
 			require.NoError(t, updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg))
 			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot)
@@ -907,6 +821,16 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, newRoot, root)
 		})
+	}
+}
+
+func writeTestBlockIndices(t *testing.T, tx kv.RwTx, root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
+	t.Helper()
+	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
+	require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
+	require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
+	if canonical {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 }
 
