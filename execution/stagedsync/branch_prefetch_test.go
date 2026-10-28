@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -96,7 +95,7 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 
 	cc := calc()
 	require.Nil(t, cc.parentRecords(), "nothing verified")
-	cc.noteVerified(child, nil)
+	cc.noteVerified(child)
 	r := cc.parentRecords()
 	require.NotNil(t, r)
 	require.Equal(t, child.blockHash, r.BlockHash)
@@ -106,96 +105,13 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	require.Equal(t, kv.Step(4), step)
 
 	cc = calc()
-	cc.noteVerified(commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: common.Hash{8}}, nil)
+	cc.noteVerified(commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: common.Hash{8}})
 	require.Nil(t, cc.parentRecords(), "a block whose parent is not the head the records were read at")
 
 	cc = calc()
-	cc.noteVerified(child, nil)
-	cc.noteVerified(commitTarget{blockNum: 11, blockHash: common.Hash{11}, parentHash: child.blockHash}, nil)
+	cc.noteVerified(child)
+	cc.noteVerified(commitTarget{blockNum: 11, blockHash: common.Hash{11}, parentHash: child.blockHash})
 	require.Nil(t, cc.parentRecords(), "a calculator that verified two blocks")
-}
-
-type carryDB struct{ kv.TemporalRoDB }
-
-func TestBranchCarryAdoptsVerifiedDeltasOnlyAtItsHead(t *testing.T) {
-	t.Cleanup(dropBranchCarry)
-	db := &carryDB{}
-	p := newPrefetchRecords()
-	p.block = 10
-	p.put([]byte{0x01}, []byte("kept"), 3)
-	p.put([]byte{0x02}, []byte("old"), 3)
-	head := commitTarget{blockNum: 10, blockHash: common.Hash{10}}
-	deltas := [][]commitment.BranchDelta{{{Key: []byte{0x02}, Data: []byte("new")}, {Key: []byte{0x03}, Data: []byte("born")}}}
-
-	storeBranchCarry(db, p, head, deltas, 5)
-	require.Nil(t, takeBranchCarry(db, 10, common.Hash{9}), "another block at the carry's height")
-	require.Nil(t, takeBranchCarry(db, 10, common.Hash{10}), "a mismatch drops the carry")
-
-	storeBranchCarry(db, p, head, deltas, 5)
-	require.Nil(t, takeBranchCarry(&carryDB{}, 10, common.Hash{10}), "another database")
-
-	storeBranchCarry(db, p, head, deltas, 5)
-	got := takeBranchCarry(db, 10, common.Hash{10})
-	require.Same(t, p, got)
-	want := map[byte]string{0x01: "kept", 0x02: "new", 0x03: "born"}
-	for _, stage := range []string{"attached", "merged"} {
-		for key, w := range want {
-			data, _, ok := got.get([]byte{key})
-			require.True(t, ok, stage)
-			require.Equal(t, w, string(data), stage)
-		}
-		_, step, _ := got.get([]byte{0x02})
-		require.Equal(t, kv.Step(5), step, stage)
-		got.mergeOverlay()
-	}
-	require.Nil(t, got.overlay.Load())
-	require.Nil(t, takeBranchCarry(db, 10, common.Hash{10}), "a carry is taken once")
-}
-
-func TestBranchCarryEvictsRecordsOlderThanTheWindow(t *testing.T) {
-	p := newPrefetchRecords()
-	p.block = 1
-	p.put([]byte{0x01}, []byte("stale"), 0)
-	p.put([]byte{0x03}, []byte("refreshed"), 0)
-	p.block = 40
-	p.put([]byte{0x02}, []byte("recent"), 0)
-	p.put([]byte{0x03}, []byte("refreshed"), 0)
-	before := p.bytes.Load()
-
-	ov := map[string]prefetchedRecord{}
-	p.overlay.Store(&ov)
-	p.overlayBlock = 1 + branchCarryBlocks
-	p.mergeOverlay()
-
-	_, _, ok := p.get([]byte{0x01})
-	require.False(t, ok, "a record last filled more than the window ago is evicted")
-	for _, key := range []byte{0x02, 0x03} {
-		_, _, ok := p.get([]byte{key})
-		require.True(t, ok)
-	}
-	require.Equal(t, before-int64(1+len("stale")), p.bytes.Load())
-}
-
-func TestParentRecordsStopServingOnceTheCarryMovesOn(t *testing.T) {
-	p := newPrefetchRecords()
-	key := []byte{0x12}
-	p.put(key, []byte("parent"), 1)
-	head := common.Hash{9}
-	cc := &commitmentCalculator{state: &calcState{branchPrefetch: p}, readAtNum: 9, readAtHash: head}
-	cc.noteVerified(commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: head}, nil)
-	r := cc.parentRecords()
-	data, _, ok := r.Get(key)
-	require.True(t, ok)
-	require.Equal(t, []byte("parent"), data)
-
-	ov := overlayOf([][]commitment.BranchDelta{{{Key: key, Data: []byte("child")}}}, 10, 2)
-	p.overlay.Store(&ov)
-	data, _, ok = r.Get(key)
-	require.True(t, ok)
-	require.Equal(t, []byte("parent"), data, "an attached overlay does not reach block 10's witness")
-	p.mergeOverlay()
-	_, _, ok = r.Get(key)
-	require.False(t, ok, "records handed to block 10's witness stop serving once the carry holds block 10's own writes")
 }
 
 func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {

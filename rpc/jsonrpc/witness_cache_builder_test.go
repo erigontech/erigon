@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -912,12 +911,12 @@ func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTeste
 	return m, testChain
 }
 
-func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
-	previousAssert, previousCarry, previousSchema, previousV3 := dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3
+func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
+	previousAssert, previousSchema, previousV3 := dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
-		dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousCarry, previousSchema, previousV3
+		dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousSchema, previousV3
 	})
-	dbg.AssertEnabled, dbg.CommitmentBranchCarry = true, true
+	dbg.AssertEnabled = true
 	commitmentdb.WantParentReads(true)
 	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
@@ -925,8 +924,6 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 
-	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
-	filled := metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()
 	used := witnessCacheParentRecordsCounter.GetValueUint64()
 	stateHits := mxParentStateHit.GetValueUint64()
 	warmed := mxWarmRecords.GetValueUint64()
@@ -966,12 +963,10 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, wantBytes, gotBytes, "block %d", n)
 	}
-	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()-adopted, "blocks validated one at a time adopt the carried records")
 	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
 	require.Positive(t, deletions, "some blocks hand their verified deletions to head-capture")
 	require.Positive(t, mxParentStateHit.GetValueUint64()-stateHits, "head-capture re-execution reads the validation's parent state")
 	require.Positive(t, mxWarmRecords.GetValueUint64()-warmed, "head-capture warms accessed paths the validation's records miss")
-	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()-filled, "records adopted from a block's deltas get their leaf refs")
 }
 
 func TestHeadCaptureWarmPanicIsContained(t *testing.T) {

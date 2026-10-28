@@ -513,7 +513,6 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
-	dropBranchCarry()
 	if u.UnwindPoint >= s.BlockNumber {
 		// Disk holds nothing above s.BlockNumber, but the in-RAM overlay may.
 

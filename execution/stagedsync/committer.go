@@ -117,13 +117,11 @@ type commitmentCalculator struct {
 	// Opened at start, lives for the calculator's lifetime.
 	roTx kv.TemporalTx
 
-	readAtNum     uint64
-	readAtHash    common.Hash
-	handoff       *commitTarget
-	handoffDeltas [][]commitment.BranchDelta
-	handoffDel    [][]byte
-	handoffMulti  bool
-	sawMidBlock   bool
+	readAtNum    uint64
+	readAtHash   common.Hash
+	handoff      *commitTarget
+	handoffDel   [][]byte
+	handoffMulti bool
 
 	// commitProgress holds the most recent CommitProgress the trie reported,
 	// and firstCommitAtNs the wall time of the first round. The parallel
@@ -339,16 +337,7 @@ func newCommitmentCalculator(
 			}
 		}
 		calc.hashes = newCalcHashes()
-		if p := takeBranchCarry(db, readAtNum, readAtHash); p != nil {
-			if dbg.AssertEnabled {
-				if err := p.verifyAgainst(roTx); err != nil {
-					panic(err)
-				}
-			}
-			calc.branchPrefetch = p.start(workCtx, db, readAtNum+1)
-		} else {
-			calc.branchPrefetch = newBranchPrefetcher(workCtx, db, readAtNum+1)
-		}
+		calc.branchPrefetch = newBranchPrefetcher(workCtx, db)
 		asOfReader.prefetched = calc.branchPrefetch
 	}
 
@@ -431,9 +420,6 @@ func (cc *commitmentCalculator) Stop() {
 			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
 		if r := cc.parentRecords(); r != nil {
 			commitmentdb.PublishParentRecords(r)
-			if dbg.CommitmentBranchCarry && !cc.sawMidBlock && cc.handoffDeltas != nil {
-				storeBranchCarry(cc.db, p, *cc.handoff, cc.handoffDeltas, kv.Step(cc.handoff.lastTxNum/cc.doms.StepSize()))
-			}
 		}
 	}
 	if cc.prefetch != nil {
@@ -951,11 +937,11 @@ func targetOf(br *blockResult) commitTarget {
 	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), parentHash: br.Block.ParentHash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root(), parent: br.parentState}
 }
 
-func (cc *commitmentCalculator) noteVerified(t commitTarget, deltas [][]commitment.BranchDelta) {
+func (cc *commitmentCalculator) noteVerified(t commitTarget) {
 	if cc.handoff != nil && cc.handoff.blockHash != t.blockHash {
 		cc.handoffMulti = true
 	}
-	cc.handoff, cc.handoffDeltas, cc.handoffDel = &t, deltas, cc.state.deleted
+	cc.handoff, cc.handoffDel = &t, cc.state.deleted
 }
 
 func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
@@ -963,10 +949,8 @@ func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
 	if h == nil || p == nil || cc.handoffMulti || h.blockNum != cc.readAtNum+1 || h.parentHash != cc.readAtHash {
 		return nil
 	}
-	gen := p.gen.Load()
 	r := &commitmentdb.ParentRecords{
-		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
-		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) },
+		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel, Get: p.get,
 	}
 	if h.parent != nil {
 		r.State = h.parent
@@ -1084,10 +1068,6 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	mismatch := m.checkRoot && !bytes.Equal(rh, t.stateRoot[:])
-	var deltas [][]commitment.BranchDelta
-	if u := cc.doms.GetCommitmentContext().PeekPendingUpdate(); u != nil && u.BlockNum == t.blockNum {
-		deltas = u.Deltas
-	}
 	if flushOwn != nil {
 		if mismatch {
 			cc.doms.GetCommitmentContext().ResetPendingUpdates()
@@ -1104,10 +1084,8 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
 		if m.checkRoot && !mismatch {
-			cc.noteVerified(t, deltas)
+			cc.noteVerified(t)
 		}
-	} else {
-		cc.sawMidBlock = true
 	}
 
 	if !m.checkRoot {
