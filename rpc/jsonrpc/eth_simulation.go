@@ -1354,8 +1354,8 @@ func (tx baseStateTx) GetLatest(domain kv.Domain, k []byte, opts kv.GetLatestOpt
 // baseStateMemBatch is the in-memory batch of a simulation on an old base. A storage
 // wipe lists the account's slots through IteratePrefix, which would read the latest
 // state; here it lists the slots at the end of the base block (txNum) together with
-// the simulated writes. Deleted storage keys are added to touchedKeys, so the state
-// root replay updates them too.
+// the slots the simulation wrote, which touchedKeys holds. Deleted storage keys are
+// added to touchedKeys, so the state root replay updates them too.
 type baseStateMemBatch struct {
 	*dbstate.TemporalMemBatch
 	tx          kv.TemporalTx
@@ -1372,17 +1372,13 @@ func (m *baseStateMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, 
 }
 
 func (m *baseStateMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	if domain != kv.StorageDomain {
+	if domain != kv.StorageDomain || len(prefix) != length.Addr {
 		return m.TemporalMemBatch.IteratePrefix(domain, prefix, roTx, it)
 	}
-	// The batch lists the simulated writes together with the latest state. Only the
-	// keys are taken; a key that is neither written nor in the base state is skipped.
 	values := map[string][]byte{}
-	if err := m.TemporalMemBatch.IteratePrefix(domain, prefix, roTx, func(k, _ []byte) (bool, error) {
-		values[string(k)] = nil
-		return true, nil
-	}); err != nil {
-		return err
+	for _, slot := range m.touchedKeys[accounts.InternAddress(common.BytesToAddress(prefix))] {
+		slotValue := slot.Value()
+		values[string(prefix)+string(slotValue[:])] = nil
 	}
 	to, _ := kv.NextSubtree(prefix)
 	base, err := m.tx.RangeAsOf(domain, prefix, to, m.txNum, order.Asc, kv.Unlim)

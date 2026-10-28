@@ -1584,10 +1584,12 @@ func TestBaseStateMemBatchListsStorageAtBase(t *testing.T) {
 	// Slot 0 is 1 at the base and cleared at the head.
 	require.Equal(t, map[string]string{slotKey(0): "01"}, listStorage())
 
+	// The state writer registers the slots it writes in touchedKeys.
+	touched[accounts.InternAddress(slotStore)] = storageKeys{accounts.InternKey(common.Hash{31: 1})}
 	require.NoError(t, mem.DomainPut(kv.StorageDomain, slotKey(1), []byte{5}, baseTxNum, nil))
 	require.NoError(t, mem.DomainDel(kv.StorageDomain, slotKey(0), baseTxNum, []byte{1}))
 	require.Equal(t, map[string]string{slotKey(1): "05"}, listStorage())
-	require.Equal(t, storageKeys{accounts.InternKey(common.Hash{})}, touched[accounts.InternAddress(slotStore)])
+	require.Equal(t, storageKeys{accounts.InternKey(common.Hash{31: 1}), accounts.InternKey(common.Hash{})}, touched[accounts.InternAddress(slotStore)])
 }
 
 // latestAndHistoryTx answers latest and historical reads with different values.
