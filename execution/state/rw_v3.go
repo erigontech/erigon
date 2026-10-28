@@ -84,11 +84,15 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
 		type addrState struct {
-			balance        *uint256.Int
+			balance        uint256.Int
+			nonce          uint64
+			incarnation    uint64
+			codeHash       accounts.CodeHash
+			hasBalance     bool
 			balanceDeleted bool
-			nonce          *uint64
-			incarnation    *uint64
-			codeHash       *accounts.CodeHash
+			hasNonce       bool
+			hasIncarnation bool
+			hasCodeHash    bool
 			code           []byte
 			codeWritten    bool
 			selfDestruct   bool
@@ -106,24 +110,23 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			return d
 		}
 		for a, vw := range writes.Balances() {
-			v := vw.Val
 			d := ensure(a)
-			d.balance = &v
+			d.balance, d.hasBalance = vw.Val, true
 			d.balanceDeleted = vw.Deletes()
 		}
 		for a, vw := range writes.Nonces() {
-			v := vw.Val
-			ensure(a).nonce = &v
+			d := ensure(a)
+			d.nonce, d.hasNonce = vw.Val, true
 		}
 		for a, vw := range writes.Incarnations() {
-			v := vw.Val
-			ensure(a).incarnation = &v
+			d := ensure(a)
+			d.incarnation, d.hasIncarnation = vw.Val, true
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
 		for a, vw := range writes.CodeHashes() {
-			v := vw.Val
-			ensure(a).codeHash = &v
+			d := ensure(a)
+			d.codeHash, d.hasCodeHash = vw.Val, true
 		}
 		for a, vw := range writes.Codes() {
 			d := ensure(a)
@@ -150,11 +153,11 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for _, d := range perAddr {
 			if d.selfDestruct {
 				if d.balanceDeleted {
-					d.balance = nil
+					d.hasBalance = false
 				}
-				d.nonce = nil
-				d.incarnation = nil
-				d.codeHash = nil
+				d.hasNonce = false
+				d.hasIncarnation = false
+				d.hasCodeHash = false
 				d.code = nil
 				d.codeWritten = false
 				d.storage = nil
@@ -182,8 +185,8 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 				// An EIP-8246 self-destruct keeps its balance write; the record
 				// survives only when a non-zero balance is left to preserve.
-				sdPreservedBalance := d.balance != nil && !d.balance.IsZero()
-				pureDelete := !sdPreservedBalance && d.nonce == nil && d.incarnation == nil && d.codeHash == nil
+				sdPreservedBalance := d.hasBalance && !d.balance.IsZero()
+				pureDelete := !sdPreservedBalance && !d.hasNonce && !d.hasIncarnation && !d.hasCodeHash
 				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 					return err
 				}
@@ -218,7 +221,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
-			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.codeWritten {
+			if d.hasBalance || d.hasNonce || d.hasIncarnation || d.hasCodeHash || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
@@ -234,17 +237,17 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						}
 					}
 				}
-				if d.balance != nil {
-					acc.Balance = *d.balance
+				if d.hasBalance {
+					acc.Balance = d.balance
 				}
-				if d.nonce != nil {
-					acc.Nonce = *d.nonce
+				if d.hasNonce {
+					acc.Nonce = d.nonce
 				}
-				if d.incarnation != nil {
-					acc.Incarnation = *d.incarnation
+				if d.hasIncarnation {
+					acc.Incarnation = d.incarnation
 				}
-				if d.codeHash != nil {
-					acc.CodeHash = *d.codeHash
+				if d.hasCodeHash {
+					acc.CodeHash = d.codeHash
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
