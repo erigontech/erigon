@@ -2382,21 +2382,6 @@ func sortWriteHeaders(headers []WriteHeader) {
 	})
 }
 
-// ShadowsAt reports whether ws writes every cell other writes at addr, so a read of those cells
-// after ws's tx sees ws or a later write. A lifecycle write reaches every read of the address,
-// so it is never shadowed.
-func (ws *WriteSet) ShadowsAt(other *WriteSet, addr accounts.Address) bool {
-	if ws == nil {
-		return false
-	}
-	for h := range other.AllHeaders() {
-		if h.Address == addr && (h.Path.AffectsAccountLifecycle() || !ws.hasHeader(h)) {
-			return false
-		}
-	}
-	return true
-}
-
 // hasHeader reports whether a write exists at h's (Address, Path, Key).
 func (ws *WriteSet) hasHeader(h WriteHeader) bool {
 	if ws == nil {
@@ -3287,17 +3272,10 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	return false
 }
 
-// DependsOnAt is HasReadDep for the writes ws makes at addr.
-func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
-	if ws == nil {
-		return false
-	}
-	if anyCommonKey(ws.storage[addr], s.storage[addr]) {
-		return true
-	}
-	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodePath, CodeHashPath, CodeSizePath, CreateContractPath} {
-		h := WriteHeader{Address: addr, Path: p}
-		if ws.hasHeader(h) && s.DependsOn(h) {
+// DependsOnAny reports whether a write of any of headers can invalidate a read in s.
+func (s ReadSet) DependsOnAny(headers []WriteHeader) bool {
+	for _, h := range headers {
+		if s.DependsOn(h) {
 			return true
 		}
 	}

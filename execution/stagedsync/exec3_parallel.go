@@ -3004,20 +3004,15 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	if ws == nil {
 		return
 	}
-	seen := map[accounts.Address]struct{}{}
+	// Grouped by address once, so each reader is checked only against the cells ws wrote there.
+	written := map[accounts.Address][]state.WriteHeader{}
 	for h := range ws.AllHeaders() {
-		if _, ok := seen[h.Address]; ok {
-			continue
-		}
-		seen[h.Address] = struct{}{}
-		for _, tx := range readersAbove(be.readerByAddr[h.Address], writerTx) {
-			txIndex := be.tasks[tx].Task.Version().TxIndex
-			if !be.revalidate[tx] && be.blockIO.ReadSet(txIndex).DependsOnAt(ws, h.Address) {
+		written[h.Address] = append(written[h.Address], h)
+	}
+	for addr, headers := range written {
+		for _, tx := range readersAbove(be.readerByAddr[addr], writerTx) {
+			if !be.revalidate[tx] && be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOnAny(headers) {
 				be.revalidate[tx] = true
-			}
-			// Readers above tx see tx's write or a later one; publishing tx's write flags them.
-			if be.blockIO.WriteSet(txIndex).ShadowsAt(ws, h.Address) {
-				break
 			}
 		}
 	}

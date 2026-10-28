@@ -2114,27 +2114,3 @@ func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
 	require.Len(t, bal, 1)
 	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
 }
-
-func TestWriteSetShadowsAt(t *testing.T) {
-	t.Parallel()
-	a := accounts.InternAddress(common.HexToAddress("0xda11"))
-	b := accounts.InternAddress(common.HexToAddress("0xda12"))
-	bal := func(addr accounts.Address) *VersionedWrite[uint256.Int] {
-		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey}}
-	}
-	nonce := func(addr accounts.Address) *VersionedWrite[uint64] {
-		return &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Key: accounts.NilKey}}
-	}
-	slot := func(addr accounts.Address, k byte) *VersionedWrite[uint256.Int] {
-		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: accounts.InternKey(common.Hash{k})}}
-	}
-	sender := newWriteSet(bal(a), nonce(a), bal(b))
-
-	require.True(t, newWriteSet(bal(a), nonce(a)).ShadowsAt(sender, a), "a later write of every cell at a")
-	require.False(t, newWriteSet(bal(a)).ShadowsAt(sender, a), "nonce at a left visible")
-	require.True(t, newWriteSet(bal(a), nonce(a)).ShadowsAt(newWriteSet(slot(a, 1)), b), "nothing written at b")
-	require.False(t, newWriteSet(slot(a, 1)).ShadowsAt(newWriteSet(slot(a, 1), slot(a, 2)), a), "slot 2 left visible")
-	selfDestruct := newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: a, Path: SelfDestructPath, Key: accounts.NilKey}, Val: true})
-	require.False(t, selfDestruct.ShadowsAt(selfDestruct, a), "a lifecycle write reaches every read of the address")
-	require.False(t, (*WriteSet)(nil).ShadowsAt(sender, a))
-}
