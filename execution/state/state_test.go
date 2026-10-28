@@ -118,13 +118,15 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 
 func TestWriterAccountAndStorageNotifications(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		nonces []uint64
-		action notifications.Action
+		name                          string
+		storageOriginal, storageValue uint64
+		nonces                        []uint64
+		action                        notifications.Action
 	}{
-		{"storage only", []uint64{1}, notifications.ActionStorage},
-		{"account and storage", []uint64{2}, notifications.ActionUpsert},
-		{"account restored", []uint64{2, 1}, notifications.ActionUpsert},
+		{"storage only", 0, 1, []uint64{1}, notifications.ActionStorage},
+		{"storage cleared", 1, 0, []uint64{1}, notifications.ActionStorage},
+		{"account and storage", 0, 1, []uint64{2}, notifications.ActionUpsert},
+		{"account restored", 0, 1, []uint64{2, 1}, notifications.ActionUpsert},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, tx, domains := NewTestRwTx(t)
@@ -136,7 +138,8 @@ func TestWriterAccountAndStorageNotifications(t *testing.T) {
 			original.Nonce = 1
 			account := original
 
-			require.NoError(t, writer.WriteAccountStorage(address, 0, accounts.ZeroKey, uint256.Int{}, uint256.Int{1}))
+			storageValue := uint256.NewInt(tc.storageValue)
+			require.NoError(t, writer.WriteAccountStorage(address, 0, accounts.ZeroKey, *uint256.NewInt(tc.storageOriginal), *storageValue))
 			for _, nonce := range tc.nonces {
 				account.Nonce = nonce
 				require.NoError(t, writer.UpdateAccountData(address, &original, &account))
@@ -146,6 +149,7 @@ func TestWriterAccountAndStorageNotifications(t *testing.T) {
 			require.Len(t, changes[0].Changes, 1)
 			require.Equal(t, tc.action, changes[0].Changes[0].Action)
 			require.Len(t, changes[0].Changes[0].StorageChanges, 1)
+			require.Equal(t, storageValue.Bytes(), changes[0].Changes[0].StorageChanges[0].Data)
 			if tc.action == notifications.ActionUpsert {
 				require.Equal(t, accounts.SerialiseV3(&account), changes[0].Changes[0].Data)
 			}

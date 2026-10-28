@@ -839,11 +839,11 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
-	if len(v) == 0 {
-		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
-	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
+	}
+	if len(v) == 0 {
+		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
