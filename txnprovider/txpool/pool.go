@@ -1622,11 +1622,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	// An interesting note here is that if the block contained any transactions local to the node,
-	// by being first removed from the pool (from the "local" part of it), and then re-injected,
-	// they effective lose their priority over the "remote" transactions. In order to prevent that,
-	// somehow the fact that certain transactions were local, needs to be remembered for some
-	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
@@ -1687,11 +1682,6 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	// An interesting note here is that if the block contained any transactions local to the node,
-	// by being first removed from the pool (from the "local" part of it), and then re-injected,
-	// they effective lose their priority over the "remote" transactions. In order to prevent that,
-	// somehow the fact that certain transactions were local, needs to be remembered for some
-	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
