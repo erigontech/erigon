@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // Frame receipts encode per-frame outcomes. The aggregate status, logs and bloom
@@ -97,5 +98,22 @@ func (r *FrameReceipt) UnmarshalJSON(input []byte) error {
 }
 
 func (receipts FrameReceipts) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return jsonstream.WriteReflected(s, receipts)
+	jsonstream.ArrayValue(s, receipts, writeFrameReceiptElem)
+	return nil
+}
+
+func writeFrameReceiptElem(s *jsonstream.Stream, receipt *FrameReceipt) {
+	s.WriteObjectStart()
+	ethjson.Quantity(s, "status", receipt.Status)
+	s.Field("gasUsed").WriteArrayStart()
+	s.WriteQuotedText(hexutil.Uint64(receipt.GasUsed.Execution))
+	s.WriteQuotedText(hexutil.Uint64(receipt.GasUsed.State))
+	s.WriteArrayEnd()
+	s.Field("logs")
+	logs := receipt.Logs
+	if logs == nil {
+		logs = Logs{}
+	}
+	_ = logs.MarshalFastJSONTo(s)
+	s.WriteObjectEnd()
 }

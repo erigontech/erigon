@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -61,7 +62,17 @@ type ReceiptWithTimestamp struct {
 
 // MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop Timestamp.
 func (r ReceiptWithTimestamp) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return jsonstream.WriteReflected(s, r)
+	return writeReflected(s, r)
+}
+
+// writeReflected writes v with encoding/json.
+func writeReflected(s *jsonstream.Stream, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(b)
+	return nil
 }
 
 type OtterscanAPI interface {

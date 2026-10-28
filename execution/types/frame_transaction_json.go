@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // Preserve empty target, signer and message fields in the JSON forms. Resolving
@@ -151,13 +152,45 @@ func (keys *FrameNonceKeys) UnmarshalJSON(input []byte) error {
 }
 
 func (keys FrameNonceKeys) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return jsonstream.WriteReflected(s, keys)
+	s.WriteArrayStart()
+	for i := range keys {
+		s.WriteQuotedText((*hexutil.U256)(&keys[i]))
+	}
+	s.WriteArrayEnd()
+	return nil
 }
 
 func (frames Frames) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return jsonstream.WriteReflected(s, frames)
+	jsonstream.ArrayValue(s, frames, writeFrameElem)
+	return nil
+}
+
+func writeFrameElem(s *jsonstream.Stream, frame *Frame) {
+	s.WriteObjectStart()
+	ethjson.Quantity(s, "mode", uint64(frame.Mode))
+	ethjson.Quantity(s, "flags", uint64(frame.Flags))
+	if frame.Target == nil {
+		s.Field("target").WriteNil()
+	} else {
+		ethjson.Data(s, "target", frame.Target[:])
+	}
+	ethjson.Quantity(s, "gasLimit", frame.Limits.Execution)
+	ethjson.Quantity(s, "stateGasLimit", frame.Limits.State)
+	ethjson.Quantity256(s, "value", &frame.Value)
+	ethjson.Data(s, "data", frame.Data)
+	s.WriteObjectEnd()
 }
 
 func (signatures FrameSignatures) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return jsonstream.WriteReflected(s, signatures)
+	jsonstream.ArrayValue(s, signatures, writeFrameSignatureElem)
+	return nil
+}
+
+func writeFrameSignatureElem(s *jsonstream.Stream, sig *FrameSignature) {
+	s.WriteObjectStart()
+	ethjson.Quantity(s, "scheme", uint64(sig.Scheme))
+	ethjson.Data(s, "signer", sig.Signer)
+	ethjson.Data(s, "msg", sig.Message)
+	ethjson.Data(s, "signature", sig.Signature)
+	s.WriteObjectEnd()
 }
