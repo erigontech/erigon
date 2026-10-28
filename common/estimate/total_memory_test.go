@@ -1,7 +1,6 @@
 package estimate
 
 import (
-	"runtime"
 	"runtime/debug"
 	"testing"
 
@@ -37,17 +36,4 @@ func TestMemoryBound(t *testing.T) {
 			require.Equal(t, tc.want, memoryBound(tc.bounds...))
 		})
 	}
-}
-
-func TestRaiseProcsForIOSharesOneRaise(t *testing.T) {
-	t.Setenv("GOMAXPROCS", "")
-	t.Setenv("GOMAXPROCS_EXTRA", "3")
-	base := runtime.GOMAXPROCS(0)
-	first, second := RaiseProcsForIO(), RaiseProcsForIO()
-	require.Equal(t, base+3, runtime.GOMAXPROCS(0))
-	first()
-	first()
-	require.Equal(t, base+3, runtime.GOMAXPROCS(0), "a repeated release must not drop the other holder's raise")
-	second()
-	require.Equal(t, base, runtime.GOMAXPROCS(0))
 }

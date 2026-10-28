@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -197,7 +196,6 @@ func ExecV3(ctx context.Context,
 	if maxBlockNum < blockNum {
 		return out, nil
 	}
-	defer estimate.RaiseProcsForIO()()
 
 	var readAhead chan uint64
 	startBlockNum := blockNum
