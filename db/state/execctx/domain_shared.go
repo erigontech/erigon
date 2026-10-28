@@ -1814,8 +1814,15 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
-func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
+// GetAsOf reads key as of ts from sd.mem; with a tx, a miss goes on to the shared state cache, then tx.
+func (sd *SharedDomains) GetAsOf(domain kv.Domain, tx kv.TemporalTx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	if v, ok, err = sd.mem.GetAsOf(domain, key, ts); err != nil || ok || tx == nil {
+		return v, ok, err
+	}
+	if v, hit := sd.cacheViewFor(tx).GetAsOf(domain, key, ts); hit {
+		return v, len(v) > 0, nil // an empty value is a cached absence
+	}
+	return tx.GetAsOf(domain, key, ts)
 }
 
 func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -2048,7 +2055,6 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 type DomainReader interface {
 	membatchwithdb.DomainReader
 	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
-	AsOfGetter(tx kv.TemporalTx) *AsOfGetter
 	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 }
 

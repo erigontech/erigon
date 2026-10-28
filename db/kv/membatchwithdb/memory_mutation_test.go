@@ -1028,7 +1028,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 // error is indistinguishable from a caller that saw no value at all.
 type erroringDomainReader struct{ err error }
 
-func (r erroringDomainReader) GetAsOf(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+func (r erroringDomainReader) GetAsOf(kv.Domain, kv.TemporalTx, []byte, uint64) ([]byte, bool, error) {
 	return nil, false, r.err
 }
 
@@ -1070,7 +1070,7 @@ func TestDomainReadErrorsPropagate(t *testing.T) {
 // are still served from memory, matching the carve-out in TemporalMemBatch.GetAsOf.
 type historyDisabledDomainReader struct{ receipt []byte }
 
-func (r historyDisabledDomainReader) GetAsOf(name kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) {
+func (r historyDisabledDomainReader) GetAsOf(name kv.Domain, _ kv.TemporalTx, _ []byte, _ uint64) ([]byte, bool, error) {
 	if name == kv.ReceiptDomain {
 		return r.receipt, true, nil
 	}
@@ -1078,7 +1078,7 @@ func (r historyDisabledDomainReader) GetAsOf(name kv.Domain, _ []byte, _ uint64)
 }
 
 func (r historyDisabledDomainReader) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	return r.GetAsOf(name, k, ts)
+	return r.GetAsOf(name, nil, k, ts)
 }
 
 // committedTemporalTx answers every history read with a fixed value, standing in for the backing
