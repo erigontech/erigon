@@ -662,12 +662,9 @@ reread:
 			}
 		}
 
-		// A slot with no cell after an in-block destruct reads post-wipe zero. Anchor it
-		// as a MapRead at the wipe version {destroyedAt, wipeInc}, matching liveStorage,
-		// so validation agrees by version alone — a bare StorageRead/UnknownVersion would
-		// validate against liveStorage's wipe result, whose default ValueChanged status
-		// rejects the correct zero on every attempt and self-loops. Mirrors the
-		// stale-Done-cell storage branch above.
+		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
+		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
+		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{

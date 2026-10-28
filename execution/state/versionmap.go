@@ -1583,18 +1583,6 @@ func wipedByDestruct(path AccountPath) bool {
 	return path == AddressPath || path == BalancePath || path == NoncePath || path == CodeSizePath || path == StoragePath
 }
 
-// validateRead validates one recorded read. readLive supplies the live ReadResult for the
-// path (its version and valStatus); validation stands on version+valStatus, so the recorded
-// value itself is never compared here.
-func validateRead(vm *VersionMap, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
-	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) ReadResult,
-	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string,
-) VersionValidity {
-	rr := readLive(vm, addr, key, txIndex)
-	return vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, checkVersion, traceInvalid, tracePrefix, false)
-}
-
 // liveStorage is the one path that needs a dedicated live reader: a slot's wipe after a
 // destruct is a lifecycle verdict ReadStorage alone does not carry. Every other path
 // validates on the plain ReadStatus result (version + status, no value), so ValidateReadSet
@@ -1657,19 +1645,12 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	case MVReadResultDone, MVReadResultValidated:
 		switch {
 		case source != MapRead && recursive:
-			// Synthetic cross-validate probe with no recorded value of its own — the outer
-			// entry's validation covers it; invalidating here would over-fire.
+			// Synthetic cross-validate probe: the outer entry's validation covers it.
 		case source != MapRead && (path != StoragePath || version == UnknownVersion):
-			// A non-storage read, or a storage read with no concrete version to compare.
-			// Only storage reads carry a seeded-origin version; for the rest there is no
-			// version to compare on this branch — a non-storage same-version re-write (e.g. a
-			// fee re-credit of the coinbase balance) would otherwise slip a stale read past a
-			// version check. With BAL the path is pre-populated, so a Done cell is a no-op and
-			// stays valid — unless an in-range removal wiped the slot (EIP-7928 has no removal
-			// field). Otherwise invalidate conservatively. Storage reads with a concrete
-			// version fall to checkVersion below, where the seeded origin matches and any
-			// shadowing cell or wipe anchor version-mismatches; one value per version makes
-			// that value-exact.
+			// No concrete version to compare (only storage carries a seeded origin). A
+			// BAL-seeded Done cell is a no-op, so stays valid — unless an in-range removal
+			// wiped the slot (EIP-7928 has no removal field); otherwise invalidate
+			// conservatively. Concrete-version storage reads fall to checkVersion below.
 			balTrusted := vm.HasBAL && path.BALSeeded()
 			if balTrusted && path == StoragePath {
 				if _, removed := vm.selfDestructInRange(addr, version.TxIndex+1, txIndex, true); removed {
@@ -1863,7 +1844,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	}
 	for a, inner := range rs.storage {
 		for k, tr := range inner {
-			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage, checkVersion, traceInvalid, tracePrefix)) {
+			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {
 				return
 			}
 		}

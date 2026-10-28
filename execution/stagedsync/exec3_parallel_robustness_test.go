@@ -442,52 +442,70 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
-// TestApplyLoopPanicDrainsBlockedProducer reproduces chfast's hang: a panic
-// injected through the BAL sink unwinds the apply loop while the exec loop is
+// TestApplyLoopDrainsBlockedProducerOnNonCleanExit reproduces chfast's hang: a
+// non-clean apply-loop exit (a panic through the BAL sink, or an early error
+// return such as a failed roTx open) unwinds the loop while the exec loop is
 // blocked on a mustDeliver send into a full applyResults. mustDeliver ignores
-// ctx, so the recover must drain applyResults to EOF to release the producer;
-// without the drain pe.wait() hangs forever.
-func TestApplyLoopPanicDrainsBlockedProducer(t *testing.T) {
-	const buf = 4
-	applyResults := make(chan applyResult, buf)
-	consumers := newResultStream()
-	consumers.register("applyResults", applyResults)
+// ctx, so the deferred cancel+drain must empty applyResults to EOF to release
+// the producer; without the drain pe.wait() hangs forever. Both exit kinds must
+// drain — an early error return is not special-cased to the panic path.
+func TestApplyLoopDrainsBlockedProducerOnNonCleanExit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		panic bool
+	}{
+		{"panic", true},
+		{"error return", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const buf = 4
+			applyResults := make(chan applyResult, buf)
+			consumers := newResultStream()
+			consumers.register("applyResults", applyResults)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	producerDone := make(chan struct{})
-	go func() {
-		defer close(producerDone)
-		for i := range buf * 4 {
-			_ = consumers.publish(ctx, i, true) // mustDeliver: blocks once the buffer fills
-		}
-		consumers.close()
-	}()
-
-	loopErr := func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("apply loop panic: %v", rec)
-				cancel()
-				for range applyResults {
+			producerDone := make(chan struct{})
+			go func() {
+				defer close(producerDone)
+				for i := range buf * 4 {
+					_ = consumers.publish(ctx, i, true) // mustDeliver: blocks once the buffer fills
 				}
-			}
-		}()
-		n := 0
-		for range applyResults {
-			if n++; n == 2 {
-				panic("bal sink: injected fault")
-			}
-		}
-		return nil
-	}()
+				consumers.close()
+			}()
 
-	require.ErrorContains(t, loopErr, "bal sink")
-	select {
-	case <-producerDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("producer stranded on a mustDeliver send: apply-loop recover did not drain applyResults")
+			loopErr := func() (err error) {
+				defer func() {
+					rec := recover()
+					if rec != nil {
+						err = fmt.Errorf("apply loop panic: %v", rec)
+					}
+					if rec != nil || err != nil {
+						cancel()
+						for range applyResults {
+						}
+					}
+				}()
+				if !tc.panic {
+					return fmt.Errorf("apply loop: open roTx")
+				}
+				n := 0
+				for range applyResults {
+					if n++; n == 2 {
+						panic("bal sink: injected fault")
+					}
+				}
+				return nil
+			}()
+
+			require.Error(t, loopErr)
+			select {
+			case <-producerDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("producer stranded on a mustDeliver send: apply loop did not drain applyResults")
+			}
+		})
 	}
 }
 

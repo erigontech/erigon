@@ -444,7 +444,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	execErr := func() (err error) {
 		defer func() {
-			if rec := recover(); rec != nil {
+			rec := recover()
+			switch {
+			case rec != nil:
 				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
 				// Surface the panic as the loop's error; otherwise execImpl returns
 				// nil with sd.mem partly folded and the caller mistakes an internal
@@ -452,16 +454,20 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				if err == nil {
 					err = fmt.Errorf("apply loop panic: %v", rec)
 				}
-				// mustDeliver sends ignore ctx, so the cancel cannot release an exec loop
-				// blocked on a full applyResults. Drain to EOF so it winds down and closes
-				// the channel; else pe.wait() hangs on the stranded send.
+			case err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})):
+				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
+			default:
+				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
+			}
+			// Any non-clean exit (panic or an error return before the channel-close
+			// drain) can leave the exec loop blocked on a mustDeliver send into a full
+			// applyResults; mustDeliver ignores ctx, so the cancel alone cannot release
+			// it. Cancel and drain to EOF so it winds down and closes the channel, else
+			// pe.wait() hangs. A clean exit already drained to the close.
+			if rec != nil || err != nil {
 				pe.cancelExecLoop(&stopCause{kind: stopOperational, err: err})
 				for range applyResults {
 				}
-			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
-			} else {
-				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
 			}
 		}()
 
