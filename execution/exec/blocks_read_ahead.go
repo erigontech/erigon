@@ -427,7 +427,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
 	if mmap.BatchPrefetch {
-		prefetchBAL(ctx, db, bal)
+		go prefetchBAL(ctx, db, bal)
 	}
 	var txCodeDestinations map[accounts.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
