@@ -20,16 +20,16 @@ import (
 // rather than sharing one.
 type LayeredDomainReader struct {
 	sd         execctx.DomainReader
+	base       kv.AsOfGetter // sd.mem only, or with a tx sd.mem, the state cache, then the tx
 	prevBlocks *PrevBlockList
-	asOf       *execctx.AsOfGetter // nil without a tx
 }
 
 // NewLayeredDomainReader composes the window + sd. A nil prevBlocks layers nothing;
 // a nil roTx leaves only sd.mem.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
-	l := &LayeredDomainReader{sd: sd, prevBlocks: prevBlocks}
+	l := &LayeredDomainReader{sd: sd, base: sd, prevBlocks: prevBlocks}
 	if roTx != nil {
-		l.asOf = sd.AsOfGetter(roTx)
+		l.base = sd.AsOfGetter(roTx)
 	}
 	return l
 }
@@ -43,10 +43,7 @@ func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader
 // baseGetAsOf reads the committed base without the prior-block window: sd.mem, then (with a tx) the shared
 // state cache and the domain files.
 func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	if l.asOf == nil {
-		return l.sd.GetAsOf(name, k, ts)
-	}
-	return l.asOf.GetAsOf(name, k, ts)
+	return l.base.GetAsOf(name, k, ts)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/

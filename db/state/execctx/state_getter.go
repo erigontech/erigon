@@ -69,6 +69,8 @@ type AsOfGetter struct {
 }
 
 // AsOfGetter binds the cache view once per tx: building it can read the DB.
+var _ kv.AsOfGetter = (*AsOfGetter)(nil)
+
 func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
 	return &AsOfGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
 }
