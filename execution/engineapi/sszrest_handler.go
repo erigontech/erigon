@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
@@ -193,7 +192,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var status ssz.Marshaler
+	var status *engine_types.PayloadStatus
 	switch version {
 	case 1:
 		status, err = e.NewPayloadV1(r.Context(), payload)

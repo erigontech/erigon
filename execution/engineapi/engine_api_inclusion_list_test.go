@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
@@ -100,6 +101,48 @@ func bogotaPayload(t *testing.T, parent *types.Header) *engine_types.ExecutionPa
 		SlotNumber:      &slot,
 		BlockAccessList: &balParam,
 	}
+}
+
+// preBogotaPayload returns an empty payload on top of parent carrying the
+// fields engine_newPayload requires for version, from Bellatrix up to Gloas.
+func preBogotaPayload(t *testing.T, parent *types.Header, version clparams.StateVersion) *engine_types.ExecutionPayload {
+	t.Helper()
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		UncleHash:  empty.UncleHash,
+		Difficulty: *merge.ProofOfStakeDifficulty,
+		Nonce:      merge.ProofOfStakeNonce,
+		TxHash:     types.DeriveSha(types.BinaryTransactions{}),
+		GasLimit:   parent.GasLimit,
+		Time:       parent.Time + 12,
+		BaseFee:    uint256.NewInt(1_000_000_000),
+	}
+	header.Number.SetUint64(parent.Number.Uint64() + 1)
+	var withdrawals types.Withdrawals
+	if version >= clparams.CapellaVersion {
+		withdrawals = types.Withdrawals{}
+		withdrawalsHash := types.DeriveSha(withdrawals)
+		header.WithdrawalsHash = &withdrawalsHash
+	}
+	if version >= clparams.DenebVersion {
+		header.BlobGasUsed = new(uint64)
+		header.ExcessBlobGas = new(uint64)
+		header.ParentBeaconBlockRoot = &common.Hash{}
+	}
+	if version >= clparams.ElectraVersion {
+		header.RequestsHash = types.FlatRequests{}.Hash()
+	}
+	if version >= clparams.GloasVersion {
+		balHash := empty.BlockAccessListHash
+		header.BlockAccessListHash = &balHash
+		header.SlotNumber = new(uint64)
+	}
+	payload, err := engine_types.ExecutionPayloadFromBlock(types.NewBlockFromStorage(header.Hash(), header, nil, nil, withdrawals, nil))
+	require.NoError(t, err)
+	if version >= clparams.GloasVersion {
+		payload.BlockAccessList = &hexutil.Bytes{0xc0}
+	}
+	return payload
 }
 
 func signedInclusionList(t *testing.T, cfg *chain.Config) []hexutil.Bytes {
@@ -414,7 +457,7 @@ func TestNewPayloadV6InclusionListSatisfiedNullUnlessValid(t *testing.T) {
 	}
 }
 
-func TestNewPayloadV6InvalidBlockHashReturnsPayloadStatusV2(t *testing.T) {
+func TestNewPayloadV6InvalidBlockHash(t *testing.T) {
 	t.Parallel()
 
 	cfg := bogotaChainConfig()
@@ -504,17 +547,17 @@ func TestNewPayloadV6AcceptsEmptyInclusionList(t *testing.T) {
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 }
 
-func TestPayloadStatusV2MarshalsInclusionListSatisfied(t *testing.T) {
+func TestPayloadStatusMarshalsInclusionListSatisfied(t *testing.T) {
 	t.Parallel()
 
 	satisfied := false
 	for _, tc := range []struct {
 		name   string
-		status engine_types.PayloadStatusV2
+		status engine_types.PayloadStatus
 		want   string
 	}{
-		{"null", engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, `null`},
-		{"false", engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied}, `false`},
+		{"nil omitted", engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, ""},
+		{"false", engine_types.PayloadStatus{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied}, `false`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -522,10 +565,92 @@ func TestPayloadStatusV2MarshalsInclusionListSatisfied(t *testing.T) {
 			require.NoError(t, err)
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal(raw, &fields))
+			if tc.want == "" {
+				require.NotContains(t, fields, "inclusionListSatisfied")
+				return
+			}
 			require.Contains(t, fields, "inclusionListSatisfied")
 			require.JSONEq(t, tc.want, string(fields["inclusionListSatisfied"]))
 		})
 	}
+}
+
+func TestNewPayloadV1ToV5LeaveInclusionListSatisfiedNil(t *testing.T) {
+	t.Parallel()
+
+	satisfied := true
+	for _, tc := range []struct {
+		name    string
+		cfg     *chain.Config
+		version clparams.StateVersion
+	}{
+		{"V1", preShanghaiChainConfig(), clparams.BellatrixVersion},
+		{"V2", preCancunChainConfig(), clparams.CapellaVersion},
+		{"V3", prePragueChainConfig(), clparams.DenebVersion},
+		{"V4", preOsakaChainConfig(), clparams.ElectraVersion},
+		{"V5", allForksChainConfig(), clparams.GloasVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := makeParentHeader(1000)
+			srv, _ := newInclusionListServer(tc.cfg, parent, execmodule.ValidationResult{
+				ValidationStatus: execmodule.ExecutionStatusSuccess,
+				LatestValidHash:  common.Hash{0x1},
+			}, &satisfied, ilTestMaxReorgDepth)
+			payload := preBogotaPayload(t, parent, tc.version)
+
+			var status *engine_types.PayloadStatus
+			var err error
+			switch tc.version {
+			case clparams.BellatrixVersion:
+				status, err = srv.NewPayloadV1(t.Context(), payload)
+			case clparams.CapellaVersion:
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			case clparams.DenebVersion:
+				status, err = srv.NewPayloadV3(t.Context(), payload, []common.Hash{}, &common.Hash{})
+			case clparams.ElectraVersion:
+				status, err = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+			case clparams.GloasVersion:
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+			}
+			require.NoError(t, err)
+			require.NotNil(t, status)
+			require.Equal(t, engine_types.ValidStatus, status.Status)
+			require.Nil(t, status.InclusionListSatisfied)
+			require.True(t, status.SSZVersion.Before(clparams.HezeVersion))
+
+			raw, err := json.Marshal(status)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			require.NotContains(t, fields, "inclusionListSatisfied")
+		})
+	}
+}
+
+func TestNewPayloadV6TagsHezeSSZVersion(t *testing.T) {
+	t.Parallel()
+
+	satisfied := true
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+		LatestValidHash:  common.Hash{0x1},
+	}, &satisfied, ilTestMaxReorgDepth)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, clparams.HezeVersion, status.SSZVersion)
+
+	enc, err := status.EncodeSSZ(nil)
+	require.NoError(t, err)
+	var out engine_types.PayloadStatus
+	require.NoError(t, out.DecodeSSZ(enc, int(clparams.HezeVersion)))
+	require.NotNil(t, out.InclusionListSatisfied)
+	require.True(t, *out.InclusionListSatisfied)
 }
 
 func TestNewPayloadV6JSONRPC(t *testing.T) {
@@ -539,7 +664,7 @@ func TestNewPayloadV6JSONRPC(t *testing.T) {
 	}, &satisfied, ilTestMaxReorgDepth)
 	client := newEngineInProcClient(t, srv)
 
-	var status engine_types.PayloadStatusV2
+	var status engine_types.PayloadStatus
 	require.NoError(t, client.CallContext(t.Context(), &status, "engine_newPayloadV6",
 		bogotaPayload(t, parent), []common.Hash{}, common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg)))
 	require.Equal(t, engine_types.ValidStatus, status.Status)

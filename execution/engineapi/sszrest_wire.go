@@ -73,10 +73,10 @@ func newPayloadRequestSchema(version clparams.StateVersion, payload *engine_type
 		return []any{payload}
 	case clparams.DenebVersion:
 		return []any{payload, blobHashes, parentRoot[:]}
-	case clparams.HezeVersion:
-		return []any{payload, blobHashes, parentRoot[:], requests, inclusionList}
-	default:
+	case clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion:
 		return []any{payload, blobHashes, parentRoot[:], requests}
+	default: // HezeVersion+
+		return []any{payload, blobHashes, parentRoot[:], requests, inclusionList}
 	}
 }
 
