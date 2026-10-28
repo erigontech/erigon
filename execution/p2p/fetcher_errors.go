@@ -30,6 +30,7 @@ var (
 	ErrInvalidFetchBlocksAmount  = errors.New("invalid fetch blocks amount")
 	ErrInvalidFetchHeadersAmount = errors.New("invalid fetch headers amount")
 	ErrInvalidBodyRLP            = errors.New("invalid block body RLP")
+	ErrBodyDoesNotMatchHeader    = errors.New("body does not match header")
 )
 
 type ErrInvalidFetchHeadersRange struct {
@@ -156,25 +157,6 @@ func (e ErrTooManyBodies) Error() string {
 func (e ErrTooManyBodies) Is(err error) bool {
 	var errTooManyBodies *ErrTooManyBodies
 	return errors.As(err, &errTooManyBodies)
-}
-
-type ErrBodyDoesNotMatchHeader struct {
-	blockNum  uint64
-	blockHash common.Hash
-	err       error
-}
-
-func (e ErrBodyDoesNotMatchHeader) Error() string {
-	return fmt.Sprintf("body does not match header: blockNum=%d, blockHash=%s: %v", e.blockNum, e.blockHash, e.err)
-}
-
-func (e ErrBodyDoesNotMatchHeader) Unwrap() error {
-	return e.err
-}
-
-func (e ErrBodyDoesNotMatchHeader) Is(err error) bool {
-	_, ok := errors.AsType[*ErrBodyDoesNotMatchHeader](err)
-	return ok
 }
 
 func NewErrMissingBodies(headers []*types.Header) *ErrMissingBodies {

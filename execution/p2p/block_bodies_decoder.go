@@ -105,10 +105,6 @@ func validateRawBlockBody(payload []byte, header *types.Header, bodyIndex int) e
 	return nil
 }
 
-func newBodyHeaderMismatch(header *types.Header, err error) *ErrBodyDoesNotMatchHeader {
-	return &ErrBodyDoesNotMatchHeader{
-		blockNum:  header.Number.Uint64(),
-		blockHash: header.Hash(),
-		err:       err,
-	}
+func newBodyHeaderMismatch(header *types.Header, err error) error {
+	return fmt.Errorf("%w: blockNum=%d, blockHash=%s: %w", ErrBodyDoesNotMatchHeader, header.Number.Uint64(), header.Hash(), err)
 }

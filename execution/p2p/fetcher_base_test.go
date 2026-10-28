@@ -19,6 +19,7 @@ package p2p
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -527,8 +528,34 @@ func TestFetcherFetchBodies(t *testing.T) {
 	// setup 2 request to test "paging"-style fetch logic
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
-	body1 := &types.Body{}
-	body2 := &types.Body{Withdrawals: []*types.Withdrawal{{Index: 1}}}
+	body1 := &types.Body{
+		Transactions: types.Transactions{
+			types.NewEIP1559Transaction(
+				*uint256.NewInt(1),
+				1,
+				common.BigToAddress(big.NewInt(123)),
+				uint256.NewInt(55),
+				0,
+				uint256.NewInt(777),
+				uint256.NewInt(888),
+				nil,
+			),
+		},
+	}
+	body2 := &types.Body{
+		Transactions: types.Transactions{
+			types.NewEIP1559Transaction(
+				*uint256.NewInt(1),
+				2,
+				common.BigToAddress(big.NewInt(321)),
+				uint256.NewInt(21),
+				0,
+				uint256.NewInt(876),
+				uint256.NewInt(765),
+				nil,
+			),
+		},
+	}
 	mockHeaders := []*types.Header{
 		newMockHeaderForBody(1, body1),
 		newMockHeaderForBody(2, body2),
@@ -757,7 +784,20 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	peerId := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
-	body := &types.Body{}
+	body := &types.Body{
+		Transactions: types.Transactions{
+			types.NewEIP1559Transaction(
+				*uint256.NewInt(1),
+				1,
+				common.BigToAddress(big.NewInt(123)),
+				uint256.NewInt(55),
+				0,
+				uint256.NewInt(777),
+				uint256.NewInt(888),
+				nil,
+			),
+		},
+	}
 	mockHeaders := []*types.Header{newMockHeaderForBody(1, body)}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages1 := []*sentryproto.InboundMessage{

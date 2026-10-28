@@ -445,7 +445,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenBodyDoesNotMatchHeade
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
-		require.ErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+		require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 		require.Nil(t, bodies.Data)
 	})
 }

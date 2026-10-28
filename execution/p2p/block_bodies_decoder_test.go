@@ -64,7 +64,7 @@ func TestDecodeBlockBodiesResponseRejectsMismatchBeforeTransactionDecode(t *test
 	header := newMockHeaderForBody(1, &types.Body{})
 
 	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
-	require.ErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 	require.False(t, rlp.IsInvalidRLPError(err))
 	require.Nil(t, decoded)
 }
@@ -84,7 +84,7 @@ func TestDecodeBlockBodiesResponseRejectsWithdrawalPresenceMismatch(t *testing.T
 			require.NoError(t, err)
 
 			decoded, err := decodeBlockBodiesResponse(encoded, []*types.Header{header})
-			require.ErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+			require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 			require.False(t, rlp.IsInvalidRLPError(err))
 			require.Nil(t, decoded)
 		})
@@ -98,7 +98,7 @@ func TestDecodeBlockBodiesResponseRejectsTrailingFieldBeforeMismatch(t *testing.
 
 	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
 	require.ErrorIs(t, err, rlp.ErrMoreThanOneValue)
-	require.NotErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+	require.NotErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 	require.Nil(t, decoded)
 }
 
@@ -111,7 +111,7 @@ func TestDecodeBlockBodiesResponseRejectsTransactionAmplification(t *testing.T) 
 	header := newMockHeaderForBody(1, &types.Body{})
 
 	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
-	require.ErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 	require.Nil(t, decoded)
 }
 
