@@ -62,10 +62,14 @@ func callGas(isEip150 bool, availableGas, base uint64, callCost *uint256.Int) (u
 // frame transactions use EIP-8141's isolated state-gas pool:
 // https://eips.ethereum.org/EIPS/eip-8037#transaction-level-gas-accounting-reservoir-model
 // https://eips.ethereum.org/EIPS/eip-8141#frame-gas-pools
-func applyStateGas(_ *EVM, callContext *CallContext, gas int64) bool {
+func applyStateGas(callContext *CallContext, gas int64) bool {
 	if gas > 0 {
 		return callContext.useMdGas(uint64(gas), mdgas.StateGas, nil, tracing.GasChangeIgnored)
 	}
-	callContext.refillStateGas(uint64(-gas), nil, tracing.GasChangeIgnored)
+	// Frame refills were applied to their owner by the gas calculator. Keep the
+	// negative cost for tracing without crediting the current frame a second time.
+	if callContext.frameContext == nil {
+		callContext.refillStateGas(uint64(-gas), nil, tracing.GasChangeIgnored)
+	}
 	return true
 }

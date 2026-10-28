@@ -419,19 +419,68 @@ func TestFrameTransactionStateBudget(t *testing.T) {
 	}
 }
 
+func TestFrameTransactionSameFrameRefill(t *testing.T) {
+	t.Parallel()
+	for _, traced := range []bool{false, true} {
+		t.Run(fmt.Sprint(traced), func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			target := common.HexToAddress("0x2000")
+			addr := accounts.InternAddress(target)
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(addr, program.New().Sstore(0, 1).Sstore(0, 0).Sstore(1, 1).Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}},
+			}
+			var stateCosts []int64
+			if traced {
+				config := evm.Config()
+				config.Tracer = &tracing.Hooks{OnOpcodeV2: func(_ uint64, op byte, _ mdgas.MdGas, cost mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					if op == byte(vm.SSTORE) {
+						stateCosts = append(stateCosts, cost.State)
+					}
+				}}
+				evm.ResetBetweenBlocks(evm.Context, evm.TxContext, ibs, config, evm.ChainRules())
+			}
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			require.EqualValues(t, params.StateGasPerStorageSet, result.FrameReceipts[1].GasUsed.State)
+			require.EqualValues(t, params.StateGasPerStorageSet, result.BlockStateGasUsed)
+			for key, want := range []uint256.Int{{}, {1}} {
+				stored, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: byte(key)}))
+				require.NoError(t, err)
+				require.Equal(t, want, stored)
+			}
+			if traced {
+				require.Equal(t, []int64{params.StateGasPerStorageSet, -params.StateGasPerStorageSet, params.StateGasPerStorageSet}, stateCosts)
+			}
+		})
+	}
+}
+
 func TestFrameTransactionCrossFrameRefill(t *testing.T) {
 	t.Parallel()
-	for _, revertClear := range []bool{false, true} {
-		t.Run(fmt.Sprint(revertClear), func(t *testing.T) {
+	for _, failure := range []string{"none", "revert", "out of gas"} {
+		t.Run(failure, func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
 			ibs := evm.IntraBlockState()
 			sender := accounts.InternAddress(tx.SenderAddress)
 			target := common.HexToAddress("0x2000")
 			addr := accounts.InternAddress(target)
 			require.NoError(t, ibs.SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(addr, []byte{0x5f, 0x35, 0x5f, 0x55, 0x60, 32, 0x35, 0x60, 11, 0x57, 0, 0x5b, 0x5f, 0x5f, 0xfd}, tracing.CodeChangeUnspecified))
+			code := []byte{0x5f, 0x35, 0x5f, 0x55, 0x60, 32, 0x35, 0x60, 11, 0x57, 0, 0x5b}
+			wantErr := vm.ErrExecutionReverted
+			if failure == "out of gas" {
+				code = append(code, program.New().Sstore(1, 1).Bytes()...)
+				wantErr = vm.ErrOutOfGas
+			} else {
+				code = append(code, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT))
+			}
+			require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeUnspecified))
 			var clearData []byte
-			if revertClear {
+			if failure != "none" {
 				clearData = make([]byte, 33)
 				clearData[32] = 1
 			}
@@ -442,8 +491,8 @@ func TestFrameTransactionCrossFrameRefill(t *testing.T) {
 			}
 			result, err := applyFrameTest(t, evm, tx)
 			require.NoError(t, err)
-			if revertClear {
-				require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
+			if failure != "none" {
+				require.ErrorIs(t, result.Err, wantErr)
 				require.EqualValues(t, params.StateGasPerStorageSet, result.FrameReceipts[1].GasUsed.State)
 			} else {
 				require.NoError(t, result.Err)

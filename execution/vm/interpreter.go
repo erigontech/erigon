@@ -698,7 +698,7 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State != 0 && !operation.applyStateGas(evm, callContext, dynamicCost.State) {
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}

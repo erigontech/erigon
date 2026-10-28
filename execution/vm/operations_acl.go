@@ -32,26 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// EIP-8141, "State-gas attribution and refills":
-// https://eips.ethereum.org/EIPS/eip-8141#state-gas-attribution-and-refills
-func applySStoreStateGas(evm *EVM, callContext *CallContext, gas int64) bool {
-	if evm.FrameContext == nil {
-		return applyStateGas(evm, callContext, gas)
-	}
-	if gas > 0 {
-		if !applyStateGas(evm, callContext, gas) {
-			return false
-		}
-		// Keep the paying frame as the charge owner for later storage refills.
-		evm.FrameContext.RecordStorageCharge(callContext.Address(), callContext.peekStorageKey(evm))
-	} else {
-		// Refills reduce the owner's state-gas usage. They restore spendable gas
-		// only when the owner is the current transaction frame.
-		evm.FrameContext.RefillStorageGas(callContext.Address(), callContext.peekStorageKey(evm), uint64(-gas))
-	}
-	return true
-}
-
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 		rules := evm.chainRules
@@ -123,6 +103,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
+				if evm.FrameContext != nil {
+					// EIP-8141 attributes later refills to the frame that paid for the slot.
+					// The journal restores ownership if the subsequent gas charge fails.
+					// https://eips.ethereum.org/EIPS/eip-8141#state-gas-attribution-and-refills
+					evm.FrameContext.RecordStorageCharge(callContext.Address(), slot)
+				}
 				return mdgas.MdGasCost{Execution: access + writeCreate, State: int64(stateCreate)}, nil
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
@@ -142,6 +128,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if original.Eq(&value) {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				evm.IntraBlockState().AddRefund(writeCreate)
+				if evm.FrameContext != nil {
+					evm.FrameContext.RefillStorageGas(callContext.Address(), slot, stateCreate)
+				}
 				return mdgas.MdGasCost{Execution: access, State: -int64(stateCreate)}, nil
 			} else { // reset to original existing slot (2.2.2.2)
 				evm.IntraBlockState().AddRefund(writeExisting)
