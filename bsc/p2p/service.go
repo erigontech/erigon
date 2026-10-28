@@ -19,6 +19,8 @@ package bscp2p
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
@@ -46,6 +48,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpDir)
 	return &Service{
 		logger:          logger,
+		sentryClient:    sc,
 		fetcher:         fetcher,
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
@@ -58,6 +61,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 
 type Service struct {
 	logger          log.Logger
+	sentryClient    sentryproto.SentryClient
 	fetcher         p2p.Fetcher
 	messageListener *p2p.MessageListener
 	peerPenalizer   *p2p.PeerPenalizer
@@ -134,4 +138,36 @@ func (s *Service) RegisterNewBlockObserver(o event.Observer[*p2p.DecodedInboundM
 
 func (s *Service) RegisterNewBlockHashesObserver(o event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc {
 	return s.messageListener.RegisterNewBlockHashesObserver(o)
+}
+
+func (s *Service) RegisterPeerEventObserver(o event.Observer[*sentryproto.PeerEvent], opts ...p2p.RegisterOpt) event.UnregisterFunc {
+	return s.messageListener.RegisterPeerEventObserver(o, opts...)
+}
+
+// PeerEthVersion returns the highest eth protocol version that the peer advertises and
+// this node supports.
+func (s *Service) PeerEthVersion(ctx context.Context, peerId *p2p.PeerId) (uint, bool) {
+	reply, err := s.sentryClient.PeerById(ctx, &sentryproto.PeerByIdRequest{PeerId: peerId.H512()})
+	if err != nil || reply.Peer == nil {
+		return 0, false
+	}
+	return ethVersionFromCaps(reply.Peer.Caps)
+}
+
+func ethVersionFromCaps(caps []string) (uint, bool) {
+	var best uint
+	for _, c := range caps {
+		v, ok := strings.CutPrefix(c, eth.ProtocolName+"/")
+		if !ok {
+			continue
+		}
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			continue
+		}
+		if _, supported := eth.ProtocolLengths[uint(n)]; supported && uint(n) > best {
+			best = uint(n)
+		}
+	}
+	return best, best > 0
 }

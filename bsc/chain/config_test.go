@@ -241,3 +241,28 @@ func TestChapelStaticPeers(t *testing.T) {
 		assert.Equal(t, 30311, n.TCP())
 	}
 }
+
+func TestChapelForkHelpers(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	const londonBlock = 31103030
+	for _, tc := range []struct {
+		name   string
+		active func(num, time uint64) bool
+		time   uint64
+	}{
+		{"bohr", cfg.IsBohr, *cfg.BohrTime},
+		{"lorentz", cfg.IsLorentz, *cfg.LorentzTime},
+		{"maxwell", cfg.IsMaxwell, *cfg.MaxwellTime},
+		{"fermi", cfg.IsFermi, *cfg.FermiTime},
+	} {
+		assert.False(t, tc.active(londonBlock, tc.time-1), tc.name)
+		assert.True(t, tc.active(londonBlock, tc.time), tc.name)
+		assert.True(t, tc.active(londonBlock, tc.time+1), tc.name)
+		assert.False(t, tc.active(londonBlock-1, tc.time), tc.name)
+	}
+}

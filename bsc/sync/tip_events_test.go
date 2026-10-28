@@ -1,0 +1,249 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package bscsync
+
+import (
+	"context"
+	"testing"
+	"testing/synctest"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+)
+
+func TestBlockEventsSpamGuard(t *testing.T) {
+	t.Parallel()
+	logger := testlog.Logger(t, log.LvlCrit)
+	sg := newBlockEventsSpamGuard(logger)
+	peerId1 := p2p.PeerIdFromUint64(1)
+	peerId2 := p2p.PeerIdFromUint64(2)
+	require.False(t, sg.Spam(peerId1, common.HexToHash("0x0"), 1))
+	require.True(t, sg.Spam(peerId1, common.HexToHash("0x0"), 1))
+	require.True(t, sg.Spam(peerId1, common.HexToHash("0x0"), 1))
+	require.False(t, sg.Spam(peerId2, common.HexToHash("0x0"), 1))
+	require.True(t, sg.Spam(peerId2, common.HexToHash("0x0"), 1))
+	require.False(t, sg.Spam(peerId2, common.HexToHash("0x1"), 1))
+	require.False(t, sg.Spam(peerId2, common.HexToHash("0x0"), 2))
+	require.False(t, sg.Spam(peerId2, common.HexToHash("0x2"), 2))
+	require.False(t, sg.Spam(peerId2, common.HexToHash("0x3"), 3))
+}
+
+func TestAnnouncedHeads(t *testing.T) {
+	t.Parallel()
+	h := newAnnouncedHeads()
+	_, ok := h.Head()
+	require.False(t, ok)
+
+	h.Update(p2p.PeerIdFromUint64(1), 100)
+	head, ok := h.Head()
+	require.True(t, ok)
+	require.Equal(t, uint64(100), head)
+
+	h.Update(p2p.PeerIdFromUint64(2), 90)
+	head, _ = h.Head()
+	require.Equal(t, uint64(90), head)
+
+	h.Update(p2p.PeerIdFromUint64(3), 1_000_000)
+	head, _ = h.Head()
+	require.Equal(t, uint64(100), head, "one peer cannot raise the head alone")
+
+	h.Update(p2p.PeerIdFromUint64(1), 50)
+	head, _ = h.Head()
+	require.Equal(t, uint64(100), head, "a peer's head never goes down")
+
+	h.Remove(p2p.PeerIdFromUint64(3))
+	head, _ = h.Head()
+	require.Equal(t, uint64(90), head)
+
+	h.Remove(p2p.PeerIdFromUint64(1))
+	h.Remove(p2p.PeerIdFromUint64(2))
+	_, ok = h.Head()
+	require.False(t, ok)
+}
+
+type fakeTipRegistrar struct {
+	versions       map[uint64]uint
+	newBlock       event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]
+	newBlockHashes event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]
+	peerEvent      event.Observer[*sentryproto.PeerEvent]
+	registered     chan struct{}
+}
+
+func newFakeTipRegistrar() *fakeTipRegistrar {
+	return &fakeTipRegistrar{registered: make(chan struct{}, 3)}
+}
+
+func (f *fakeTipRegistrar) RegisterNewBlockObserver(o event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc {
+	f.newBlock = o
+	f.registered <- struct{}{}
+	return func() {}
+}
+
+func (f *fakeTipRegistrar) RegisterNewBlockHashesObserver(o event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc {
+	f.newBlockHashes = o
+	f.registered <- struct{}{}
+	return func() {}
+}
+
+func (f *fakeTipRegistrar) RegisterPeerEventObserver(o event.Observer[*sentryproto.PeerEvent], _ ...p2p.RegisterOpt) event.UnregisterFunc {
+	f.peerEvent = o
+	f.registered <- struct{}{}
+	return func() {}
+}
+
+func (f *fakeTipRegistrar) PeerEthVersion(_ context.Context, peerId *p2p.PeerId) (uint, bool) {
+	for peer, version := range f.versions {
+		if p2p.PeerIdFromUint64(peer).Equal(peerId) {
+			return version, true
+		}
+	}
+	return 0, false
+}
+
+func (f *fakeTipRegistrar) sendNewBlock(peer uint64, num uint64) *types.Block {
+	b := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(num), Extra: []byte{byte(peer)}}, nil)
+	f.sendBlock(peer, b)
+	return b
+}
+
+func (f *fakeTipRegistrar) sendBlock(peer uint64, b *types.Block) {
+	f.newBlock(&p2p.DecodedInboundMessage[*eth.NewBlockPacket]{
+		Decoded: &eth.NewBlockPacket{Block: b},
+		PeerId:  p2p.PeerIdFromUint64(peer),
+	})
+}
+
+func (f *fakeTipRegistrar) sendNewBlockHashes(peer uint64, nums ...uint64) {
+	var pkt eth.NewBlockHashesPacket
+	for _, n := range nums {
+		pkt = append(pkt, struct {
+			Hash   common.Hash
+			Number uint64
+		}{Hash: common.Hash{byte(n >> 8), byte(n)}, Number: n})
+	}
+	f.sendHashes(peer, pkt)
+}
+
+func (f *fakeTipRegistrar) sendHashes(peer uint64, pkt eth.NewBlockHashesPacket) {
+	f.newBlockHashes(&p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]{
+		Decoded: &pkt,
+		PeerId:  p2p.PeerIdFromUint64(peer),
+	})
+}
+
+func runTipEvents(t *testing.T) (*TipEvents, *fakeTipRegistrar) {
+	reg := newFakeTipRegistrar()
+	te := NewTipEvents(testlog.Logger(t, log.LvlCrit), reg)
+	ctx, cancel := context.WithCancel(t.Context())
+	eg := errgroup.Group{}
+	eg.Go(func() error { return te.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.ErrorIs(t, eg.Wait(), context.Canceled)
+	})
+	for range 3 {
+		<-reg.registered
+	}
+	return te, reg
+}
+
+func TestTipEventsFromP2P(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		te, reg := runTipEvents(t)
+
+		b := reg.sendNewBlock(1, 10)
+		reg.sendNewBlock(1, 10)
+		reg.sendNewBlockHashes(2)
+		reg.sendNewBlockHashes(2, 11, 12)
+		reg.sendNewBlockHashes(2, 11, 12)
+
+		events, err := te.Next(t.Context())
+		require.NoError(t, err)
+		require.Len(t, events, 2)
+		e := events[0]
+		require.Equal(t, EventTypeNewBlock, e.Type)
+		require.Equal(t, b.Hash(), e.AsNewBlock().NewBlock.Hash())
+		require.Equal(t, EventSourceP2PNewBlock, e.AsNewBlock().Source)
+		require.Equal(t, p2p.PeerIdFromUint64(1), e.AsNewBlock().PeerId)
+
+		e = events[1]
+		require.Equal(t, EventTypeNewBlockHashes, e.Type)
+		require.Len(t, e.AsNewBlockHashes().NewBlockHashes, 2)
+	})
+}
+
+func TestTipEventsAnnouncedHead(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		te, reg := runTipEvents(t)
+
+		reg.sendNewBlock(1, 100)
+		reg.sendNewBlockHashes(2, 98, 99)
+		reg.sendNewBlockHashes(3, 500)
+		head, ok := te.AnnouncedHead()
+		require.True(t, ok)
+		require.Equal(t, uint64(100), head)
+
+		reg.peerEvent(&sentryproto.PeerEvent{PeerId: p2p.PeerIdFromUint64(1).H512(), EventId: sentryproto.PeerEvent_Disconnect})
+		head, _ = te.AnnouncedHead()
+		require.Equal(t, uint64(99), head)
+	})
+}
+
+func TestTipEventsPushBatch(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		te, _ := runTipEvents(t)
+		te.PushEvent(Event{Type: EventTypeNewBlockBatch})
+		events, err := te.Next(t.Context())
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, EventTypeNewBlockBatch, events[0].Type)
+	})
+}
+
+func TestTipEventsAnnouncementSummary(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		te, reg := runTipEvents(t)
+		reg.versions = map[uint64]uint{1: 70, 2: 68}
+
+		b := reg.sendNewBlock(1, 10)
+		reg.sendBlock(1, b)
+		reg.sendNewBlockHashes(1, 10)
+		reg.sendNewBlockHashes(2, 10)
+		reg.sendNewBlock(3, 11)
+
+		require.Equal(t, map[string]announcementCounts{
+			"eth70":   {NewBlock: 2, NewBlockHashes: 1},
+			"eth68":   {NewBlockHashes: 1},
+			"unknown": {NewBlock: 1},
+		}, te.announcementSummary(t.Context()))
+		require.Empty(t, te.announcementSummary(t.Context()))
+	})
+}

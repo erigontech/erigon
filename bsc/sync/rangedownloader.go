@@ -23,7 +23,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
@@ -53,13 +52,13 @@ type blockRange struct {
 	from, to uint64 // inclusive
 }
 
-// downloadRanges fetches [from,to] forward in parallel range-chunks, calling
-// insert with each assembled ascending batch. parent is the header at from-1
+// downloadRanges fetches [from,target()] forward in parallel range-chunks, calling
+// insert with each assembled ascending batch. target is evaluated once per round. parent is the header at from-1
 // (used to verify the first range links to the persisted chain); it may be nil
-// only at genesis. It returns when the range is fully inserted or ctx is
+// only at genesis. It returns when the cursor passes the target or ctx is
 // cancelled. Peer backoff uses peerBackoff (poll for peers, not bor's 1m
 // steady-state wait).
-func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service, from, to uint64, parent *types.Header, insert insertFunc) error {
+func downloadRanges(ctx context.Context, logger log.Logger, svc rangeFetcher, from uint64, target func() uint64, parent *types.Header, insert insertFunc) error {
 	maxWorkers := estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly()
 	prev := parent
 	fetchStart := time.Now()
@@ -68,7 +67,11 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service,
 	// Ranges are generated lazily from a cursor rather than materialized up front:
 	// a full-chain sync (0 → ~126M at 1024/range) would otherwise pre-allocate
 	// ~123k range structs. nextFrom is the first not-yet-persisted block.
-	for nextFrom := from; nextFrom <= to; {
+	for nextFrom := from; ; {
+		to := target()
+		if nextFrom > to {
+			return nil
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -145,5 +148,4 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service,
 			"workers", len(batch), "peers", len(peers),
 			"blk/s", uint64(float64(done)/time.Since(fetchStart).Seconds()))
 	}
-	return nil
 }

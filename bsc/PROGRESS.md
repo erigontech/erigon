@@ -73,7 +73,7 @@ headers+bodies over devp2p and hands them to the exec module via `InsertBlocks` 
 
 - **Loop** (`bsc/sync/{driver,fetch,verify,resume}.go`): from `max(FrozenBlocks, CurrentHeader)`,
   verify (`SanityCheck`+`HashCheck`+parent-linkage, no EVM/seal), `InsertBlocks`, and
-  `UpdateForkChoice` every `LoopBlockLimit` blocks (+ at target). Bounded by `--sync.target-block`.
+  `UpdateForkChoice` every `LoopBlockLimit` blocks, then follows the chain tip.
   Only network fetch is off the exec semaphore.
 - **Parallel range downloader** (`bsc/sync/rangedownloader.go`): a generalized fork of bor's deleted
   `polygon/sync` block downloader (`downloadBlocksUsingWaypoints`). Waypoints → block-number ranges
@@ -95,7 +95,7 @@ headers+bodies over devp2p and hands them to the exec module via `InsertBlocks` 
 - **Verified** on Chapel: genesis→4000 forward, resume `resumeFrom=2000` on restart, no
   `BadBlock`; `erigon seg retire` dumped headers/bodies/transactions `.seg` and pruned; `seg
   integrity` → *snapshots are publishable*.
-- Run: `erigon --chain=chapel --no-downloader --sync.target-block=<N>` (peering defaults come
+- Run: `erigon --chain=chapel --no-downloader` (peering defaults come
   from `--chain=chapel`).
 
 ## Rebased onto main after the Bor removal

@@ -18,48 +18,86 @@
 // consensus layer. It is an execution-module client: it fetches headers+bodies
 // from peers and hands them to the exec module via InsertBlocks + UpdateForkChoice.
 // It performs no execution itself (the exec module runs blocks-only for BSC until
-// Parlia execution exists) and no seal verification.
+// Parlia execution exists). Catch-up does no seal verification; the tip loop
+// verifies every header with the Parlia verifier.
 package bscsync
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	bscp2p "github.com/erigontech/erigon/bsc/p2p"
+	"github.com/erigontech/erigon/bsc/parlia"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
-	defaultFcuBlocks = 8192 // fallback FCU interval when LoopBlockLimit is unset
-	peerBackoff      = 3 * time.Second
+	defaultFcuBlocks    = 8192 // fallback FCU interval when LoopBlockLimit is unset
+	peerBackoff         = 3 * time.Second
+	tipHandoverDistance = 32
+	snapshotCacheSize   = 1024
+	announceWait        = time.Second
+)
+
+type chainReaderWriter interface {
+	CurrentHeader(ctx context.Context) *types.Header
+	GetHeader(ctx context.Context, hash common.Hash, number uint64) *types.Header
+	FrozenBlocks(ctx context.Context) (uint64, bool)
+	GetHeaderByNumber(ctx context.Context, number uint64) *types.Header
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
+	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error)
+}
+
+type rangeFetcher interface {
+	ListPeersMayHaveBlockNum(blockNum uint64) []*p2p.PeerId
+	FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error)
+}
+
+type p2pService interface {
+	rangeFetcher
+	p2pObserverRegistrar
+	backwardDownloader
+	peerPenalizer
+	Run(ctx context.Context) error
+}
+
+var (
+	_ chainReaderWriter = chainreader.ChainReaderWriterEth1{}
+	_ p2pService        = (*bscp2p.Service)(nil)
 )
 
 // Config parameterizes the BSC download driver.
 type Config struct {
-	ChainRW     chainreader.ChainReaderWriterEth1
-	Svc         *bscp2p.Service
-	TargetBlock uint64 // upper bound for the parallel downloader; required (> 0)
+	ChainConfig *chain.Config
+	ChainRW     chainReaderWriter
+	Svc         p2pService
 	FcuInterval uint64 // blocks between UpdateForkChoice calls during catch-up
 }
 
-// RunBlockDownloader runs the p2p service and the forward download loop until ctx
-// is cancelled, the target is reached, or a fatal error occurs.
+// RunBlockDownloader runs the p2p service and follows the chain tip until ctx is
+// cancelled or a fatal error occurs.
 func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) error {
-	if cfg.TargetBlock == 0 {
-		return fmt.Errorf("bsc/sync: --sync.target-block is required (tip-following not implemented)")
-	}
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
 	}
-	errCh := make(chan error, 2)
+	store, err := parlia.NewSnapshotStore(cfg.ChainConfig, chainHeaderReader{ctx: ctx, chainRW: cfg.ChainRW}, snapshotCacheSize)
+	if err != nil {
+		return err
+	}
+	tipEvents := NewTipEvents(logger, cfg.Svc)
+	ts := newTipSync(logger, cfg.ChainRW, cfg.Svc, fetchBackwardsWith(cfg.Svc), tipEvents, store, NewParliaVerifier(cfg.ChainConfig))
+	errCh := make(chan error, 3)
 	go func() { errCh <- cfg.Svc.Run(ctx) }()
-	go func() { errCh <- runParallel(ctx, logger, cfg) }()
+	go func() { errCh <- tipEvents.Run(ctx) }()
+	go func() { errCh <- followTip(ctx, logger, cfg, ts) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -68,23 +106,82 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 	}
 }
 
-// runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
-// downloader, persisting each assembled batch and advancing the head via FCU.
-func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
+// followTip catches up to the announced head, then follows the tip until the tip loop
+// falls back to catch-up.
+func followTip(ctx context.Context, logger log.Logger, cfg Config, ts *tipSync) error {
+	for {
+		head, err := catchUp(ctx, logger, cfg, ts.tipEvents.AnnouncedHead)
+		if err != nil {
+			return err
+		}
+		if head == nil {
+			return errors.New("bsc/sync: no local head to follow the tip from")
+		}
+		announced, _ := ts.tipEvents.AnnouncedHead()
+		logger.Info("[bsc] switching to tip mode", "head", head.Number.Uint64(), "announced", announced)
+		err = ts.run(ctx, head)
+		if !errors.Is(err, errFallBack) {
+			return err
+		}
+		logger.Info("[bsc] falling back to catch-up", "reason", err)
+	}
+}
+
+type chainHeaderReader struct {
+	ctx     context.Context
+	chainRW chainReaderWriter
+}
+
+func (r chainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return r.chainRW.GetHeader(r.ctx, hash, number)
+}
+
+// catchUp downloads forward until the local head is at most tipHandoverDistance
+// blocks behind the announced head. The target is recomputed every round, so it
+// follows the chain while the download runs.
+func catchUp(ctx context.Context, logger log.Logger, cfg Config, announced func() (uint64, bool)) (*types.Header, error) {
+	waitLogged := false
+	for {
+		if _, ok := announced(); ok {
+			break
+		}
+		if !waitLogged {
+			logger.Info("[bsc] waiting for peers to announce a head")
+			waitLogged = true
+		}
+		if err := common.Sleep(ctx, announceWait); err != nil {
+			return nil, err
+		}
+	}
+	target := func() uint64 {
+		head, _ := announced()
+		if head < tipHandoverDistance {
+			return 0
+		}
+		return head - tipHandoverDistance
+	}
+	announcedHead, _ := announced()
+	logger.Info("[bsc] catching up to the announced head", "announced", announcedHead, "handoverDistance", tipHandoverDistance)
+	return downloadTo(ctx, logger, cfg, target)
+}
+
+// downloadTo downloads from the resume point up to target, evaluated every round,
+// and commits the last inserted block. It returns the head.
+func downloadTo(ctx context.Context, logger log.Logger, cfg Config, target func() uint64) (*types.Header, error) {
 	head, parent := computeResume(ctx, cfg.ChainRW)
-	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock, "rangeSize", rangeSize)
-	if head >= cfg.TargetBlock {
-		logger.Info("[bsc] reached target", "block", head)
-		return nil
+	fcuInterval := cfg.FcuInterval
+	if fcuInterval == 0 {
+		fcuInterval = defaultFcuBlocks
 	}
 	lastFcu := head
+	var last *types.Block
 	insert := func(ctx context.Context, blocks []*types.Block) error {
 		if err := cfg.ChainRW.InsertBlocks(ctx, blocks); err != nil {
 			return err
 		}
-		last := blocks[len(blocks)-1]
+		last = blocks[len(blocks)-1]
 		head = last.NumberU64()
-		if head-lastFcu >= cfg.FcuInterval || head >= cfg.TargetBlock {
+		if head-lastFcu >= fcuInterval {
 			if err := commitHead(ctx, logger, cfg, last); err != nil {
 				return err
 			}
@@ -92,11 +189,18 @@ func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
 		}
 		return nil
 	}
-	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, cfg.TargetBlock, parent, insert); err != nil {
-		return err
+	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, target, parent, insert); err != nil {
+		return nil, err
 	}
-	logger.Info("[bsc] reached target", "block", cfg.TargetBlock)
-	return nil
+	if last == nil {
+		return parent, nil
+	}
+	if head > lastFcu {
+		if err := commitHead(ctx, logger, cfg, last); err != nil {
+			return nil, err
+		}
+	}
+	return last.Header(), nil
 }
 
 // commitHead advances the canonical head via the exec module, retrying while the
