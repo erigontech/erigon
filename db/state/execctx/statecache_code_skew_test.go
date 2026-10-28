@@ -55,12 +55,13 @@ func TestCodeReadBetweenAccountAndCodeWritesDoesNotPoisonCodeCache(t *testing.T)
 	newHash := crypto.Keccak256Hash(newCode)
 
 	tests := []struct {
-		name         string
-		accountFirst bool
-		readSize     bool
+		name                string
+		accountFirst        bool
+		readSize            bool
+		cachesCommittedCode bool
 	}{
-		{name: "account_first/GetCode", accountFirst: true},
-		{name: "account_first/GetCodeSize", accountFirst: true, readSize: true},
+		{name: "account_first/GetCode", accountFirst: true, cachesCommittedCode: true},
+		{name: "account_first/GetCodeSize", accountFirst: true, readSize: true, cachesCommittedCode: true},
 		{name: "code_first_guard/GetCode"},
 		{name: "code_first_guard/GetCodeSize", readSize: true},
 	}
@@ -80,6 +81,7 @@ func TestCodeReadBetweenAccountAndCodeWritesDoesNotPoisonCodeCache(t *testing.T)
 
 			sc := cache.NewDefaultStateCache()
 			t.Cleanup(sc.Close)
+			require.True(t, sc.FillsEnabled(), "the cache assertions need reader fills (STATE_CACHE_FILLS)")
 			roTx, err := db.BeginTemporalRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
@@ -133,7 +135,12 @@ func TestCodeReadBetweenAccountAndCodeWritesDoesNotPoisonCodeCache(t *testing.T)
 			}
 
 			assert.Equal(t, newValue, runBatch(true), "read after both writes")
-			_, ok := sc.View(nil).GetCodeByHash(newHash[:])
+			cached, ok := sc.View(nil).GetCodeByHash(oldHash[:])
+			assert.Equal(t, tt.cachesCommittedCode, ok, "content cache entry for committed code")
+			if ok {
+				assert.Equal(t, oldCode, cached, "content cache bytes for committed code")
+			}
+			_, ok = sc.View(nil).GetCodeByHash(newHash[:])
 			assert.False(t, ok, "content cache entry for uncommitted code")
 			_, ok = sc.View(nil).GetCodeSizeByHash(newHash[:])
 			assert.False(t, ok, "size cache entry for uncommitted code")

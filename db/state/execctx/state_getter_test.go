@@ -134,12 +134,16 @@ func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 // the caller lends, the way seg's Getter does.
 type codeBufTx struct {
 	kv.TemporalTx
-	code map[string][]byte
+	code              map[string][]byte
+	bufferedCodeReads int
 }
 
-func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+func (tx *codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain != kv.CodeDomain {
 		return tx.TemporalTx.GetLatest(domain, key, opts)
+	}
+	if cap(opts.Buf()) > 0 {
+		tx.bufferedCodeReads++
 	}
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
 }
@@ -147,9 +151,6 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
-	roTx, err := db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
 
 	codes := [][]byte{
 		bytes.Repeat([]byte{0xa1}, 1024),
@@ -157,10 +158,32 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		bytes.Repeat([]byte{0xc3}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
+	}
+	func() {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		seedSD, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(t, err)
+		defer seedSD.Close()
+		for i := range codes {
+			acc := accounts.SerialiseV3(&accounts.Account{
+				Nonce:    1,
+				CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
+			})
+			require.NoError(t, seedSD.DomainPut(kv.AccountsDomain, rwTx, addrs[i], acc, 5, nil))
+		}
+		require.NoError(t, seedSD.Commit(ctx, rwTx))
+	}()
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	for i := range codes {
 		tx.code[string(addrs[i])] = codes[i]
 	}
 
@@ -170,13 +193,6 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	sd.BindStateCache(sc)
-	for i, addr := range addrs {
-		acc := accounts.SerialiseV3(&accounts.Account{
-			Nonce:    1,
-			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
-		})
-		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
-	}
 
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 	got := make([][]byte, len(codes))
@@ -190,6 +206,7 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	for i := range codes {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
 	}
+	require.Equal(t, len(codes)-1, tx.bufferedCodeReads)
 }
 
 // A read that does not resolve a codeHash skips the cache copy, so it must not
@@ -207,7 +224,7 @@ func TestStateGetterCodeBufNotLentWithoutCodeHash(t *testing.T) {
 		bytes.Repeat([]byte{0xf6}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	tx := &codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
