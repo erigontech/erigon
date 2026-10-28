@@ -62,7 +62,7 @@ func TestProcessBlockPreservesStateRootForUnacceptedBlock(t *testing.T) {
 			require.NoError(t, err)
 			cfg.forkChoice.OnTick((fixture.headState.GenesisTime() + block.Block.Slot*cfg.beaconCfg.SecondsPerSlot) * 1000)
 
-			err = processBlock(t.Context(), cfg, block, true, true, false)
+			err = processBlock(t.Context(), cfg, block, true)
 			if tc.ignored {
 				require.NoError(t, err)
 			} else {
@@ -102,7 +102,7 @@ func TestProcessBlockPersistsAcceptedBlock(t *testing.T) {
 				graph.insertOnAdd = true
 			}
 
-			require.NoError(t, processBlock(t.Context(), cfg, block, false, true, false))
+			require.NoError(t, processBlock(t.Context(), cfg, block, false))
 			_, accepted := cfg.forkChoice.GetHeader(blockRoot)
 			require.True(t, accepted)
 			require.NoError(t, cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {

@@ -63,7 +63,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
-		if err = processBlock(ctx, cfg, block, false, true, false); err != nil {
+		if err = processBlock(ctx, cfg, block, false); err != nil {
 			// Forward sync skips NewPayload, so a pending write must also retain the
 			// collector insertion that would otherwise be lost on a stage transition.
 			if collectExecution && cfg.pendingBlockWrite != nil && cfg.pendingBlockWrite.block == block {

@@ -220,7 +220,7 @@ func catchUpPublishingHead(args Args) StageName {
 	return next
 }
 
-func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, newPayload bool) error {
 	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 		return err
 	}
@@ -230,8 +230,8 @@ func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBloc
 	}
 
 	_, hasHeaderInFCU := cfg.forkChoice.GetHeader(blockRoot)
-	if checkDataAvaiability || !hasHeaderInFCU {
-		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability); err != nil {
+	if !hasHeaderInFCU {
+		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, true, false); err != nil {
 			return err
 		}
 		// OnBlock can return nil for old blocks it ignores. Require acceptance before

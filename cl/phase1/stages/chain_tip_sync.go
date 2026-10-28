@@ -340,7 +340,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 
 		// Process the block without its data; the deferred requestCustodyBackfill fetches it.
-		if err := processBlock(ctx, cfg, block, true, true, false); err != nil {
+		if err := processBlock(ctx, cfg, block, true); err != nil {
 			if cfg.pendingBlockWrite != nil {
 				return false
 			}
