@@ -1526,6 +1526,16 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
 }
 
+// storageWriteSet is the write set of a run of the tx at index 1 that writes val to addr's slot.
+func storageWriteSet(addr accounts.Address, slot accounts.StorageKey, incarnation Incarnation, val uint64, status valueStatus) *WriteSet {
+	ws := &WriteSet{}
+	ws.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 1, Incarnation: incarnation}, valStatus: status},
+		Val:         *uint256.NewInt(val),
+	})
+	return ws
+}
+
 // On a BAL block a net-zero storage write is not materialized, so a later reader resolves the
 // floor. A cell that an earlier run of the tx left with a changed value must go too, whether it is
 // still an estimate or already validated: the reader would wait for it forever, or take its stale
@@ -1535,14 +1545,6 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	other := accounts.InternAddress([20]byte{0xaa})
 	slot := accounts.InternKey(common.Hash{0x04})
-	storageWrite := func(incarnation Incarnation, val uint64, status valueStatus) *WriteSet {
-		ws := &WriteSet{}
-		ws.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
-			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 1, Incarnation: incarnation}, valStatus: status},
-			Val:         *uint256.NewInt(val),
-		})
-		return ws
-	}
 	for _, test := range []struct {
 		name         string
 		balValue     uint64
@@ -1581,14 +1583,14 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 			vm := NewVersionMap(bal)
 			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
 			if test.earlier != "" {
-				first := storageWrite(0, test.earlierValue, ValueChanged)
+				first := storageWriteSet(addr, slot, 0, test.earlierValue, ValueChanged)
 				vm.FlushVersionedWrites(first, false)
 				if test.earlier == "validated" {
 					vm.MarkWritesValidated(first, func(accounts.Address) bool { return false })
 				}
 			}
 
-			rerun := storageWrite(1, 5, ValueUnchanged)
+			rerun := storageWriteSet(addr, slot, 1, 5, ValueUnchanged)
 			if test.otherWrite {
 				otherSlot := accounts.InternKey(common.Hash{0x05})
 				rerun.SetStorage(addr, otherSlot, &VersionedWrite[uint256.Int]{
@@ -1613,17 +1615,9 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})
-	storageWrite := func(incarnation Incarnation, val uint64, status valueStatus) *WriteSet {
-		ws := &WriteSet{}
-		ws.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
-			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 1, Incarnation: incarnation}, valStatus: status},
-			Val:         *uint256.NewInt(val),
-		})
-		return ws
-	}
 	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}}}}})
 	for incarnation, val := range []uint64{42, 9} {
-		ws := storageWrite(Incarnation(incarnation), val, ValueChanged)
+		ws := storageWriteSet(addr, slot, Incarnation(incarnation), val, ValueChanged)
 		vm.FlushVersionedWrites(ws, false)
 		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
 	}
@@ -1631,7 +1625,7 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	reads.SetStorage(addr, slot, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: *uint256.NewInt(9)})
 	require.Equal(t, VersionValid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
 
-	vm.FlushVersionedWrites(storageWrite(2, 5, ValueUnchanged), false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
 
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
 	val, res, ok := vm.ReadStorage(addr, slot, 2)
