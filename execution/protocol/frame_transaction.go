@@ -84,9 +84,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			return nil, err
 		}
 	}
-	if len(tx.BlobVersionedHashes) > params.MaxBlobsPerTxn {
-		return nil, ErrTooManyBlobs
-	}
 	skipBlobCheck := st.evm.Config().NoBaseFee && tx.Fees.BlobFeeCap.IsZero()
 	if tx.GetBlobGas() > 0 && !skipBlobCheck && tx.Fees.BlobFeeCap.Lt(&st.evm.Context.BlobBaseFee) {
 		return nil, ErrMaxFeePerBlobGas
