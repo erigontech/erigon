@@ -39,6 +39,9 @@ import (
 // an empty success.
 var ErrForkChoiceUpdateTimeout = errors.New("forkchoice update timed out")
 
+// ErrForkChoiceUpdateBusy reports that the execution module did not start the update.
+var ErrForkChoiceUpdateBusy = errors.New("forkchoice update was not started because the execution module is busy")
+
 // ErrForkChoiceUpdateNoPayloadID reports that an attribute-bearing update did not start a payload build.
 var ErrForkChoiceUpdateNoPayloadID = errors.New("forkchoice update returned no payload ID")
 
