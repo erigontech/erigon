@@ -52,10 +52,13 @@ func TestFrameReceiptEncoding(t *testing.T) {
 	require.Equal(t, r.Payer, decoded.Payer)
 	require.Equal(t, r.FrameReceipts, decoded.FrameReceipts)
 	require.Equal(t, r.Logs, decoded.Logs)
+	require.Equal(t, CreateBloom(Receipts{r}), decoded.Bloom)
 	enveloped, err := rlp.EncodeToBytes(r)
 	require.NoError(t, err)
+	decoded = Receipt{}
 	require.NoError(t, rlp.DecodeBytes(enveloped, &decoded))
 	require.Equal(t, r.FrameReceipts, decoded.FrameReceipts)
+	require.Equal(t, CreateBloom(Receipts{r}), decoded.Bloom)
 	var network bytes.Buffer
 	require.NoError(t, r.EncodeRLP69(&network))
 	wantNetwork, err := rlp.EncodeToBytes([]any{uint64(6), uint64(12_000), payer, frames})
@@ -85,9 +88,11 @@ func TestFrameReceiptCopy(t *testing.T) {
 func TestFrameReceiptStorage(t *testing.T) {
 	t.Parallel()
 	payer := common.HexToAddress("0x1234")
+	log := &Log{Address: payer, Topics: []common.Hash{{1}}, Data: []byte{2}}
 	r := &Receipt{
 		Type: FrameTxType, CumulativeGasUsed: 12_000, Payer: &payer,
-		FrameReceipts: []FrameReceipt{{Status: 1, GasUsed: mdgas.MdGas{Execution: 100, State: 200}, Logs: Logs{}}},
+		FrameReceipts: []FrameReceipt{{Status: 1, GasUsed: mdgas.MdGas{Execution: 100, State: 200}, Logs: Logs{log}}},
+		Logs:          Logs{log},
 		GasUsed:       300, FirstLogIndexWithinBlock: 4, TransactionIndex: 5,
 	}
 	b, err := rlp.EncodeToBytes((*ReceiptForStorage)(r))
@@ -99,6 +104,11 @@ func TestFrameReceiptStorage(t *testing.T) {
 	require.Equal(t, r.GasUsed, stored.GasUsed)
 	require.Equal(t, r.FirstLogIndexWithinBlock, stored.FirstLogIndexWithinBlock)
 	require.Equal(t, r.TransactionIndex, stored.TransactionIndex)
+	require.Equal(t, r.Logs, stored.Logs)
+	require.True(t, stored.Bloom.IsEmpty(), "storage decoding must leave bloom calculation to the caller")
+	require.Nil(t, stored.derivedBloom.Load())
+	require.Equal(t, CreateBloom(Receipts{r}), *(*Receipt)(&stored).LogsBloom())
+	require.True(t, stored.Bloom.IsEmpty(), "lazy bloom calculation must not modify the shared Bloom field")
 }
 
 func TestFrameReceiptJSON(t *testing.T) {

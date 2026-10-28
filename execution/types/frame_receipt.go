@@ -44,7 +44,6 @@ func (r *Receipt) deriveFrameFields() {
 		}
 	}
 	r.PostState = nil
-	r.Bloom = CreateBloom(Receipts{r})
 	r.derivedBloom.Store(nil)
 }
 

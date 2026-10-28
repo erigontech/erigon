@@ -263,6 +263,7 @@ func (r *Receipt) decodeTyped(b []byte) error {
 		}
 		r.Type, r.CumulativeGasUsed, r.Payer, r.FrameReceipts = FrameTxType, data.CumulativeGasUsed, data.Payer, data.Frames
 		r.deriveFrameFields()
+		r.Bloom = CreateBloom(Receipts{r})
 		return nil
 	}
 	if !hasStandardReceiptPayload(b[0]) {
@@ -476,7 +477,7 @@ func (r *Receipt) Copy() *Receipt {
 type ReceiptsForStorage []*ReceiptForStorage
 
 // ReceiptForStorage is a wrapper around a Receipt with RLP serialization
-// that omits the Bloom field and deserialization that re-computes it.
+// that omits the Bloom field.
 type ReceiptForStorage Receipt
 
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
