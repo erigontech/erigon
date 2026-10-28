@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"maps"
 	"net"
 	"sync"
 	"time"
@@ -23,8 +24,9 @@ type TorrentPeerManager struct {
 	nodeSourceFn func() NodeSource
 	logger       log.Logger
 
-	mu         sync.Mutex
-	knownPeers map[enode.ID]btPeerInfo // peers we've added to the torrent client
+	mu           sync.Mutex
+	knownPeers   map[enode.ID]btPeerInfo
+	torrentPeers map[*torrent.Torrent]map[enode.ID]string
 }
 
 type btPeerInfo struct {
@@ -37,6 +39,7 @@ func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSourc
 		nodeSourceFn: nodeSourceFn,
 		logger:       logger,
 		knownPeers:   make(map[enode.ID]btPeerInfo),
+		torrentPeers: make(map[*torrent.Torrent]map[enode.ID]string),
 	}
 }
 
@@ -70,7 +73,7 @@ func (m *TorrentPeerManager) sync() {
 		return
 	}
 
-	currentPeers := make(map[enode.ID]struct{})
+	currentPeers := make(map[enode.ID]btPeerInfo)
 
 	for _, node := range ns.AllNodes() {
 		var bt enr.BT
@@ -84,45 +87,66 @@ func (m *TorrentPeerManager) sync() {
 		}
 
 		id := node.ID()
-		currentPeers[id] = struct{}{}
-
-		m.mu.Lock()
-		_, already := m.knownPeers[id]
-		if !already {
-			pi := torrent.PeerInfo{
-				Addr:    ipPortAddr{IP: ip, Port: int(bt)},
-				Trusted: true,
-			}
-			m.knownPeers[id] = btPeerInfo{addr: pi}
-			m.mu.Unlock()
-
-			// Add this peer to all active torrents.
-			m.addPeerToAllTorrents(pi)
-			m.logger.Debug("[bt-peers] added torrent peer from ENR",
-				"node", id.TerminalString(),
-				"addr", pi.Addr)
-		} else {
-			m.mu.Unlock()
+		pi := torrent.PeerInfo{
+			Addr:    ipPortAddr{IP: ip, Port: int(bt)},
+			Trusted: true,
 		}
+		currentPeers[id] = btPeerInfo{addr: pi}
 	}
 
-	// Remove peers that are no longer in the DevP2P peer set.
+	torrents := m.client.Torrents()
+	activeTorrents := make(map[*torrent.Torrent]struct{}, len(torrents))
+	for _, t := range torrents {
+		activeTorrents[t] = struct{}{}
+	}
+
 	m.mu.Lock()
 	for id := range m.knownPeers {
 		if _, exists := currentPeers[id]; !exists {
 			delete(m.knownPeers, id)
+			for _, peers := range m.torrentPeers {
+				delete(peers, id)
+			}
 			m.logger.Debug("[bt-peers] peer left DevP2P, removed from tracking",
 				"node", id.TerminalString())
 		}
 	}
+	maps.Copy(m.knownPeers, currentPeers)
+	for t := range m.torrentPeers {
+		if _, exists := activeTorrents[t]; !exists {
+			delete(m.torrentPeers, t)
+		}
+	}
+	var pendingAdds []torrentPeerAdd
+	for _, t := range torrents {
+		processedPeers := m.torrentPeers[t]
+		if processedPeers == nil {
+			processedPeers = make(map[enode.ID]string)
+			m.torrentPeers[t] = processedPeers
+		}
+		for id, peer := range m.knownPeers {
+			processed, exists := processedPeers[id]
+			if exists && processed == peer.addr.Addr.String() {
+				continue
+			}
+			processedPeers[id] = peer.addr.Addr.String()
+			pendingAdds = append(pendingAdds, torrentPeerAdd{torrent: t, id: id, peer: peer.addr})
+		}
+	}
 	m.mu.Unlock()
+
+	for _, add := range pendingAdds {
+		add.torrent.AddPeers([]torrent.PeerInfo{add.peer})
+		m.logger.Debug("[bt-peers] added torrent peer from ENR",
+			"node", add.id.TerminalString(),
+			"addr", add.peer.Addr)
+	}
 }
 
-// addPeerToAllTorrents adds the given peer to all currently active torrents.
-func (m *TorrentPeerManager) addPeerToAllTorrents(pi torrent.PeerInfo) {
-	for _, t := range m.client.Torrents() {
-		t.AddPeers([]torrent.PeerInfo{pi})
-	}
+type torrentPeerAdd struct {
+	torrent *torrent.Torrent
+	id      enode.ID
+	peer    torrent.PeerInfo
 }
 
 // PeerCount returns the number of tracked torrent peers.
