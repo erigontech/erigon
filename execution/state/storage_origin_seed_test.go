@@ -127,3 +127,26 @@ func TestFinalizedWritesHandsOverOrigins(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, committed, got)
 }
+
+// The account origin must reach the versionMap before FinalizedWrites releases
+// the tx's origin cells.
+func TestFinalizedWritesHandsOverAccountOrigin(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xA0, 0xb8})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(11)
+
+	ibs := NewWithVersionMap(&storageReader{addr: addr, account: &acc}, NewVersionMap(nil))
+	ibs.SetTxContext(100, 0)
+
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	_, err = ibs.FinalizedWrites(nil)
+	require.NoError(t, err)
+
+	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
+	got, ok := ibs.versionMap.LoadOriginAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, acc.Nonce, got.Nonce)
+	require.Equal(t, acc.Balance, got.Balance)
+}
