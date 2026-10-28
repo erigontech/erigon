@@ -172,11 +172,7 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 				if kw.valStatus == ValueUnchanged {
 					continue
 				}
-				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				if !ok {
-					val = kw.Val
-				}
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}

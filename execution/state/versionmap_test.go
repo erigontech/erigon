@@ -1543,13 +1543,21 @@ func storageWriteSet(addr accounts.Address, slot accounts.StorageKey, incarnatio
 func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
-	other := accounts.InternAddress([20]byte{0xaa})
+	low := accounts.InternAddress([20]byte{0xaa})
+	high := accounts.InternAddress([20]byte{0xff})
 	slot := accounts.InternKey(common.Hash{0x04})
+	otherSlot := accounts.InternKey(common.Hash{0x05})
+	at := func(index uint32, val uint64) []*types.StorageChange {
+		return []*types.StorageChange{{Index: index, Value: *uint256.NewInt(val)}}
+	}
+	lowBalance := types.AccountChanges{Address: low.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}
+	seeded := types.BlockAccessList{lowBalance, {Address: addr.Value(), StorageChanges: []types.SlotChanges{
+		{Slot: accounts.InternKey(common.Hash{0x03}), Changes: at(2, 7)},
+		{Slot: slot, Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(6)}, {Index: 2, Value: *uint256.NewInt(42)}}},
+	}}}
 	for _, test := range []struct {
 		name         string
-		balValue     uint64
-		balAccount   bool
-		balNeighbors bool
+		bal          types.BlockAccessList
 		earlier      string
 		earlierValue uint64
 		otherWrite   bool
@@ -1557,29 +1565,23 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 		wantVal      uint64
 	}{
 		{name: "no earlier cell", wantIdx: originIndex, wantVal: 5},
-		{name: "no earlier cell, account in the access list", balAccount: true, wantIdx: originIndex, wantVal: 5},
+		{name: "no earlier cell, account in the access list", bal: types.BlockAccessList{lowBalance, {Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}, wantIdx: originIndex, wantVal: 5},
 		{name: "earlier cell is an estimate", earlier: "estimate", wantIdx: originIndex, wantVal: 5},
 		{name: "earlier cell is validated", earlier: "validated", wantIdx: originIndex, wantVal: 5},
-		{name: "earlier cell, the access list seeds the slot of another account and another slot", balNeighbors: true, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
-		{name: "cell from the block access list", balValue: 42, wantIdx: 1, wantVal: 42},
-		{name: "cell from the block access list, another slot written", balValue: 42, otherWrite: true, wantIdx: 1, wantVal: 42},
-		{name: "cell from the block access list, validated", balValue: 42, earlier: "validated", earlierValue: 42, wantIdx: 1, wantVal: 42},
+		{name: "earlier cell, the access list seeds another slot of the account", bal: types.BlockAccessList{lowBalance, {Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: otherSlot, Changes: at(2, 42)}}}}, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell, the access list seeds the slot at another tx", bal: types.BlockAccessList{lowBalance, {Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: at(3, 42)}}}}, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell, the access list seeds the slot of other accounts", bal: types.BlockAccessList{{Address: low.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: at(2, 42)}}}, {Address: high.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: at(2, 42)}}}}, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "cell from the block access list", bal: seeded, wantIdx: 1, wantVal: 42},
+		{name: "cell from the block access list, another slot written", bal: seeded, otherWrite: true, wantIdx: 1, wantVal: 42},
+		{name: "cell from the block access list, validated", bal: seeded, earlier: "validated", earlierValue: 42, wantIdx: 1, wantVal: 42},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			bal := types.BlockAccessList{{Address: other.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
-			switch {
-			case test.balValue != 0:
-				bal = types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(test.balValue)}}}}}}
-			case test.balAccount:
-				bal = types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
-			case test.balNeighbors:
-				seeded := []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}
-				bal = types.BlockAccessList{
-					{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{0x05}), Changes: seeded}}},
-					{Address: other.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: seeded}}},
-				}
+			bal := test.bal
+			if bal == nil {
+				bal = types.BlockAccessList{lowBalance}
 			}
+			require.NoError(t, bal.Validate())
 			vm := NewVersionMap(bal)
 			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
 			if test.earlier != "" {
@@ -1592,7 +1594,6 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 
 			rerun := storageWriteSet(addr, slot, 1, 5, ValueUnchanged)
 			if test.otherWrite {
-				otherSlot := accounts.InternKey(common.Hash{0x05})
 				rerun.SetStorage(addr, otherSlot, &VersionedWrite[uint256.Int]{
 					WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: otherSlot, Version: Version{TxIndex: 1, Incarnation: 1}, valStatus: ValueChanged},
 					Val:         *uint256.NewInt(1),

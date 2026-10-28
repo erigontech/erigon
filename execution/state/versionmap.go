@@ -1,9 +1,11 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -314,24 +316,26 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	return vm
 }
 
-// seededStorage returns the value the access list seeds for addr's slot key at txIdx.
+// seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
+// list is validated, so its accounts, slots and changes are in increasing order.
 func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
-	for i := range vm.bal {
-		if vm.bal[i].Address != addr.Value() {
-			continue
-		}
-		for _, slotChanges := range vm.bal[i].StorageChanges {
-			if slotChanges.Slot != key {
-				continue
-			}
-			for _, change := range slotChanges.Changes {
-				if int(change.Index)-1 == txIdx {
-					return change.Value, true
-				}
-			}
-		}
+	address := addr.Value()
+	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
+	if i == len(vm.bal) || vm.bal[i].Address != address {
+		return uint256.Int{}, false
 	}
-	return uint256.Int{}, false
+	slots := vm.bal[i].StorageChanges
+	j := sort.Search(len(slots), func(j int) bool { return slots[j].Slot.Cmp(key) >= 0 })
+	if j == len(slots) || slots[j].Slot.Cmp(key) != 0 {
+		return uint256.Int{}, false
+	}
+	changes := slots[j].Changes
+	index := uint32(txIdx + 1)
+	k := sort.Search(len(changes), func(k int) bool { return changes[k].Index >= index })
+	if k == len(changes) || changes[k].Index != index {
+		return uint256.Int{}, false
+	}
+	return changes[k].Value, true
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
