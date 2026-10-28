@@ -1185,7 +1185,7 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 
 // FlushVersionedWrites routes a tx's typed write collections into the version map. Each
 // cell is positioned by the write's (txIndex, incarnation), so the loop order is irrelevant.
-func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
+func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 	if writes == nil {
 		return
 	}

@@ -69,6 +69,7 @@ type BackwardBeaconDownloader struct {
 	initialGloasRoot       common.Hash
 	onInitialGloasBlock    func(*cltypes.SignedBeaconBlock) error
 	finished               atomic.Bool
+	processed              atomic.Uint64
 	reqInterval            *time.Ticker
 	baseInterval           time.Duration
 	emptyResponses         atomic.Uint32
@@ -353,6 +354,10 @@ func (b *BackwardBeaconDownloader) Progress() uint64 {
 	return b.slotToDownload.Load()
 }
 
+func (b *BackwardBeaconDownloader) Processed() uint64 {
+	return b.processed.Load()
+}
+
 // Peers returns the current number of peers connected to the BackwardBeaconDownloader.
 func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 	return b.rpc.Peers()
@@ -558,6 +563,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Warn("Error processing block", "err", err)
 			return nil
 		}
+		b.processed.Add(1)
 		b.setExpectedRoot(block.Block.ParentRoot)
 		b.prevBatchTopBlock = block
 		if block.Block.Slot == 0 {
@@ -615,6 +621,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					log.Warn("Error processing root-fetched block", "err", err)
 					return nil
 				}
+				b.processed.Add(1)
 				b.setExpectedRoot(block.Block.ParentRoot)
 				b.prevBatchTopBlock = block
 				if block.Block.Slot == 0 {
