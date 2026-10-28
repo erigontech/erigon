@@ -92,7 +92,12 @@ type Cfg struct {
 	executionHead      common.Hash
 	forkChoiceRerunAt  time.Time
 	chainTipRejections *chainTipRejections
-	pendingBlockWrite  *cltypes.SignedBeaconBlock
+	pendingBlockWrite  *pendingBlockWrite
+}
+
+type pendingBlockWrite struct {
+	block            *cltypes.SignedBeaconBlock
+	collectExecution bool
 }
 
 type Args struct {
@@ -239,7 +244,7 @@ func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBloc
 	if err := persistAcceptedBlock(ctx, cfg, block); err != nil {
 		// Fork choice advances before persistence. Keep the accepted block across stage
 		// transitions and finish its write before importing more blocks or reporting success.
-		cfg.pendingBlockWrite = block
+		cfg.pendingBlockWrite = &pendingBlockWrite{block: block}
 		return err
 	}
 	return nil
@@ -255,12 +260,18 @@ func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBe
 }
 
 func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
-	block := cfg.pendingBlockWrite
-	if block == nil {
+	pending := cfg.pendingBlockWrite
+	if pending == nil {
 		return nil
 	}
+	block := pending.block
 	for {
 		err := persistAcceptedBlock(ctx, cfg, block)
+		if err == nil && pending.collectExecution {
+			if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
+				err = fmt.Errorf("failed to add block to collector: %w", err)
+			}
+		}
 		if err == nil {
 			cfg.pendingBlockWrite = nil
 			if cfg.peerDas != nil {
