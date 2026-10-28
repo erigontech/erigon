@@ -122,6 +122,20 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	}
 	currentRoot := headRoot
 	currentSlot := headSlot
+	// Accepted blocks can be visible before their indices are committed. The trusted
+	// anchor can come from a checkpoint state, so it is allowed to lack block indices.
+	var anchorRoot common.Hash
+	if cfg.forkChoice != nil {
+		anchorRoot = cfg.forkChoice.AnchorRoot()
+	}
+	storedSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, headRoot)
+	if err != nil {
+		return fmt.Errorf("failed to read block slot by block root: %w", err)
+	}
+	if storedSlot == nil && (cfg.forkChoice == nil || headRoot != anchorRoot) {
+		return fmt.Errorf("block indices are not yet available for %s", headRoot)
+	}
+
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
@@ -137,8 +151,8 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
-	// Trace back through the parent block roots until the current root matches the canonical root
-	for currentRoot != currentCanonical {
+	// Trace back to a canonical block or the trusted anchor.
+	for currentRoot != currentCanonical && currentRoot != anchorRoot {
 		var newFoundSlot *uint64
 
 		// Read the parent block root
@@ -151,7 +165,14 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 			return fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
-			break
+			if cfg.forkChoice == nil || currentRoot != anchorRoot {
+				return fmt.Errorf("block indices are not yet available for %s", currentRoot)
+			}
+			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
+			if !ok {
+				return fmt.Errorf("anchor header is not available for %s", anchorRoot)
+			}
+			newFoundSlot = &header.Slot
 		}
 
 		currentSlot = *newFoundSlot

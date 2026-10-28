@@ -806,6 +806,110 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	require.Equal(t, state101b, reorg.NewHeadState, "NewHeadState")
 }
 
+func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
+	for _, pendingSlot := range []uint64{102, 101} {
+		name := "head"
+		if pendingSlot == 101 {
+			name = "ancestor"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			fixture := newLockOrderFixture(t, 100)
+			cfg := fixture.cfg
+			root100 := fixture.headRoot
+			root101a := common.Hash{0x11, 0xaa}
+			root102a := common.Hash{0x12, 0xaa}
+			root101b := common.Hash{0x11, 0xbb}
+			root102b := common.Hash{0x12, 0xbb}
+
+			writeBlock := func(tx kv.RwTx, root, parent common.Hash, slot uint64, canonical bool) {
+				t.Helper()
+				require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
+				require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parent))
+				require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, common.Hash{byte(slot)}))
+				if canonical {
+					require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
+				}
+			}
+			requireCanonical := func(root101, root102 common.Hash) {
+				t.Helper()
+				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+					for slot, want := range map[uint64]common.Hash{100: root100, 101: root101, 102: root102} {
+						root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+						require.NoError(t, err)
+						require.Equal(t, want, root, "canonical root at slot %d", slot)
+					}
+					return nil
+				}))
+			}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				writeBlock(tx, root100, common.Hash{}, 100, true)
+				writeBlock(tx, root101a, root100, 101, true)
+				writeBlock(tx, root102a, root101a, 102, true)
+				if pendingSlot != 101 {
+					writeBlock(tx, root101b, root100, 101, false)
+				}
+				if pendingSlot != 102 {
+					writeBlock(tx, root102b, root101b, 102, false)
+				}
+				return nil
+			}))
+
+			err := db.Update(t.Context(), func(tx kv.RwTx) error {
+				return updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+			})
+			require.Error(t, err, "canonical publication must wait for the pending block write")
+			requireCanonical(root101a, root102a)
+
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if pendingSlot == 101 {
+					writeBlock(tx, root101b, root100, 101, false)
+				} else {
+					writeBlock(tx, root102b, root101b, 102, false)
+				}
+				return nil
+			}))
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+			}))
+			requireCanonical(root101b, root102b)
+		})
+	}
+}
+
+func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
+	for _, anchorSlot := range []uint64{0, 64} {
+		name := "genesis"
+		if anchorSlot != 0 {
+			name = "checkpoint"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newLockOrderFixture(t, anchorSlot)
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			require.NoError(t, updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg))
+			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot)
+			require.NoError(t, err)
+			require.Equal(t, fixture.headRoot, root)
+
+			oldRoot, newRoot := common.Hash{0xaa}, common.Hash{0xbb}
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, anchorSlot+1, oldRoot))
+			require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, newRoot, anchorSlot+2))
+			require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, newRoot, fixture.headRoot))
+			require.NoError(t, updateCanonicalChainInTheDatabase(tx, anchorSlot+2, newRoot, fixture.cfg))
+			root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot+1)
+			require.NoError(t, err)
+			require.Equal(t, common.Hash{}, root, "the skipped slot must no longer be canonical")
+			root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot+2)
+			require.NoError(t, err)
+			require.Equal(t, newRoot, root)
+		})
+	}
+}
+
 func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
 	emitter := beaconevents.NewEventEmitter()
