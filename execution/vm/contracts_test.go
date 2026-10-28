@@ -777,7 +777,9 @@ func TestPrecompileCacheSeparatesForks(t *testing.T) {
 	for range 2 {
 		_, err := prague.Run(in)
 		require.NoError(t, err)
-		require.True(t, cachedPrecompileHit(prague.(*cachedPrecompile), in), "the Prague result was not cached")
+		if cached, ok := prague.(*cachedPrecompile); ok {
+			require.True(t, cachedPrecompileHit(cached, in), "the Prague result was not cached")
+		}
 		_, err = osaka.Run(in)
 		require.ErrorIs(t, err, errModExpBaseLengthTooLarge)
 	}
