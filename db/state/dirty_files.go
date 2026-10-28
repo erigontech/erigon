@@ -450,7 +450,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 		}
 		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
 			openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string) (err error) {
-				item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, d.dataReader(item.decompressor))
+				item.bindex, err = d.openBtIndex(fPath, d.dataReader(item.decompressor))
 				return err
 			}, tag, d.logger)
 		}

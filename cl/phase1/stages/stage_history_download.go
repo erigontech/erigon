@@ -63,6 +63,7 @@ type StageHistoryReconstructionCfg struct {
 
 type historyDownloader interface {
 	Finished() bool
+	Processed() uint64
 	Progress() uint64
 	RequestMore(context.Context) error
 	SetBlockChecker(network.BlockChecker)
@@ -129,6 +130,15 @@ func clampProgress(highestBlockSeen, floor, current uint64) (processed, total ui
 	processed = highestBlockSeen - current
 	total = max(highestBlockSeen-floor, processed)
 	return
+}
+
+func historyDownloadRate(d historyDownloader, start time.Time, startProcessed uint64, now time.Time) (speed float64, nextStart time.Time, nextStartProcessed uint64) {
+	processed := d.Processed()
+	speed = float64(processed-startProcessed) / now.Sub(start).Seconds()
+	if speed > 1000.0 {
+		return 0, now, processed
+	}
+	return speed, start, startProcessed
 }
 
 // SpawnStageBeaconsForward spawn the beacon forward stage
@@ -317,7 +327,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	go func() {
 		startTimeLoop := time.Now()
-		initialProgress := cfg.downloader.Progress()
+		initialProcessed := cfg.downloader.Processed()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
 		for {
@@ -333,13 +343,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []any{}
 				currProgress := cfg.downloader.Progress()
-				speed := math.Abs(float64(currProgress)-float64(initialProgress)) / time.Since(startTimeLoop).Seconds()
-				if speed > 1000.0 { // to avoid spamming logs on fast syncs
-					initialProgress = currProgress
-					startTimeLoop = time.Now()
-					continue
-				}
-
+				var speed float64
+				speed, startTimeLoop, initialProcessed = historyDownloadRate(cfg.downloader, startTimeLoop, initialProcessed, time.Now())
 				if speed == 0 || initialBeaconBlock == nil {
 					continue
 				}

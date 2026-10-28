@@ -97,7 +97,7 @@ func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 	rwTx := se.applyTx.(kv.TemporalRwTx)
 	require.NoError(t, putLogEmittingContract(se.doms.AsPutDel(rwTx), logIndexContract))
 
-	_, err := se.executeBlock(t.Context(), []exec.Task{task}, true, false)
+	_, err := se.executeBlock(t.Context(), []exec.Task{task}, true)
 	require.NoError(t, err)
 	require.NoError(t, se.doms.Flush(t.Context(), rwTx))
 
