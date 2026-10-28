@@ -25,6 +25,8 @@ import (
 	"math/big"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -312,6 +315,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		time                uint64
 		parentValidated     bool
 		stored              bool
+		lookupErr           error // the lookup of the block by hash and number fails with it
 		wrongBlockHash      bool
 		blobHashes          []common.Hash
 		l2                  bool
@@ -324,6 +328,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		{name: "gas limit above the parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValidHash: &parentHash, wantBad: true},
 		{name: "time of the parent", txCount: 4, gasLimit: parent.GasLimit, time: 1000, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block: timestamp older than parent", wantLatestValidHash: &parentHash, wantBad: true},
 		{name: "gas limit above the parent's, block already stored", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, stored: true, wantStatus: engine_types.AcceptedStatus},
+		{name: "gas limit above the parent's, block lookup fails", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, lookupErr: context.Canceled, wantStatus: engine_types.AcceptedStatus},
 		{name: "gas limit above an unvalidated parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.AcceptedStatus},
 		{name: "gas limit above the parent's with a wrong block hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wrongBlockHash: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block hash"},
 		{name: "gas limit above the parent's with a wrong blob hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{{0x01}}, wantStatus: engine_types.InvalidStatus, wantErr: "mismatch blob hashes"},
@@ -370,8 +375,13 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			var recovered bool
 			stub := &stubExecutionModule{
 				getHeaderFunc: func(ctx context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
-					if test.stored && hash != nil && *hash == block.Hash() && number != nil && *number == header.Number.Uint64() {
-						return header, nil
+					if hash != nil && *hash == block.Hash() && number != nil && *number == header.Number.Uint64() {
+						if test.lookupErr != nil {
+							return nil, test.lookupErr
+						}
+						if test.stored {
+							return header, nil
+						}
 					}
 					return getHeaderReturning(parentHash, parent)(ctx, hash, number)
 				},
@@ -400,7 +410,7 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			if bad {
 				require.Equal(t, parentHash, latestValidAncestor)
 			}
-			require.Equal(t, test.wantStatus == engine_types.AcceptedStatus && !test.stored, recovered, "senders are recovered early only for a payload without a header error that goes to the block validation")
+			require.Equal(t, test.wantStatus == engine_types.AcceptedStatus && !test.stored && test.lookupErr == nil, recovered, "senders are recovered early only for a payload without a header error that goes to the block validation")
 		})
 	}
 }
@@ -456,21 +466,8 @@ func TestNewPayloadLooksUpTheParentOnce(t *testing.T) {
 // once its parent is validated. The INVALID answer must also remove the stored block, so its body is
 // not served any more.
 func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
-	canonical, err := m.GenerateChain(4, func(int, *blockgen.BlockGen) {})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(canonical))
-	side, err := m.GenerateChain(2, func(_ int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
-	require.NoError(t, err)
-	block1 := side.Blocks[0]
-	header2 := types.CopyHeader(side.Blocks[1].HeaderNoCopy())
-	header2.GasLimit *= 2
-	block2 := types.NewBlockFromStorage(header2.Hash(), header2, nil, nil, side.Blocks[1].Withdrawals(), nil)
-
+	m, srv, block1, block2 := sideChainWithAnInvalidHeader(t)
 	ctx := t.Context()
-	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, m.Log, m.ExecModule, nil, nil, m.ChainConfig, ethconfig.Sync{}, nil)
-	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, 2)
-	srv.test = true
 	newPayload := func(block *types.Block) *engine_types.PayloadStatus {
 		payload, err := engine_types.ExecutionPayloadFromBlock(block)
 		require.NoError(t, err)
@@ -503,6 +500,102 @@ func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, bodies, 1)
 	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+}
+
+// A stored block with an invalid header is sent again while the forkchoice update that commits it
+// hides it from a lookup. The payload must take the normal path, which answers SYNCING while the
+// execution module is busy. Sent again later, it is answered INVALID and removed.
+func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeaderSentDuringAForkchoiceUpdate(t *testing.T) {
+	var pause atomic.Bool
+	paused, resume := make(chan struct{}), make(chan struct{})
+	observer := func(ctx context.Context, point execmodule.StateTransitionPoint) {
+		if point != execmodule.StateTransitionOverlayPublished || !pause.CompareAndSwap(true, false) {
+			return
+		}
+		close(paused)
+		select {
+		case <-resume:
+		case <-ctx.Done():
+		}
+	}
+	m, srv, block1, block2 := sideChainWithAnInvalidHeader(t, execmoduletester.WithStateTransitionObserver(observer))
+	var resumeOnce sync.Once
+	resumeForkchoice := func() { resumeOnce.Do(func() { close(resume) }) }
+	t.Cleanup(resumeForkchoice)
+	ctx := t.Context()
+	newPayload := func(block *types.Block) *engine_types.PayloadStatus {
+		payload, err := engine_types.ExecutionPayloadFromBlock(block)
+		require.NoError(t, err)
+		status, err := srv.NewPayloadV2(ctx, payload)
+		require.NoError(t, err)
+		return status
+	}
+	waitIdle := func() {
+		require.Eventually(t, func() bool {
+			ready, err := m.ExecModule.Ready(ctx)
+			return err == nil && ready
+		}, time.Minute, time.Millisecond)
+	}
+
+	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1).Status)
+	r, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: m.Genesis.Hash()}, nil)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, r.PayloadStatus.Status)
+	waitIdle()
+	require.Equal(t, engine_types.ValidStatus, newPayload(block1).Status)
+	// Stored as a download stores it, in the overlay that the next forkchoice update commits.
+	_, err = m.InsertBlocks(ctx, []*types.Block{block2})
+	require.NoError(t, err)
+
+	pause.Store(true)
+	forkchoiceDone := make(chan error, 1)
+	go func() {
+		_, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: block1.Hash()}, nil)
+		forkchoiceDone <- err
+	}()
+	select {
+	case <-paused:
+	case <-time.After(time.Minute):
+		t.Fatal("the forkchoice update did not publish its overlay")
+	}
+	hash, number := block2.Hash(), block2.NumberU64()
+	hidden, err := m.ExecModule.GetHeader(ctx, &hash, &number)
+	require.NoError(t, err)
+	require.Nil(t, hidden, "the paused forkchoice update must hide the block from a lookup")
+	require.Equal(t, engine_types.SyncingStatus, newPayload(block2).Status)
+	resumeForkchoice()
+	require.NoError(t, <-forkchoiceDone)
+	waitIdle()
+
+	status := newPayload(block2)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Equal(t, block1.Hash(), *status.LatestValidHash)
+	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
+	bodies, err := srv.GetPayloadBodiesByHashV1(ctx, []common.Hash{block2.Hash()})
+	require.NoError(t, err)
+	require.Len(t, bodies, 1)
+	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+}
+
+// sideChainWithAnInvalidHeader builds a canonical chain of four blocks and a side chain of two
+// blocks on the genesis. The second side block has a doubled gas limit, which is invalid for its
+// parent.
+func sideChainWithAnInvalidHeader(t *testing.T, options ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *EngineServer, *types.Block, *types.Block) {
+	t.Helper()
+	m := execmoduletester.New(t, append([]execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()})}, options...)...)
+	canonical, err := m.GenerateChain(4, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(canonical))
+	side, err := m.GenerateChain(2, func(_ int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
+	require.NoError(t, err)
+	header2 := types.CopyHeader(side.Blocks[1].HeaderNoCopy())
+	header2.GasLimit *= 2
+	block2 := types.NewBlockFromStorage(header2.Hash(), header2, nil, nil, side.Blocks[1].Withdrawals(), nil)
+
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, nil, nil, m.ChainConfig, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, 2)
+	srv.test = true
+	return m, srv, side.Blocks[0], block2
 }
 
 // storedBlockAboveTheCappedBound stores a side-chain block and its parent without the
@@ -591,11 +684,19 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 		storedGasLimit uint64
 		storedParent   common.Hash
 		l2             bool
-		wantErr        string
+		// Whether the execution module is busy before and after the lookup of the stored block. The
+		// lookup misses the block when the module is busy at either point.
+		busyBefore, busyAfter bool
+		lookupErr             error // the lookup of the stored block fails with it
+		wantErr               string
 	}{
 		{name: "stored block with a valid gas limit", txCount: 5, storedGasLimit: parent.GasLimit, storedParent: parentHash, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "stored block with another parent", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: common.Hash{0xaa}, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "stored block with an invalid gas limit", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, wantErr: "invalid block hash"},
+		{name: "stored block that a busy execution module hides", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyBefore: true, busyAfter: true, wantErr: "invalid block hash"},
+		{name: "stored block hidden by a forkchoice update that ends during the lookup", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyBefore: true, wantErr: "invalid block hash"},
+		{name: "stored block hidden by a forkchoice update that starts during the lookup", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyAfter: true, wantErr: "invalid block hash"},
+		{name: "stored block whose lookup fails", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, lookupErr: context.Canceled, wantErr: "invalid block hash"},
 		{name: "L2 chain, above the payload's own gas limit", txCount: 9, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, l2: true, wantErr: "gas limit reached: 9 transactions use at least 16800 gas each"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -630,18 +731,32 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 			require.NoError(t, err)
 			payload.BlockHash = storedHash
 
+			lookedUp := false
 			stub := &stubExecutionModule{
 				getHeaderFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
 					switch {
 					case hash != nil && *hash == parentHash:
 						return parent, nil
 					case hash != nil && *hash == storedHash && number != nil && *number == 100:
+						lookedUp = true
+						if test.lookupErr != nil {
+							return nil, test.lookupErr
+						}
+						if test.busyBefore || test.busyAfter {
+							return nil, nil
+						}
 						return stored, nil
 					}
 					return nil, nil
 				},
 				currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
 				isValidatedFunc:   func(hash common.Hash) bool { return hash == parentHash },
+				readyFunc: func(context.Context) (bool, error) {
+					if lookedUp {
+						return !test.busyAfter, nil
+					}
+					return !test.busyBefore, nil
+				},
 			}
 			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)

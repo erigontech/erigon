@@ -452,7 +452,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	// A stored block with a gas limit that is invalid for the parent was stored without the cap. It
 	// takes the normal path, which validates and removes it as any stored invalid block.
-	if !e.config.AllowAA && uint64(len(req.Transactions)) > gasLimit/minTxBlockGas && !e.storedWithInvalidGasLimit(ctx, req, parent) {
+	if !e.config.AllowAA && uint64(len(req.Transactions)) > gasLimit/minTxBlockGas && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
 		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
 	}
 
@@ -554,9 +554,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	// Answered after the block hash check and the other payload checks, so that their answers come
-	// first and only a verified block hash is reported as bad. A block that is already stored takes
-	// the normal path, where a block validation that rejects it also removes it.
-	if headerErr != nil && e.chainRW.GetHeader(ctx, blockHash, header.Number.Uint64()) == nil {
+	// first and only a verified block hash is reported as bad. A block that is stored, or may be,
+	// takes the normal path, where a block validation that rejects it also removes it.
+	if headerErr != nil && !e.mayBeStored(ctx, blockHash, header.Number.Uint64()) {
 		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
 		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)
 		e.blockDownloader.ReportBadHeader(blockHash, req.ParentHash, err.Error())
@@ -606,12 +606,33 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
-// storedWithInvalidGasLimit reports whether the payload's hash names a stored block on the payload's
-// parent with a gas limit that is invalid for that parent. Only the stored header decides, as the
-// payload's block hash is not verified yet.
-func (e *EngineServer) storedWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) bool {
-	stored := e.chainRW.GetHeader(ctx, req.BlockHash, req.BlockNumber.Uint64())
-	return stored != nil && stored.ParentHash == req.ParentHash && misc.VerifyParentGasLimit(e.config, parent, stored) != nil
+// storedHeader looks up a stored header, and reports whether the answer is known. It is not when
+// the lookup fails or the execution module is busy: a forkchoice update can hide the blocks that it
+// commits.
+func (e *EngineServer) storedHeader(ctx context.Context, hash common.Hash, number uint64) (header *types.Header, known bool) {
+	if !e.executionIdle(ctx) {
+		return nil, false
+	}
+	header, err := e.executionService.GetHeader(ctx, &hash, &number)
+	return header, err == nil && e.executionIdle(ctx)
+}
+
+func (e *EngineServer) executionIdle(ctx context.Context) bool {
+	ready, err := e.chainRW.Ready(ctx)
+	return err == nil && ready
+}
+
+func (e *EngineServer) mayBeStored(ctx context.Context, hash common.Hash, number uint64) bool {
+	stored, known := e.storedHeader(ctx, hash, number)
+	return !known || stored != nil
+}
+
+// mayBeStoredWithInvalidGasLimit reports whether the payload's hash names, or may name, a stored
+// block on the payload's parent with a gas limit that is invalid for that parent. Only the stored
+// header decides, as the payload's block hash is not verified yet.
+func (e *EngineServer) mayBeStoredWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) bool {
+	stored, known := e.storedHeader(ctx, req.BlockHash, req.BlockNumber.Uint64())
+	return !known || (stored != nil && stored.ParentHash == req.ParentHash && misc.VerifyParentGasLimit(e.config, parent, stored) != nil)
 }
 
 func gasLimitReached(txCount int, minTxBlockGas uint64) *engine_types.PayloadStatus {
