@@ -560,6 +560,44 @@ func TestOpenFolderOpensEveryBeaconBlocksSegment(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 1)
 }
 
+// Two versions of one range both enter the dirty set, and visibility serves the newer one, as
+// for EL. SegmentsCaplin's version-first sort kept only the older file.
+func TestOpenFolderServesTheNewerVersionOfARange(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	older := snaptype.BeaconBlocks.FileName(version.V1_0, 0, limit)
+	newer := snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, limit)
+	olderPrefix, newerPrefix := strings.SplitN(older, "-", 2)[0]+"-", strings.SplitN(newer, "-", 2)[0]+"-"
+	require.NotEqual(t, olderPrefix, newerPrefix)
+	files, err := filepath.Glob(filepath.Join(dirs.Snap, newerPrefix+"*beaconblocks*"))
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		require.NoError(t, err)
+		name := olderPrefix + strings.TrimPrefix(filepath.Base(f), newerPrefix)
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), data, 0o644))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	var dirty int
+	sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(*snapshotsync.DirtySegment) bool {
+		dirty++
+		return true
+	})
+	require.Equal(t, 2, dirty)
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BeaconBlocks(), 1)
+	require.Equal(t, newer, view.BeaconBlocks()[0].Src().FileName())
+}
+
 func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
 	t.Helper()
 	idx, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.idx"))
