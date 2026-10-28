@@ -90,7 +90,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	}
 	config.Tracer = &tracing.Hooks{OnOpcodeV2: validation.onOpcode, OnEnterV2: validation.onEnter}
 	evm.ResetBetweenBlocks(evm.Context, NewEVMTxContext(msg), evm.IntraBlockState(), config, evm.ChainRules())
-	st := NewTxnExecutor(evm, msg, NewGasPool(tx.GetGasLimit(), tx.GetBlobGas()))
+	st := NewTxnExecutor(evm, msg, NewGasPool(msg.Gas(), tx.GetBlobGas()))
 	if _, err := st.executeFrameTransaction(tx, true, false, validation); err != nil {
 		return nil, err
 	}

@@ -1910,11 +1910,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			// A local replacement attempt can help the existing transaction propagate.
 			announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 		}
-		switch decision.outcome {
-		case replacementRejected:
+		if decision.reason != txpoolcfg.NotSet {
 			return decision.reason
-		case replacementUnchanged:
-			return txpoolcfg.NotSet
 		}
 	}
 

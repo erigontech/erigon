@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"math/big"
 	"slices"
 
@@ -28,16 +27,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-type replacementOutcome uint8
-
-const (
-	replacementRejected replacementOutcome = iota
-	replacementAccepted
-	replacementUnchanged
-)
-
 type replacementDecision struct {
-	outcome     replacementOutcome
 	reason      txpoolcfg.DiscardReason
 	rebroadcast bool
 }
@@ -47,11 +37,11 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	newTxn, oldTxn := replacement.TxnSlot, previous.TxnSlot
 	if newTxn.TxType() == FrameTxnType || oldTxn.TxType() == FrameTxnType {
 		if reason := validateFrameReplacement(oldTxn, newTxn, p.cfg.PriceBump, p.cfg.BlobPriceBump); reason != txpoolcfg.Success {
-			return replacementDecision{outcome: replacementRejected, reason: reason}
+			return replacementDecision{reason: reason}
 		}
 	}
 	if oldTxn.HasBlobs() && !newTxn.HasBlobs() {
-		return replacementDecision{outcome: replacementRejected, reason: txpoolcfg.BlobTxReplace}
+		return replacementDecision{reason: txpoolcfg.BlobTxReplace}
 	}
 	priceBump := p.cfg.PriceBump
 
@@ -66,10 +56,7 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 			uint256.NewInt(100),
 		)
 		if newTxn.GetBlobFeeCap().Lt(blobFeeThreshold) && !overflow {
-			if bytes.Equal(oldTxn.IDHash[:], newTxn.IDHash[:]) {
-				return replacementDecision{outcome: replacementUnchanged}
-			}
-			return replacementDecision{outcome: replacementRejected, reason: txpoolcfg.ReplaceUnderpriced}
+			return replacementDecision{reason: txpoolcfg.ReplaceUnderpriced}
 		}
 	}
 
@@ -87,16 +74,12 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	}
 	if newTxn.GetTipCap().Cmp(tipThreshold) < 0 || newTxn.GetFeeCap().Cmp(feecapThreshold) < 0 {
 		rebroadcast := replacement.subPool&IsLocal != 0 && (previous.currentSubPool == PendingSubPool || previous.currentSubPool == BaseFeeSubPool)
-		if bytes.Equal(oldTxn.IDHash[:], newTxn.IDHash[:]) {
-			return replacementDecision{outcome: replacementUnchanged, rebroadcast: rebroadcast}
-		}
 		return replacementDecision{
-			outcome:     replacementRejected,
 			reason:      txpoolcfg.NotReplaced,
 			rebroadcast: rebroadcast,
 		}
 	}
-	return replacementDecision{outcome: replacementAccepted}
+	return replacementDecision{}
 }
 
 // Frame replacements must keep the same nonce keys and strictly increase fees,
