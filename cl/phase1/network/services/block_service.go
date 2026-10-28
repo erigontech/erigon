@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -308,6 +309,13 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	return nil
 }
 
+var (
+	mxELColumnsImported   = metrics.GetOrCreateCounter(`caplin_el_columns_import_total{result="imported"}`)
+	mxELColumnsAvailable  = metrics.GetOrCreateCounter(`caplin_el_columns_import_total{result="already_available"}`)
+	mxELColumnsEngineErr  = metrics.GetOrCreateCounter(`caplin_el_columns_import_total{result="engine_error"}`)
+	mxELColumnsIncomplete = metrics.GetOrCreateCounter(`caplin_el_columns_import_total{result="not_built"}`)
+)
+
 // importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
 // (engine_getBlobsV2), so the block need not wait for them on gossip.
 func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
@@ -323,6 +331,9 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		return
 	}
 	if available, err := peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || available {
+		if available {
+			mxELColumnsAvailable.Inc()
+		}
 		return
 	}
 	versionedHashes := make([]common.Hash, 0, block.Block.Body.BlobKzgCommitments.Len())
@@ -337,13 +348,16 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 	defer cancel()
 	blobs, proofs, err := b.engine.GetBlobs(ctx, versionedHashes, block.Version())
 	if err != nil {
+		mxELColumnsEngineErr.Inc()
 		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
 	}
 	if err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs); err != nil {
+		mxELColumnsIncomplete.Inc()
 		log.Debug("[blockService] columns not built from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
 	}
+	mxELColumnsImported.Inc()
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }
 
