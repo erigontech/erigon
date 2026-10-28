@@ -71,6 +71,9 @@ type AsOfGetter struct {
 // AsOfGetter binds the cache view once per tx: building it can read the DB.
 var _ kv.AsOfGetter = (*AsOfGetter)(nil)
 
+// CacheView binds the shared state cache to tx's read view.
+func (sd *SharedDomains) CacheView(tx kv.TemporalTx) cache.ReadView { return sd.cacheViewFor(tx) }
+
 func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
 	return &AsOfGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
 }
@@ -122,6 +125,9 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	g.stepSize = tx.Debug().StepSize()
 	return g
 }
+
+// CacheView is the state cache view the getter reads through; empty without a cache.
+func (g *TemporalTxStateGetter) CacheView() cache.ReadView { return g.view }
 
 func writableTx(tx kv.TemporalTx) bool {
 	_, writable := tx.(kv.TemporalRwTx)

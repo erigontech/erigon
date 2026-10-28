@@ -136,13 +136,11 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 		sd = c.publishedSD()
 	}
 
-	var view *CacheView
 	if sd != nil {
-		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
-	} else {
-		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
+		return &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}), cached: sd.CacheView(tx)}, nil
 	}
-	return view, nil
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	return &CacheView{getter: getter, cached: getter.CacheView()}, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
@@ -156,6 +154,7 @@ type CacheView struct {
 	// getter is built once per view: it carries the per-tx cache ReadView, so
 	// per-read getter construction would cost an allocation on every call.
 	getter execctxapi.StateGetter
+	cached cache.ReadView // the state cache as tx sees it, for as-of reads
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
@@ -172,12 +171,20 @@ func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 	return v, err
 }
 
+// GetAsOf reads the in-memory batch, then a value the state cache holds from before ts; a miss is left to
+// the caller's history read.
 func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	domain := kv.StorageDomain
+	if len(key) == 20 {
+		domain = kv.AccountsDomain
+	}
 	if c.context != nil {
-		if len(key) == 20 {
-			return c.context.GetAsOf(kv.AccountsDomain, key, ts)
+		if v, ok, err = c.context.GetAsOf(domain, key, ts); err != nil || ok {
+			return v, ok, err
 		}
-		return c.context.GetAsOf(kv.StorageDomain, key, ts)
+	}
+	if v, hit := c.cached.GetAsOf(domain, key, ts); hit && len(v) > 0 {
+		return v, true, nil
 	}
 	return nil, false, nil
 }

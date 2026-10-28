@@ -32,11 +32,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type headerNumberErrorReader struct {
@@ -229,4 +232,44 @@ func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
 	require.Panics(t, func() { _, _, _ = e.beginOverlayOrRo(context.Background()) })
 	require.True(t, e.lock.TryLock(), "the read lock is still held after the panic")
 	e.lock.Unlock()
+}
+
+// A historical read is served by a value the state cache holds from before the read's txNum.
+func TestCacheViewGetAsOfServesCommittedValueFromStateCache(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	stateCache := newDomainStateCache(16 * datasize.MB)
+	require.NotNil(t, stateCache)
+	t.Cleanup(stateCache.Close)
+	addr := common.Address{0xcc}
+	enc := accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	writer, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer writer.Close()
+	writer.BindStateCache(stateCache)
+	writer.SetTxNum(5)
+	require.NoError(t, writer.DomainPut(kv.AccountsDomain, rwTx, addr[:], enc, 5, nil))
+	require.NoError(t, writer.Commit(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	view, err := (&Cache{execModule: &ExecModule{stateCache: stateCache}}).View(ctx, roTx)
+	require.NoError(t, err)
+	asOf := view.(interface {
+		GetAsOf(key []byte, ts uint64) ([]byte, bool, error)
+	})
+
+	v, ok, err := asOf.GetAsOf(addr[:], 10)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, enc, v)
+	_, ok, err = asOf.GetAsOf(addr[:], 5)
+	require.NoError(t, err)
+	require.False(t, ok, "a value written at txNum 5 is not the value as of 5")
 }
