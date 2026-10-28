@@ -10,27 +10,26 @@ import (
 )
 
 // LayeredDomainReader composes the finished-but-not-yet-committed prior blocks'
-// versionMap window over the shared domain (sd.mem) and domain files, so a value
+// versionMap window over the shared domain (sd.mem, state cache, domain files), so a value
 // written by a prior block not yet flushed to sd.mem is served from its
 // versionMap instead of a stale domain read. The window is selected by txNum
 // (matching the per-tx apply). Only account/storage are layered; the commitment /
 // code domains and history read the base directly.
 //
-// roTx is the per-user files-fallback tx: clone with CloneWithTx per concurrent
-// user rather than sharing one.
+// The base read is bound to one tx: clone with CloneWithTx per concurrent user
+// rather than sharing one.
 type LayeredDomainReader struct {
 	sd         execctx.DomainReader
-	roTx       kv.TemporalTx
 	prevBlocks *PrevBlockList
-	cached     func(domain kv.Domain, key []byte) ([]byte, uint64, bool)
+	asOf       func(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) // sd's as-of read bound to the tx
 }
 
-// NewLayeredDomainReader composes the window + sd + files. A nil prevBlocks
-// layers nothing, giving the plain sd+files path.
+// NewLayeredDomainReader composes the window + sd. A nil prevBlocks layers nothing;
+// a nil roTx leaves only sd.mem.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
-	l := &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
+	l := &LayeredDomainReader{sd: sd, prevBlocks: prevBlocks}
 	if roTx != nil {
-		l.cached = sd.CachedCommittedReader(roTx)
+		l.asOf = sd.AsOfReader(roTx)
 	}
 	return l
 }
@@ -41,25 +40,13 @@ func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader
 	return NewLayeredDomainReader(l.sd, tx, l.prevBlocks)
 }
 
-// baseGetAsOf reads sd.mem, then the shared state cache, then the domain files — the
-// committed base without the prior-block window.
+// baseGetAsOf reads the committed base without the prior-block window: sd.mem, then (with a tx) the shared
+// state cache and the domain files.
 func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	enc, ok, err := l.sd.GetAsOf(name, k, ts)
-	if err != nil {
-		return nil, false, err
+	if l.asOf == nil {
+		return l.sd.GetAsOf(name, k, ts)
 	}
-	if ok {
-		return enc, true, nil
-	}
-	if l.roTx == nil {
-		return nil, false, nil
-	}
-	if l.cached != nil && name != kv.CommitmentDomain {
-		if v, txNum, hit := l.cached(name, k); hit && txNum < ts {
-			return v, len(v) > 0, nil
-		}
-	}
-	return l.roTx.GetAsOf(name, k, ts)
+	return l.asOf(name, k, ts)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
