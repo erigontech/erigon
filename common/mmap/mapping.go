@@ -45,6 +45,7 @@ func OpenRo(f *os.File, size int) (Ro, error) {
 		_ = m.Unmap()
 		return nil, err
 	}
+	registerMapping(m, f)
 	return Ro(m), nil
 }
 
@@ -76,6 +77,7 @@ func (m *Ro) Unmap() error {
 		*m = nil
 		return nil
 	}
+	unregisterMapping(*m)
 	return (*mmapgo.MMap)(m).Unmap()
 }
 
