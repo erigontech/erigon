@@ -341,13 +341,13 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 
 		// Process the block without its data; the deferred requestCustodyBackfill fetches it.
 		if err := processBlock(ctx, cfg, block, true, true, false); err != nil {
+			if cfg.pendingBlockWrite != nil {
+				return false
+			}
 			if parentEnvelopeUnavailable(cfg, block, envelopes, parentBlockByRoot) {
 				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errParentEnvelopeUnavailable.Error(), errParentEnvelopeUnavailable)
 			} else {
 				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "process block failed", err)
-			}
-			if cfg.pendingBlockWrite != nil {
-				return false
 			}
 			if rememberBlockAfterProcess(err) {
 				seenBlockRoots[blockRoot] = struct{}{}

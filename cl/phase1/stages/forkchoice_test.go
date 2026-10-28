@@ -836,15 +836,10 @@ func writeTestBlockIndices(t *testing.T, tx kv.RwTx, root, parentRoot, stateRoot
 
 func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
-	emitter := beaconevents.NewEventEmitter()
+	cfg := newLockOrderFixture(t, 0).cfg
 	ch := make(chan *beaconevents.EventStream, 16)
-	sub := emitter.State().Subscribe(ch)
+	sub := cfg.emitter.State().Subscribe(ch)
 	defer sub.Unsubscribe()
-
-	cfg := &Cfg{
-		emitter:   emitter,
-		beaconCfg: &clparams.MainnetBeaconConfig,
-	}
 
 	err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)

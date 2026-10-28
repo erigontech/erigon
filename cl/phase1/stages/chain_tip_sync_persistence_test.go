@@ -65,6 +65,26 @@ func (db *blockWriteErrorDB) Update(ctx context.Context, fn func(kv.RwTx) error)
 	return db.RwDB.Update(ctx, fn)
 }
 
+func TestChainTipBatchDoesNotRejectAcceptedBlockAfterWriteFailure(t *testing.T) {
+	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	graph.insertOnAdd = true
+	cfg.indiciesDB = &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+	cfg.chainTipRejections.lastLog = time.Now()
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	rejected := make(map[common.Hash]error)
+
+	reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: block.Block.Slot}, []*cltypes.SignedBeaconBlock{block}, make(map[common.Hash]struct{}), rejected)
+
+	require.False(t, reachedTarget)
+	_, accepted := cfg.forkChoice.GetHeader(root)
+	require.True(t, accepted)
+	require.NotNil(t, cfg.pendingBlockWrite)
+	require.Empty(t, rejected, "a failed write must not classify an accepted block as rejected")
+	require.Empty(t, cfg.chainTipRejections.reasons)
+}
+
 func TestChainTipListenerRetriesWriteWithoutAnotherBatch(t *testing.T) {
 	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	graph.insertOnAdd = true
@@ -150,6 +170,11 @@ func TestChainTipSyncRetriesWriteFromForwardSync(t *testing.T) {
 	args := Args{seenSlot: cfg.forkChoice.HighestSeen(), targetSlot: block.Block.Slot}
 	require.Equal(t, args.targetSlot, args.seenSlot)
 	require.Equal(t, ChainTipSync, ConsensusClStages().Stages[ForwardSync].TransitionFunc(cfg, args, ErrForwardSyncStale))
+	unpublished := args
+	unpublished.hasDownloaded, unpublished.headUnpublished = true, true
+	unpublished.peers = 1
+	unpublished.targetSlot++
+	require.Equal(t, ChainTipSync, ConsensusClStages().Stages[ForwardSync].TransitionFunc(cfg, unpublished, err), "finish the pending write before publishing the accepted head")
 
 	require.NoError(t, chainTipSync(t.Context(), log.Root(), cfg, args))
 	require.Nil(t, cfg.pendingBlockWrite)

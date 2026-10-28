@@ -418,6 +418,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ForwardSync: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.pendingBlockWrite != nil {
+						return ChainTipSync
+					}
 					// If forward sync is stale (no progress), go directly to ChainTipSync
 					// so gossip can deliver blocks that range requests cannot.
 					if errors.Is(err, ErrForwardSyncStale) {

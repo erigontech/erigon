@@ -57,6 +57,21 @@ var publishedBlockJobSequence atomic.Uint64
 
 const maxConcurrentBlockValidationContexts = 4
 
+// AcceptedBlockWriteError carries the exact signed copy accepted by fork choice
+// so a failed database write can be retried even after its header is pruned.
+type AcceptedBlockWriteError struct {
+	Block *cltypes.SignedBeaconBlock
+	Err   error
+}
+
+func (e *AcceptedBlockWriteError) Error() string {
+	return fmt.Sprintf("%s: %v", errBlockStorage, e.Err)
+}
+
+func (e *AcceptedBlockWriteError) Unwrap() error { return e.Err }
+
+func (e *AcceptedBlockWriteError) Is(target error) bool { return target == errBlockStorage }
+
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
 	slot          uint64
@@ -302,6 +317,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true, accepted)
 			job.logStorageErrorOnce(err)
+			if accepted {
+				return nil
+			}
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		if errors.Is(err, forkchoice.ErrBlockInvalid) {
@@ -1232,6 +1250,9 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	err := blockErr
 	if err == nil {
 		err = store(ctx)
+	}
+	if writeErr, ok := errors.AsType[*AcceptedBlockWriteError](err); ok {
+		accepted, block, blockErr = true, writeErr.Block, err
 	}
 	job.logStorageErrorOnce(err)
 	job.mu.Lock()

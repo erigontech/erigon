@@ -87,9 +87,13 @@ func TestPendingGossipRetainsCanceledDatabaseAttempt(t *testing.T) {
 			service.db = db
 
 			err := service.ProcessMessage(ctx, nil, block)
-			require.ErrorIs(t, err, ErrIgnore)
-			require.ErrorIs(t, err, context.Canceled)
-			require.NotErrorIs(t, err, errBlockStorage)
+			if operation == "write" {
+				require.NoError(t, err, "an accepted block can propagate while its write is retried")
+			} else {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.ErrorIs(t, err, context.Canceled)
+				require.NotErrorIs(t, err, errBlockStorage)
+			}
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 			job := serviceJob(t, service, root)
@@ -141,8 +145,12 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 			service.db = db
 
 			err := service.ProcessMessage(t.Context(), nil, block)
-			require.ErrorIs(t, err, ErrIgnore)
-			require.ErrorIs(t, err, failure)
+			if tc.writeFailure {
+				require.NoError(t, err, "an accepted block can propagate while its write is retried")
+			} else {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.ErrorIs(t, err, failure)
+			}
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 			job := serviceJob(t, service, root)
@@ -259,7 +267,7 @@ func TestPendingGossipWriteKeepsAcceptedBlockOnJobReuse(t *testing.T) {
 	deferred.Signature[0] ^= 1
 	job, _ := service.scheduleBlockForLaterProcessing(&deferred, nil, false, false)
 
-	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, block), errBlockStorage)
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	require.Same(t, job, serviceJob(t, service, root))
@@ -295,7 +303,7 @@ func TestPendingGossipWriteSurvivesStoreCompletion(t *testing.T) {
 			service.SchedulePublishedBlockForLaterProcessing(block, func(ctx context.Context) error {
 				calls++
 				if calls == 1 {
-					require.ErrorIs(t, service.ProcessMessage(ctx, nil, block), errBlockStorage)
+					require.NoError(t, service.ProcessMessage(ctx, nil, block))
 				}
 				return tc.storeErr
 			})
@@ -318,6 +326,61 @@ func TestPendingGossipWriteSurvivesStoreCompletion(t *testing.T) {
 			require.False(t, queued)
 		})
 	}
+}
+
+func TestPublishedBlockRetainsAcceptedWriteAfterExpiry(t *testing.T) {
+	api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
+	service := api.(*blockService)
+	processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
+	service.forkchoiceStore = processing
+	failure := errors.New("database unavailable")
+	db := &blockDBError{RwDB: service.db, updateErr: failure}
+	service.db = db
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(ctx context.Context) error {
+		if _, known := processing.GetHeader(root); !known {
+			if err := processing.OnBlock(ctx, block, true, true, false); err != nil {
+				return err
+			}
+		}
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := beacon_indicies.WriteHighestFinalized(tx, processing.FinalizedSlot()); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
+		}); err != nil {
+			return &AcceptedBlockWriteError{Block: block, Err: err}
+		}
+		return nil
+	})
+	job := serviceJob(t, service, root)
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, failure)
+	require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
+	require.Equal(t, blockRetryInitialDelay, job.retryDelay)
+	_, accepted := processing.GetHeader(root)
+	require.True(t, accepted)
+
+	now := job.creationTime.Add(blockJobExpiry + time.Second)
+	service.processScheduledBlock(t.Context(), root, job, now)
+	require.False(t, job.terminal, "an accepted block's write must survive job expiry")
+	require.ErrorIs(t, job.lastAttempt.err, failure)
+
+	db.updateErr = nil
+	service.processScheduledBlock(t.Context(), root, job, now.Add(time.Second))
+	require.True(t, job.terminal)
+	require.NoError(t, handle.Wait(t.Context()))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, slot)
+		require.Equal(t, block.Block.Slot, *slot)
+		return nil
+	}))
+	require.Equal(t, int32(1), processing.calls.Load())
+	_, queued := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, queued)
 }
 
 func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {

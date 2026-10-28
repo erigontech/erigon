@@ -122,10 +122,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	currentRoot := headRoot
 	currentSlot := headSlot
 	// The trusted anchor can come from a checkpoint state without block indices.
-	var anchorRoot common.Hash
-	if cfg.forkChoice != nil {
-		anchorRoot = cfg.forkChoice.AnchorRoot()
-	}
+	anchorRoot := cfg.forkChoice.AnchorRoot()
 	// Accepted blocks may not have their indices yet. Wait for the required ancestry
 	// before marking the head canonical: later updates stop at that head and would
 	// leave any canonical ancestors from the old fork unchanged.
@@ -133,7 +130,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	if err != nil {
 		return fmt.Errorf("failed to read block slot by block root: %w", err)
 	}
-	if storedSlot == nil && (cfg.forkChoice == nil || headRoot != anchorRoot) {
+	if storedSlot == nil && headRoot != anchorRoot {
 		return fmt.Errorf("block indices are not yet available for %s", headRoot)
 	}
 
@@ -166,7 +163,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 			return fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
-			if cfg.forkChoice == nil || currentRoot != anchorRoot {
+			if currentRoot != anchorRoot {
 				return fmt.Errorf("block indices are not yet available for %s", currentRoot)
 			}
 			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
