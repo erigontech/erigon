@@ -226,7 +226,10 @@ func TestPendingGossipRetriesAcceptedScheduledBlockAfterExpiry(t *testing.T) {
 	_, accepted := processing.GetHeader(root)
 	require.True(t, accepted)
 
-	processing.headers.Delete(root)
+	processing.headers.Delete(common.Hash(root))
+	_, accepted = processing.GetHeader(root)
+	require.False(t, accepted, "the retry must run without the accepted header")
+
 	db.updateErr = nil
 	service.processScheduledBlock(t.Context(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
 
