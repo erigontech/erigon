@@ -23,11 +23,21 @@ import (
 
 // TransitionState will call impl..ProcessSlots, then impl.VerifyBlockSignature, then ProcessBlock, then impl.VerifyTransition
 func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
-	currentBlock := block.Block
-	if err := impl.ProcessSlots(s, currentBlock.Slot); err != nil {
+	if err := impl.ProcessSlots(s, block.Block.Slot); err != nil {
 		return err
 	}
+	return transitionBlock(impl, s, block)
+}
 
+func TransitionStateFromPrecomputedEpochState(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	if s.Slot() == block.Block.Slot {
+		return transitionBlock(impl, s, block)
+	}
+	return TransitionState(impl, s, block)
+}
+
+func transitionBlock(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	currentBlock := block.Block
 	if err := impl.VerifyBlockSignature(s, block); err != nil {
 		return err
 	}

@@ -392,6 +392,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
 	}
+	go forkChoice.RunNextEpochPrecompute(ctx)
 	bls.SetEnabledCaching(true)
 
 	forkDigest, err := ethClock.CurrentForkDigest()

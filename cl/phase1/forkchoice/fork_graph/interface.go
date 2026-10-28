@@ -17,6 +17,8 @@
 package fork_graph
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -37,6 +39,7 @@ import (
 type ForkGraph interface {
 	// AddChainSegment processes a new block and returns the post-state.
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	SetNextEpochState(ctx context.Context, parentRoot common.Hash, state *state.CachingBeaconState)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
