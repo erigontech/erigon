@@ -65,11 +65,14 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 	if !precompileCacheEnabled || normalize == nil {
 		return p
 	}
-	c := &cachedPrecompile{PrecompiledContract: p, normalize: normalize}
-	c.domain[0] = byte(tier)
-	copy(c.domain[1:], address[:])
-	c.domainHash = maphash.Bytes(precompileSeed, c.domain[:])
-	return c
+	var domain [21]byte
+	domain[0] = byte(tier)
+	copy(domain[1:], address[:])
+	return newCachedPrecompile(p, normalize, domain)
+}
+
+func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, bool), domain [21]byte) *cachedPrecompile {
+	return &cachedPrecompile{PrecompiledContract: p, normalize: normalize, domain: domain, domainHash: maphash.Bytes(precompileSeed, domain[:])}
 }
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
