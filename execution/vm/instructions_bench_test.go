@@ -102,6 +102,12 @@ func BenchmarkOpDiv64(b *testing.B) {
 	opBenchmark(b, opDiv, x, y)
 }
 
+func BenchmarkOpDivPow2(b *testing.B) {
+	x := "80000000000000000000000000000000"
+	y := "87ffb8b26394face67d77fae3608d0891ff3f9014f20db29ae04af2c2d265de1"
+	opBenchmark(b, opDiv, x, y)
+}
+
 func BenchmarkOpSdiv(b *testing.B) {
 	x := "ff3f9014f20db29ae04af2c2d265de17"
 	y := "fe7fb0d1f59dfe9492ffbf73683fd1e870eec79504c60144cc7f5fc2bad1e611"
@@ -568,6 +574,36 @@ func BenchmarkContextAddress(b *testing.B) {
 				}
 				scope.Stack.Reset()
 			}
+		})
+	}
+}
+
+// BenchmarkCopyLoop runs 64 KB of one zero-length copy after the other, as the
+// codecopy benchmark fixture does, and ADD for comparison.
+func BenchmarkCopyLoop(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		iter []byte
+	}{
+		{"CODECOPY", []byte{byte(PUSH1), 0, byte(PUSH0), byte(PUSH0), byte(CODECOPY)}},
+		{"CALLDATACOPY", []byte{byte(PUSH1), 0, byte(PUSH0), byte(PUSH0), byte(CALLDATACOPY)}},
+		{"RETURNDATACOPY", []byte{byte(PUSH1), 0, byte(PUSH0), byte(PUSH0), byte(RETURNDATACOPY)}},
+		{"ADD", []byte{byte(PUSH1), 1, byte(PUSH1), 1, byte(ADD), byte(POP)}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
+			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			n := 64 * 1024 / len(tc.iter)
+			contract.Code = append([]byte{byte(PUSH1), 0xff, byte(PUSH1), 0x20, byte(MSTORE8), byte(JUMPDEST)}, bytes.Repeat(tc.iter, n)...)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, _, err := evm.Run(*contract, mdgas.MdGas{Execution: 1_000_000}, nil, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/iter")
 		})
 	}
 }
