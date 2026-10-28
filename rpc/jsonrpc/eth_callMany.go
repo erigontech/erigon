@@ -173,6 +173,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if simulateContext.TransactionIndex != nil {
 		transactionIndex = *simulateContext.TransactionIndex
 	}
+	if err := checkTxIndex(blockNum, transactionIndex, len(block.Transactions())); err != nil {
+		return nil, err
+	}
 
 	if transactionIndex == -1 {
 		transactionIndex = len(block.Transactions())
