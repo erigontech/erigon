@@ -37,7 +37,7 @@ var ErrPruned = errors.New("old data not available due to pruning")
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
 	sd          execctx.DomainReader
-	asOf        *execctx.AsOfGetter // sd's as-of read bound to ttx, built on the first read
+	asOf        kv.AsOfGetter // ttx, or sd's as-of read bound to ttx; built on the first read
 	tracePrefix string
 	txNum       uint64
 	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
@@ -61,15 +61,16 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainRea
 // sd.mem has inMemHistoryReads disabled and returns an error, it falls through to ttx so the same reader type
 // serves both the in-batch and persisted-history modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.sd != nil {
-		if hr.asOf == nil {
+	if hr.asOf == nil {
+		hr.asOf = hr.ttx
+		if hr.sd != nil {
 			hr.asOf = hr.sd.AsOfGetter(hr.ttx)
 		}
-		if enc, ok, err = hr.asOf.GetAsOf(domain, key, hr.txNum); err == nil {
-			return enc, ok, nil
-		}
 	}
-	return hr.ttx.GetAsOf(domain, key, hr.txNum)
+	if enc, ok, err = hr.asOf.GetAsOf(domain, key, hr.txNum); err != nil && hr.sd != nil {
+		return hr.ttx.GetAsOf(domain, key, hr.txNum)
+	}
+	return enc, ok, err
 }
 
 func (hr *HistoryReaderV3) String() string {
