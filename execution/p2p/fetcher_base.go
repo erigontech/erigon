@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"time"
@@ -411,7 +412,8 @@ func (f *FetcherBase) fetchBodies(
 
 	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, headers)
 	if err != nil {
-		if rlp.IsInvalidRLPError(err) {
+		// The full response is buffered, so an unexpected EOF means malformed body RLP.
+		if rlp.IsInvalidRLPError(err) || errors.Is(err, io.ErrUnexpectedEOF) {
 			err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
 		}
 		return nil, err

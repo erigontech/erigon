@@ -18,6 +18,7 @@ package p2p
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -452,28 +453,42 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenBodyDoesNotMatchHeade
 func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenInvalidBodyRLP(t *testing.T) {
 	t.Parallel()
 
-	peerId := PeerIdFromUint64(1)
-	requestId := uint64(1234)
-	header := newMockBlockHeaders(1)[0]
-	response := requestResponseMock{
-		requestId: requestId,
-		mockResponseInboundMessages: []*sentryproto.InboundMessage{{
-			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
-			PeerId: peerId.H512(),
-			Data:   newMockRawBlockBodiesPacketBytes(t, requestId, rlp.RawValue{0x80}),
-		}},
-		wantRequestPeerId: peerId,
-		wantRequestHashes: []common.Hash{header.Hash()},
-	}
+	for _, tc := range []struct {
+		name    string
+		body    rlp.RawValue
+		wantErr error
+	}{
+		{name: "not a list", body: rlp.RawValue{0x80}, wantErr: rlp.ErrExpectedList},
+		{name: "truncated transaction length", body: rlp.RawValue{0xc3, 0xc1, 0xb8, 0xc0}, wantErr: io.ErrUnexpectedEOF},
+		{name: "truncated uncles length", body: rlp.RawValue{0xc2, 0xc0, 0xf8}, wantErr: io.ErrUnexpectedEOF},
+		{name: "truncated withdrawals length", body: rlp.RawValue{0xc3, 0xc0, 0xc0, 0xf8}, wantErr: io.ErrUnexpectedEOF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			peerId := PeerIdFromUint64(1)
+			requestId := uint64(1234)
+			header := newMockBlockHeaders(1)[0]
+			response := requestResponseMock{
+				requestId: requestId,
+				mockResponseInboundMessages: []*sentryproto.InboundMessage{{
+					Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+					PeerId: peerId.H512(),
+					Data:   newMockRawBlockBodiesPacketBytes(t, requestId, tc.body),
+				}},
+				wantRequestPeerId: peerId,
+				wantRequestHashes: []common.Hash{header.Hash()},
+			}
 
-	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
-	test.mockSentryStreams(response)
-	mockExpectPenalizePeer(t, test.sentryClient, peerId)
-	test.run(func(ctx context.Context, t *testing.T) {
-		bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
-		require.ErrorIs(t, err, rlp.ErrExpectedList)
-		require.Nil(t, bodies.Data)
-	})
+			test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
+			test.mockSentryStreams(response)
+			mockExpectPenalizePeer(t, test.sentryClient, peerId)
+			test.run(func(ctx context.Context, t *testing.T) {
+				bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+				require.ErrorIs(t, err, tc.wantErr)
+				require.ErrorIs(t, err, ErrInvalidBodyRLP)
+				require.Nil(t, bodies.Data)
+			})
+		})
+	}
 }
 
 func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrMissingBodies(t *testing.T) {
