@@ -31,6 +31,8 @@ import (
 )
 
 const (
+	// minCachedPrecompileGas keeps calls whose compute is cheaper than a cache lookup out of the cache.
+	minCachedPrecompileGas   = 2000
 	maxCachedPrecompileInput = 64 * 1024
 )
 
@@ -75,7 +77,7 @@ func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, 
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
-	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < uint64(len(in)) {
+	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < max(minCachedPrecompileGas, uint64(len(in))) {
 		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)

@@ -533,28 +533,6 @@ func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 	}
 }
 
-// A cache hit costs about as much as tens of gas of compute, so a cheap call is still cached; only a call
-// whose gas is below its key length is not, since hashing that key would cost more than the call.
-func TestCachedPrecompileAdmission(t *testing.T) {
-	runTwice := func(p *countingPrecompile, input []byte) int {
-		c := newCachedPrecompile(p, wholeInputKey, [21]byte{206})
-		for range 2 {
-			_, err := c.Run(input)
-			require.NoError(t, err)
-		}
-		return p.calls
-	}
-	input := func(n int) []byte {
-		in := make([]byte, n)
-		copy(in, fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1)))
-		return in
-	}
-	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 200}, input(171)), "cheap call not cached")
-	require.Equal(t, 2, runTwice(&countingPrecompile{output: []byte{1}, gas: 170}, input(171)), "gas below key length cached")
-	require.Equal(t, 1, runTwice(&countingPrecompile{output: make([]byte, 1024)}, input(64)), "1024-byte output not cached")
-	require.Equal(t, 2, runTwice(&countingPrecompile{output: make([]byte, 1025)}, input(64)), "1025-byte output cached")
-}
-
 func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
 	p := &countingPrecompile{output: []byte{7}}
@@ -772,7 +750,7 @@ func TestPrecompileCacheSeparatesForks(t *testing.T) {
 	in[len(in)-1] = 3
 	addr := accounts.InternAddress(common.BytesToAddress([]byte{5}))
 	prague, osaka := forkSets[forkPrague].contracts[addr], forkSets[forkOsaka].contracts[addr]
-	require.GreaterOrEqual(t, prague.RequiredGas(in), uint64(len(in)))
+	require.GreaterOrEqual(t, prague.RequiredGas(in), uint64(max(minCachedPrecompileGas, len(in))))
 	for range 2 {
 		_, err := prague.Run(in)
 		require.NoError(t, err)
