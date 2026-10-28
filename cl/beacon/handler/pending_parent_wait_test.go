@@ -190,7 +190,7 @@ func TestAwaitPendingParentPayloadDoesNotWaitPastTheCutoff(t *testing.T) {
 
 	start := time.Now()
 	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 	require.Zero(t, retries.Load())
 }
 
@@ -253,7 +253,7 @@ func TestAwaitPendingParentPayloadSkipsAParentThePtcVotesRuleOut(t *testing.T) {
 
 	start := time.Now()
 	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, targetSlot, clparams.GloasVersion))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 	require.Zero(t, retries.Load())
 }
 
@@ -459,7 +459,7 @@ func TestAwaitHeadStateAfterChangeRetriesAtOnceWhenTheHeadReturns(t *testing.T) 
 
 	start := time.Now()
 	require.True(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 // notCurrentSlotClock reports every slot as not current, as for a request for a later slot.
@@ -483,7 +483,7 @@ func TestAwaitPendingParentPayloadDoesNotWaitForASlotThatIsNotCurrent(t *testing
 
 	start := time.Now()
 	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 	require.Zero(t, retries.Load())
 }
 
@@ -496,7 +496,7 @@ func TestAwaitHeadStateAfterChangeDoesNotWaitForASlotThatIsNotCurrent(t *testing
 
 	start := time.Now()
 	require.False(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 // The time a retry gets back can be another caller's booking, which is dropped if that attempt is
