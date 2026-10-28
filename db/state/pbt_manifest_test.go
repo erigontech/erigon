@@ -40,25 +40,33 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 	require.NoError(t, err)
 	path := filepath.Join(root, "pbt-manifest.toml")
 	require.NoError(t, state.WritePBTManifest(path, manifest))
-	got, err := state.ReadPBTManifest(path, sources...)
+	got, err := state.ReadPBTManifest(path)
 	require.NoError(t, err)
 	require.Equal(t, manifest, got)
+	validate := func() error {
+		read, err := state.ReadPBTManifest(path)
+		if err != nil {
+			return err
+		}
+		return state.ValidatePBTManifestFiles(t.Context(), read, sources, 2, nil)
+	}
+	require.NoError(t, validate())
 
 	t.Run("changed size", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(first, []byte("changed-size"), 0o644))
-		_, err := state.ReadPBTManifest(path, sources...)
+		err := validate()
 		require.ErrorContains(t, err, "size mismatch")
 		require.NoError(t, os.WriteFile(first, []byte("first"), 0o644))
 	})
 	t.Run("changed digest", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(first, []byte("other"), 0o644))
-		_, err := state.ReadPBTManifest(path, sources...)
+		err := validate()
 		require.ErrorContains(t, err, "digest mismatch")
 		require.NoError(t, os.WriteFile(first, []byte("first"), 0o644))
 	})
 	t.Run("missing file", func(t *testing.T) {
 		require.NoError(t, dir.RemoveFile(first))
-		_, err := state.ReadPBTManifest(path, sources...)
+		err := validate()
 		require.ErrorContains(t, err, "missing file")
 		require.NoError(t, os.WriteFile(first, []byte("first"), 0o644))
 	})
@@ -66,7 +74,7 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 		modified := manifest
 		modified.Files = append(modified.Files, state.PBTManifestFile{Name: "extra.kv", Size: 0, Blake3: ""})
 		require.NoError(t, state.WritePBTManifest(path, modified))
-		_, err := state.ReadPBTManifest(path, sources...)
+		err := validate()
 		require.ErrorContains(t, err, "extra file")
 		require.NoError(t, state.WritePBTManifest(path, manifest))
 	})

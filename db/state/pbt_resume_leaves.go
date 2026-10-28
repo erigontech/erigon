@@ -138,10 +138,7 @@ func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOp
 
 func pbinResumeValidateSource(at *AggregatorRoTx, opts PBinResumeOptions) error {
 	var hasGap bool
-	baseEnd := opts.BaseTxNum
-	if baseEnd < ^uint64(0) {
-		baseEnd++
-	}
+	baseEnd := pbinResumeBaseEnd(opts.BaseTxNum)
 	for _, domain := range [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		domainRoTx := at.d[domain]
 		if domainRoTx == nil {
@@ -169,11 +166,18 @@ func pbinResumeValidateSource(at *AggregatorRoTx, opts PBinResumeOptions) error 
 	return nil
 }
 
+func pbinResumeBaseEnd(baseTxNum uint64) uint64 {
+	if baseTxNum < ^uint64(0) {
+		return baseTxNum + 1
+	}
+	return baseTxNum
+}
+
 func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange pbinLeafAddressRange, opts PBinResumeOptions, collector *etl.Collector) error {
 	domains := [...]kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain}
 	var cursors [len(domains)]pbinLatestCursor
 	for i, domain := range domains {
-		iter, err := at.d[domain].debugRangeLatestFromFilesAfter(addressRange.from, addressRange.to, kv.Unlim, opts.BaseTxNum)
+		iter, err := at.d[domain].debugRangeLatestFromFilesAfter(addressRange.from, addressRange.to, kv.Unlim, pbinResumeBaseEnd(opts.BaseTxNum))
 		if err != nil {
 			for j := range i {
 				cursors[j].close()

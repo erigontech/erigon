@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/stretchr/testify/require"
 )
 
@@ -373,6 +374,12 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
+}
+
+func TestPBinTrieContextVerifyWithoutRangeReader(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, pbt.NewTrie(NewTrieContextRo(&testStateReader{}, 1)).Verify())
 }
 
 // Test_NewSharedDomainsCommitmentContext_AcceptsBinVariant pins that the bin

@@ -359,8 +359,19 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 	return nil
 }
 
-func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
+func (t *Trie) verifyRangeReader() (VerifyRangeReader, bool) {
 	reader, ok := t.ctx.(VerifyRangeReader)
+	if !ok {
+		return nil, false
+	}
+	if checker, ok := reader.(interface{ HasVerifyRange() bool }); ok && !checker.HasVerifyRange() {
+		return nil, false
+	}
+	return reader, true
+}
+
+func (t *Trie) loadVerifyRows(path eip8297.Bitpath) error {
+	reader, ok := t.verifyRangeReader()
 	if !ok {
 		return nil
 	}
@@ -435,7 +446,7 @@ func (t *Trie) releaseVerifyRows() {
 }
 
 func (t *Trie) loadVerifyExact(key []byte) error {
-	reader, ok := t.ctx.(VerifyRangeReader)
+	reader, ok := t.verifyRangeReader()
 	if !ok {
 		return nil
 	}
@@ -521,6 +532,9 @@ func (t *Trie) verifyBranch(key []byte) ([]byte, kv.Step, error) {
 		t.verifyStats.PointLookups.Add(1)
 	}
 	data, step, err := t.ctx.Branch(key)
+	if t.verifyOnly {
+		data = bytes.Clone(data)
+	}
 	return data, step, err
 }
 

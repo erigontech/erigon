@@ -116,7 +116,7 @@ func PBTManifestDigest(path string) (string, error) {
 	return file.Blake3, nil
 }
 
-func ReadPBTManifest(path string, sources ...PBTManifestFileSource) (PBTManifest, error) {
+func ReadPBTManifest(path string) (PBTManifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return PBTManifest{}, fmt.Errorf("pbt manifest: read: %w", err)
@@ -125,16 +125,7 @@ func ReadPBTManifest(path string, sources ...PBTManifestFileSource) (PBTManifest
 	if decodeErr := toml.Unmarshal(data, &wire); decodeErr != nil {
 		return PBTManifest{}, fmt.Errorf("pbt manifest: decode: %w", decodeErr)
 	}
-	manifest, err := pbtManifestFromWire(wire)
-	if err != nil {
-		return PBTManifest{}, err
-	}
-	if len(sources) != 0 {
-		if err := ValidatePBTManifestFiles(context.Background(), manifest, sources, len(sources), nil); err != nil {
-			return PBTManifest{}, err
-		}
-	}
-	return manifest, nil
+	return pbtManifestFromWire(wire)
 }
 
 func ValidatePBTManifestFiles(ctx context.Context, manifest PBTManifest, sources []PBTManifestFileSource, workers int, progress PBTManifestProgressFunc) error {

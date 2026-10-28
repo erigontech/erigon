@@ -1714,6 +1714,8 @@ func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan
 	}
 }
 
+func (sdc *TrieContext) HasVerifyRange() bool { return sdc.verifyRange != nil }
+
 func (sdc *TrieContext) ReadVerifyRange(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
 	if sdc.verifyRange == nil {
 		return 0, errors.New("verification range reader is unavailable")

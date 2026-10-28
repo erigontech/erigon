@@ -466,7 +466,7 @@ func TestPBinResumeNonzeroSpanPreservesUntouchedBaseRows(t *testing.T) {
 }
 
 func TestPBinResumeAtRangeLastStamp(t *testing.T) {
-	pbinCheckResumeRows(t, 1, 8, 23, 24, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 24}})
+	pbinCheckResumeRows(t, 1, 8, 23, 25, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 24}})
 }
 
 func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, sourceRanges, baseMerges [][2]uint64) {
@@ -489,7 +489,7 @@ func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, 
 		writePBinLeafStreamRange(t, db, initialFrom, initialFrom+8, initial)
 	}
 	for _, db := range []kv.TemporalRwDB{sourceDB, targetDB, freshDB} {
-		writePBinLeafStreamStates(t, db, baseTx, updated)
+		writePBinLeafStreamStates(t, db, baseTx+1, updated)
 	}
 	writePBinLeafStreamStates(t, targetDB, endTx, updated)
 	require.NoError(t, baseAgg.BuildFiles2(t.Context(), baseDB, 0, kv.Step(baseTx/step), unboundedFinalityCtx, false))

@@ -117,6 +117,34 @@ func TestPBinResumeLeavesMatchesSourceState(t *testing.T) {
 	require.Contains(t, resumed, string(eip8297.TreeKeyCodeChunk(crypto.Keccak256Hash(code), 0)))
 }
 
+func TestPBinResumeLeavesSkipsFileEndingAtBase(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	converted := pbinLeafStreamAddress(0x11)
+	gap := pbinLeafStreamAddress(0x22)
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{address: converted, nonce: 1, balance: 1}})
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	writePBinLeafStreamRange(t, db, pbinLeafStreamStepSize, 2*pbinLeafStreamStepSize, []pbinLeafStreamAccount{{address: gap, nonce: 2, balance: 2}})
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 1, 2, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+
+	at := agg.BeginFilesRo()
+	t.Cleanup(at.Close)
+	emitted := make(map[string]struct{})
+	require.NoError(t, state.PBinResumeLeaves(t.Context(), at, state.PBinResumeOptions{
+		BaseTxNum:   pbinLeafStreamStepSize - 1,
+		SourceTxNum: 2*pbinLeafStreamStepSize - 1,
+		Workers:     2,
+		PostCancun:  true,
+	}, func(leaf state.PBinLeaf) error {
+		emitted[string(leaf.Key)] = struct{}{}
+		return nil
+	}))
+	require.Contains(t, emitted, string(eip8297.TreeKeyAccount(gap, eip8297.BasicDataLeafKey)))
+	require.NotContains(t, emitted, string(eip8297.TreeKeyAccount(converted, eip8297.BasicDataLeafKey)), "a file ending at the inclusive base txNum is already converted")
+}
+
 func TestPBinResumeLeavesRefusesUnsafeSource(t *testing.T) {
 	selectPBinLeafStreamHash(t)
 	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)

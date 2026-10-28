@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"os"
@@ -413,6 +414,17 @@ func TestPBTResumeEarlierOutputWithHexOnlySource(t *testing.T) {
 	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
 }
 
+func TestPBTResumeReadBaseHonorsCancelledContext(t *testing.T) {
+	source, output := pbtResumeFixture(t, 1, false, false)
+	settings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = readPBTResumeBase(ctx, source.Tester.Dirs, datadir.Open(output), true, settings, 1, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, "resume manifest")
+}
+
 func TestPBTResumeReadBaseRestoresSource(t *testing.T) {
 	for _, variant := range []string{dbstate.TrieVariantHex, dbstate.TrieVariantHexBin} {
 		t.Run(variant, func(t *testing.T) {
@@ -427,7 +439,7 @@ func TestPBTResumeReadBaseRestoresSource(t *testing.T) {
 			require.NoError(t, dbstate.WriteErigonDBSettings(source.Tester.Dirs, settings))
 			configurePBTSourceVariant(settings)
 			bin, dual, hash, v3 := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash, statecfg.ExperimentalCommitmentV3
-			_, err = readPBTResumeBase(t.Context(), source.Tester.Dirs, datadir.Open(output), true, settings, log.New())
+			_, err = readPBTResumeBase(t.Context(), source.Tester.Dirs, datadir.Open(output), true, settings, 1, log.New())
 			require.NoError(t, err)
 			require.Equal(t, bin, statecfg.ExperimentalBinCommitment)
 			require.Equal(t, dual, statecfg.ExperimentalHexBinCommitment)

@@ -43,8 +43,8 @@ type mergeBatch struct {
 	arena   []byte
 }
 
-func newMergeBatch() *mergeBatch {
-	return &mergeBatch{arena: make([]byte, 0, mergeBatchBytes)}
+func newMergeBatch(entries, arena int) *mergeBatch {
+	return &mergeBatch{entries: make([]mergeBatchEntry, 0, entries), arena: make([]byte, 0, arena)}
 }
 
 func (b *mergeBatch) full(key, value []byte) bool {
@@ -81,7 +81,7 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 	free := make(chan *mergeBatch, mergeBatchRing)
 	ready := make(chan *mergeBatch, mergeBatchRing)
 	for range mergeBatchRing {
-		free <- newMergeBatch()
+		free <- newMergeBatch(0, 0)
 	}
 
 	mergeQuit := make(chan struct{})
@@ -187,7 +187,7 @@ func mergeSortFilesInBackground(logPrefix string, providers []dataProvider, load
 				return err
 			}
 		}
-		free <- newMergeBatch()
+		free <- newMergeBatch(len(batch.entries), len(batch.arena))
 	}
 	producerErr := <-producerResult
 	<-watchDone

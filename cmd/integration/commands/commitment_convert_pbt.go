@@ -205,7 +205,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	var resumeSourceRanges [][2]uint64
 	var resumeSourceSettings *dbstate.ErigonDBSettings
 	if resume {
-		resumeBase, err = readPBTResumeBase(ctx, sourceDirs, outputDirs, outputHasFiles, sourceSettings, logger)
+		resumeBase, err = readPBTResumeBase(ctx, sourceDirs, outputDirs, outputHasFiles, sourceSettings, hooks.workers, logger)
 		if err != nil {
 			return err
 		}
@@ -818,7 +818,7 @@ func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	return readPBinConversionPointFromFiles(at, variant, keepHex)
 }
 
-func readPBTResumeBase(ctx context.Context, sourceDirs, outputDirs datadir.Dirs, outputHasFiles bool, sourceSettings *dbstate.ErigonDBSettings, logger log.Logger) (pbtResumeBase, error) {
+func readPBTResumeBase(ctx context.Context, sourceDirs, outputDirs datadir.Dirs, outputHasFiles bool, sourceSettings *dbstate.ErigonDBSettings, workers int, logger log.Logger) (pbtResumeBase, error) {
 	if outputHasFiles {
 		settings, err := dbstate.ReadErigonDBSettings(outputDirs)
 		if err != nil {
@@ -832,7 +832,10 @@ func readPBTResumeBase(ctx context.Context, sourceDirs, outputDirs datadir.Dirs,
 		if err != nil {
 			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume manifest files: %w", err)
 		}
-		manifest, err := dbstate.ReadPBTManifest(manifestPath, sources...)
+		manifest, err := dbstate.ReadPBTManifest(manifestPath)
+		if err == nil {
+			err = dbstate.ValidatePBTManifestFiles(ctx, manifest, sources, workers, nil)
+		}
 		if err != nil {
 			return pbtResumeBase{}, fmt.Errorf("commitment convert-pbt: resume manifest: %w", err)
 		}
