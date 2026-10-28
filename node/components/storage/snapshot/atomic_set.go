@@ -60,13 +60,6 @@ func AccessorsOf(primary string, candidates []string) []string {
 	return out
 }
 
-// HasAccessors reports whether a file of this name is a primary that accessors
-// are built from.
-func HasAccessors(name string) bool {
-	_, ok := accessorExtsByPrimary[filepath.Ext(name)]
-	return ok
-}
-
 // AccessorsOnDisk returns the snap-dir-relative names of the accessors present
 // under snapDir that were built from primary. A set member's version prefix is
 // independent of the primary's, so members cannot be named outright — the

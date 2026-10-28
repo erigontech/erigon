@@ -19,8 +19,6 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +68,7 @@ func TestBuildOnIndexing_BuildsThenAdvancesWhenDepsMissing(t *testing.T) {
 	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	handler := BuildOnIndexing(builder, inv, "", nil)
+	handler := BuildOnIndexing(builder, inv, nil)
 
 	require.NoError(t, handler(context.Background(), primary))
 	state, _ := inv.LifecycleState(primary.Name)
@@ -100,7 +98,7 @@ func TestBuildOnIndexing_DepsAlreadyLocal_SkipsBuild(t *testing.T) {
 	})
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv, "", nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state)
@@ -121,7 +119,7 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv, "", nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state)
@@ -156,7 +154,7 @@ func TestBuildOnIndexing_HandlesNoDependencies_BlockFile(t *testing.T) {
 	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv, "", nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state,
@@ -183,7 +181,7 @@ func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
 		},
 	}
 
-	err := BuildOnIndexing(builder, inv, "", nil)(context.Background(), primary)
+	err := BuildOnIndexing(builder, inv, nil)(context.Background(), primary)
 	require.ErrorIs(t, err, wantErr)
 
 	// State stays at Downloaded — driver leaves it there for retry.
@@ -206,7 +204,7 @@ func TestBuildOnIndexing_DepsNotYetPropagatedNoOps(t *testing.T) {
 
 	// noopIndexBuilder reports success without producing the dep.
 	// Handler should return nil but NOT advance.
-	require.NoError(t, BuildOnIndexing(noopIndexBuilder{}, inv, "", nil)(
+	require.NoError(t, BuildOnIndexing(noopIndexBuilder{}, inv, nil)(
 		context.Background(), primary,
 	))
 
@@ -238,7 +236,7 @@ func TestBuildOnIndexing_PartialDepsNoOps(t *testing.T) {
 	// Builder no-ops (doesn't add anything). Use a builder with no
 	// auto-add behaviour.
 	noopBuilder := noopIndexBuilder{}
-	require.NoError(t, BuildOnIndexing(noopBuilder, inv, "", nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(noopBuilder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleDownloaded, state,
@@ -249,67 +247,4 @@ type noopIndexBuilder struct{}
 
 func (noopIndexBuilder) BuildMissedIndices(_ context.Context, _ *snapshot.FileEntry) error {
 	return nil
-}
-
-// Dependencies is empty on every entry in production, so the deps-all-local
-// short-circuit advanced each file to Indexed without consulting the builder —
-// Indexed then meant no more than "the primary is on disk". With a snapshot dir
-// the handler asks the question directly instead.
-func TestBuildOnIndexing_MissingAccessorDoesNotReachIndexed(t *testing.T) {
-	snapDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(snapDir, "domain"), 0o755))
-	primary := "domain/v2.2-commitment.355-356.kv"
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, primary), []byte("data"), 0o644))
-
-	inv := snapshot.NewInventory()
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: primary, Local: true}))
-
-	var built int
-	builder := builderFunc(func(context.Context, *snapshot.FileEntry) error {
-		built++
-		return nil
-	})
-	entry, _ := inv.GetByName(primary)
-	handler := BuildOnIndexing(builder, inv, snapDir, nil)
-
-	require.NoError(t, handler(context.Background(), entry))
-	require.Equal(t, 1, built, "a primary with no accessor must reach the builder")
-	got, _ := inv.GetByName(primary)
-	require.Less(t, got.State, snapshot.LifecycleIndexed,
-		"Indexed must not be claimed while the accessor is absent")
-
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "domain", "v2.1-commitment.355-356.kvi"), []byte("idx"), 0o644))
-	require.NoError(t, handler(context.Background(), entry))
-	got, _ = inv.GetByName(primary)
-	require.GreaterOrEqual(t, got.State, snapshot.LifecycleIndexed)
-}
-
-// The accessor is already there, so the builder is not worth invoking.
-func TestBuildOnIndexing_PresentAccessorSkipsTheBuilder(t *testing.T) {
-	snapDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(snapDir, "domain"), 0o755))
-	primary := "domain/v2.2-commitment.355-356.kv"
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, primary), []byte("data"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "domain", "v2.1-commitment.355-356.kvi"), []byte("idx"), 0o644))
-
-	inv := snapshot.NewInventory()
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: primary, Local: true}))
-
-	var built int
-	builder := builderFunc(func(context.Context, *snapshot.FileEntry) error {
-		built++
-		return nil
-	})
-	entry, _ := inv.GetByName(primary)
-	require.NoError(t, BuildOnIndexing(builder, inv, snapDir, nil)(context.Background(), entry))
-
-	require.Zero(t, built)
-	got, _ := inv.GetByName(primary)
-	require.GreaterOrEqual(t, got.State, snapshot.LifecycleIndexed)
-}
-
-type builderFunc func(context.Context, *snapshot.FileEntry) error
-
-func (f builderFunc) BuildMissedIndices(ctx context.Context, e *snapshot.FileEntry) error {
-	return f(ctx, e)
 }
