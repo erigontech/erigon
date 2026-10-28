@@ -22,22 +22,27 @@ type LayeredDomainReader struct {
 	sd         execctx.DomainReader
 	roTx       kv.TemporalTx
 	prevBlocks *PrevBlockList
+	cached     func(domain kv.Domain, key []byte) ([]byte, uint64, bool)
 }
 
 // NewLayeredDomainReader composes the window + sd + files. A nil prevBlocks
 // layers nothing, giving the plain sd+files path.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
-	return &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
+	l := &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
+	if c, ok := sd.(cachedCommittedReader); ok && roTx != nil {
+		l.cached = c.CachedCommittedReader(roTx)
+	}
+	return l
 }
 
 // CloneWithTx returns a copy bound to tx — each concurrent user carries its own
 // files-fallback tx rather than sharing the base reader's.
 func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader {
-	return &LayeredDomainReader{sd: l.sd, roTx: tx, prevBlocks: l.prevBlocks}
+	return NewLayeredDomainReader(l.sd, tx, l.prevBlocks)
 }
 
-// baseGetAsOf reads sd.mem then the domain files — the committed base without the
-// prior-block window.
+// baseGetAsOf reads sd.mem, then the shared state cache, then the domain files — the
+// committed base without the prior-block window.
 func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	enc, ok, err := l.sd.GetAsOf(name, k, ts)
 	if err != nil {
@@ -49,7 +54,16 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 	if l.roTx == nil {
 		return nil, false, nil
 	}
+	if l.cached != nil && name != kv.CommitmentDomain {
+		if v, txNum, hit := l.cached(name, k); hit && txNum < ts {
+			return v, len(v) > 0, nil
+		}
+	}
 	return l.roTx.GetAsOf(name, k, ts)
+}
+
+type cachedCommittedReader interface {
+	CachedCommittedReader(tx kv.TemporalTx) func(domain kv.Domain, key []byte) ([]byte, uint64, bool)
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/

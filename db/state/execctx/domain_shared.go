@@ -1814,6 +1814,15 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
+// CachedCommittedReader returns a lookup of committed values in the shared state cache as tx sees them, with the
+// txNum each was written at, or nil without a cache. Bind it once per tx: building the view can read the DB.
+func (sd *SharedDomains) CachedCommittedReader(tx kv.TemporalTx) func(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
+	if sd.stateCache == nil {
+		return nil
+	}
+	return sd.cacheViewFor(tx).GetVisible
+}
+
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return sd.mem.GetAsOf(domain, key, ts)
 }
