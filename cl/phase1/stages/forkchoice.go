@@ -64,6 +64,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	if !ready {
 		executionHead = cfg.forkChoice.GetEth1Hash(headRoot)
 	}
+	recordExecutionHead := true
 
 	// Perform fork choice update if the engine is available
 	if engine := cfg.forkChoice.Engine(); engine != nil {
@@ -77,18 +78,25 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			executionHead, nil, headVersion,
 		); err != nil {
-			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
-			// to lose by carrying on: the next head will send another one.
-			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+			switch {
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
+				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+				// to lose by carrying on: the next head will send another one.
 				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
 				err = nil
-			} else {
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy):
+				logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
+				recordExecutionHead = false
+				err = nil
+			default:
 				err = fmt.Errorf("failed to run forkchoice: %w", err)
 				return
 			}
 		}
 	}
-	cfg.executionHead = executionHead
+	if recordExecutionHead {
+		cfg.executionHead = executionHead
+	}
 	// The stage's payload decision may differ from the poll that woke it.
 	// Keep the wake's throttle key current without changing its timestamp.
 	cfg.sleepForSlotLastWake.executionHead = executionHead

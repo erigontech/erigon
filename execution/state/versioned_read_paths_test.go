@@ -1121,6 +1121,32 @@ func TestVersionedRead_F_MVReadResultDependencyRecordsDep(t *testing.T) {
 	assert.Equal(t, uint256.NewInt(50), &bal, "no pause hook: falls through to the in-flight value")
 }
 
+// A run that skips the wait on an in-flight self-destruct must still record it as a dependency: the
+// destruct burns the balance even when the balance cell already reads as Done.
+func TestVersionedRead_InFlightSelfDestructWithoutWaitRecordsDep(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+	ibs.SetWaitCommit(func(int) bool { return false })
+
+	addr := accounts.InternAddress([20]byte{0xf1})
+	writer := Version{TxIndex: 2}
+	destruct := &WriteSet{}
+	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
+	burn := &WriteSet{}
+	burn.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
+	mvhm.FlushVersionedWrites(destruct, false, "")
+	mvhm.FlushVersionedWrites(burn, true, "")
+
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.True(t, ibs.HadInvalidRead(), "an unawaited in-flight self-destruct must set the invalid-read verdict")
+	assert.Equal(t, 2, ibs.DepTxIndex(), "verdict names the self-destructing predecessor")
+}
+
 // writeSet hit at MVReadResultDone, but readSet has a stale version:
 // records the dependency verdict (a write was based on a stale read) rather
 // than panicking. The current tx wrote, but the readSet for the same path
