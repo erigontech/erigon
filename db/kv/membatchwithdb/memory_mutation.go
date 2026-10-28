@@ -40,8 +40,7 @@ import (
 var _ kv.TemporalRwTx = &MemoryMutation{}
 
 type DomainReader interface {
-	// GetAsOf reads in-batch state; with a non-nil tx a miss goes on to that tx.
-	GetAsOf(name kv.Domain, tx kv.TemporalTx, k []byte, ts uint64) ([]byte, bool, error)
+	GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
 	HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
 }
 
@@ -1026,7 +1025,7 @@ func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, f
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
-		val, ok, err := m.DomainReader.GetAsOf(name, nil, k, ts)
+		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
 		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
@@ -1246,7 +1245,7 @@ func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
-		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, nil, k, ts)
+		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
 		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}

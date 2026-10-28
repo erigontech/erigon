@@ -675,7 +675,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// compute-ahead wrote at the step edge — not the pre-block-2 checkpoint.
 	// Without checkpointStepsFromBAL, compute-ahead would write only the
 	// block-end (txNum 20) checkpoint and this as-of read would miss the edge.
-	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, nil, commitmentdb.KeyCommitmentState, edgeTxNum+1)
+	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, edgeTxNum+1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.GreaterOrEqual(t, len(blob), 16)
