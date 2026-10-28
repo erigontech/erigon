@@ -165,7 +165,7 @@ func TestFlushMVWrite(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: ver},
 			Val:         valueFor(AddressPath, ver.TxIndex, int(ver.Incarnation)).(*accounts.Account),
 		})
-		mvh.FlushVersionedWrites(ws, true, "")
+		mvh.FlushVersionedWrites(ws, true)
 	}
 
 	flushAddress(ap1, Version{0, 0, 0, 1})
@@ -537,7 +537,7 @@ func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
 	published := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(published, false, "")
+	vm.FlushVersionedWrites(published, false)
 
 	// Completing that same version with a different value is exactly the divergence a
 	// read-side value check would have caught. The write side rejects it outright, so
@@ -564,7 +564,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 
 	// TX 10 reads should see FlagDone → MVReadResultDone.
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
@@ -577,7 +577,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	writes2 := newWriteSet(
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Key: accounts.NilKey, Version: Version{TxIndex: 7, Incarnation: 2}}, Val: uint64(5)},
 	)
-	vm.FlushVersionedWrites(writes2, false, "")
+	vm.FlushVersionedWrites(writes2, false)
 
 	// TX 10 reads NoncePath should see FlagEstimate → MVReadResultDependency.
 	_, res2, _ := readFor(vm, addr, NoncePath, accounts.NilKey, 10)
@@ -598,7 +598,7 @@ func TestMarkWritesComplete_FlagFlipPreservesValue(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, false, "")
+	vm.FlushVersionedWrites(writes, false)
 
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
 	require.Equal(t, MVReadResultDependency, res.Status(), "estimate flush reads back as a dependency")
@@ -960,7 +960,7 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	ws := &WriteSet{}
 	ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postBalance})
 	ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postNonce})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
 		"tx 0 should validate (no prior writes to conflict with)")
@@ -1169,7 +1169,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
 		Val:         1,
 	})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 	// The read-once fast path serves the repeat probe from the recorded read —
 	// consistent with the absence the EVM already consumed, never a silent
 	// adoption of the fresh cell — and commit-time validation catches the
@@ -1567,7 +1567,7 @@ func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
 			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
 			if test.earlier != "" {
 				first := storageWrite(0, 0, ValueChanged)
-				vm.FlushVersionedWrites(first, false, "")
+				vm.FlushVersionedWrites(first, false)
 				if test.earlier == "validated" {
 					vm.MarkWritesValidated(first, func(accounts.Address) bool { return false })
 				}
@@ -1581,7 +1581,7 @@ func TestFlushNetZeroRerunRemovesEarlierRunsCell(t *testing.T) {
 					Val:         *uint256.NewInt(1),
 				})
 			}
-			vm.FlushVersionedWrites(rerun, false, "")
+			vm.FlushVersionedWrites(rerun, false)
 
 			val, res, ok := vm.ReadStorage(addr, slot, 2)
 			require.True(t, ok)
