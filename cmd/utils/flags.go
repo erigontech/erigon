@@ -1539,7 +1539,7 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 		cfg.NetRestrict = list
 	}
 
-	if ctx.String(ChainFlag.Name) == networkname.Chapel {
+	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.BSC || chainName == networkname.Chapel {
 		// BSC advertises eth/70 and eth/68 only — it rejects eth/69 and has no
 		// eth/71. BSC discovery still uses discv4 (enode bootnodes + static
 		// peers); it hasn't moved to discv5 at all.
