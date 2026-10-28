@@ -613,96 +613,65 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
 
-// NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
-// It overlays the per-field writes on the account's latest state and calls
-// ChangeAccount/ChangeCode/ChangeStorage on the accumulator.
-// StartChange must have been called on the accumulator before this function is invoked.
-func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx, writes WriteSetView) error {
-	if accumulator == nil || writes.IsEmpty() {
+// NotifyAccumulator sends a block's state changes to the accumulator. It reads every
+// account's latest state, so the block's writes must already be applied. StartChange
+// must be called on the accumulator first.
+func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx, blockWrites []WriteSetView) error {
+	if accumulator == nil {
 		return nil
 	}
 
-	type pendingAccount struct {
-		balance     *uint256.Int
-		nonce       *uint64
-		incarnation *uint64
-		codeHash    *accounts.CodeHash
-	}
-
-	pending := make(map[accounts.Address]*pendingAccount, writes.Count()/4+1)
-	get := func(addr accounts.Address) *pendingAccount {
-		p := pending[addr]
-		if p == nil {
-			p = &pendingAccount{}
-			pending[addr] = p
-		}
-		return p
-	}
-
-	for addr, w := range writes.Balances() {
-		v := w.Val
-		get(addr).balance = &v
-	}
-	for addr, w := range writes.Nonces() {
-		v := w.Val
-		get(addr).nonce = &v
-	}
-	for addr, w := range writes.Incarnations() {
-		v := w.Val
-		get(addr).incarnation = &v
-	}
-	for addr, w := range writes.CodeHashes() {
-		v := w.Val
-		get(addr).codeHash = &v
-	}
-	for addr, w := range writes.Codes() {
-		var inc uint64
-		if p := pending[addr]; p != nil && p.incarnation != nil {
-			inc = *p.incarnation
-		}
-		accumulator.ChangeCode(addr.Value(), inc, w.Val.Bytes)
-	}
-	for addr, byKey := range writes.Storages() {
-		var inc uint64
-		if p := pending[addr]; p != nil && p.incarnation != nil {
-			inc = *p.incarnation
-		}
-		for key, w := range byKey {
-			val := w.Val
-			accumulator.ChangeStorage(addr.Value(), inc, key.Value(), val.Bytes())
-		}
-	}
-
-	// Flush pending account field groups.
-	for addr, p := range pending {
-		if p.balance == nil && p.nonce == nil {
-			continue // no account fields collected (e.g. only storage/code)
+	latest := make(map[accounts.Address]accounts.Account)
+	account := func(addr accounts.Address) (accounts.Account, error) {
+		if acc, ok := latest[addr]; ok {
+			return acc, nil
 		}
 		acc := accounts.NewAccount()
 		address := addr.Value()
 		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 		if err != nil {
-			return err
+			return accounts.Account{}, err
 		}
 		if len(v) > 0 {
 			if err := accounts.DeserialiseV3(&acc, v); err != nil {
-				return err
+				return accounts.Account{}, err
 			}
 		}
-		if p.balance != nil {
-			acc.Balance = *p.balance
+		latest[addr] = acc
+		return acc, nil
+	}
+
+	for _, writes := range blockWrites {
+		for addr, write := range writes.Codes() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
 		}
-		if p.nonce != nil {
-			acc.Nonce = *p.nonce
+		for addr, byKey := range writes.Storages() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			for key, write := range byKey {
+				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
+			}
 		}
-		if p.incarnation != nil {
-			acc.Incarnation = *p.incarnation
+		for addr := range writes.Balances() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
-		if p.codeHash != nil {
-			acc.CodeHash = *p.codeHash
+		for addr := range writes.Nonces() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
-		serialised := accounts.SerialiseV3(&acc)
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, serialised)
 	}
 	return nil
 }

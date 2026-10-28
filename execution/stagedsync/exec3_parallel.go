@@ -463,15 +463,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			panic(pe.chaosFaults.ApplyLoopPanic)
 		}
 
-		// Open a thread-local read-only tx for domain operations. The apply loop
-		// must not use the rwTx for domain reads — rwTx is thread-bound to the
-		// caller goroutine and will be used only for flush/unwind/stage-update.
-		applyRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
-		if err != nil {
-			return fmt.Errorf("apply loop: open roTx: %w", err)
-		}
-		defer applyRoTx.Rollback()
-
 		// appliedBlocks tracks blockNums that completed full apply-loop processing
 		// (including post-block validation). Compared at exit against txResultBlocks
 		// to catch "channel closed cleanly but a block was silently missed" — its
@@ -795,12 +786,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							continue
 						}
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						var notifyErr error
-						for _, writes := range pendingAccumulatorWrites {
-							if notifyErr = pe.rs.NotifyAccumulator(pe.accumulator, rwTx, writes); notifyErr != nil {
-								break
-							}
-						}
+						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 						if notifyErr != nil {
 							<-balDone
