@@ -17,6 +17,7 @@
 package das
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	gossipmock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -98,7 +100,73 @@ func TestPeerDasRestoresCustodyRaiseSlot(t *testing.T) {
 	require.Equal(t, uint64(1001), secondState.GetEarliestAvailableSlot())
 }
 
+// A raise that adds no custody columns must not leave a raise slot for the restart to restore.
+func TestPeerDasRestartAfterRaiseWithinSampledColumnsKeepsEarliestAvailableSlot(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	first, _ := newCgcTestPeerDas(t, db, newCgcTestLocalNode(t), 1000)
+	first.UpdateValidatorsCustody(clparams.MainnetBeaconConfig.SamplesPerSlot)
+
+	second, secondState := newCgcTestPeerDas(t, db, newCgcTestLocalNode(t), 5000)
+	second.Start(t.Context())
+	require.NoError(t, second.PruneBelow(200))
+	require.Equal(t, uint64(200), secondState.GetEarliestAvailableSlot())
+}
+
+// A count stored by a version that did not store a raise slot is treated as a raise on restore.
+func TestPeerDasStartRecordsRaiseSlotForCountStoredWithoutOne(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestCustodyGroupCount(tx, 96)
+	}))
+
+	first, firstState := newCgcTestPeerDas(t, db, newCgcTestLocalNode(t), 5000)
+	first.Start(t.Context())
+	require.NoError(t, first.PruneBelow(200))
+	require.Equal(t, uint64(5001), firstState.GetEarliestAvailableSlot())
+
+	second, secondState := newCgcTestPeerDas(t, db, newCgcTestLocalNode(t), 9000)
+	second.Start(t.Context())
+	require.NoError(t, second.PruneBelow(200))
+	require.Equal(t, uint64(5001), secondState.GetEarliestAvailableSlot(), "the recorded raise slot must be persisted")
+}
+
+// Peers can read the earliest available slot while Start writes the recorded raise slot.
+func TestPeerDasStartInstallsRecordedRaiseSlotBeforeWritingIt(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestCustodyGroupCount(tx, 96)
+	}))
+
+	probe := &updateProbeDB{RwDB: db}
+	peerDas, state := newCgcTestPeerDas(t, probe, newCgcTestLocalNode(t), 5000)
+	var earliestAtWrite uint64
+	probe.beforeUpdate = func() { earliestAtWrite = state.GetEarliestAvailableSlot() }
+	peerDas.Start(t.Context())
+	require.Equal(t, uint64(5001), earliestAtWrite)
+}
+
+// A raiser that read the slot before installing the raise could stall across a slot boundary
+// and record a slot whose block was already checked with the old custody columns.
+func TestPeerDasReadsCustodyRaiseSlotAfterInstallingRaise(t *testing.T) {
+	localNode := newCgcTestLocalNode(t)
+	cgcKey := clparams.NetworkConfigs[chainspec.MainnetChainID].CgcKey
+	var raiseInstalledAtRead bool
+	peerDas, _ := newCgcTestPeerDasWithClock(t, mdbxtest.NewTestDB(t, dbcfg.ChainDB), localNode, func() uint64 {
+		var enrCgc []byte
+		raiseInstalledAtRead = localNode.Node().Load(enr.WithEntry(cgcKey, &enrCgc)) == nil && bytes.Equal(peerdasstate.EncodeCgc(96), enrCgc)
+		return 1000
+	})
+
+	peerDas.UpdateValidatorsCustody(96)
+	require.True(t, raiseInstalledAtRead, "the slot must be read after the raise is installed")
+}
+
 func newCgcTestPeerDas(t *testing.T, db kv.RwDB, localNode *enode.LocalNode, currentSlot uint64) (PeerDas, *peerdasstate.PeerDasState) {
+	t.Helper()
+	return newCgcTestPeerDasWithClock(t, db, localNode, func() uint64 { return currentSlot })
+}
+
+func newCgcTestPeerDasWithClock(t *testing.T, db kv.RwDB, localNode *enode.LocalNode, currentSlot func() uint64) (PeerDas, *peerdasstate.PeerDasState) {
 	t.Helper()
 	beaconConfig := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&beaconConfig)
@@ -107,13 +175,23 @@ func newCgcTestPeerDas(t *testing.T, db kv.RwDB, localNode *enode.LocalNode, cur
 	gossipManager := gossipmock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).AnyTimes()
 	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().DoAndReturn(currentSlot).AnyTimes()
 	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 	columnStorage.EXPECT().PruneBelow(gomock.Any()).Return(nil).AnyTimes()
 	columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(150), nil).AnyTimes()
 	state := peerdasstate.NewPeerDasState(&beaconConfig, &networkConfig)
 	state.SetLocalNodeID(localNode)
 	return NewPeerDas(nil, &beaconConfig, &clparams.CaplinConfig{}, columnStorage, nil, nil, localNode.ID(), clock, state, gossipManager, nil, db), state
+}
+
+type updateProbeDB struct {
+	kv.RwDB
+	beforeUpdate func()
+}
+
+func (db *updateProbeDB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	db.beforeUpdate()
+	return db.RwDB.Update(ctx, f)
 }
 
 func newCgcTestLocalNode(t *testing.T) *enode.LocalNode {

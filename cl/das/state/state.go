@@ -59,8 +59,9 @@ func (s *PeerDasState) GetRealCgc() uint64 {
 }
 
 // SetCustodyGroupCount sets the real count and raises the advertised one. A raise that adds
-// custody columns moves the custody raise slot to slot.
-func (s *PeerDasState) SetCustodyGroupCount(cgc, slot uint64) bool {
+// custody columns moves the custody raise slot up to raiseSlot(), read after the new custody
+// columns are installed.
+func (s *PeerDasState) SetCustodyGroupCount(cgc uint64, raiseSlot func() uint64) bool {
 	s.cgcMutex.Lock()
 	defer s.cgcMutex.Unlock()
 	s.realCgc = cgc
@@ -69,8 +70,8 @@ func (s *PeerDasState) SetCustodyGroupCount(cgc, slot uint64) bool {
 		return false
 	}
 	if s.custodiedGroupCountLocked() > custodied {
-		// Concurrent callers read the clock before taking the lock.
-		s.custodyRaiseSlot.Store(max(slot, s.custodyRaiseSlot.Load()))
+		// The clock behind raiseSlot can step back.
+		s.custodyRaiseSlot.Store(max(raiseSlot(), s.custodyRaiseSlot.Load()))
 	}
 	return true
 }
@@ -80,7 +81,9 @@ func (s *PeerDasState) GetCustodyRaiseSlot() uint64 {
 }
 
 func (s *PeerDasState) SetCustodyRaiseSlot(slot uint64) {
-	s.custodyRaiseSlot.Store(slot)
+	s.cgcMutex.Lock()
+	defer s.cgcMutex.Unlock()
+	s.custodyRaiseSlot.Store(max(slot, s.custodyRaiseSlot.Load()))
 }
 
 func (s *PeerDasState) RaiseAdvertisedCgc(cgc uint64) bool {

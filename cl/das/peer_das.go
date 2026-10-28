@@ -186,7 +186,17 @@ func (d *peerdas) Start(ctx context.Context) {
 			log.Warn("[peerdas] failed to read highest custody group count and custody raise slot", "err", err)
 		} else {
 			d.state.RaiseAdvertisedCgc(storedCgc)
-			d.state.SetCustodyRaiseSlot(raiseSlot)
+			if raiseSlot == 0 && storedCgc > d.beaconConfig.SamplesPerSlot {
+				raiseSlot = d.nextSlot()
+				d.state.SetCustodyRaiseSlot(raiseSlot)
+				if err := d.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+					return beacon_indicies.WriteCustodyRaiseSlot(tx, raiseSlot)
+				}); err != nil {
+					log.Warn("[peerdas] failed to write custody raise slot", "err", err)
+				}
+			} else {
+				d.state.SetCustodyRaiseSlot(raiseSlot)
+			}
 		}
 		d.resubscribeGossip()
 		for range numOfBlobRecoveryWorkers {
@@ -463,9 +473,14 @@ func (d *peerdas) resubscribeGossip() {
 	}
 }
 
+// nextSlot is the custody raise slot of a raise made now: the current slot's block may already
+// be checked with the old custody columns.
+func (d *peerdas) nextSlot() uint64 {
+	return d.ethClock.GetCurrentSlot() + 1
+}
+
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
-	// The current slot's block may already be handled with the old custody columns.
-	adCgcChanged := d.state.SetCustodyGroupCount(cgc, d.ethClock.GetCurrentSlot()+1)
+	adCgcChanged := d.state.SetCustodyGroupCount(cgc, d.nextSlot)
 	if adCgcChanged {
 		if err := d.indiciesDB.Update(context.Background(), func(tx kv.RwTx) error {
 			if err := beacon_indicies.WriteHighestCustodyGroupCount(tx, cgc); err != nil {
