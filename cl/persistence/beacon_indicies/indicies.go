@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // Encoder options must not change the output: these bytes are copied verbatim into
@@ -412,8 +413,10 @@ func WriteBeaconBlockAndIndicies(tx kv.RwTx, block *cltypes.SignedBeaconBlock, c
 	return nil
 }
 
+// PruneBlocks deletes at most snaptype.CaplinMergeLimit blocks below to, so one call
+// never holds a long write transaction; periodic callers delete the rest later.
 func PruneBlocks(tx kv.RwTx, to uint64) error {
-	if _, _, err := PruneBlocksLimit(tx, to, 0); err != nil {
+	if _, _, err := PruneBlocksLimit(tx, to, snaptype.CaplinMergeLimit); err != nil {
 		return err
 	}
 	return PruneExecutionPayloadEnvelopeSignatures(tx, to)

@@ -93,6 +93,7 @@ type failingHistoryDownloader struct {
 }
 
 func (d *failingHistoryDownloader) Finished() bool                             { return d.finished }
+func (*failingHistoryDownloader) Processed() uint64                            { return 0 }
 func (*failingHistoryDownloader) Progress() uint64                             { return 1 }
 func (d *failingHistoryDownloader) RequestMore(context.Context) error          { return d.err }
 func (*failingHistoryDownloader) SetBlockChecker(network.BlockChecker)         {}
@@ -136,6 +137,41 @@ func TestClampProgress(t *testing.T) {
 			}
 		})
 	}
+}
+
+type countingHistoryDownloader struct {
+	failingHistoryDownloader
+	progress, processed uint64
+}
+
+func (d *countingHistoryDownloader) Processed() uint64 { return d.processed }
+func (d *countingHistoryDownloader) Progress() uint64  { return d.progress }
+
+func TestHistoryDownloadRateIgnoresSkippedSlots(t *testing.T) {
+	d := &countingHistoryDownloader{progress: 20, processed: 5}
+	start := time.Unix(1000, 0)
+	now := start.Add(10 * time.Second)
+
+	d.progress = 9
+	speed, nextStart, nextProcessed := historyDownloadRate(d, start, 5, now)
+	require.Zero(t, speed, "skipped slots must not count as speed")
+	require.Equal(t, start, nextStart)
+	require.Equal(t, uint64(5), nextProcessed)
+
+	d.processed = 25
+	speed, _, _ = historyDownloadRate(d, start, 5, now)
+	require.InDelta(t, 2.0, speed, 1e-9)
+}
+
+func TestHistoryDownloadRateRestartsAboveThousandPerSecond(t *testing.T) {
+	d := &countingHistoryDownloader{processed: 20_005}
+	start := time.Unix(1000, 0)
+	now := start.Add(10 * time.Second)
+
+	speed, nextStart, nextProcessed := historyDownloadRate(d, start, 5, now)
+	require.Zero(t, speed)
+	require.Equal(t, now, nextStart)
+	require.Equal(t, uint64(20_005), nextProcessed)
 }
 
 // Post-merge the EL block number exceeds the beacon slot, so a snapshot-gap

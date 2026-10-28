@@ -83,10 +83,8 @@ import (
 )
 
 func OpenCaplinDatabase(ctx context.Context,
-	beaconConfig *clparams.BeaconChainConfig,
 	dbPath string,
 	blobDir string,
-	engine execution_client.ExecutionEngine,
 	wipeout bool,
 ) (kv.RwDB, blob_storage.BlobStorage, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
@@ -301,7 +299,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
-	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false)
+	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, dirs.CaplinIndexing, dirs.CaplinBlobs, false)
 	if err != nil {
 		return err
 	}
@@ -501,7 +499,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(beaconConfig, networkConfig, syncedDataManager, gossipManager, aggregationPool)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
-	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
+	blockService := services.NewBlockService(ctx, indexDB, forkChoice, engine, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
 	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)

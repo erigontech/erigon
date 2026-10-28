@@ -529,7 +529,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 		acc.Balance = *priorCoinbaseBalance
 	}
 
-	vm.FlushVersionedWrites(result.TxOut, true, "")
+	vm.FlushVersionedWrites(result.TxOut, true)
 
 	task := result.Task.(*taskVersion)
 
@@ -690,13 +690,13 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 		// flush and the calcFees flush below are one Estimate→Done transition at
 		// (txIdx,0), not two Done writes at the same version. An incomplete flush
 		// publishes the whole write-set as Estimate, which covers the coinbase balance.
-		vm.FlushVersionedWrites(result.TxOut, false, "")
+		vm.FlushVersionedWrites(result.TxOut, false)
 
 		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		coinbaseWrite := findBalance(writes, s.coinbase)
 		require.NotNil(t, coinbaseWrite, "tx %d: coinbase BalancePath write must exist (workerWroteCoinbase gate fires when newBal==oldBal)", txIdx)
@@ -740,7 +740,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 		state.Version{TxIndex: 0, Incarnation: 0},
 		*uint256.NewInt(abandonedPostBal), true)
 
-	vm.FlushVersionedWrites(result.TxOut, true, "")
+	vm.FlushVersionedWrites(result.TxOut, true)
 
 	writes, err := result.calcFees(task, vm, reader, s.rules)
 	require.NoError(t, err)
@@ -752,6 +752,73 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	assert.Equal(t, *want, got,
 		"re-execution: finalize must use re-executed TxOut value (%d) + tip (%d) = %d, NOT abandoned incarnation-0 value (%d) + tip = %d",
 		reExecutedPostBal, tip, expectedFinal, abandonedPostBal, abandonedPostBal+tip)
+}
+
+// calcFees credits the coinbase and the burnt-fee recipient after a tx is validated, and undoes the
+// tx's EIP-161 removal of a recipient it credits. A later reader of their balance or existence must
+// wait for that write, not continue on the validated write of the tx.
+func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
+	t.Parallel()
+
+	t.Run("balance", func(t *testing.T) {
+		t.Parallel()
+		s := londonTransferScenario()
+		sender := fAddr("sender")
+		for _, addr := range []accounts.Address{s.coinbase, s.burntAddr, sender} {
+			s.txOut.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 0}},
+				Val:         *uint256.NewInt(1_000),
+			})
+			s.txOut.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: state.Version{TxIndex: 0}},
+				Val:         &accounts.Account{Balance: *uint256.NewInt(1_000), CodeHash: accounts.EmptyCodeHash},
+			})
+		}
+		r := s.buildExecResult()
+		r.TxOut = copyWrites(s.txOut)
+
+		vm := state.NewVersionMap(nil)
+		vm.FlushVersionedWrites(r.TxOut, false)
+		be := &blockExecutor{coinbase: s.coinbase}
+		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
+
+		for addr, want := range map[accounts.Address]int{
+			s.coinbase:  state.MVReadResultDependency,
+			s.burntAddr: state.MVReadResultDependency,
+			sender:      state.MVReadResultValidated,
+		} {
+			_, res, ok := vm.ReadBalance(addr, 1)
+			require.True(t, ok)
+			require.Equal(t, want, res.Status(), "balance of %x", addr.Value())
+			_, res, ok = vm.ReadAddress(addr, 1)
+			require.True(t, ok)
+			require.Equal(t, want, res.Status(), "account record of %x", addr.Value())
+		}
+	})
+
+	t.Run("EIP-161 removal", func(t *testing.T) {
+		t.Parallel()
+		s := londonTransferScenario()
+		s.accts[s.burntAddr] = fMakeAccount(0, 0)
+		s.txOut.SetEmptyRemoval(s.burntAddr, state.Version{TxIndex: 0})
+		r := s.buildExecResult()
+		r.TxOut = copyWrites(s.txOut)
+
+		vm := state.NewVersionMap(nil)
+		vm.FlushVersionedWrites(r.TxOut, false)
+		be := &blockExecutor{coinbase: s.coinbase}
+		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
+		_, res, ok := vm.ReadSelfDestruct(s.burntAddr, 1)
+		require.True(t, ok)
+		require.Equal(t, state.MVReadResultDependency, res.Status())
+
+		writes, err := r.calcFees(r.Task.(*taskVersion), vm, s.makeReader(), s.rules)
+		require.NoError(t, err)
+		revived, ok := writes.GetSelfDestruct(s.burntAddr)
+		require.True(t, ok)
+		require.False(t, revived.Val, "the base fee revives the removed recipient")
+		require.Equal(t, 0, revived.Version.TxIndex)
+	})
 }
 
 // TestFinalizeTx_BurntRecipient_HeldEstimateUntilSeal pins the single-Done-writer
@@ -788,11 +855,11 @@ func TestFinalizeTx_BurntRecipient_HeldEstimateUntilSeal(t *testing.T) {
 
 	vm := state.NewVersionMap(nil)
 	// Worker flushes every write as an Estimate — nothing is Done before seal.
-	vm.FlushVersionedWrites(r.TxOut, false, "")
+	vm.FlushVersionedWrites(r.TxOut, false)
 	// calcFees credits the base-fee burn and flushes the tip as an Estimate too.
 	writes, err := r.calcFees(task, vm, s.makeReader(), s.rules)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(writes, false, "")
+	vm.FlushVersionedWrites(writes, false)
 
 	// Before seal a later reader sees the burnt cell as an in-flight dependency,
 	// never a pre-fee Done value.
@@ -908,13 +975,13 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		task.version.TxIndex = txIdx
 
 		// Flush TxOut to versionMap (simulates line 1928).
-		vm.FlushVersionedWrites(result.TxOut, true, "")
+		vm.FlushVersionedWrites(result.TxOut, true)
 
 		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		// Verify accumulated balance.
 		coinbaseWrite := findBalance(writes, s.coinbase)
@@ -952,7 +1019,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	cbWS := &state.WriteSet{}
 	cbWS.SetBalance(s.coinbase, coinbaseWrite)
-	vm.FlushVersionedWrites(cbWS, true, "")
+	vm.FlushVersionedWrites(cbWS, true)
 
 	checkVersion := func(readV, writeV state.Version) state.VersionValidity {
 		if readV != writeV {
@@ -1018,8 +1085,8 @@ func TestFinalizeTx_CoinbaseFlushedEstimateReadsAsDependency(t *testing.T) {
 		return h.Address == coinbase && (h.Path == state.BalancePath || h.Path == state.AddressPath)
 	}
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true, "")
-	vm.FlushVersionedWrites(ws.Filter(isCoinbaseBal), false, "")
+	vm.FlushVersionedWrites(ws.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true)
+	vm.FlushVersionedWrites(ws.Filter(isCoinbaseBal), false)
 
 	_, cbRR, ok := vm.ReadBalance(coinbase, 1)
 	require.True(t, ok, "coinbase cell must exist")
@@ -1030,6 +1097,45 @@ func TestFinalizeTx_CoinbaseFlushedEstimateReadsAsDependency(t *testing.T) {
 	require.True(t, ok, "other cell must exist")
 	assert.Equal(t, state.MVReadResultDone, otherRR.Status(),
 		"a non-fee-recipient write flushed Done reads as a committed value")
+}
+
+// Finalizing a system tx over a lower tx's write that is still an estimate must
+// not panic.
+func TestFinalizeSystemTx_OverEstimateCellDoesNotPanic(t *testing.T) {
+	s := simpleTransferScenario()
+	result := s.buildExecResult()
+	task := result.Task.(*taskVersion)
+	task.version.TxIndex = 2
+	txTask := task.Task.(*exec.TxTask)
+	txTask.TxIndex = 2
+
+	addr := fAddr("syscall-target")
+	result.TxOut = &state.WriteSet{}
+	result.TxOut.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: task.version},
+		Val:         *uint256.NewInt(5),
+	})
+
+	lower := &state.WriteSet{}
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(3)
+	lowerVersion := state.Version{TxIndex: 1}
+	lower.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: lowerVersion},
+		Val:         &acc,
+	})
+	lower.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: lowerVersion},
+		Val:         *uint256.NewInt(3),
+	})
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(lower, false)
+
+	var err error
+	require.NotPanics(t, func() {
+		_, _, _, err = result.finalizeSystemTx(task, txTask, vm, s.makeReader())
+	})
+	require.NoError(t, err)
 }
 
 // TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation verifies the
@@ -1067,11 +1173,11 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true, "")
+	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1))
@@ -1089,11 +1195,11 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	val200 := *uint256.NewInt(200)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true, "")
+	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=200 (changed from TX 0's 100)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val200).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 1)
 	assert.Equal(t, 1, countViewPath(view, state.StoragePath), "changed storage write is in the view")
@@ -1112,7 +1218,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 
 	// TX 0 writes slotA=100 (no prior TX)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 0)
 	assert.Equal(t, 1, countViewPath(view, state.StoragePath), "new storage key is in the view")
@@ -1135,12 +1241,12 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 	vm.FlushVersionedWrites(newWS().
 		stor(addr, slotA, state.Version{TxIndex: 5, Incarnation: 0}, val100).
 		stor(addr, slotB, state.Version{TxIndex: 5, Incarnation: 0}, val200).
-		build(), true, "")
+		build(), true)
 
 	// TX 5 incarnation 1 (validated) re-executes writing only slotA. Its result
 	// overwrites blockIO.WriteSet(5), so slotB (stale inc-0) is not in the key-set.
 	validated := newWS().stor(addr, slotA, state.Version{TxIndex: 5, Incarnation: 1}, val100).build()
-	vm.FlushVersionedWrites(validated, true, "")
+	vm.FlushVersionedWrites(validated, true)
 
 	view := state.NewVersionMapWriteView(validated, vm, 5)
 	assert.Equal(t, 1, countViewPath(view, state.StoragePath), "only the validated incarnation's slotA is in the view")
@@ -1190,10 +1296,10 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x15})
 
 	// TX 0 writes balance=100
-	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).build(), true, "")
+	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).build(), true)
 
 	// TX 1 writes balance=150 (accumulated from TX 0's 100 + delta)
-	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(150)).build(), true, "")
+	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(150)).build(), true)
 
 	// Worker's WriteSet had stale balance=120 (from speculative execution)
 	writeSet := newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(120)).build()
@@ -1216,7 +1322,7 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 		addr(addr, state.Version{TxIndex: 0, Incarnation: 0}, &accounts.Account{}).
 		bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 0)
 	assert.Equal(t, 0, countViewPath(view, state.AddressPath), "AddressPath is structurally absent from the view")
@@ -1235,7 +1341,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 
 	// TX 0 only writes storage — no balance/nonce/code changes
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{Balance: *uint256.NewInt(500), Nonce: 3, CodeHash: empty.CodeHash}
@@ -1259,11 +1365,11 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true, "")
+	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{Balance: *uint256.NewInt(500), Nonce: 3, CodeHash: empty.CodeHash}
@@ -1294,7 +1400,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 		inc(addr, ver0, uint64(1)).
 		codeHash(addr, ver0, codeHash).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0))
@@ -1316,7 +1422,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 
 	// TX 0 sends ETH to a new address — only BalancePath written
 	writeSet := newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(50000)).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	cs := newTestCalcState() // no pre-load: the account doesn't exist yet
 	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0))
@@ -1344,7 +1450,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 		nonce(addr, ver5, uint64(0)).
 		codeHash(addr, ver5, accounts.EmptyCodeHash).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{Balance: *uint256.NewInt(1400000000000000), Nonce: 2, CodeHash: empty.CodeHash}
@@ -1368,7 +1474,7 @@ func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 			nonce(params.SystemAddress, ver, uint64(0)).
 			codeHash(params.SystemAddress, ver, accounts.EmptyCodeHash).
 			build()
-		vm.FlushVersionedWrites(writeSet, true, "")
+		vm.FlushVersionedWrites(writeSet, true)
 
 		cs := newTestCalcState()
 		cs.accounts[params.SystemAddress] = &calcAccountState{Balance: *uint256.NewInt(1400000000000000), Nonce: 2, CodeHash: empty.CodeHash}
@@ -1400,7 +1506,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 		codeHash(authority, ver, designatorHash).
 		nonce(authority, ver, 1).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 5)
 	gotHash, okHash := viewCodeHashVal(view, authority)
@@ -1426,7 +1532,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	// Re-delegating tx: SetCode short-circuits, so the only write is the nonce.
 	ver0 := state.Version{TxIndex: 5, Incarnation: 0}
 	writeSet := newWS().nonce(authority, ver0, 2).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	// authority is an already-committed 7702 delegation: its codeHash is in the
 	// account's accumulated state.
@@ -1455,7 +1561,7 @@ func TestNormalizeWriteSet_MetamorphicSameTxRecreateKeepsWrites(t *testing.T) {
 		bal(addr, ver, *uint256.NewInt(500)).
 		nonce(addr, ver, 1).
 		build()
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, 1))
@@ -1479,7 +1585,7 @@ func TestNormalizeWriteSet_StaleIncarnationSelfDestructIgnored(t *testing.T) {
 	// The validated incarnation (inc 1) writes only the balance; the stale inc-0
 	// SelfDestructPath is not part of its writeset.
 	validated := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(300)).build()
-	vm.FlushVersionedWrites(validated, true, "")
+	vm.FlushVersionedWrites(validated, true)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(state.NewVersionMapWriteView(validated, vm, 5))
@@ -1536,9 +1642,9 @@ func TestNormalizeWriteSet_RecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
 		stor(addr, slot, destroyVer, *uint256.NewInt(77)).
 		selfDestruct(addr, destroyVer, true).
 		build()
-	vm.FlushVersionedWrites(destroy, true, "")
+	vm.FlushVersionedWrites(destroy, true)
 	writeBack := newWS().stor(addr, slot, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(77)).build()
-	vm.FlushVersionedWrites(writeBack, true, "")
+	vm.FlushVersionedWrites(writeBack, true)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(state.NewVersionMapWriteView(destroy, vm, 2))
@@ -1666,7 +1772,7 @@ func TestNormalizeWriteSet_RevivalDropsPreBlockNonce(t *testing.T) {
 func applyTxs(cs *calcState, txs ...*state.WriteSet) {
 	vm := state.NewVersionMap(nil)
 	for _, ws := range txs {
-		vm.FlushVersionedWrites(ws, true, "")
+		vm.FlushVersionedWrites(ws, true)
 	}
 	for _, ws := range txs {
 		for h := range ws.AllHeaders() {
@@ -1820,7 +1926,7 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 			require.NoError(t, destructor.AddBalance(coinbase, *uint256.NewInt(kept), tracing.BalanceChangeTransfer))
 			_, err := destructor.Selfdestruct(coinbase, tc.rules.IsAmsterdam)
 			require.NoError(t, err)
-			vm.FlushVersionedWrites(finalizedWrites(t, destructor, tc.rules), true, "")
+			vm.FlushVersionedWrites(finalizedWrites(t, destructor, tc.rules), true)
 
 			writes, err := result.calcFees(task, vm, newMapStateReader(), tc.rules)
 			require.NoError(t, err)
@@ -1953,6 +2059,28 @@ func TestCalcFees_SameTxDestroyedBurntContract_StaysRemoved(t *testing.T) {
 	}
 }
 
+// coinbaseTipResult is the result of tx 1 of block 1 whose only fee is a tip of
+// tip wei to coinbase, ready for calcFees.
+func coinbaseTipResult(coinbase accounts.Address, tip uint64) (*execResult, *taskVersion) {
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+	version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+	txTask := &exec.TxTask{
+		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+		Config:          chain.TestChainBerlinConfig,
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task: task,
+		ExecutionResult: evmtypes.ExecutionResult{
+			FeeTipped:            *uint256.NewInt(tip),
+			BurntContractAddress: accounts.NilAddress,
+		},
+		Coinbase: coinbase,
+	}}
+	return result, task
+}
+
 // The worker's EIP-161 removal of an empty codeless coinbase stands only without a tip:
 // serial credits the tip before the tx's empty-account sweep, so a tip keeps the account.
 func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
@@ -1971,22 +2099,7 @@ func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
 			reader := newMapStateReader()
 			reader.accounts[coinbase] = &accounts.Account{CodeHash: accounts.EmptyCodeHash}
 
-			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
-			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
-			txTask := &exec.TxTask{
-				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
-				Config:          chain.TestChainBerlinConfig,
-				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
-			}
-			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
-			result := &execResult{TxResult: &exec.TxResult{
-				Task: task,
-				ExecutionResult: evmtypes.ExecutionResult{
-					FeeTipped:            *uint256.NewInt(tc.tip),
-					BurntContractAddress: accounts.NilAddress,
-				},
-				Coinbase: coinbase,
-			}}
+			result, task := coinbaseTipResult(coinbase, tc.tip)
 
 			vm := state.NewVersionMap(nil)
 			worker := state.NewWithVersionMap(reader, vm)
@@ -2009,6 +2122,106 @@ func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
 			require.Equal(t, *uint256.NewInt(tc.tip), bw.Val)
 		})
 	}
+}
+
+// On a BAL block a live coinbase already has its account record, so the fee credit writes only the
+// balance; a first credit still writes the record. Either way the next tx reads the credited balance
+// with the coinbase's nonce and code intact.
+func TestCalcFees_BALCoinbaseAddressPath(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	const tip = 1_000
+	for _, tc := range []struct {
+		name        string
+		pre         *accounts.Account
+		wantAddress bool
+	}{
+		{"live coinbase skips the record", &accounts.Account{Nonce: 5, Balance: *uint256.NewInt(7), CodeHash: accounts.InternCodeHash(common.Hash{0xc0})}, false},
+		{"first credit writes the record", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+			reader := newMapStateReader()
+			want := accounts.Account{CodeHash: accounts.EmptyCodeHash}
+			if tc.pre != nil {
+				reader.accounts[coinbase] = tc.pre
+				want = *tc.pre
+			}
+
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000},
+				TxNum:  version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task:            task,
+				ExecutionResult: evmtypes.ExecutionResult{FeeTipped: *uint256.NewInt(tip), BurntContractAddress: accounts.NilAddress},
+				Coinbase:        coinbase,
+				TxOut:           &state.WriteSet{},
+			}}
+
+			vm := state.NewVersionMap(nil)
+			vm.HasBAL = true
+			writes, err := result.calcFees(task, vm, reader, rules)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantAddress, findAddress(writes, coinbase) != nil)
+
+			vm.FlushVersionedWrites(writes, true)
+			next := state.NewWithVersionMap(reader, vm)
+			next.SetTxContext(1, 2)
+			bal, err := next.GetBalance(coinbase)
+			require.NoError(t, err)
+			require.Equal(t, *new(uint256.Int).AddUint64(&want.Balance, tip), bal)
+			nonce, err := next.GetNonce(coinbase)
+			require.NoError(t, err)
+			require.Equal(t, want.Nonce, nonce)
+			codeHash, err := next.GetCodeHash(coinbase)
+			require.NoError(t, err)
+			require.Equal(t, want.CodeHash, codeHash)
+		})
+	}
+}
+
+// A zero tip still touches an existing empty coinbase, which EIP-161 then
+// removes. The removal must invalidate a later tx that read the coinbase's existence.
+func TestCalcFees_ZeroTipRemovalInvalidatesExistenceRead(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	coinbase := fAddr("coinbase")
+	reader := newMapStateReader()
+	empty := accounts.NewAccount()
+	reader.accounts[coinbase] = &empty
+	vm := state.NewVersionMap(nil)
+
+	later := state.NewWithVersionMap(reader, vm)
+	t.Cleanup(later.Close)
+	later.SetTxContext(1, 2)
+	exists, err := later.Exist(coinbase)
+	require.NoError(t, err)
+	require.True(t, exists)
+	io := state.NewVersionedIO(3)
+	io.RecordReads(state.Version{TxIndex: 2}, later.VersionedReads())
+
+	result, task := coinbaseTipResult(coinbase, 0)
+	result.TxOut = &state.WriteSet{}
+
+	writes, err := result.calcFees(task, vm, reader, rules)
+	require.NoError(t, err)
+	sd, ok := writes.GetSelfDestruct(coinbase)
+	require.True(t, ok && sd.Val, "precondition: the zero-tip touch removes the empty coinbase")
+	vm.FlushVersionedWrites(writes, true)
+
+	equalVersion := func(readVersion, writeVersion state.Version) state.VersionValidity {
+		if readVersion != writeVersion {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	require.Equal(t, state.VersionInvalid, vm.ValidateVersion(2, io, equalVersion, false, ""))
 }
 
 // failingAccountReader fails account reads once err is set.

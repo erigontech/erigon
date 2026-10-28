@@ -2822,17 +2822,15 @@ func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWrit
 	}
 	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
-	store.executionPayloadValidationOnce.Do(func() {
-		store.executionPayloadValidation = make(chan struct{}, 1)
-	})
+	validation := store.envelopeValidationSemaphore()
 	firstDone := make(chan error, 1)
 	go func() { firstDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
 	<-graph.firstEntered
 
 	limiterHeld := true
 	select {
-	case store.executionPayloadValidation <- struct{}{}:
-		<-store.executionPayloadValidation
+	case validation <- struct{}{}:
+		<-validation
 		limiterHeld = false
 	default:
 	}
@@ -3421,6 +3419,11 @@ func TestOnExecutionPayloadMergesStrongerConcurrentValidationResult(t *testing.T
 	<-firstStarted
 	go func() { secondDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
 	<-graph.bothRead
+	require.Eventually(t, func() bool {
+		f.envelopeAppliesMu.Lock()
+		defer f.envelopeAppliesMu.Unlock()
+		return f.envelopeApplies[blockRoot] == 2
+	}, lockScopeTimeout, time.Millisecond)
 	f.mu.Lock()
 	close(releaseFirst)
 	<-secondStarted
@@ -3565,6 +3568,9 @@ func TestPersistedEnvelopeDoesNotSynthesizeValidatedELResult(t *testing.T) {
 		done <- f.OnExecutionPayload(context.Background(), envelope, false, true)
 	}()
 	<-graph.stateRead
+	require.Eventually(t, func() bool {
+		return f.ExecutionPayloadApplyInFlight(envelope.Message.BeaconBlockRoot)
+	}, lockScopeTimeout, time.Millisecond)
 	require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, false))
 	<-f.payloadValidationAdmission
 
@@ -5015,6 +5021,11 @@ func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testi
 					}
 				}()
 				<-graph.stateRead
+				if !local {
+					require.Eventually(t, func() bool {
+						return f.ExecutionPayloadApplyInFlight(envelope.Message.BeaconBlockRoot)
+					}, lockScopeTimeout, time.Millisecond)
+				}
 
 				f.mu.Lock()
 				replacement := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
