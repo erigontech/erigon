@@ -41,8 +41,6 @@
   check is logged by name.
 - `convert-pbt --resume` builds only the missing steps when hex execution has run past an existing PBT. It folds the
   keys of the source files that end after the PBT point on top of the existing trie.
-- Evidence: `~/org/mode/e/research/pbt-fast-migration.org` (F1–F18) and its code maps. gpt-6-astra max checked them
-  claim by claim twice: C1–C10, then C11–C19 for the lanes and resume.
 
 ## Context (from discovery)
 - Convert: `convertPBTWithOptions` (`cmd/integration/commands/commitment_convert_pbt.go`) → `ConvertPBin`
@@ -182,7 +180,7 @@ flowchart LR
   skip collector. A row goes to its partition's lane if its key is above the lane's last key. Otherwise it goes to
   the skip collector, as do rows above bit 12, the global root and the `state` key. A range's `.kv` input is its
   lanes concatenated in partition order, merged with the skip collector. Partition runs are contiguous in row-key
-  order (astra C7, C13). Measured: 0.14% of rows go to the skip collector at `MaxOps` 100k (log F12).
+  order. Measured: 0.14% of rows go to the skip collector at `MaxOps` 100k.
 - **D9 — resume.**
   - Base: the PBT at X, taken from an earlier output or from a hex+bin source whose bin domain stopped.
   - Gap ops: the keys of every source `.kv` that ends after X, as leaves at Y:
@@ -197,9 +195,8 @@ flowchart LR
     - a zero-start source file that spans X, because its deletions are gone;
     - a base bin file that straddles a source commitment range boundary;
     - a gap that is not post-Cancun, or that holds a bytecode rewrite.
-  - Facts: log F13–F18.
-- **D10 — partition-parallel fold (Tasks 15–18; owner's call, 2026-10-25).** Superseded: Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
-- **D11 — one fold, two wirings (Task 17 here, exec in a follow-up; owner's call, 2026-10-25).** Superseded: Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+- **D10 — partition-parallel fold (Tasks 15–18; owner's call, 2026-10-25).** Superseded: Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s); the design at `4b2be4b990c` stays.
+- **D11 — one fold, two wirings (Task 17 here, exec in a follow-up; owner's call, 2026-10-25).** Superseded: Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s); the design at `4b2be4b990c` stays.
 
 ## Technical Details
 - **Partition file writer** (replaces ETL B in `pbinForEachRebuildOpStream`):
@@ -462,7 +459,7 @@ flowchart LR
 - [x] run the gate — must pass before Task 14.
 
 ### Task 14: Scale benchmark
-- [ ] Use a hard-linked clone of `/Volumes/dev/chains/hoodi-pbt/src4` (61 GB, commitment layout `0-16` and `16-17`);
+- [ ] Use a hard-linked clone of a Hoodi datadir, `src4` (61 GB, commitment layout `0-16` and `16-17`);
       no node runs.
 - [ ] Run the arms:
   - the pre-change converter built from `c4892e8a808`;
@@ -477,22 +474,22 @@ flowchart LR
 - [ ] Drop `BenchmarkPBinConvert`.
 
 ### Task 15: Engine — fold an owned subtree across batches
-Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s); the design at `4b2be4b990c` stays.
 
 ### Task 16: Partition ops cursors and a single row sink
-Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s); the design at `4b2be4b990c` stays.
 
 ### Task 17: Partition-parallel fold, fresh and resume
-Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s); the design at `4b2be4b990c` stays.
 
 ### Task 18: C-d in adaptive structural tasks with an admission limit
-Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s at turn 19); the turn-20 design stays.
+Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower on Hoodi w16 (540.9 s against 127.2 s); the design at `4b2be4b990c` stays.
 
 ### Task 19: Verify acceptance criteria
 - [ ] every Overview item is implemented and reached from `convert-pbt` or `attach-pbt`.
 - [ ] exec's fold path is unchanged: `ProcessParallelContext` → `processParallelPhaseA`, with the exec-side
       binary-trie packages green in the gate.
-- [ ] Hoodi real data on the Mac (`/Volumes/dev/chains/hoodi-pbt/`, offline clone):
+- [ ] Hoodi real data on the Mac (offline clone):
   - bin files identical to the pre-change converter's;
   - attach on a clone, then dual re-execution over ≥ 1000 blocks with no shadow stop;
   - per-phase wall time recorded.
@@ -504,17 +501,15 @@ Dropped 2026-10-26 (owner): the partition scheduler made convert 4.25× slower o
 *Items requiring manual intervention or external systems — informational only*
 
 **Mainnet measurement** (arb1-dev, `/erigon-data/pbt-min/src`, 3.0B leaves, 8C/16T, 125 GB; the owner's call):
-- per-phase wall time against the erigon-2 table above and against pbt-mainnet-convert-dual F5 (27 h 05 min +
+- per-phase wall time against the erigon-2 table above and against the earlier mainnet run (27 h 05 min +
   13 h 56 min);
 - bin files identical to the old converter's at the same point.
 
 **Conformance**: hive `pbt-artifacts` on snap-arb1, 231/0 as before.
 
 **Next lever, if the totals stay above ~2 h**: the fold stays serial in its batch cutter, and the stream root is one
-goroutine. A partitioned bulk build is research-log idea I1: the engine per partition, one spill, and rows straight
+goroutine. A partitioned bulk build would run the engine per partition, with one spill and rows straight
 into the range files. It replaces both, and needs its own plan.
-
-The partition scheduler is kept on `awskii/pbt-convert-pipeline` at `3f6f54a37c0`, unmerged.
 
 **Rollout**: outputs without a manifest are refused, and convert must be rerun.
 
