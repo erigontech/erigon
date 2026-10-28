@@ -17,21 +17,18 @@
 package execmodule_test
 
 import (
-	"math/big"
+	"context"
+	"sync/atomic"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -39,51 +36,13 @@ import (
 // unexecuted, the state a node restarts into after its execution stage fell
 // behind its headers. It returns the next block, a payload whose parent is the
 // canonical head.
-func newExecLagTester(t *testing.T, loopBlockLimit uint, lag int) (*execmoduletester.ExecModuleTester, *types.Block) {
+func newExecLagTester(t *testing.T, lag int, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *types.Block) {
 	t.Helper()
-	ctx := t.Context()
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	addr := crypto.PubkeyToAddress(key.PublicKey)
-	genesis := &types.Genesis{Config: chain.AllProtocolChanges, Alloc: types.GenesisAlloc{addr: {Balance: big.NewInt(1e18)}}}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key), execmoduletester.WithLoopBlockLimit(loopBlockLimit))
-	chainPack, err := m.GenerateChain(lag+2, func(i int, b *blockgen.BlockGen) {
-		txn, err := types.SignTx(types.NewTransaction(uint64(i), addr, uint256.NewInt(1), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(nil), key)
-		require.NoError(t, err)
-		b.AddTx(txn)
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:1]))
-
-	lagging := chainPack.Blocks[1 : 1+lag]
-	_, err = m.InsertBlocks(ctx, lagging)
-	require.NoError(t, err)
-	head := lagging[len(lagging)-1].NumberU64()
-	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, 1)
-		if err != nil {
-			return err
-		}
-		for _, b := range lagging {
-			maxTxNum += uint64(len(b.Transactions())) + 2
-			if err := rawdbv3.TxNums.Append(tx, b.NumberU64(), maxTxNum); err != nil {
-				return err
-			}
-			if err := rawdb.WriteCanonicalHash(tx, b.Hash(), b.NumberU64()); err != nil {
-				return err
-			}
-		}
-		for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.Senders} {
-			if err := stages.SaveStageProgress(tx, stage, head); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
+	m, chainPack := execmoduletester.NewWithExecLag(t, lag, 1, opts...)
 	require.Equal(t, uint64(1), execProgress(t, m))
 
 	payload := chainPack.Blocks[1+lag]
-	_, err = m.InsertBlocks(ctx, []*types.Block{payload})
+	_, err := m.InsertBlocks(t.Context(), []*types.Block{payload})
 	require.NoError(t, err)
 	return m, payload
 }
@@ -99,7 +58,7 @@ func execProgress(t *testing.T, m *execmoduletester.ExecModuleTester) uint64 {
 }
 
 func TestValidateChainAcceptsPayloadBeyondLoopBlockLimit(t *testing.T) {
-	m, payload := newExecLagTester(t, 5, 12)
+	m, payload := newExecLagTester(t, 12, execmoduletester.WithLoopBlockLimit(5))
 
 	for range 2 {
 		result, err := m.ValidateChain(t.Context(), payload.Header())
@@ -115,9 +74,54 @@ func TestValidateChainAcceptsPayloadBeyondLoopBlockLimit(t *testing.T) {
 }
 
 func TestValidateChainExecutesLagWithinLoopBlockLimit(t *testing.T) {
-	m, payload := newExecLagTester(t, 5, 3)
+	m, payload := newExecLagTester(t, 3, execmoduletester.WithLoopBlockLimit(5))
 
 	result, err := m.ValidateChain(t.Context(), payload.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+}
+
+func TestValidateChainAcceptsPayloadBeyondBatchSize(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	m, payload := newExecLagTester(t, 12, execmoduletester.WithBatchSize(1))
+
+	result, err := m.ValidateChain(t.Context(), payload.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+	require.Equal(t, uint64(1), execProgress(t, m))
+
+	fcu, err := m.UpdateForkChoice(t.Context(), payload.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	require.Equal(t, payload.NumberU64(), execProgress(t, m))
+}
+
+type validationWarnRecorder struct {
+	next   log.Handler
+	warned atomic.Bool
+}
+
+func (w *validationWarnRecorder) Log(r *log.Record) error {
+	if r.Lvl <= log.LvlWarn && r.Msg == "Could not validate block" {
+		w.warned.Store(true)
+	}
+	return w.next.Log(r)
+}
+
+func (w *validationWarnRecorder) Enabled(context.Context, log.Lvl) bool { return true }
+
+func TestValidateChainBeyondLoopBlockLimitDoesNotWarn(t *testing.T) {
+	m, payload := newExecLagTester(t, 12, execmoduletester.WithLoopBlockLimit(5))
+	prev := log.Root().GetHandler()
+	recorder := &validationWarnRecorder{next: prev}
+	log.Root().SetHandler(recorder)
+	t.Cleanup(func() { log.Root().SetHandler(prev) })
+
+	result, err := m.ValidateChain(t.Context(), payload.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+	require.False(t, recorder.warned.Load())
 }
