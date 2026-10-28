@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"math/big"
 	"sync"
@@ -73,12 +74,19 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 	if b.err != nil {
 		return nil, b.err
 	}
+	var expiry uint64
 	var dependencies [][]byte
-	if frame, ok := tx.(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
-		dependencies = append(dependencies, types.FrameNonceManager[:])
+	if frame, ok := tx.(*types.FrameTransaction); ok {
+		if !frame.UsesLegacyNonce() {
+			dependencies = append(dependencies, types.FrameNonceManager[:])
+		}
+		if first := &frame.Frames[0]; first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier {
+			expiry = binary.BigEndian.Uint64(first.Data)
+			dependencies = append(dependencies, types.FrameExpiryVerifier[:])
+		}
 	}
 	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetFeeCap())
-	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster, Dependencies: dependencies}, nil
+	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies}, nil
 }
 
 func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
@@ -669,6 +677,87 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 				require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[backend.payer].cost)
 			}
+		})
+	}
+}
+
+func TestFramePoolExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		deadline        uint64
+		blockTime       uint64
+		baseFee         uint64
+		expired         bool
+		verifierChanged bool
+	}{
+		{name: "before deadline", deadline: 100, blockTime: 99, baseFee: 1},
+		{name: "at deadline", deadline: 100, blockTime: 100, baseFee: 1},
+		{name: "waiting for base fee", deadline: 100, blockTime: 99, baseFee: 2},
+		{name: "expired", deadline: 100, blockTime: 101, baseFee: 1, expired: true},
+		{name: "expired below base fee", deadline: 100, blockTime: 101, baseFee: 2, expired: true},
+		{name: "zero deadline", baseFee: 1},
+		{name: "expired zero deadline", blockTime: 1, baseFee: 1, expired: true},
+		{name: "verifier code changed", deadline: 100, blockTime: 99, baseFee: 1, verifierChanged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+			initial.PendingBlockBaseFee = tc.baseFee
+			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			tx := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{1}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+				Frames: []types.Frame{
+					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, tc.deadline), Limits: mdgas.MdGas{Execution: 5_000}},
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
+				},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&encoded))
+			slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			require.Len(t, backend.calls, 1)
+			backend.calls = nil
+			backend.valid = false
+			wantPool := PendingSubPool
+			if tc.baseFee > 1 {
+				wantPool = BaseFeeSubPool
+			}
+			require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+
+			change := &remoteproto.StateChangeBatch{
+				PendingBlockBaseFee: tc.baseFee, BlockGasLimit: 1_000_000,
+				ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockTime: tc.blockTime, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2})}},
+			}
+			if tc.verifierChanged {
+				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+					Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_CODE, Code: []byte{0xfe},
+				}}
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			if tc.verifierChanged {
+				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+			} else {
+				require.Empty(t, backend.calls, "the fixed deadline must not require another simulation")
+			}
+			if tc.expired || tc.verifierChanged {
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+				require.Empty(t, pool.all.senderIDFrameTxn)
+				require.Zero(t, pool.pending.Len()+pool.baseFee.Len()+pool.queued.Len())
+				reason, ok := pool.discardReasonsLRU.Get(string(slot.IDHash[:]))
+				require.True(t, ok)
+				require.Equal(t, txpoolcfg.FrameStateChanged, reason)
+				return
+			}
+			require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+			require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+			require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
 		})
 	}
 }

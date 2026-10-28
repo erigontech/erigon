@@ -280,9 +280,10 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	}
 }
 
-// invalidateFrames parks transactions whose validation results may be stale.
+// invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
+	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
 	touched := make(map[common.Address]struct{})
 	nonceSlots := make(map[common.Hash]struct{})
 	var nonceManagerAccountChanged bool
@@ -305,11 +306,18 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			continue
 		}
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
-		keyedNonce := !frame.UsesLegacyNonce()
 		first := &frame.Frames[0]
-		// Expiry and blob costs can change with the block context even when none
+		// The signed deadline needs only a timestamp check. Changes to the verifier's
+		// code still trigger validation through its recorded dependency below.
+		if first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier && previous.Deadline < blockTime {
+			p.removeFromSubPool(mt, "frame expired")
+			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+			continue
+		}
+		keyedNonce := !frame.UsesLegacyNonce()
+		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || first.Target != nil && *first.Target == types.FrameExpiryVerifier || frame.GetBlobGas() != 0
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		for _, dependency := range previous.Dependencies {
 			// Storage-only changes to the nonce manager need only the selected slots
 			// checked below. If the manager is the sender, validation can read all its storage.
