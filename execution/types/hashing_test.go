@@ -87,7 +87,6 @@ func TestDeriveShaRawTransactions(t *testing.T) {
 					common.Address{1},
 					uint256.NewInt(2),
 					21_000,
-					uint256.NewInt(3),
 					uint256.NewInt(4),
 					uint256.NewInt(5),
 					nil,
@@ -148,7 +147,6 @@ func checkDeriveSha(t *testing.T, list DerivableList) {
 	deriveSha := DeriveSha(list)
 	if !hashesEqual(legacySha, deriveSha) {
 		t.Errorf("unexpected hash: %v (expected: %v)\n", deriveSha.Hex(), legacySha.Hex())
-
 	}
 }
 

@@ -97,7 +97,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -110,7 +110,7 @@ var readDomains = &cobra.Command{
 		}
 		defer stateDb.Close()
 
-		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs, logger); err != nil {
+		if err := requestDomains(stateDb, ctx, readFromDomain, addrs, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -119,7 +119,7 @@ var readDomains = &cobra.Command{
 	},
 }
 
-func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
+func requestDomains(stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -149,6 +149,10 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			acc, err := r.ReadAccountData(accounts.InternAddress(common.BytesToAddress(addr)))
 			if err != nil {
 				logger.Error("failed to read account", "addr", addr, "err", err)
+				continue
+			}
+			if acc == nil {
+				logger.Info(fmt.Sprintf("%x: not found", addr))
 				continue
 			}
 			logger.Info(fmt.Sprintf("%x: nonce=%d balance=%d code=%x root=%x", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root))

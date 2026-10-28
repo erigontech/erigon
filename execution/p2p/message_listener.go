@@ -38,12 +38,10 @@ type DecodedInboundMessage[TPacket any] struct {
 	PeerId  *PeerId
 }
 
-// RawBlockBodiesInboundMessage carries a decoded request ID and the encoded body list.
-type RawBlockBodiesInboundMessage struct {
-	*sentryproto.InboundMessage
+// BlockBodiesEnvelope carries a request ID and the RLP payload of the body list.
+type BlockBodiesEnvelope struct {
 	RequestId     uint64
 	EncodedBodies []byte
-	PeerId        *PeerId
 }
 
 type UnregisterFunc = event.UnregisterFunc
@@ -84,7 +82,7 @@ func NewMessageListener(
 		newBlockObservers:         event.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
 		newBlockHashesObservers:   event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
 		blockHeadersObservers:     event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
-		blockBodiesObservers:      event.NewObservers[*RawBlockBodiesInboundMessage](),
+		blockBodiesObservers:      event.NewObservers[*DecodedInboundMessage[BlockBodiesEnvelope]](),
 		blockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]](),
 		peerEventObservers:        event.NewObservers[*sentryproto.PeerEvent](),
 	}
@@ -98,7 +96,7 @@ type MessageListener struct {
 	newBlockObservers         *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers   *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	blockHeadersObservers     *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
-	blockBodiesObservers      *event.Observers[*RawBlockBodiesInboundMessage]
+	blockBodiesObservers      *event.Observers[*DecodedInboundMessage[BlockBodiesEnvelope]]
 	blockAccessListsObservers *event.Observers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]
 	peerEventObservers        *event.Observers[*sentryproto.PeerEvent]
 	stopWg                    sync.WaitGroup
@@ -143,7 +141,7 @@ func (ml *MessageListener) RegisterBlockHeadersObserver(observer event.Observer[
 	return ml.blockHeadersObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*RawBlockBodiesInboundMessage]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*DecodedInboundMessage[BlockBodiesEnvelope]]) UnregisterFunc {
 	return ml.blockBodiesObservers.Register(observer)
 }
 
@@ -269,7 +267,7 @@ func notifyBlockBodiesObservers(
 	ctx context.Context,
 	logger log.Logger,
 	peerPenalizer *PeerPenalizer,
-	observers *event.Observers[*RawBlockBodiesInboundMessage],
+	observers *event.Observers[*DecodedInboundMessage[BlockBodiesEnvelope]],
 	message *sentryproto.InboundMessage,
 ) error {
 	peerId := PeerIdFromH512(message.PeerId)
@@ -278,11 +276,13 @@ func notifyBlockBodiesObservers(
 		return handleInboundMessageDecodeError(ctx, logger, peerPenalizer, peerId, err)
 	}
 
-	observers.Notify(&RawBlockBodiesInboundMessage{
+	observers.Notify(&DecodedInboundMessage[BlockBodiesEnvelope]{
 		InboundMessage: message,
-		RequestId:      requestId,
-		EncodedBodies:  encodedBodies,
-		PeerId:         peerId,
+		Decoded: BlockBodiesEnvelope{
+			RequestId:     requestId,
+			EncodedBodies: encodedBodies,
+		},
+		PeerId: peerId,
 	})
 	return nil
 }

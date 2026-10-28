@@ -16,16 +16,15 @@ Erigon 3 supports four pruning modes that control how much chain history your no
 | [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the EIP-8252 window                                | Users needing historical block data for research or indexing.                            |
 | [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
 
-By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
+By **default**, Erigon runs as a [full node](#full-node). To change its behavior, use the flag `--prune.mode <value>`.
 
-In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch. Pruning is not reversible — data a mode has already discarded can only be recovered by re-syncing — so pick the mode that covers the history you need before you start.
+In order to switch the type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch. Pruning is not reversible — data a mode has already discarded can only be recovered by re-syncing — so pick the mode that covers the history you need before you start.
 
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
-default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
-`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+They are enabled by default in every pruning mode on **fresh datadirs**; turn them off with
+`--prune.include-receipts=false` (the former `--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
 flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
 datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
 working within the node's state-history window, just with higher latency.
@@ -56,7 +55,7 @@ instead follows the general state-history window by default, and is only retired
 
 Ethereum's state refers to account balances, contracts, and consensus data. Archive nodes retain all historical state and require more **disk space.** However, Erigon 3 has consistently reduced the [disk space](../get-started/hardware-requirements.mdx#disk-size-and-ram-requirements) requirements for running an archive node, rendering it more affordable and accessible to a broader range of users.
 
-Archive are ideal for extensive research on the blockchain, developers, researchers, and RPC providers requiring a complete history of the state.
+Archive nodes are ideal for extensive research on the blockchain, developers, researchers, and RPC providers requiring a complete history of the state.
 
 ## Full node
 

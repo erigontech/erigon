@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -33,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -87,6 +90,29 @@ func TestDrainWaitsForInFlightExecution(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("drain did not return after execution became idle")
 	}
+}
+
+func TestPruneWaitsForExecution(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		defer module.semaphore.Release(1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		result := make(chan error, 1)
+		go func() {
+			_, err := module.Prune(ctx)
+			result <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-result:
+			t.Fatalf("prune returned while execution was still active: %v", err)
+		default:
+		}
+		cancel()
+		require.ErrorIs(t, <-result, context.Canceled)
+	})
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {
@@ -149,7 +175,7 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		forkHeader:    forkHeader,
 		forkBody:      &types.Body{},
 	}
-	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16)
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
 
 	// Stop at the suspension boundary; this test needs no execution pipeline to
 	// prove that suspension failure aborts before the validator stages its unwind.
@@ -158,4 +184,49 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)
+}
+
+func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {
+	reader := sideForkReader{canonicalHash: common.HexToHash("0x01")}
+
+	off := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
+	require.Nil(t, off.blockMetricsCache,
+		"a disabled threshold must not build the cache: the nil check is what keeps newPayload from recording")
+	require.Nil(t, off.TakeBlockMetrics(common.HexToHash("0x02")))
+
+	every := time.Duration(0)
+	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, &every)
+	require.NotNil(t, on.blockMetricsCache)
+}
+
+func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
+	prevReadMetrics := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+
+	every := time.Duration(0)
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, sideForkReader{}, 16, &every)
+	sd := &execctx.SharedDomains{}
+	header := &types.Header{Number: *uint256.NewInt(7), GasUsed: 21_000}
+	hash := header.Hash()
+
+	sd.AddCommitmentTime(5 * time.Millisecond)
+	fv.recordBlockMetrics(sd, header, &types.RawBody{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
+
+	rec := fv.TakeBlockMetrics(hash)
+	require.NotNil(t, rec)
+	require.Equal(t, 5*time.Millisecond, rec.StateHash)
+	require.Equal(t, 7*time.Millisecond, rec.Execution)
+	require.Equal(t, 20*time.Millisecond, rec.Validation)
+	require.Zero(t, sd.TakeCommitmentTime(), "a commitment time left behind is reported again by the next block")
+}
+
+func (fv *ForkValidator) LastValidationExecStageTiming() time.Duration {
+	return fv.executor.lastValidationExecStageTiming()
+}
+
+func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
+	e := &ExecModule{publishedSD: func() *execctx.SharedDomains { panic("boom") }}
+	require.Panics(t, func() { _, _, _ = e.beginOverlayOrRo(context.Background()) })
+	require.True(t, e.lock.TryLock(), "the read lock is still held after the panic")
+	e.lock.Unlock()
 }

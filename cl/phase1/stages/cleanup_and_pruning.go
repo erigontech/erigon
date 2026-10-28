@@ -2,12 +2,23 @@ package stages
 
 import (
 	"context"
-	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
+
+// blockPruneSlot keeps the block-serving window and every block after the finalized
+// checkpoint, which peers need to sync through a long period of non-finality.
+func blockPruneSlot(tx kv.Tx, beaconCfg *clparams.BeaconChainConfig, headSlot uint64) (uint64, error) {
+	highestFinalized, err := beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return 0, err
+	}
+	finalizedEpochStart := highestFinalized / beaconCfg.SlotsPerEpoch * beaconCfg.SlotsPerEpoch
+	return min(beaconCfg.BlockServeRangeStartSlot(headSlot), finalizedEpochStart), nil
+}
 
 // cleanupAndPruning cleans up the database and prunes old data.
 func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
@@ -16,10 +27,13 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 	defer tx.Rollback()
-	const blockPruneDistance = uint64(1_000_000)
-
-	if !cfg.caplinConfig.ArchiveBlocks && args.seenSlot > blockPruneDistance {
-		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-blockPruneDistance); err != nil {
+	currentSlot := cfg.ethClock.GetCurrentSlot()
+	if !cfg.caplinConfig.ArchiveBlocks {
+		pruneTo, err := blockPruneSlot(tx, cfg.beaconCfg, min(args.seenSlot, currentSlot))
+		if err != nil {
+			return err
+		}
+		if err := beacon_indicies.PruneBlocks(tx, pruneTo); err != nil {
 			return err
 		}
 	}
@@ -30,15 +44,14 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 
 	// Sidecar retention cuts against wall-clock, not the stage head, so a stalled
 	// stage does not retain data forever.
-	currentSlot := cfg.ethClock.GetCurrentSlot()
-	pruneBlobDistance := uint64(128600)
+	blobFloor := cfg.beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
 	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.BlobPruningDisabled {
-		pruneBlobDistance = math.MaxUint64
+		blobFloor = 0
 	}
-	if err := cfg.blobStore.PruneBelow(floorFor(currentSlot, pruneBlobDistance)); err != nil {
+	if err := cfg.blobStore.PruneBelow(blobFloor); err != nil {
 		logger.Warn("failed to prune blob sidecars", "err", err)
 	}
-	columnFloor := specColumnFloor(currentSlot, cfg.beaconCfg)
+	columnFloor := cfg.beaconCfg.DataColumnSidecarServeRangeStartSlot(currentSlot)
 	if keep := cfg.caplinConfig.ColumnKeepSlots; keep > 0 {
 		columnFloor = floorFor(currentSlot, keep)
 	}
@@ -46,21 +59,6 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		logger.Warn("failed to prune data column sidecars", "err", err)
 	}
 	return nil
-}
-
-// specColumnFloor returns the first slot whose columns a node must still serve: the start of
-// current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS. The window is stated in
-// epochs, so subtracting a slot count from a head sitting inside an epoch would cut above
-// the boundary and delete data that is still required.
-func specColumnFloor(currentSlot uint64, beaconCfg *clparams.BeaconChainConfig) uint64 {
-	if beaconCfg.SlotsPerEpoch == 0 {
-		return 0
-	}
-	epoch := currentSlot / beaconCfg.SlotsPerEpoch
-	if epoch <= beaconCfg.MinEpochsForDataColumnSidecarsRequests {
-		return 0
-	}
-	return (epoch - beaconCfg.MinEpochsForDataColumnSidecarsRequests) * beaconCfg.SlotsPerEpoch
 }
 
 func floorFor(head, keep uint64) uint64 {

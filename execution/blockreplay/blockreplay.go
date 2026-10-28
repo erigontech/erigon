@@ -1,14 +1,9 @@
 // Package blockreplay provides a lightweight, exec-only block-replay harness.
 //
-// A Fixture is the minimal "exec witness" for one block: the pre-state VALUES
-// the block's execution reads (accounts, storage, code), plus the block payload
-// RLP and the ancestor data execution needs (parent header, BLOCKHASH hashes).
-// It carries no merkle proofs and no commitment state — replay runs
+// A Fixture is the minimal exec witness for one block: the pre-state values the
+// block reads (accounts, storage, code), the block RLP, and the ancestor data
+// execution needs (parent header, BLOCKHASH hashes). Replay runs
 // ExecuteBlockEphemerally against an in-memory reader and never computes a trie.
-//
-// Capture: wrap a real StateReader in a recordingReader and run the block once;
-// every first read records the pre-block value. Replay: serve those values from
-// an inMemReader. Same block + same reads => deterministic, portable, tiny.
 package blockreplay
 
 import (
@@ -21,12 +16,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Save/Load serialize a Fixture (gob) so a captured block becomes a drop-in
-// testdata file.
 func (fx *Fixture) Save(path string) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -49,8 +41,7 @@ func Load(path string) (*Fixture, error) {
 	return fx, nil
 }
 
-// acctData is a captured pre-state account. Present=false means the account did
-// not exist at capture time (ReadAccountData returned nil).
+// acctData is a captured account. Present=false means the account did not exist.
 type acctData struct {
 	Present     bool
 	Nonce       uint64
@@ -60,8 +51,8 @@ type acctData struct {
 }
 
 // Fixture is the serializable exec-witness for a single block: the pre-state
-// the block reads (inputs) plus the post-state it writes (Outputs), so a replay
-// can be checked against known-correct data — not just profiled.
+// the block reads plus the post-state it writes (Outputs), so a replay can be
+// checked against known-correct data.
 type Fixture struct {
 	BlockRLP        []byte
 	ParentHeaderRLP []byte
@@ -70,28 +61,11 @@ type Fixture struct {
 	Accounts        map[[20]byte]acctData
 	Storage         map[[20]byte]map[[32]byte][32]byte
 	Code            map[[20]byte][]byte
-	// HasStorageResult is the per-address HasStorage answer captured at query time.
-	// It cannot be derived from Storage (which holds only slots that were read):
-	// storage may exist only in unread slots, and reading an absent/zero slot does
-	// not imply storage exists. The EVM uses HasStorage for CREATE collision, so
-	// replay must reproduce the captured answer, not infer it.
-	HasStorageResult map[[20]byte]bool
-	Outputs          *Outputs // post-state the block wrote; nil until captured/backfilled
-	BALBytes         []byte   // encoded block access list sidecar; empty pre-Amsterdam
+	Outputs         *Outputs // post-state the block wrote; nil until captured/backfilled
 }
 
-// BAL decodes the fixture's block access list sidecar, or nil when the block
-// carried none (pre-Amsterdam).
-func (f *Fixture) BAL() (types.BlockAccessList, error) {
-	if len(f.BALBytes) == 0 {
-		return nil, nil
-	}
-	return types.DecodeBlockAccessListBytes(f.BALBytes)
-}
-
-// Outputs is the post-state a block's execution produced: the accounts it
-// updated (with final values), deleted, and the storage/code it wrote. It is
-// the reference the replay's post-state is checked against (data, not root).
+// Outputs is the post-state a block's execution produced, checked against the
+// replay's post-state (data, not root).
 type Outputs struct {
 	Accounts map[[20]byte]acctData
 	Deleted  map[[20]byte]bool
@@ -110,11 +84,10 @@ func newOutputs() *Outputs {
 
 func newFixture() *Fixture {
 	return &Fixture{
-		Ancestors:        map[uint64][32]byte{},
-		Accounts:         map[[20]byte]acctData{},
-		Storage:          map[[20]byte]map[[32]byte][32]byte{},
-		Code:             map[[20]byte][]byte{},
-		HasStorageResult: map[[20]byte]bool{},
+		Ancestors: map[uint64][32]byte{},
+		Accounts:  map[[20]byte]acctData{},
+		Storage:   map[[20]byte]map[[32]byte][32]byte{},
+		Code:      map[[20]byte][]byte{},
 	}
 }
 
@@ -152,7 +125,6 @@ type recordingReader struct {
 	tracePrefix string
 }
 
-// NewRecordingReader wraps inner; capture the accumulated Fixture with Fixture().
 func NewRecordingReader(inner state.StateReader) *recordingReader {
 	return &recordingReader{inner: inner, fx: newFixture()}
 }
@@ -169,6 +141,15 @@ func (r *recordingReader) ReadAccountData(address accounts.Address) (*accounts.A
 		r.fx.Accounts[k] = toAcctData(a)
 	}
 	return a, nil
+}
+
+func (r *recordingReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *recordingReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (r *recordingReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -190,17 +171,6 @@ func (r *recordingReader) ReadAccountStorage(address accounts.Address, key accou
 		m[key.Value()] = v.Bytes32()
 	}
 	return v, ok, nil
-}
-
-func (r *recordingReader) HasStorage(address accounts.Address) (bool, error) {
-	has, err := r.inner.HasStorage(address)
-	if err != nil {
-		return has, err
-	}
-	if _, seen := r.fx.HasStorageResult[address.Value()]; !seen {
-		r.fx.HasStorageResult[address.Value()] = has
-	}
-	return has, nil
 }
 
 func (r *recordingReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
@@ -229,9 +199,8 @@ func (r *recordingReader) Trace() bool               { return r.trace }
 func (r *recordingReader) TracePrefix() string       { return r.tracePrefix }
 
 // inMemReader serves reads from a Fixture with no DB behind it. Reads are
-// ~free, so it models the COMPUTE path, not read cost — set StorageReadNanos to
-// busy-spin a modelled per-storage-read latency (measured cold-file cost) when
-// reproducing read-bound blocks matters.
+// ~free, so set StorageReadNanos to busy-spin a modelled per-storage-read
+// latency when reproducing read-bound blocks matters.
 type inMemReader struct {
 	fx               *Fixture
 	trace            bool
@@ -239,7 +208,6 @@ type inMemReader struct {
 	StorageReadNanos int64 // >0: model per-storage-read latency
 }
 
-// NewInMemReader serves StateReader reads from fx.
 func NewInMemReader(fx *Fixture) *inMemReader { return &inMemReader{fx: fx} }
 
 func spin(ns int64) {
@@ -249,6 +217,15 @@ func spin(ns int64) {
 	deadline := time.Now().Add(time.Duration(ns))
 	for time.Now().Before(deadline) {
 	}
+}
+
+func (r *inMemReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+func (r *inMemReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.fx.Accounts[address].toAccount(), nil
 }
 
 func (r *inMemReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -272,14 +249,6 @@ func (r *inMemReader) ReadAccountStorage(address accounts.Address, key accounts.
 	var v uint256.Int
 	v.SetBytes(b[:])
 	return v, !v.IsZero(), nil
-}
-
-func (r *inMemReader) HasStorage(address accounts.Address) (bool, error) {
-	// Use the captured answer; do NOT infer from read slots (see HasStorageResult).
-	if has, ok := r.fx.HasStorageResult[address.Value()]; ok {
-		return has, nil
-	}
-	return len(r.fx.Storage[address.Value()]) > 0, nil
 }
 
 func (r *inMemReader) ReadAccountCode(address accounts.Address) ([]byte, error) {

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -39,11 +40,19 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const dumpSlotFrequency = 4
+const (
+	dumpSlotFrequency = 4
+	pruneBatchSize    = 256
+)
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
 	nextSyncCommittee    *solid.SyncCommittee
+}
+
+type validatedChildren struct {
+	slots   map[common.Hash]uint64
+	maxSlot uint64
 }
 
 var ErrStateNotFound = errors.New("state not found")
@@ -89,17 +98,27 @@ func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
-	// Alternate beacon states
-	fs        afero.Fs
-	blocks    sync.Map // set of blocks (block root -> block)
-	headers   sync.Map // set of headers
-	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
+	lifecycleMu       sync.RWMutex
+	addPruneMu        sync.Mutex
+	pruneMu           sync.Mutex
+	pruneBoundaryHook func()
+	pruneBatchHook    func()
+	pruneChildrenHook func()
 
-	// current state data — dual-protected. AddChainSegment is the sole writer
-	// and runs under the outer forkchoice f.mu, so reads taken under f.mu are
-	// already serialized against the writer and don't need currentStateMu.
-	// Reads outside f.mu (e.g. getCheckpointState) must take currentStateMu.
-	currentStateMu        sync.RWMutex
+	// Alternate beacon states
+	fs      afero.Fs
+	blocks  sync.Map // set of blocks (block root -> block)
+	headers sync.Map // set of headers
+	// badBlocks maps an invalid block root to the slot it was seen at, so Prune
+	// can drop it: an invalid block is deleted from blocks before its root is
+	// recorded here, so the block-keyed pruning below never reaches it. Roots
+	// marked with no header to take a slot from are stored as slotUnknown.
+	badBlocks           sync.Map // common.Hash -> uint64 slot
+	unavailablePayloads sync.Map
+	acceptedPayloads    sync.Map
+	childrenMu          sync.RWMutex
+	children            map[common.Hash]*validatedChildren
+
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
 
@@ -128,15 +147,18 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists sync.Map // common.Hash -> struct{}
+	envelopeExists   sync.Map // common.Hash -> struct{}
+	envelopeMissing  sync.Map // common.Hash -> struct{}
+	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
-	// reusable buffers
-	sszBuffer []byte
+	// reusable disk I/O buffers, each guarded by the mutex above it
+	stateDumpLock     sync.Mutex
+	sszBuffer         []byte
+	envelopeMu        sync.Mutex
+	envelopeSSZBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData
-
-	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state.
@@ -171,6 +193,10 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	}
 
 	farthestExtendingPath[anchorRoot] = true
+	anchorState, err = anchorState.Copy()
+	if err != nil {
+		return nil, err
+	}
 
 	f := &forkGraphDisk{
 		fs: aferoFs,
@@ -184,11 +210,11 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		anchorRoot:  anchorRoot,
 		rcfg:        rcfg,
 		syncedData:  syncedData,
+		children:    make(map[common.Hash]*validatedChildren),
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
-
 	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
 		return nil, err
 	}
@@ -213,6 +239,9 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 
 // Add a new node and edge to the graph
 func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -225,7 +254,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
 		log.Debug("block below anchor slot", "slot", block.Slot, "hash", common.Hash(blockRoot))
-		f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
+		f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+		return nil, BelowAnchor, nil
+	}
+	if isBelowPrunedBoundary(block.Slot, f.lowestAvailableBlock.Load()) {
+		f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 		return nil, BelowAnchor, nil
 	}
 
@@ -233,8 +266,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	var newState *state.CachingBeaconState
 	if isBlockRootTheCurrentState {
 		newState = f.currentState
+	} else if current := f.CurrentStateLocked(block.ParentRoot); current != nil {
+		newState = current
 	} else {
-		newState, err = f.getState(block.ParentRoot, false, true)
+		newState, err = f.replayState(block.ParentRoot, true)
 		if err != nil {
 			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
 		}
@@ -303,20 +338,16 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
-			f.currentStateMu.Lock()
+			f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 			f.currentState = nil
 			f.currentStateBlockRoot = common.Hash{}
-			f.currentStateMu.Unlock()
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
 	}
 
-	f.currentStateMu.Lock()
 	f.currentState = newState
 	f.currentStateBlockRoot = common.Hash(blockRoot)
-	f.currentStateMu.Unlock()
 
 	// Verify currentState.BlockRoot() matches the actual block root.
 	if computedRoot, cerr := newState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
@@ -369,19 +400,36 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, err
 	}
 
-	f.headers.Store(common.Hash(blockRoot), &cltypes.BeaconBlockHeader{
+	header := &cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
 		ParentRoot:    block.ParentRoot,
 		Root:          block.StateRoot,
 		BodyRoot:      bodyRoot,
-	})
+	}
+	currentJustified := newState.CurrentJustifiedCheckpoint()
+	finalized := newState.FinalizedCheckpoint()
 
-	// Lastly add checkpoints to caches as well.
-	f.currentJustifiedCheckpoints.Store(common.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
-	f.finalizedCheckpoints.Store(common.Hash(blockRoot), newState.FinalizedCheckpoint())
+	f.lifecycleMu.Lock()
+	f.headers.Store(common.Hash(blockRoot), header)
+	f.addValidatedChild(block.ParentRoot, common.Hash(blockRoot), block.Slot)
+	f.currentJustifiedCheckpoints.Store(common.Hash(blockRoot), currentJustified)
+	f.finalizedCheckpoints.Store(common.Hash(blockRoot), finalized)
+	f.lifecycleMu.Unlock()
 
 	return newState, Success, nil
+}
+
+func isBelowPrunedBoundary(slot, lowestAvailable uint64) bool {
+	return lowestAvailable > 0 && slot < lowestAvailable-1
+}
+
+func lastFullyPrunedEpoch(pruneSlot, slotsPerEpoch uint64) (uint64, bool) {
+	completedEpochs := pruneSlot / slotsPerEpoch
+	if completedEpochs == 0 {
+		return 0, false
+	}
+	return completedEpochs - 1, true
 }
 
 func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -389,7 +437,11 @@ func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHe
 	if !has {
 		return nil, false
 	}
-	return obj.(*cltypes.BeaconBlockHeader), true
+	header := obj.(*cltypes.BeaconBlockHeader)
+	if blockRoot != f.anchorRoot && isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+		return nil, false
+	}
+	return header, true
 }
 
 func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -398,11 +450,89 @@ func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBl
 		return nil, false
 	}
 
-	return obj.(*cltypes.SignedBeaconBlock), true
+	block := obj.(*cltypes.SignedBeaconBlock)
+	if isBelowPrunedBoundary(block.Block.Slot, f.lowestAvailableBlock.Load()) {
+		return nil, false
+	}
+	return block, true
 }
 
-func (f *forkGraphDisk) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	return f.getState(blockRoot, alwaysCopy, false)
+func (f *forkGraphDisk) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
+	f.childrenMu.RLock()
+	defer f.childrenMu.RUnlock()
+	children := f.children[blockRoot]
+	return children != nil && !isBelowPrunedBoundary(children.maxSlot, f.lowestAvailableBlock.Load()) && children.maxSlot >= slot
+}
+
+func (f *forkGraphDisk) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
+	if isBelowPrunedBoundary(slot, f.lowestAvailableBlock.Load()) {
+		return false
+	}
+	found := false
+	f.headers.Range(func(key, value any) bool {
+		root, ok := key.(common.Hash)
+		if !ok || root == exceptRoot {
+			return true
+		}
+		header, ok := value.(*cltypes.BeaconBlockHeader)
+		if ok && header != nil && header.Slot == slot && header.ProposerIndex == proposerIndex {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func (f *forkGraphDisk) addValidatedChild(parentRoot, childRoot common.Hash, slot uint64) {
+	f.childrenMu.Lock()
+	defer f.childrenMu.Unlock()
+	if f.children == nil {
+		f.children = make(map[common.Hash]*validatedChildren)
+	}
+	if f.children[parentRoot] == nil {
+		f.children[parentRoot] = &validatedChildren{slots: make(map[common.Hash]uint64)}
+	}
+	children := f.children[parentRoot]
+	children.slots[childRoot] = slot
+	if slot > children.maxSlot {
+		children.maxSlot = slot
+	}
+}
+
+func (f *forkGraphDisk) removeValidatedChildren(rootsByParent map[common.Hash][]common.Hash) {
+	f.childrenMu.Lock()
+	defer f.childrenMu.Unlock()
+	for parentRoot, roots := range rootsByParent {
+		children := f.children[parentRoot]
+		if children == nil {
+			continue
+		}
+		for _, root := range roots {
+			delete(children.slots, root)
+		}
+		if len(children.slots) == 0 {
+			delete(f.children, parentRoot)
+			continue
+		}
+		children.maxSlot = 0
+		for _, slot := range children.slots {
+			if slot > children.maxSlot {
+				children.maxSlot = slot
+			}
+		}
+	}
+}
+
+func (f *forkGraphDisk) CurrentStateLocked(blockRoot common.Hash) *state.CachingBeaconState {
+	if f.currentState == nil || f.currentStateBlockRoot != blockRoot {
+		return nil
+	}
+	return f.currentState
+}
+
+func (f *forkGraphDisk) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	return f.replayState(blockRoot, false)
 }
 
 func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
@@ -410,7 +540,10 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		return
 	}
 	if f.syncedData.HeadRoot() == blockRoot {
-		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		err = f.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if headRoot != blockRoot {
+				return nil
+			}
 			// HeadRoot() already matched blockRoot, so we trust the stored root
 			// rather than recomputing BlockRoot() which can return incorrect results
 			// when the state's incremental hashing cache has been dirtied.
@@ -428,7 +561,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		return
+		if ok || err != nil {
+			return
+		}
 	}
 
 	// check if the state is in the cache
@@ -461,24 +596,14 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 	return
 }
 
-func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
-	// Snapshot currentState/currentStateBlockRoot under RLock so that
-	// concurrent callers (getCheckpointState outside forkchoice mu)
-	// don't race with AddChainSegment writes.
-	f.currentStateMu.RLock()
-	cs := f.currentState
-	csRoot := f.currentStateBlockRoot
-	f.currentStateMu.RUnlock()
-
-	if cs != nil && csRoot == blockRoot {
-		if alwaysCopy {
-			return cs.Copy()
-		}
-		return cs, nil
-	}
-	if addChainSegment && !alwaysCopy {
-		if state, ok, err := f.useCachedStateIfPossible(blockRoot, cs); ok {
+func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool) (*state.CachingBeaconState, error) {
+	if addChainSegment {
+		if state, ok, err := f.useCachedStateIfPossible(blockRoot, f.currentState); ok {
 			return state, err
+		}
+	} else {
+		if _, ok := f.GetHeader(blockRoot); !ok {
+			return nil, nil
 		}
 	}
 
@@ -494,11 +619,17 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
+			// The anchor state is dumped at startup whatever its slot.
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					if currentIteratorRoot == f.anchorRoot {
+						// Once currentState has moved on, this file is the only copy of the anchor state.
+						log.Warn("Could not read the anchor state file", "root", currentIteratorRoot, "err", err)
+					} else {
+						log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					}
 					return nil, nil
 				}
 				continue
@@ -528,10 +659,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	for _, b := range slices.Backward(blocksInTheWay) {
 		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
 			if addChainSegment {
-				f.currentStateMu.Lock()
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
-				f.currentStateMu.Unlock()
 			}
 			return nil, err
 		}
@@ -556,7 +685,72 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Che
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
-	f.badBlocks.Store(blockRoot, struct{}{})
+	slot := uint64(slotUnknown)
+	if header, ok := f.GetHeader(blockRoot); ok {
+		slot = header.Slot
+	}
+	f.badBlocks.Store(blockRoot, slot)
+}
+
+func (f *forkGraphDisk) IsBlockInvalid(blockRoot common.Hash) bool {
+	_, invalid := f.badBlocks.Load(blockRoot)
+	return invalid
+}
+
+func (f *forkGraphDisk) MarkPayloadUnavailable(blockRoot common.Hash) {
+	f.unavailablePayloads.Store(blockRoot, struct{}{})
+}
+
+func (f *forkGraphDisk) MarkPayloadAvailable(blockRoot common.Hash) {
+	f.unavailablePayloads.Delete(blockRoot)
+}
+
+func (f *forkGraphDisk) IsPayloadUnavailable(blockRoot common.Hash) bool {
+	_, unavailable := f.unavailablePayloads.Load(blockRoot)
+	return unavailable
+}
+
+func (f *forkGraphDisk) MarkPayloadAccepted(blockRoot common.Hash, verified bool) {
+	f.acceptedPayloads.Store(blockRoot, verified)
+}
+
+func (f *forkGraphDisk) ClearPayloadAccepted(blockRoot common.Hash) {
+	f.acceptedPayloads.Delete(blockRoot)
+}
+
+func (f *forkGraphDisk) PayloadAccepted(blockRoot common.Hash) (bool, bool) {
+	verified, ok := f.acceptedPayloads.Load(blockRoot)
+	if !ok {
+		return false, false
+	}
+	return verified.(bool), true
+}
+
+func (f *forkGraphDisk) retainedBlock(blockRoot common.Hash) bool {
+	header, ok := f.headers.Load(blockRoot)
+	if !ok {
+		return false
+	}
+	if blockRoot == f.anchorRoot {
+		return true
+	}
+	return !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load())
+}
+
+func (f *forkGraphDisk) IsBlockRetained(blockRoot common.Hash) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	return f.retainedBlock(blockRoot)
+}
+
+func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func(func(common.Hash) bool)) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	if !f.retainedBlock(blockRoot) {
+		return false
+	}
+	fn(f.retainedBlock)
+	return true
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
@@ -564,8 +758,20 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
+// slotUnknown marks a bad block with no header to take a slot from, so no prune
+// drops it; MarkHeaderAsInvalid records the header's slot when there is one.
+const slotUnknown = math.MaxUint64
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
-	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	f.pruneMu.Lock()
+	defer f.pruneMu.Unlock()
+
+	f.badBlocks.Range(func(key, value any) bool {
+		if value.(uint64) < pruneSlot {
+			f.badBlocks.Delete(key)
+		}
+		return true
+	})
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value any) bool {
 		hash := key.(common.Hash)
@@ -573,21 +779,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
 			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
-		if signedBlock.Block.Slot >= pruneSlot {
-			return true
-		}
-
-		oldRoots = append(oldRoots, hash)
 		return true
 	})
 	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
 
-	// prune the indicies for the epoch
-	f.currentIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
-	f.previousIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
-
+	f.addPruneMu.Lock()
+	f.lifecycleMu.Lock()
 	// Prune runs without the fork choice lock, so concurrent (or stale queued)
 	// calls may arrive out of order: only ever raise the marker.
 	for {
@@ -596,21 +795,67 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			break
 		}
 	}
-	for _, root := range oldRoots {
-		f.badBlocks.Delete(root)
-		f.blocks.Delete(root)
-		f.lightclientBootstraps.Delete(root)
-		f.currentJustifiedCheckpoints.Delete(root)
-		f.finalizedCheckpoints.Delete(root)
-		f.headers.Delete(root)
-		f.blockRewards.Delete(root)
-		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
+	f.lifecycleMu.Unlock()
+	if lastPrunedEpoch, ok := lastFullyPrunedEpoch(pruneSlot, f.beaconCfg.SlotsPerEpoch); ok {
+		currentIndexKeys := f.currentIndicies.keysThrough(lastPrunedEpoch)
+		previousIndexKeys := f.previousIndicies.keysThrough(lastPrunedEpoch)
+		f.currentIndicies.deleteKeys(currentIndexKeys)
+		f.previousIndicies.deleteKeys(previousIndexKeys)
+	}
+	f.addPruneMu.Unlock()
+	if f.pruneBoundaryHook != nil {
+		f.pruneBoundaryHook()
+	}
+
+	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	validatedRootsByParent := make(map[common.Hash][]common.Hash)
+	f.blocks.Range(func(key, value any) bool {
+		if value.(*cltypes.SignedBeaconBlock).Block.Slot < pruneSlot {
+			root := key.(common.Hash)
+			oldRoots = append(oldRoots, root)
+			if header, ok := f.headers.Load(root); ok {
+				h := header.(*cltypes.BeaconBlockHeader)
+				validatedRootsByParent[h.ParentRoot] = append(validatedRootsByParent[h.ParentRoot], root)
+			}
 		}
-		// [New in Gloas:EIP7732] Also remove envelope files
-		f.envelopeExists.Delete(root)
-		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
+		return true
+	})
+	for start := 0; start < len(oldRoots); start += pruneBatchSize {
+		end := min(start+pruneBatchSize, len(oldRoots))
+		f.lifecycleMu.Lock()
+		for _, root := range oldRoots[start:end] {
+			f.blocks.Delete(root)
+			f.lightclientBootstraps.Delete(root)
+			f.currentJustifiedCheckpoints.Delete(root)
+			f.finalizedCheckpoints.Delete(root)
+			f.headers.Delete(root)
+			f.blockRewards.Delete(root)
+			f.envelopeExists.Delete(root)
+			f.envelopeMissing.Delete(root)
+			f.invalidEnvelopes.Delete(root)
+			f.unavailablePayloads.Delete(root)
+			f.acceptedPayloads.Delete(root)
+			f.badBlocks.Delete(root)
+		}
+		f.lifecycleMu.Unlock()
+		if f.pruneBatchHook != nil {
+			f.pruneBatchHook()
+		}
+	}
+	if f.pruneChildrenHook != nil {
+		f.pruneChildrenHook()
+	}
+	f.removeValidatedChildren(validatedRootsByParent)
+
+	for _, root := range oldRoots {
+		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
+		}
+		if removeErr := f.fs.Remove(getEnvelopeFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))
+		}
+		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
 		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
@@ -661,28 +906,6 @@ func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClien
 	return obj.(*cltypes.LightClientUpdate), true
 }
 
-func (f *forkGraphDisk) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.Balances(), nil
-}
-
-func (f *forkGraphDisk) GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.InactivityScores(), nil
-}
-
 func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
 	b, ok := f.previousIndicies.get(epoch)
 	if !ok {
@@ -719,15 +942,4 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.Pa
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	err := out.DecodeSSZ(b, 0)
 	return out, err
-}
-
-func (f *forkGraphDisk) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.ValidatorSet(), nil
 }

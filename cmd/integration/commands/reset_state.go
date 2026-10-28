@@ -46,7 +46,7 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -93,7 +93,7 @@ var cmdClearBadBlocks = &cobra.Command{
 	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return err
@@ -210,7 +210,11 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error 
 			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
 			continue
 		}
-		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
+		historyStart, err := dbg.HistoryStartFrom(d)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), historyStart, txNum, step)
 	}
 	fmt.Fprintf(w, " \t\t  \t\t  \t\t  \n") // newline acts as a table separator, this is a hack to maintain same tabwriter group
 	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
@@ -244,6 +248,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error 
 	//})
 	return nil
 }
+
 func u64or0(in []byte) (v uint64) {
 	if len(in) > 0 {
 		v = binary.BigEndian.Uint64(in)

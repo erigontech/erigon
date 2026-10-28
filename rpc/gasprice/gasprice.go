@@ -40,12 +40,20 @@ const sampleNumber = 3 // Number of transactions sampled in a block
 // OracleBackend includes all necessary background APIs for oracle.
 type OracleBackend interface {
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
+	// LatestHead returns the number and canonical hash of the latest block
+	// without reading its header: the identity the tip cache is keyed by.
+	LatestHead(ctx context.Context) (uint64, common.Hash, error)
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 	GetLatestBlockNumber() (uint64, error)
 
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
+
+	// CheckBlockRewardsAvailable reports whether the transactions of a block and the
+	// gas used GetReceiptsGasUsed reads for them can still be served under the node's
+	// retention.
+	CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error
 
 	// CanonicalHashes returns the canonical hashes of [from, to] on the
 	// backend's view, one entry per height. Heights the view has no canonical
@@ -151,15 +159,10 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, hi
 // baseFee to the returned bigInt
 func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	latestHead, latestPrice := oracle.cache.GetLatest()
-	head, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+	number, headHash, err := oracle.backend.LatestHead(ctx)
 	if err != nil {
 		return latestPrice, err
 	}
-	if head == nil {
-		return latestPrice, nil
-	}
-
-	headHash := head.Hash()
 	if latestHead == headHash {
 		return latestPrice, nil
 	}
@@ -170,7 +173,6 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 		return latestPrice, nil
 	}
 
-	number := head.Number.Uint64()
 	txPrices := make([]*uint256.Int, 0, 2*sampleNumber*oracle.checkBlocks)
 
 	// Phase 1: fetch checkBlocks blocks in parallel (or sequentially when Fork
@@ -308,7 +310,8 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 // on every comparison (O(n log n) allocations). Now we allocate exactly once
 // per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
-	ignoreUnder *uint256.Int, out *[]*uint256.Int) error {
+	ignoreUnder *uint256.Int, out *[]*uint256.Int,
+) error {
 	block, err := backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)

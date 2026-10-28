@@ -35,12 +35,12 @@ const ChangeSets3 = "ChangeSets3"
 
 const (
 
-	//HashedAccounts
+	// HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
+	// key - address hash + incarnation + storage key hash
+	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
 )
@@ -138,11 +138,6 @@ const (
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
-
-	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
-	// persistent backing tier for the in-memory code cache so reads skip the
-	// CodeDomain decompression across restarts. Immutable (content-addressed).
-	TblCodeCache = "CodeCache"
 
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
@@ -250,21 +245,22 @@ const (
 
 	// GLOAS (EIP-7732)
 	BuildersDump                      = "BuildersDump"                   // slot => dump
-	Builders                          = "Builders"                       // slot => queue_diffs
+	Builders                          = "Builders"                       // slot => per-index builders diff
 	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
 	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
 	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
 	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
 	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
 	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
-	PtcWindowTable                    = "PtcWindow"                      // slot => ptc window SSZ
+	PtcWindowTable                    = "PtcWindow"                      // legacy table; no longer written
 	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	PtcWindowEpochTable               = "PtcWindowEpoch"                 // epoch-start slot => compressed ptc window SSZ
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
-	//Diagnostics tables
+	// Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 )
@@ -338,7 +334,6 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
-	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -426,6 +421,7 @@ var ChaindataTables = []string{
 	BuilderPendingPaymentsTable,
 	PtcWindowTable,
 	LatestExecutionPayloadBidTable,
+	PtcWindowEpochTable,
 }
 
 const (
@@ -441,15 +437,19 @@ var TxPoolTables = []string{
 	PoolInfo,
 	SenderLastActivity,
 }
+
 var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables
-var DownloaderTables = []string{
-	BittorrentCompletion,
-	BittorrentInfo,
-}
+
+var (
+	ConsensusTables  = ChaindataTables
+	DownloaderTables = []string{
+		BittorrentCompletion,
+		BittorrentInfo,
+	}
+)
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{
@@ -478,11 +478,15 @@ var DiagnosticsTables = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableCfgItem
-type Bucket string
+type (
+	TableCfg map[string]TableCfgItem
+	Bucket   string
+)
 
-type DBI uint32
-type TableFlags uint
+type (
+	DBI        uint32
+	TableFlags uint
+)
 
 const (
 	Default    TableFlags = 0x00
@@ -551,16 +555,18 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var TxpoolTablesCfg = TableCfg{}
-var SentryTablesCfg = TableCfg{}
-var ConsensusTablesCfg = TableCfg{}
-var DownloaderTablesCfg = TableCfg{}
-var DiagnosticsTablesCfg = TableCfg{}
-var MigrationsTablesCfg = TableCfg{Migrations: {}}
+var (
+	TxpoolTablesCfg      = TableCfg{}
+	SentryTablesCfg      = TableCfg{}
+	ConsensusTablesCfg   = TableCfg{}
+	DownloaderTablesCfg  = TableCfg{}
+	DiagnosticsTablesCfg = TableCfg{}
+	MigrationsTablesCfg  = TableCfg{Migrations: {}}
+)
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: // TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.MigrationsDB:
 		return MigrationsTablesCfg
@@ -578,6 +584,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
 }
+
 func sortBuckets() {
 	slices.Sort(ChaindataTables)
 }

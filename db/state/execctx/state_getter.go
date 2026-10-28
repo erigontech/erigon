@@ -17,16 +17,23 @@
 package execctx
 
 import (
+	"slices"
+
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
+const maxLentCodeBuf = 256 * 1024
+
 type stateGetter struct {
-	sd   *SharedDomains
-	tx   kv.TemporalTx
-	view cache.ReadView
-	m    kv.GetLatestMetrics
+	sd      *SharedDomains
+	tx      kv.TemporalTx
+	view    cache.ReadView
+	m       kv.GetLatestMetrics
+	codeBuf []byte
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -41,24 +48,49 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return g.sd.getCode(g.tx, g.view, addr, txNum)
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
+	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
+	return code, ok, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
 	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
 }
 
-func (g *stateGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return g.sd.HasPrefix(name, prefix, g.tx)
-}
-
 func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
+}
+
+// AsOfGetter reads keys as of a txNum through sd.mem, the shared state cache, then its tx.
+type AsOfGetter struct {
+	sd   *SharedDomains
+	tx   kv.TemporalTx
+	view cache.ReadView
+}
+
+// AsOfGetter binds the cache view once per tx: building it can read the DB.
+var _ kv.AsOfGetter = (*AsOfGetter)(nil)
+
+func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
+	return &AsOfGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
+}
+
+func (g *AsOfGetter) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if v, ok, err := g.sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
+		return v, ok, err
+	}
+	if v, hit := g.view.GetAsOf(domain, key, ts); hit {
+		return v, len(v) > 0, nil // an empty value is a cached absence
+	}
+	return g.tx.GetAsOf(domain, key, ts)
 }
 
 // TemporalTxStateGetter exposes execution reads over a temporal transaction.
 type TemporalTxStateGetter struct {
 	kv.TemporalTx
+	stateCache *cache.StateCache
+	view       cache.ReadView
+	stepSize   uint64
 }
 
 var _ execctxapi.StateGetter = (*TemporalTxStateGetter)(nil)
@@ -68,8 +100,52 @@ func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
 	return &TemporalTxStateGetter{TemporalTx: tx}
 }
 
+// NewCachedTemporalTxStateGetter reads through the shared state cache.
+func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCache) *TemporalTxStateGetter {
+	g := &TemporalTxStateGetter{TemporalTx: tx}
+	if stateCache == nil || !dbg.UseStateCache {
+		return g
+	}
+	// A writable tx's visible end comes from the SharedDomains flush memo, not
+	// from the tx, so only a read-only tx can vouch for a fill here. A read-only
+	// wrapper can hide a writable tx, so both ends are checked.
+	generationTx := kv.UnderlyingTx(tx)
+	if generationTx == nil || writableTx(tx) || writableTx(generationTx) {
+		return g
+	}
+	stateVersion, err := rawdb.GetStateVersion(generationTx)
+	if err != nil {
+		return g
+	}
+	g.stateCache = stateCache
+	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	g.stepSize = tx.Debug().StepSize()
+	return g
+}
+
+func writableTx(tx kv.TemporalTx) bool {
+	_, writable := tx.(kv.TemporalRwTx)
+	return writable
+}
+
 func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	return g.TemporalTx.GetLatest(name, k, opts)
+	// A bounded read observes a staged unwind, so it neither hits nor fills.
+	if g.stateCache == nil || opts.MaxStep() != kv.NoStepBound {
+		return g.TemporalTx.GetLatest(name, k, opts)
+	}
+	if v, txNum, ok := g.view.GetVisible(name, k); ok {
+		return v, kv.Step(txNum / g.stepSize), nil
+	}
+	v, step, err := g.TemporalTx.GetLatest(name, k, opts)
+	if err == nil && g.stateCache.Caches(name) {
+		readTxNum := step.LastTxNum(g.stepSize)
+		// A read-only tx's visible end is exact, so its latest value was written below it.
+		if end, ok := g.Debug().DomainVisibleEnd(name); ok && end > 0 {
+			readTxNum = min(readTxNum, end-1)
+		}
+		g.view.Fill(name, k, v, readTxNum)
+	}
+	return v, step, err
 }
 
 func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
@@ -78,6 +154,9 @@ func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, er
 }
 
 func (g *TemporalTxStateGetter) GetCodeSize(addr []byte, _ uint64) (int, bool, error) {
+	if code, _, ok := g.view.GetVisible(kv.CodeDomain, addr); ok {
+		return len(code), len(code) > 0, nil
+	}
 	size, found, err := g.GetLatestValSize(kv.CodeDomain, addr)
 	return size, found && size > 0, err
 }

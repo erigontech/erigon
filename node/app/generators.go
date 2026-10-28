@@ -20,28 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"github.com/erigontech/erigon/node/app/util/random"
-	"golang.org/x/exp/constraints"
 )
-
-func SequentialGenerator[T constraints.Integer](initialId T) IdGenerator[T] {
-	return &sequentialGenerator[T]{initialId, sync.Mutex{}}
-}
-
-type sequentialGenerator[T constraints.Integer] struct {
-	nextId T
-	mutex  sync.Mutex
-}
-
-func (generator *sequentialGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
-	generator.mutex.Lock()
-	id := generator.nextId
-	generator.nextId++
-	generator.mutex.Unlock()
-	return id, nil
-}
 
 func FixedValueGenerator[T comparable](value T) IdGenerator[T] {
 	return &fixedValueGenerator[T]{value}
@@ -59,8 +40,7 @@ func PassThroughGenerator[T comparable]() IdGenerator[T] {
 	return &passThroughGenerator[T]{}
 }
 
-type passThroughGenerator[T comparable] struct {
-}
+type passThroughGenerator[T comparable] struct{}
 
 func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	return entity[0].(T), nil
@@ -80,10 +60,10 @@ func (generator *randomGenerator[T]) GenerateId(generationContext context.Contex
 
 	switch t.Kind() {
 	case reflect.String:
-		return ((any)(random.RandomString(generator.len))).(T), nil
+		return any(random.RandomString(generator.len)).(T), nil
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
-			return ((any)(random.RandomBytes(generator.len))).(T), nil
+			return any(random.RandomBytes(generator.len)).(T), nil
 		}
 	}
 

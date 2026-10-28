@@ -50,8 +50,10 @@ type remoteOpts struct {
 	version     gointerfaces.Version
 }
 
-var _ kv.TemporalTx = (*tx)(nil)
-var _ kv.TemporalRoDB = (*DB)(nil)
+var (
+	_ kv.TemporalTx   = (*tx)(nil)
+	_ kv.TemporalRoDB = (*DB)(nil)
+)
 
 type DB struct {
 	remoteKV     remoteproto.KVClient
@@ -62,15 +64,16 @@ type DB struct {
 }
 
 type tx struct {
-	stream             remoteproto.KV_TxClient
-	ctx                context.Context
-	streamCancelFn     context.CancelFunc
-	db                 *DB
-	statelessCursors   map[string]kv.Cursor
-	cursors            []*remoteCursor
-	streams            []kv.Closer
-	viewID, id         uint64
-	streamingRequested bool
+	stream                 remoteproto.KV_TxClient
+	ctx                    context.Context
+	streamCancelFn         context.CancelFunc
+	db                     *DB
+	statelessCursors       map[string]kv.Cursor
+	cursors                []*remoteCursor
+	streams                []kv.Closer
+	viewID, id             uint64
+	historyFilesGeneration *uint64
+	streamingRequested     bool
 }
 
 type remoteCursor struct {
@@ -198,7 +201,24 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		streamCancelFn()
 		return nil, err
 	}
-	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
+	remoteTx := &tx{ctx: ctx, db: db, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId, historyFilesGeneration: msg.HistoryFilesGeneration}
+	remoteTx.stream = &txViewStream{KV_TxClient: stream, tx: remoteTx}
+	return remoteTx, nil
+}
+
+type txViewStream struct {
+	remoteproto.KV_TxClient
+	tx *tx
+}
+
+func (s *txViewStream) Recv() (*remoteproto.Pair, error) {
+	pair, err := s.KV_TxClient.Recv()
+	// Legacy replies omit both fields; do not replace their initial view ID with zero.
+	if err == nil && pair.ViewId != 0 {
+		s.tx.viewID = pair.ViewId
+		s.tx.historyFilesGeneration = pair.HistoryFilesGeneration
+	}
+	return pair, err
 }
 
 func (db *DB) Debug() kv.TemporalDebugDB {
@@ -300,7 +320,18 @@ func (tx *tx) AggTx() any {
 }
 
 func (tx *tx) Debug() kv.TemporalDebugTx {
+	// A missing generation is not generation zero: older servers cannot identify
+	// pinned history files, so their reads must not enter a shared cache.
+	if tx.historyFilesGeneration != nil {
+		return historyFilesDebugTx{tx}
+	}
 	return kv.TemporalDebugTx(tx)
+}
+
+type historyFilesDebugTx struct{ *tx }
+
+func (tx historyFilesDebugTx) HistoryFilesGeneration() uint64 {
+	return *tx.historyFilesGeneration
 }
 
 func (tx *tx) FreezeInfo() kv.FreezeInfo {
@@ -340,6 +371,14 @@ func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (s
 }
 
 func (tx *tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	panic("not implemented")
+}
+
+func (tx *tx) HistoryCoverageStart(name kv.Domain) uint64 {
+	panic("not implemented")
+}
+
+func (tx *tx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
 	panic("not implemented")
 }
 
@@ -852,12 +891,14 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 
 // Temporal Methods
 
-func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
+// HistoryStartFrom preserves remote lookup errors. Returning (0, nil) on failure
+// would remove the on-disk lower bound from history availability checks.
+func (tx *tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remoteproto.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return reply.StartFrom
+	return reply.StartFrom, nil
 }
 
 func (tx *tx) StepSize() uint64 {
@@ -903,15 +944,6 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v [
 func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
 	v, _, err := tx.GetLatest(name, k, kv.GetLatestOptions{})
 	return len(v), len(v) > 0, err
-}
-
-func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	req := &remoteproto.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
-	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

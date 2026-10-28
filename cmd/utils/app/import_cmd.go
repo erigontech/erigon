@@ -67,7 +67,7 @@ var importCommand = cli.Command{
 		&utils.ChainFlag,
 		&utils.NetworkIdFlag,
 	},
-	//Category: "BLOCKCHAIN COMMANDS",
+	// Category: "BLOCKCHAIN COMMANDS",
 	Description: `
 The import command imports blocks from an RLP-encoded form. The form can be one file
 with several RLP-encoded blocks, or several files can be used.
@@ -132,7 +132,7 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		}
 	}()
 
-	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
+	err = ethereum.Init(stack, ethCfg)
 	if err != nil {
 		return err
 	}

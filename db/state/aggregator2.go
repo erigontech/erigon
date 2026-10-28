@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -31,10 +32,11 @@ type AggOpts struct { //nolint:gocritic
 	disableFsync        bool // for tests speed
 	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
 	skipFilesDBGapCheck bool
+	btIndexInMem        bool // see BtIndexInMem
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return AggOpts{ //Defaults
+	return AggOpts{ // Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
 		genSaltIfNeed:   false,
@@ -48,7 +50,7 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
-	//TODO: rename `OpenFolder` to `ReopenFolder`
+	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			panic(err)
@@ -82,6 +84,14 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
 	}
+	if opts.btIndexInMem {
+		budget := newBtInMemBudget(estimate.TotalMemory())
+		for _, d := range a.d {
+			if d != nil {
+				d.btBudget = budget
+			}
+		}
+	}
 
 	return a, nil
 }
@@ -97,6 +107,7 @@ func (opts AggOpts) MustOpen(ctx context.Context) *Aggregator { //nolint:gocriti
 // Setters
 
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+
 func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.stepsInFrozenFile = steps
 	return opts
@@ -119,6 +130,15 @@ func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
 }
+
+// BtIndexInMem lets the domains read state .bt files into memory when the node has room for them (see
+// readBtIndexInMem). Only the process that executes blocks gains from it; other processes on the same
+// datadir would hold their own copies.
+func (opts AggOpts) BtIndexInMem() AggOpts { //nolint:gocritic
+	opts.btIndexInMem = true
+	return opts
+}
+
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts
@@ -200,7 +220,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -211,7 +231,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			name := entry.Name()
 			if strings.HasPrefix(name, "v1-") {
-				return errors.New("The datadir has bad snapshot files or they are " +
+				return errors.New("the datadir has bad snapshot files or they are " +
 					"incompatible with the current erigon version. If you want to upgrade from an" +
 					"older version, you may run the following to rename files to the " +
 					"new version: `erigon snapshots update-to-new-ver-format`")
@@ -237,7 +257,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}

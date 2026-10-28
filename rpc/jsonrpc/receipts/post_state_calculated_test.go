@@ -40,10 +40,18 @@ type unreachableFrozenBlocks struct {
 	t *testing.T
 }
 
-func (r unreachableFrozenBlocks) FrozenBlocks() uint64 {
+func (r unreachableFrozenBlocks) FrozenBlocksObserved() (uint64, bool) {
 	r.t.Fatal("FrozenBlocks read for a block whose fork answers on its own")
-	return 0
+	return 0, false
 }
+
+// neverObservedFrozenBlocks stands for a remote rpcdaemon whose backend has not answered
+// yet: the count it reports is a default, not an observation.
+type neverObservedFrozenBlocks struct {
+	dbservices.FullBlockReader
+}
+
+func (r neverObservedFrozenBlocks) FrozenBlocksObserved() (uint64, bool) { return 0, false }
 
 func TestPostStateCalculated(t *testing.T) {
 	t.Parallel()
@@ -59,6 +67,11 @@ func TestPostStateCalculated(t *testing.T) {
 	t.Run("below the fork commitment history decides without it", func(t *testing.T) {
 		t.Parallel()
 		require.True(t, PostStateCalculated(cfg, byzantium-1, true, unreachableFrozenBlocks{t: t}))
+	})
+
+	t.Run("a count that was never observed does not stand for an absent snapshot", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, PostStateCalculated(cfg, byzantium-1, false, neverObservedFrozenBlocks{}))
 	})
 }
 

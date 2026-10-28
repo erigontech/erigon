@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -226,7 +227,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
 	_, fName := filepath.Split(compressedFilePath)
 	var err error
-	var validationPassed = false
+	validationPassed := false
 	d := &Decompressor{
 		filePath:    compressedFilePath,
 		fileName:    fName,
@@ -257,7 +258,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
-				datasize.ByteSize(d.size).HR(), datasize.ByteSize(compressedMinSize).HR())}
+				datasize.ByteSize(d.size).HR(), datasize.ByteSize(compressedMinSize).HR()),
+		}
 	}
 
 	d.modTime = stat.ModTime()
@@ -267,7 +269,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	// read patterns from file
 	d.data = d._mmapHandle[:d.size]
 	var dataFileOffset uint64
-	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
+	defer d.MadvNormal().DisableReadAhead() // speedup opening on slow drives
 
 	d.version = d.data[0]
 
@@ -297,7 +299,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 			return nil, &ErrCompressedFileCorrupted{
 				FileName: fName,
 				Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
-					datasize.ByteSize(dataSize).HR(), datasize.ByteSize(compressedMinSize).HR())}
+					datasize.ByteSize(dataSize).HR(), datasize.ByteSize(compressedMinSize).HR()),
+			}
 		}
 		// not editing d.size because of checkFileLenChanges check
 	}
@@ -313,7 +316,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
-				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(len(d.data)).HR())}
+				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(len(d.data)).HR()),
+		}
 	}
 
 	// todo awskii: want to move dictionary reading to separate function?
@@ -329,7 +333,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{
 				FileName: fName,
-				Reason:   fmt.Sprintf("depth=%d > patternMaxDepth=%d ", depth, maxAllowedDepth)}
+				Reason:   fmt.Sprintf("depth=%d > patternMaxDepth=%d ", depth, maxAllowedDepth),
+			}
 		}
 		depths = append(depths, depth)
 		if depth > patternMaxDepth {
@@ -378,7 +383,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid dictSize=%s overflows file size of %s",
-				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
+				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR()),
+		}
 	}
 
 	data = d.data[pos : pos+dictSize]
@@ -428,7 +434,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 
 	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
-			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
+			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR()),
+		}
 	}
 
 	validationPassed = true
@@ -656,6 +663,7 @@ func (d *Decompressor) MadvSequential() *Decompressor {
 	_ = mmap.MadviseSequential(d._mmapHandle)
 	return d
 }
+
 func (d *Decompressor) MadvNormal() MadvDisabler {
 	if d == nil || d._mmapHandle == nil {
 		return d
@@ -664,6 +672,7 @@ func (d *Decompressor) MadvNormal() MadvDisabler {
 	_ = mmap.MadviseNormal(d._mmapHandle)
 	return d
 }
+
 func (d *Decompressor) MadvWillNeed() *Decompressor {
 	if d == nil || d._mmapHandle == nil {
 		return d
@@ -768,7 +777,7 @@ type Getter struct {
 	dataBit    int        // bit offset within current byte (0-7)
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
-	//less hot fields
+	// less hot fields
 	posTables                  []posTable // posArena.tables; only used for the subtable path
 	patCodewords               []codeword // patArena.codewords; table slots index into it
 	patternDict                *patternTable
@@ -973,18 +982,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	}
 
 	bufOffset := len(buf)
-	if len(buf)+int(wordLen) > cap(buf) {
-		newBuf := make([]byte, len(buf)+int(wordLen))
-		copy(newBuf, buf)
-		buf = newBuf
-	} else {
-		// Expand buffer
-		if len(buf)+int(wordLen) < 0 {
-			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
-			return nil, 0
-		}
-		buf = buf[:len(buf)+int(wordLen)]
+	if int(wordLen) < 0 || len(buf)+int(wordLen) < 0 {
+		log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
+		return nil, 0
 	}
+	buf = slices.Grow(buf, int(wordLen))[:len(buf)+int(wordLen)]
 
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
@@ -1042,6 +1044,14 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	return buf, postLoopPos
 }
 
+// PeekSize returns the next word's uncompressed length without advancing the getter.
+func (g *Getter) PeekSize() int {
+	dataP, dataBit := g.dataP, g.dataBit
+	wordLen := g.nextPosClean() - 1
+	g.dataP, g.dataBit = dataP, dataBit
+	return int(wordLen)
+}
+
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -1050,7 +1060,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 			g.dataP++
 			g.dataBit = 0
 		}
-		return g.data[g.dataP:g.dataP], g.dataP
+		return g.data[g.dataP:g.dataP:g.dataP], g.dataP
 	}
 	g.nextPos()
 	if g.dataBit > 0 {
@@ -1059,7 +1069,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	}
 	pos := g.dataP
 	g.dataP += wordLen
-	return g.data[pos:g.dataP], g.dataP
+	return g.data[pos:g.dataP:g.dataP], g.dataP
 }
 
 // Skip moves offset to the next word and returns the new offset and the length of the word.

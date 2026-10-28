@@ -53,6 +53,14 @@ func (b *gapBackend) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (
 	}, nil
 }
 
+func (b *gapBackend) LatestHead(ctx context.Context) (uint64, common.Hash, error) {
+	h, err := b.HeaderByNumber(ctx, rpc.BlockNumber(b.head))
+	if err != nil || h == nil {
+		return 0, common.Hash{}, err
+	}
+	return b.head, h.Hash(), nil
+}
+
 func (b *gapBackend) BlockByNumber(context.Context, rpc.BlockNumber) (*types.Block, error) {
 	return nil, nil
 }
@@ -66,6 +74,8 @@ func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Re
 }
 
 func (b *gapBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return nil, nil }
+
+func (b *gapBackend) CheckBlockRewardsAvailable(context.Context, uint64) error { return nil }
 
 // Zero hashes keep every height unresolved, so the oracle serves the range
 // uncached through HeaderByNumber and the missing-block gap stays visible.
@@ -101,7 +111,8 @@ func TestFeeHistoryTruncatesBlobArrays(t *testing.T) {
 	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 
 	oldest, _, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(
-		context.Background(), 5, rpc.BlockNumber(10), nil)
+		context.Background(), 5, rpc.BlockNumber(10), nil,
+	)
 	require.NoError(t, err)
 
 	// Range is 6..10 with block 8 missing, so blocks 6 and 7 are returned.

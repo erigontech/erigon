@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -37,7 +38,7 @@ type DerivableList interface {
 
 func DeriveSha(list DerivableList) common.Hash {
 	if list.Len() < 1 {
-		return trie.EmptyRoot
+		return empty.RootHash
 	}
 
 	var curr bytes.Buffer
@@ -96,7 +97,7 @@ func deriveShaRawValues(encoded []byte, unwrapStringValues bool) (common.Hash, e
 		return common.Hash{}, err
 	}
 	if count == 0 {
-		return trie.EmptyRoot, nil
+		return empty.RootHash, nil
 	}
 
 	builder := newRawDeriveShaBuilder(firstDerivationIndex(count))
@@ -302,6 +303,15 @@ func intsize(i uint) (size int) {
 
 func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
 	return crypto.Keccak256Hash(rawRlpData)
+}
+
+// TransactionHashFromEncoding returns the hash of a transaction in any encoding DecodeTransaction accepts.
+func TransactionHashFromEncoding(enc []byte) (common.Hash, error) {
+	binary, err := BinaryFromStoredTxn(enc)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return crypto.Keccak256Hash(binary), nil
 }
 
 func RlpHash(x any) common.Hash {

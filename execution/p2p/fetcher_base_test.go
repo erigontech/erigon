@@ -591,7 +591,8 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId,
 				bodyBytes,
 				rlp.RawValue{0x80},
 			),
@@ -605,16 +606,33 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 	}
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId))
-	test.fetcher.config = test.fetcher.config.CopyWithOptions(WithMaxRetries(0))
 	test.mockSentryStreams(mockRequestResponse)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errTooManyBodies *ErrTooManyBodies
 		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
 		require.ErrorAs(t, err, &errTooManyBodies)
+		require.EqualError(t, err, "too many bodies in fetch bodies response: requested=1, received>=2")
 		require.Equal(t, 1, errTooManyBodies.requested)
 		require.Equal(t, 2, errTooManyBodies.received)
 		require.Nil(t, bodies.Data)
 	})
+}
+
+func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
+	encodedBodies, err := rlp.EncodeToBytes(&types.Body{})
+	require.NoError(t, err)
+	encodedBodies = append(encodedBodies, encodedBodies...)
+	headers := []*types.Header{newMockHeaderForBody(1, &types.Body{})}
+
+	// Pool entries may be dropped, so exercise several excess/empty pairs.
+	for range 32 {
+		_, err := decodeBlockBodiesResponse(encodedBodies, headers)
+		require.ErrorIs(t, err, &ErrTooManyBodies{})
+
+		bodies, err := decodeBlockBodiesResponse(nil, headers)
+		require.NoError(t, err)
+		require.Empty(t, bodies)
+	}
 }
 
 func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
@@ -627,7 +645,8 @@ func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockRawBlockBodiesPacketBytes(t, requestId+1,
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId+1,
 				rlp.RawValue{0x80},
 			),
 		},
@@ -653,7 +672,7 @@ func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
 	})
 }
 
-func TestFetcherFetchBodiesPenalizesInvalidMatchingResponse(t *testing.T) {
+func TestFetcherFetchBodiesRejectsInvalidMatchingResponse(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -663,7 +682,8 @@ func TestFetcherFetchBodiesPenalizesInvalidMatchingResponse(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId,
 				rlp.RawValue{0x80},
 			),
 		},
@@ -677,7 +697,6 @@ func TestFetcherFetchBodiesPenalizesInvalidMatchingResponse(t *testing.T) {
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId))
 	test.mockSentryStreams(mockRequestResponse)
-	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
 		require.True(t, rlp.IsInvalidRLPError(err), err)

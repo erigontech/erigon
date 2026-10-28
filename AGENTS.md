@@ -2,6 +2,16 @@
 
 Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
 
+## Ponytail
+
+Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to keep changes simple.
+
+- Reuse an existing installation. Otherwise, follow the upstream [installation instructions](https://github.com/DietrichGebert/ponytail#install) and [portability guide](https://github.com/DietrichGebert/ponytail/blob/main/docs/agent-portability.md) for your agent and version. Prefer user-local setup, complete prerequisites and activation steps, and verify it is loaded.
+- If native integration is unavailable, clone Ponytail outside the Erigon checkout and read `skills/ponytail/SKILL.md` from that checkout at the start of each coding session. Preserve existing agent configuration and this `AGENTS.md`.
+- Before handing off code changes, use `ponytail-review` through your agent's invocation syntax, or read and apply `skills/ponytail-review/SKILL.md` from the Ponytail checkout. Review the current diff for unnecessary complexity; this supplements correctness, security, and performance checks.
+
+Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
+
 ## Build & Test
 
 ```bash
@@ -27,6 +37,7 @@ Before committing, always verify changes with: `make lint && make erigon integra
 | Directory | Purpose | Component Docs |
 |-----------|---------|----------------|
 | `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
+| `execution/commitment/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
 | `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
 | `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
 | `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
@@ -51,6 +62,12 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 ### Before adding a test
 
 Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
+
+### Before changing a bound or constant
+
+A deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+
+A red test does not settle this. It proves the code disagrees with your expectation, not that your expectation matches the system's contract — a test that encodes the same wrong assumption as the change passes for the wrong reason.
 
 ### For bug fixes
 
@@ -147,30 +164,6 @@ When a comment is genuinely required, it MUST be:
 - **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, and "used by X, Y, Z" callsite lists. That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
 - **Not a restatement of the code.** If a reader could delete the comment without losing information, delete it. Standard Go idioms and well-known library behavior don't need annotation.
 
-A good comment:
-
-```go
-// Safe to close while read views are still iterating: the memStore backing
-// makes Rollback a no-op on the data.
-func (m *MemoryMutation) Rollback() { ... }
-```
-
-The same constraint written badly — long, name-dropping internal callers, threading review history through the source:
-
-```go
-// Rollback releases this mutation's local cursor cache and forwards Rollback
-// to the backing in-memory tx / db. Concurrency invariant (load-bearing —
-// see also Filters.WithOverlay): for a MemoryMutation created via
-// NewMemoryBatch (the pure-Go memStore backing used by
-// SharedDomains.blockOverlay), memTx.Rollback and memDb.Close are no-ops on
-// the in-memory data — see memory_store.go. That is what makes it safe for
-// the FCU bg-commit goroutine to call Close on the published BlockOverlay
-// while concurrent RPC readers are still iterating views obtained via
-// NewReadView / NewTemporalReadView. If this is ever switched to
-// NewMemoryBatchMDBX (real MDBX backing, where Rollback DOES invalidate
-// cursors), the bg-commit close + concurrent-RPC-reader pattern becomes
-// unsafe and refcounting/drain logic is required...
-```
 
 If a constraint really needs to be enforced for the codebase's safety, prefer **code that enforces it** (a runtime assert, a type the caller can't misuse, a single private constructor) over a comment that describes it. A `panic` survives refactors; a long comment doesn't.
 
@@ -214,22 +207,6 @@ When opening a PR against `release/3.4` (or another release branch):
 ## Pre-push
 
 Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
-
-## Lint Notes
-
-The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
-
-A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
-
-Common lint categories and fixes:
-- **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
-- **prealloc:** Pre-allocate slices when the length is known from a range.
-- **unslice:** Remove redundant `[:]` on variables that are already slices.
-- **newDeref:** Replace `*new(T)` with `T{}`.
-- **appendCombine:** Combine consecutive `append` calls into one.
-- **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
-- **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
-- **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
 
 ## Workflows
 

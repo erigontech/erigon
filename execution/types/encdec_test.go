@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -91,10 +92,10 @@ func (tr *TRand) RandBloom() Bloom {
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
 	return &Withdrawal{
-		Index:     tr.rnd.Uint64(),
-		Validator: tr.rnd.Uint64(),
+		Index:     hexutil.Uint64(tr.rnd.Uint64()),
+		Validator: hexutil.Uint64(tr.rnd.Uint64()),
 		Address:   tr.RandAddress(),
-		Amount:    tr.rnd.Uint64(),
+		Amount:    hexutil.Uint64(tr.rnd.Uint64()),
 	}
 }
 
@@ -331,14 +332,6 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 	return txns
 }
 
-func (tr *TRand) RandRawTransactions(size int) [][]byte {
-	txns := make([][]byte, size)
-	for i := range size {
-		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
-	}
-	return txns
-}
-
 func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
 	for i := range size {
@@ -371,24 +364,6 @@ func (tr *TRand) RandRawBody() *RawBody {
 		Transactions: tr.RandRLPTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-	}
-}
-
-func (tr *TRand) RandRawBlock(setNil bool) *RawBlock {
-	if setNil {
-		return &RawBlock{
-			Header: tr.RandHeader(),
-			Body: &RawBody{
-				Uncles:      nil,
-				Withdrawals: nil,
-				// Deposits:     nil,
-			},
-		}
-	}
-
-	return &RawBlock{
-		Header: tr.RandHeader(),
-		Body:   tr.RandRawBody(),
 	}
 }
 
@@ -517,9 +492,10 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		}
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func compareBodies(t *testing.T, a, b *Body) error {
@@ -534,10 +510,10 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func TestTransactionEncodeDecodeRLP(t *testing.T) {

@@ -28,12 +28,52 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/semaphore"
 )
+
+func TestFilterNonPrivatePeerAddressesPreservesExistingLocalDiscoveryBehavior(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip6/fc00::1/tcp/9000"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
+	}}
+
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Equal(t, []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
+	}, info.Addrs)
+}
+
+func TestFilterNonPrivatePeerAddressesPreservesLinkLocalEndpoints(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/169.254.1.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fe80::1/udp/9001/quic-v1"),
+	}}
+
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Len(t, info.Addrs, 2)
+}
+
+func TestFilterNonPrivatePeerAddressesRejectsPrivateOnlyPeer(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fc00::1/udp/9001/quic-v1"),
+	}}
+
+	require.False(t, filterNonPrivatePeerAddresses(info))
+	require.Empty(t, info.Addrs)
+}
 
 func TestListenForPeersDialsDirectPeersWithoutDiscovery(t *testing.T) {
 	local, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))

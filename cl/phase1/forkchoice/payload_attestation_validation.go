@@ -37,6 +37,8 @@ const (
 	maxPendingValidationContextBuilds            = int(clparams.PtcSize)
 )
 
+var errPayloadAttestationSlotMismatch = errors.New("payload attestation slot does not match block slot")
+
 type payloadAttestationValidationContext struct {
 	slot       uint64
 	domain     common.Hash
@@ -174,15 +176,15 @@ func (f *ForkChoiceStore) payloadAttestationValidationContext(
 	slot uint64,
 ) (*payloadAttestationValidationContext, error) {
 	return f.payloadAttestationContexts.get(ctx, blockRoot, func() (*payloadAttestationValidationContext, error) {
-		blockState, err := f.GetStateAtBlockRoot(blockRoot, true)
+		blockState, err := f.GetStateAtBlockRoot(blockRoot)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: block state unavailable for root %v: %w", ErrIgnore, blockRoot, err)
 		}
 		if blockState == nil {
 			return nil, fmt.Errorf("%w: block state not found for root %v", ErrIgnore, blockRoot)
 		}
 		if slot != blockState.Slot() {
-			return nil, fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, slot, blockState.Slot())
+			return nil, fmt.Errorf("%w: %w: attestation slot %d, block slot %d", ErrIgnore, errPayloadAttestationSlotMismatch, slot, blockState.Slot())
 		}
 
 		ptc, err := blockState.GetPTC(slot)
@@ -231,7 +233,7 @@ func (f *ForkChoiceStore) payloadAttestationValidationContext(
 
 func (c *payloadAttestationValidationContext) ptcPositions(msg *cltypes.PayloadAttestationMessage) ([]int, error) {
 	if msg.Data.Slot != c.slot {
-		return nil, fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, msg.Data.Slot, c.slot)
+		return nil, fmt.Errorf("%w: %w: attestation slot %d, block slot %d", ErrIgnore, errPayloadAttestationSlotMismatch, msg.Data.Slot, c.slot)
 	}
 	positions, ok := c.positions[msg.ValidatorIndex]
 	if !ok {
@@ -240,12 +242,18 @@ func (c *payloadAttestationValidationContext) ptcPositions(msg *cltypes.PayloadA
 	return positions, nil
 }
 
-func (c *payloadAttestationValidationContext) validateSignature(msg *cltypes.PayloadAttestationMessage) error {
+func (c *payloadAttestationValidationContext) validateSignature(ctx context.Context, msg *cltypes.PayloadAttestationMessage, verifySignature PayloadAttestationSignatureVerifier) error {
 	signingRoot, err := fork.ComputeSigningRoot(msg.Data, c.domain[:])
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %w", err)
 	}
 	publicKey := c.publicKeys[msg.ValidatorIndex]
+	if verifySignature != nil {
+		if err := verifySignature(ctx, msg.Signature[:], signingRoot[:], publicKey[:]); err != nil {
+			return fmt.Errorf("error while validating signature: %w", err)
+		}
+		return nil
+	}
 	valid, err := bls.VerifyAggregate(msg.Signature[:], signingRoot[:], [][]byte{publicKey[:]})
 	if err != nil {
 		return fmt.Errorf("error while validating signature: %w", err)

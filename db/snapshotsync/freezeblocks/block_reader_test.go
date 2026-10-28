@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -608,6 +609,38 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	require.Positive(t, bodiesInTxView())
 }
 
+type minimumBlockBackendClient struct {
+	remoteproto.ETHBACKENDClient
+	block uint64
+	err   error
+}
+
+func (c minimumBlockBackendClient) MinimumBlockAvailable(context.Context, *emptypb.Empty, ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
+	return &remoteproto.MinimumBlockAvailableReply{BlockNum: c.block}, c.err
+}
+
+func TestRemoteBlockReaderMinimumBlockAvailable(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		block uint64
+		want  uint64
+		err   error
+	}{
+		{name: "unpruned", block: 0, want: 0},
+		{name: "legacy_unpruned", block: 1, want: 0},
+		{name: "pruned", block: 1000, want: 1000},
+		{name: "backend_error", err: errors.New("backend unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := NewRemoteBlockReader(minimumBlockBackendClient{block: tc.block, err: tc.err})
+			floor, err := reader.MinimumBlockAvailable(t.Context(), nil)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, floor)
+		})
+	}
+}
+
 // frozenBlocksBackendClient stubs the one call under test; every other method of the
 // embedded interface stays nil and panics if reached.
 type frozenBlocksBackendClient struct {
@@ -620,10 +653,8 @@ func (c frozenBlocksBackendClient) FrozenBlocks(ctx context.Context, in *emptypb
 	return c.reply, c.err
 }
 
-// TestRemoteBlockReaderFrozenBlocks pins that the remote reader answers FrozenBlocks
-// through the backend instead of panicking: the receipt gates and eth_capabilities
-// reach it on a remote rpcdaemon. The signature leaves no way to surface an error, so
-// a failed call reports zero, the conservative answer for every caller.
+// The scalar getter reports zero on failure. Callers that need to distinguish
+// unavailable metadata from an empty snapshot set must use FrozenBlocksObserved.
 func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -638,13 +669,72 @@ func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	})
 }
 
+type txNumBackendClient struct {
+	frozenBlocksBackendClient
+	body      []byte
+	bodyCalls int
+}
+
+func (c *txNumBackendClient) CanonicalBodyForStorage(context.Context, *remoteproto.CanonicalBodyForStorageRequest, ...grpc.CallOption) (*remoteproto.CanonicalBodyForStorageReply, error) {
+	c.bodyCalls++
+	return &remoteproto.CanonicalBodyForStorageReply{Body: c.body}, nil
+}
+
+func TestRemoteTxNumsRequireObservedFrozenRange(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdbv3.TxNums.Append(tx, 50, 200)
+	}))
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	body, err := rlp.EncodeToBytes(&types.BodyForStorage{BaseTxnID: 80, TxCount: 4})
+	require.NoError(t, err)
+	client := &txNumBackendClient{
+		frozenBlocksBackendClient: frozenBlocksBackendClient{
+			reply: &remoteproto.FrozenBlocksReply{FrozenBlocks: 42},
+			err:   errors.New("backend unavailable"),
+		},
+		body: body,
+	}
+	reader := NewRemoteBlockReader(client)
+	txNums := reader.TxnumReader()
+	_, err = txNums.Max(ctx, tx, 42)
+	require.ErrorContains(t, err, "remote frozen range is unknown")
+	_, err = txNums.Min(ctx, tx, 43)
+	require.ErrorContains(t, err, "remote frozen range is unknown")
+	require.Zero(t, client.bodyCalls)
+
+	client.err = nil
+	reader.frozenBlocks.SetTTL(0)
+	maxTxNum, err := txNums.Max(ctx, tx, 42)
+	require.NoError(t, err)
+	require.EqualValues(t, 83, maxTxNum)
+	minTxNum, err := txNums.Min(ctx, tx, 43)
+	require.NoError(t, err)
+	require.EqualValues(t, 84, minTxNum)
+	require.Equal(t, 2, client.bodyCalls)
+
+	_, found, err := txNums.MaxExact(ctx, tx, nil, 43)
+	require.NoError(t, err)
+	require.False(t, found, "a body above the frozen range has storage IDs, not canonical txNums")
+	require.Equal(t, 2, client.bodyCalls, "do not read MDBX bodies for missing mappings")
+}
+
 type countingFrozenBlocksClient struct {
 	remoteproto.ETHBACKENDClient
+	err   error
 	calls atomic.Int64
 }
 
 func (c *countingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
 	c.calls.Add(1)
+	if c.err != nil {
+		return nil, c.err
+	}
 	return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
 }
 
@@ -659,7 +749,8 @@ func (c stalledFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb
 
 // TestRemoteBlockReaderFrozenBlocksCachesValue pins that the getter does not perform a
 // live RPC on every call: receipt and capability handlers reach it while holding read
-// transactions, so repeated calls within the TTL must be answered from the cache.
+// transactions, so repeated calls within the TTL must be answered from the cache, and a
+// stale one must be answered before the refresh it triggers.
 func TestRemoteBlockReaderFrozenBlocksCachesValue(t *testing.T) {
 	t.Parallel()
 
@@ -670,9 +761,10 @@ func TestRemoteBlockReaderFrozenBlocksCachesValue(t *testing.T) {
 	require.Equal(t, uint64(42), reader.FrozenBlocks())
 	require.EqualValues(t, 1, client.calls.Load())
 
-	reader.frozenBlocksTTL = 0
+	reader.frozenBlocks.SetTTL(0)
 	require.Equal(t, uint64(42), reader.FrozenBlocks())
-	require.EqualValues(t, 2, client.calls.Load())
+	require.Eventually(t, func() bool { return client.calls.Load() == 2 },
+		time.Second, 10*time.Millisecond, "a stale value is refreshed behind the caller")
 }
 
 // TestRemoteBlockReaderFrozenBlocksStalledBackend pins that a connected but
@@ -708,18 +800,37 @@ func (c *recoveringFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emp
 }
 
 // TestRemoteBlockReaderFrozenBlocksRetriesAfterFailure pins that a failed fetch is not
-// cached as if it had succeeded. Zero is not a neutral answer: it makes the receipt
-// paths treat pre-Byzantium blocks as needing re-execution, which a node with pruned
-// state history cannot serve.
+// remembered as an observation: it reports that nothing was observed, and once its
+// attempt is no longer fresh the backend is asked again.
 func TestRemoteBlockReaderFrozenBlocksRetriesAfterFailure(t *testing.T) {
 	t.Parallel()
 
-	client := &recoveringFrozenBlocksClient{}
-	reader := NewRemoteBlockReader(client)
-	reader.frozenBlocksTTL = time.Hour
+	reader := NewRemoteBlockReader(&recoveringFrozenBlocksClient{})
+	reader.frozenBlocks.SetTTL(0)
 
-	require.Zero(t, reader.FrozenBlocks())
-	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	value, observed := reader.FrozenBlocksObserved()
+	require.Zero(t, value)
+	require.False(t, observed, "callers read zero as \"no snapshots\", which a failed fetch did not say")
+
+	value, observed = reader.FrozenBlocksObserved()
+	require.Equal(t, uint64(42), value)
+	require.True(t, observed)
+}
+
+// TestRemoteBlockReaderFrozenBlocksSuppressesRepeatFetchesAfterFailure pins that a
+// backend that is down costs one attempt per TTL rather than one per caller.
+func TestRemoteBlockReaderFrozenBlocksSuppressesRepeatFetchesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	client := &countingFrozenBlocksClient{err: errors.New("backend down")}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocks.SetTTL(time.Hour)
+
+	for range 8 {
+		require.Zero(t, reader.FrozenBlocks())
+	}
+	require.EqualValues(t, 1, client.calls.Load(),
+		"a recent failed attempt stands in for the ones that would follow it")
 }
 
 // blockingFrozenBlocksClient reports when a call arrives and holds it until released.
@@ -800,9 +911,9 @@ func TestRemoteBlockReaderFrozenBlocksWaitsForTheFirstFetch(t *testing.T) {
 }
 
 // TestRemoteBlockReaderFrozenBlocksServesCacheWhileRefreshing pins that once a value has
-// been observed a slow backend delays only the goroutine refreshing it. FrozenBlocks
-// sits on every receipt request, so holding the others behind the refresh turns one slow
-// backend into a stall of the whole handler pool.
+// been observed no caller waits for the next one: a slow backend delays only the refresh
+// running behind them. FrozenBlocks sits on every receipt request, so holding callers
+// behind the refresh turns one slow backend into a stall of the whole handler pool.
 func TestRemoteBlockReaderFrozenBlocksServesCacheWhileRefreshing(t *testing.T) {
 	t.Parallel()
 
@@ -811,102 +922,65 @@ func TestRemoteBlockReaderFrozenBlocksServesCacheWhileRefreshing(t *testing.T) {
 	reader.frozenBlocksTimeout = 10 * time.Second
 	require.Equal(t, uint64(42), reader.FrozenBlocks())
 
-	reader.frozenBlocksTTL = 0
-	refreshing := make(chan uint64, 1)
-	go func() { refreshing <- reader.FrozenBlocks() }()
+	reader.frozenBlocks.SetTTL(0)
+	require.Equal(t, uint64(42), reader.FrozenBlocks(), "the caller that finds the value stale does not wait for the refresh")
 	<-client.entered
 
-	waiting := make(chan uint64, 1)
-	go func() { waiting <- reader.FrozenBlocks() }()
-	select {
-	case value := <-waiting:
-		require.Equal(t, uint64(42), value, "the observed value answers while the refresh runs")
-	case <-time.After(time.Second):
-		close(client.release)
-		t.Fatal("FrozenBlocks held a caller behind an in-flight refresh")
-	}
-	require.EqualValues(t, 2, client.calls.Load(), "the waiting caller must not issue its own fetch")
+	require.Equal(t, uint64(42), reader.FrozenBlocks(), "the observed value answers while the refresh runs")
+	require.EqualValues(t, 2, client.calls.Load(), "the refresh in flight is not duplicated")
 
 	close(client.release)
-	require.Equal(t, uint64(43), <-refreshing)
+	require.Eventually(t, func() bool { return reader.FrozenBlocks() == 43 },
+		2*time.Second, 10*time.Millisecond, "the refreshed value replaces the one served")
 }
 
-// failingFirstFrozenBlocksClient holds and fails its first call, then holds its second
-// and answers it, so a test can watch the queue re-form behind the caller that took over.
+// failingFirstFrozenBlocksClient reports when a call arrives, holds it, and fails it.
 type failingFirstFrozenBlocksClient struct {
 	remoteproto.ETHBACKENDClient
 	entered chan int64
 	release chan struct{}
-	answer  chan struct{}
 	calls   atomic.Int64
 }
 
 func (c *failingFirstFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
-	call := c.calls.Add(1)
-	c.entered <- call
-	if call == 1 {
-		<-c.release
-		return nil, errors.New("backend down")
-	}
-	<-c.answer
-	return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+	c.entered <- c.calls.Add(1)
+	<-c.release
+	return nil, errors.New("backend down")
 }
 
-// TestRemoteBlockReaderFrozenBlocksAsksAgainWhenTheFirstFetchFails pins that waiting for
-// the first fetch is not a substitute for asking: a caller that waited and found nothing
-// observed has spent no attempt of its own, and zero is the answer this getter must not
-// hand out while it can still be asked.
-func TestRemoteBlockReaderFrozenBlocksAsksAgainWhenTheFirstFetchFails(t *testing.T) {
+// TestRemoteBlockReaderFrozenBlocksSharesTheFirstFailedFetch pins that callers arriving
+// while the first fetch is in flight share it: when it fails they all report that nothing
+// was observed, and none of them spends a timeout of its own on a backend that is down.
+func TestRemoteBlockReaderFrozenBlocksSharesTheFirstFailedFetch(t *testing.T) {
 	t.Parallel()
 
 	const waiters = 8
 	client := &failingFirstFrozenBlocksClient{
 		entered: make(chan int64, waiters+1),
 		release: make(chan struct{}),
-		answer:  make(chan struct{}),
 	}
 	reader := NewRemoteBlockReader(client)
-	reader.frozenBlocksTTL = time.Hour
+	reader.frozenBlocks.SetTTL(time.Hour)
 
-	failing := make(chan uint64, 1)
-	go func() { failing <- reader.FrozenBlocks() }()
+	results := make(chan uint64, waiters+1)
+	go func() { results <- reader.FrozenBlocks() }()
 	require.EqualValues(t, 1, <-client.entered)
 
-	waiting := make(chan uint64, waiters)
 	for range waiters {
-		go func() { waiting <- reader.FrozenBlocks() }()
+		go func() { results <- reader.FrozenBlocks() }()
 	}
 	select {
-	case value := <-waiting:
+	case value := <-results:
 		close(client.release)
-		close(client.answer)
 		t.Fatalf("a caller was served %d while the first fetch was still in flight", value)
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(client.release)
-	require.Zero(t, <-failing, "the caller whose own fetch failed has no value to report")
 
-	require.EqualValues(t, 2, <-client.entered, "one of the waiting callers takes the fetch over")
-	select {
-	case value := <-waiting:
-		close(client.answer)
-		t.Fatalf("a caller was served %d while the retry was still in flight", value)
-	case call := <-client.entered:
-		close(client.answer)
-		t.Fatalf("a waiting caller ran a fetch of its own (call %d) instead of taking the retry", call)
-	case <-time.After(100 * time.Millisecond):
+	for range waiters + 1 {
+		require.Zero(t, <-results, "a failed first fetch leaves nothing to report")
 	}
-	close(client.answer)
-
-	for range waiters {
-		select {
-		case value := <-waiting:
-			require.Equal(t, uint64(42), value, "the retry answers the caller that ran it and the ones queued behind it")
-		case <-time.After(5 * time.Second):
-			t.Fatal("a waiting caller neither answered nor retried")
-		}
-	}
-	require.EqualValues(t, 2, client.calls.Load(), "one retry, not one per waiting caller")
+	require.EqualValues(t, 1, client.calls.Load(), "one attempt, not one per caller")
 }
 
 // stalledCountingFrozenBlocksClient never answers and reports when a call arrives.
@@ -946,4 +1020,257 @@ func TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout(t *testing.T) {
 	require.Zero(t, <-waiting, "a stalled backend leaves nothing to report")
 	require.LessOrEqual(t, client.calls.Load(), int64(2), "each caller reaches the backend once, so no caller spends more than its own timeout")
 	require.Zero(t, <-first)
+}
+
+// TestMinimumBlockAvailableWithoutVisibleTransactionSegments pins that a frozen range
+// holding no visible transaction segment serves no complete block: alignment hides every
+// segment above the height the other types reach, and the minimum then has to come from
+// the database rather than from the types that are there.
+func TestMinimumBlockAvailableWithoutVisibleTransactionSegments(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	ver := version.V1_0
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.NotZero(t, snapshots.BlocksAvailable(), "headers and bodies are frozen")
+	view := snapshots.View()
+	defer view.Close()
+	require.Empty(t, view.Segments(snaptype2.Transactions), "the transaction segment starts above the aligned height")
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rawdb.WriteBodyForStorage(rwTx, common.Hash{0}, 0, &types.BodyForStorage{}))
+	require.NoError(t, rawdb.WriteBodyForStorage(rwTx, common.Hash{1}, 1000, &types.BodyForStorage{}))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1000), minimum, "no transaction is readable below the first database block")
+}
+
+// TestMinimumBlockAvailableKeepsSegmentsWhenTheDatabaseHoldsNoBody pins that a database
+// with nothing beyond genesis does not overrule the segments on disk: it has no answer to
+// give, and reporting genesis for a datadir frozen mid-chain contradicts the blocks the
+// node advertises.
+func TestMinimumBlockAvailableKeepsSegmentsWhenTheDatabaseHoldsNoBody(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	ver := version.V1_0
+	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 6000, 7000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.NotZero(t, snapshots.BlocksAvailable(), "headers and bodies are frozen")
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5000), minimum, "the empty database answers nothing, so the segments stand")
+}
+
+// A complete block needs all three segment types, regardless of which starts latest.
+func TestMinimumBlockAvailableTakesTheHighestTypeMinimum(t *testing.T) {
+	for _, latest := range snaptype2.BlockSnapshotTypes {
+		t.Run(latest.Name(), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			db := temporaltest.NewTestDB(t, dirs)
+			logger := log.New()
+			for _, typ := range snaptype2.BlockSnapshotTypes {
+				if typ.Enum() != latest.Enum() {
+					createTestSegmentFile(t, 0, 1000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+				}
+				createTestSegmentFile(t, 1000, 2000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+			}
+			snapshots := db.(HasBlockFiles).DebugBlockFiles()
+			require.NoError(t, snapshots.OpenFolder())
+			tx, err := db.BeginRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1000), minimum)
+		})
+	}
+}
+
+// A transaction of a block that is still in the DB carries the sender stored for it, so the
+// RPC does not recover it from the signature; without stored senders it has none.
+func TestTxnByIdxInBlockCarriesStoredSender(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{
+		types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+		types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+	})
+	require.NoError(t, err)
+	senders := []common.Address{{0xa}, {0xb}}
+	for num, hash := range map[uint64]common.Hash{1: {1}, 2: {2}} {
+		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: raw})
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hash, num))
+	}
+	require.NoError(t, rawdb.WriteSenders(rwTx, common.Hash{1}, 1, senders))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 2, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, ok = txn.GetSender()
+	require.False(t, ok, "block 2 has no stored senders")
+	for i, want := range senders {
+		txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 1, i)
+		require.NoError(t, err)
+		require.True(t, ok)
+		got, ok := txn.GetSender()
+		require.True(t, ok, "txn %d has no sender", i)
+		require.Equal(t, want, got.Value())
+	}
+}
+
+// A raw body skips the transaction decode, so it must carry the bytes the decoded body encodes
+// to, for every transaction type and for both stored forms: binary, and wrapped in an RLP string.
+func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	to := common.Address{1}
+	dynFee := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000, Data: []byte("abc")},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	txs := types.Transactions{
+		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+		&types.AccessListTx{
+			LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1),
+			AccessList: types.AccessList{{Address: to, StorageKeys: []common.Hash{{0x01}}}},
+		},
+		func() types.Transaction { txn := dynFee(); return &txn }(),
+		&types.BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&types.SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []types.Authorization{{ChainID: *uint256.NewInt(1), Address: to, Nonce: 2}}},
+	}
+	binaryTxs, err := types.MarshalTransactionsBinary(txs)
+	require.NoError(t, err)
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	_, err = rawdb.WriteRawBody(rwTx, common.Hash{1}, 1, &types.RawBody{Transactions: binaryTxs})
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBody(rwTx, common.Hash{2}, 2, &types.Body{Transactions: txs, Withdrawals: []*types.Withdrawal{{Index: 7, Address: to, Amount: 9}}}))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	missing, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{3}, 3)
+	require.NoError(t, err)
+	require.Nil(t, missing)
+	for num, hash := range map[uint64]common.Hash{1: {1}, 2: {2}} {
+		decoded, err := blockReader.BodyWithTransactions(t.Context(), tx, hash, num)
+		require.NoError(t, err)
+		want, err := decoded.BinaryRawBody()
+		require.NoError(t, err)
+		got, err := blockReader.BodyWithRawTransactions(t.Context(), tx, hash, num)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "block %d", num)
+		require.Equal(t, binaryTxs, got.Transactions, "block %d", num)
+	}
+}
+
+// A record whose framing is not one transaction's stays in the database: reading it as a raw body
+// fails, so the malformed bytes never reach a caller that expects a transaction.
+func TestBodyWithRawTransactionsRejectsMalformedRecord(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	wrapped := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	to := common.Address{1}
+	valid, err := types.MarshalTransactionsBinary(types.Transactions{
+		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+	})
+	require.NoError(t, err)
+	typed := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000},
+		ChainID:  *uint256.NewInt(1), TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2),
+	}
+	typedBinary, err := types.MarshalTransactionsBinary(types.Transactions{typed})
+	require.NoError(t, err)
+
+	// want is the binary encoding the read must return, or nil when the record must be rejected.
+	records := []struct {
+		name   string
+		stored []byte
+		want   []byte
+	}{
+		{"legacy binary", valid[0], valid[0]},
+		{"typed wrapped in an rlp string", wrapped(typedBinary[0]), typedBinary[0]},
+		{"empty list", []byte{0xc0}, nil},
+		{"wrapped type byte with no fields", wrapped([]byte{0x02}), nil},
+		{"wrapped with a trailing byte", append(wrapped(typedBinary[0]), 0xff), nil},
+		{"legacy with one field", []byte{0xc1, 0x80}, nil},
+		{"typed with one field", []byte{0x02, 0xc1, 0x80}, nil},
+		{"unsupported type", []byte{0x7f, 0xc1, 0x80}, nil},
+		{"zero type byte", append([]byte{0x00}, valid[0]...), nil},
+		{"legacy list wrapped in an rlp string", wrapped(valid[0]), nil},
+	}
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for i, rec := range records {
+		num, hash := uint64(i+1), common.Hash{byte(i + 1)}
+		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: [][]byte{rec.stored}})
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hash, num))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for i, rec := range records {
+		t.Run(rec.name, func(t *testing.T) {
+			body, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{byte(i + 1)}, uint64(i+1))
+			if rec.want == nil {
+				require.Error(t, err, "a malformed record must not be served as a transaction")
+				require.Nil(t, body)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, rec.want, body.Transactions[0])
+		})
+	}
 }

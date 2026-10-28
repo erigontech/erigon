@@ -20,6 +20,7 @@ import (
 	"errors"
 	"math/big"
 	"math/rand"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -44,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
+func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache kvcache.Cache, m *execmoduletester.ExecModuleTester) *BaseAPI {
 	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
@@ -97,6 +99,53 @@ func TestLogFilterEndpointsRejectTooManyTopicPositions(t *testing.T) {
 	}
 }
 
+// Every method that installs a filter or subscription answers -32005 once the node-wide budget is used up.
+func TestFilterAndSubscriptionCreationRejectedAtSubscriptionLimit(t *testing.T) {
+	config := rpchelper.FiltersConfig{RpcSubscriptionFiltersMaxSubscriptions: 1}
+	filterManager := rpchelper.New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	api := &APIImpl{
+		BaseAPI:                  &BaseAPI{filters: filterManager},
+		SubscribeLogsChannelSize: 1,
+	}
+	syncingAPI := NewEthSyncingSubscriptionAPI(filterManager, log.New())
+
+	closeNotifications := make(chan any)
+	t.Cleanup(func() { close(closeNotifications) })
+	subscriptionContext := rpc.ContextWithNotifier(t.Context(), rpc.NewLocalNotifier("eth", make(chan any, 1), closeNotifications))
+
+	_, err := api.NewBlockFilter(t.Context())
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{"eth_newBlockFilter", func() error { _, err := api.NewBlockFilter(t.Context()); return err }},
+		{"eth_newPendingTransactionFilter", func() error { _, err := api.NewPendingTransactionFilter(t.Context()); return err }},
+		{"eth_newFilter", func() error { _, err := api.NewFilter(t.Context(), filters.FilterCriteria{}); return err }},
+		{`eth_subscribe("newHeads")`, func() error { _, err := api.NewHeads(subscriptionContext); return err }},
+		{`eth_subscribe("newPendingTransactions")`, func() error {
+			_, err := api.NewPendingTransactions(subscriptionContext, nil)
+			return err
+		}},
+		{`eth_subscribe("logs")`, func() error { _, err := api.Logs(subscriptionContext, filters.FilterCriteria{}); return err }},
+		{`eth_subscribe("transactionReceipts")`, func() error {
+			_, err := api.TransactionReceipts(subscriptionContext, nil)
+			return err
+		}},
+		{`eth_subscribe("syncing")`, func() error { _, err := syncingAPI.Syncing(subscriptionContext); return err }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeServerOverloaded, rpcErr.ErrorCode())
+			require.EqualError(t, err, "too many filters and subscriptions")
+		})
+	}
+}
+
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
@@ -116,7 +165,7 @@ func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 			"newPendingTransactionsWithBody": func() (*rpc.Subscription, error) { return api.NewPendingTransactionsWithBody(ctx) },
 			"logs":                           func() (*rpc.Subscription, error) { return api.Logs(ctx, filters.FilterCriteria{}) },
 			"transactionReceipts": func() (*rpc.Subscription, error) {
-				return api.TransactionReceipts(ctx, filters.ReceiptsFilterCriteria{})
+				return api.TransactionReceipts(ctx, nil)
 			},
 		}
 		for name, subscribe := range subscriptions {
@@ -208,10 +257,8 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 		_, _ = api.UninstallFilter(ctx, filterID)
 	})
 
-	queued := &types.RPCLog{
-		Log:            types.Log{Address: common.Address{1}},
-		BlockTimestamp: 123,
-	}
+	stampedAt := hexutil.Uint64(123)
+	queued := &types.Log{Address: common.Address{1}, BlockTimestamp: &stampedAt}
 	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
 
 	_, err = api.GetFilterLogs(ctx, filterID)
@@ -478,7 +525,7 @@ func TestNewPendingTransactionIncludesFrom(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rpcTx := newRPCPendingTransaction(tx, nil, nil)
+	rpcTx := newRPCPendingTransaction(tx)
 	require.Equal(t, m.Address, rpcTx.From)
 }
 
@@ -534,4 +581,25 @@ func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
 	// Use a bogus id that does not correspond to any subscription
 	_, err := api.GetFilterChanges(ctx, "0xdeadbeefcafebabe")
 	assert.ErrorIs(err, rpc.ErrFilterNotFound)
+}
+
+// geth and reth take the transactionReceipts filter as optional.
+func TestEthSubscribeTransactionReceiptsWithoutFilter(t *testing.T) {
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+
+	server := rpc.NewServer(50, false, false, true, m.Log, 100)
+	require.NoError(t, server.RegisterName("eth", api))
+	defer server.Stop()
+	httpsrv := httptest.NewServer(server.WebsocketHandler([]string{"*"}, nil, false, m.Log))
+	defer httpsrv.Close()
+
+	client, err := rpc.DialWebsocket(ctx, "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", m.Log)
+	require.NoError(t, err)
+	defer client.Close()
+	sub, err := client.EthSubscribe(ctx, make(chan any), "transactionReceipts")
+	require.NoError(t, err)
+	sub.Unsubscribe()
 }

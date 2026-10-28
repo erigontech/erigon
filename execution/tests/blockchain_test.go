@@ -33,15 +33,20 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	libchain "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -49,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -106,7 +112,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	})
 	require.NoError(t, err)
 
-	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
+	err = canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
 		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
@@ -252,10 +258,10 @@ func testShorterFork(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
-func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
-func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
+func TestLongerForkHeaders(t *testing.T) { testLongerFork(t) }
+func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t) }
 
-func testLongerFork(t *testing.T, full bool) {
+func testLongerFork(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -755,11 +761,9 @@ func TestEIP155Transition(t *testing.T) {
 	// generate an invalid chain id transaction
 	config := &libchain.Config{ChainID: uint256.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
 	chain, chainErr = m.GenerateChainWithConfig(config, chain.TopBlock, 4, func(i int, block *blockgen.BlockGen) {
-		var (
-			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
-			}
-		)
+		basicTx := func(signer types.Signer) (types.Transaction, error) {
+			return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+		}
 		if i == 0 {
 			tx, txErr := basicTx(*types.LatestSigner(config))
 			if txErr != nil {
@@ -1487,7 +1491,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1822,7 +1827,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1864,13 +1870,13 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		exist    bool
 		blocknum int
 	}
-	var current = &expectation{
+	current := &expectation{
 		exist:    true, // exists in genesis
 		blocknum: 0,
 		values:   map[int]int{1: 1, 2: 2},
 	}
 	var expectations []*expectation
-	var newDestruct = func(e *expectation) types.Transaction {
+	newDestruct := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, aa.Value(),
 			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1881,7 +1887,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		//t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
-	var newResurrect = func(e *expectation) types.Transaction {
+	newResurrect := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
 			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1894,7 +1900,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 
 	chain, err := m.GenerateChain(150, func(i int, b *blockgen.BlockGen) {
-		var exp = new(expectation)
+		exp := new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
 		maps.Copy(exp.values, current.values)
@@ -1920,7 +1926,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	var asHash = func(num int) common.Hash {
+	asHash := func(num int) common.Hash {
 		return common.BytesToHash([]byte{byte(num)})
 	}
 	for i := range chain.Blocks {
@@ -1929,7 +1935,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 			statedb := state.New(m.NewStateReader(tx))
 			defer statedb.Close()
 			// If all is correct, then slot 1 and 2 are zero
@@ -2028,7 +2033,8 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -2073,7 +2079,6 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 		defer statedb.Close()
@@ -2197,7 +2202,6 @@ func TestEIP2718Transition(t *testing.T) {
 		vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
 	if block.GasUsed() != expected {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
-
 	}
 }
 
@@ -2397,4 +2401,101 @@ func TestEIP1559Transition(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// blockEndLogEngine makes the given number of system calls to contract at the
+// end of every block, as an engine with a block reward contract does.
+type blockEndLogEngine struct {
+	*ethash.FakeEthash
+	contract accounts.Address
+	calls    int
+}
+
+func (e *blockEndLogEngine) Finalize(config *libchain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
+	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	if _, err := e.FakeEthash.Finalize(config, header, ibs, uncles, receipts, withdrawals, chainReader, syscall, skipReceiptsEval, logger); err != nil {
+		return nil, err
+	}
+	for range e.calls {
+		if _, err := syscall(e.contract, nil); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+func (e *blockEndLogEngine) FinalizeAndAssemble(chainConfig *libchain.Config, header *types.Header, ibs *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger,
+) (*types.Block, types.FlatRequests, error) {
+	if _, err := e.Finalize(chainConfig, header, ibs, uncles, r, withdrawals, chainReader, syscall, false, logger); err != nil {
+		return nil, nil, err
+	}
+	return types.NewBlock(header, txs, uncles, r, withdrawals, nil), nil, nil
+}
+
+// Logs of block-end system calls must reach the log address and topic indexes
+// at the block's final txNum, in both executors.
+func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
+	for _, tc := range []struct {
+		parallel bool
+		workers  int
+	}{{false, 1}, {true, 1}, {true, 4}} {
+		t.Run(fmt.Sprintf("parallel=%v/workers=%d", tc.parallel, tc.workers), func(t *testing.T) {
+			prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+			t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+			logContract := common.HexToAddress("0x00000000000000000000000000000000000c0de0")
+			code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
+			key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{1}, 32))
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			config := libchain.TestChainBerlinConfig
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				sender:      {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				logContract: {Code: code},
+			}}
+			engine := &blockEndLogEngine{FakeEthash: ethash.NewFaker(), contract: accounts.InternAddress(logContract), calls: 3}
+
+			dbg.Exec3Parallel = false
+			ethconfig.Defaults.Sync.ExecWorkerCount = tc.workers
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithEngine(engine))
+			signer := types.LatestSignerForChainID(config.ChainID)
+			const blocks = 3
+			chainPack, err := m.GenerateChain(blocks, func(i int, b *blockgen.BlockGen) {
+				for range 2 {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), common.Address{0xaa}, uint256.NewInt(1), 21_000, uint256.NewInt(10_000_000_000), nil), *signer, key)
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			require.NoError(t, err)
+
+			dbg.Exec3Parallel = tc.parallel
+			require.NoError(t, m.InsertChain(chainPack))
+
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				var want []uint64
+				for bn := uint64(1); bn <= blocks; bn++ {
+					maxTxNum, err := rawdbv3.TxNums.Max(t.Context(), tx, bn)
+					require.NoError(t, err)
+					want = append(want, maxTxNum)
+				}
+				topic := common.Hash{31: 0x42}
+				for _, q := range []struct {
+					idx kv.InvertedIdx
+					key []byte
+				}{{kv.LogAddrIdx, logContract[:]}, {kv.LogTopicIdx, topic[:]}} {
+					it, err := tx.IndexRange(q.idx, q.key, 0, -1, order.Asc, kv.Unlim)
+					require.NoError(t, err)
+					got, err := stream.ToArrayU64(it)
+					require.NoError(t, err)
+					require.Equal(t, want, got, "index %v", q.idx)
+				}
+				return nil
+			}))
+		})
+	}
 }

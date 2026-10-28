@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -78,7 +77,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
 	_, indiciesDB := setupStore(t)
@@ -107,7 +105,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -146,7 +143,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -206,7 +203,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
@@ -234,7 +230,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -274,7 +269,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)

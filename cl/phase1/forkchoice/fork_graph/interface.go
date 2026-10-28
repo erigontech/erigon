@@ -39,11 +39,23 @@ type ForkGraph interface {
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
-	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
+	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
+	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
+	// CurrentStateLocked is valid only while the caller holds the fork-choice lock.
+	// Mutation requires the write lock, and callers must not retain the result after unlocking.
+	CurrentStateLocked(blockRoot common.Hash) *state.CachingBeaconState
+	ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot common.Hash)
+	IsBlockInvalid(blockRoot common.Hash) bool
+	MarkPayloadUnavailable(blockRoot common.Hash)
+	MarkPayloadAvailable(blockRoot common.Hash)
+	IsPayloadUnavailable(blockRoot common.Hash) bool
+	MarkPayloadAccepted(blockRoot common.Hash, verified bool)
+	ClearPayloadAccepted(blockRoot common.Hash)
+	PayloadAccepted(blockRoot common.Hash) (verified bool, ok bool)
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
 	Prune(uint64) error
@@ -52,9 +64,6 @@ type ForkGraph interface {
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
-	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
-	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
-	GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error)
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error

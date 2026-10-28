@@ -323,7 +323,9 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+var ErrStateStepHasMoreWork = errors.New("state step has more work")
+
+func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -341,7 +343,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		}
 	}
 	lastNum := headersChain[len(headersChain)-1].Number.Uint64()
-	if err := rawdb.TruncateCanonicalChain(ctx, tx, lastNum+1); err != nil {
+	if err := rawdb.TruncateCanonicalChain(tx, lastNum+1); err != nil {
 		return err
 	}
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
@@ -358,11 +360,10 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 			return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
 		}
 		if hasMore {
-			// should not ever happen since we exec blocks 1 by 1
 			if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
 				return err
 			}
-			return errors.New("unexpected state step has more work")
+			return ErrStateStepHasMoreWork
 		}
 	}
 	return nil
@@ -390,9 +391,8 @@ func NewDefaultStages(ctx context.Context,
 		ctx,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageHeadersCfg(blockReader),
-		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageBodiesCfg(blockReader, blockWriter),
-		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
+		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
 		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
@@ -416,7 +416,6 @@ func NewPipelineStages(ctx context.Context,
 		tracingHooks = tracer.Hooks
 	}
 	dirs := cfg.Dirs
-	blockWriter := blockio.NewBlockWriter()
 
 	var depositContract common.Address
 	if cfg.Genesis != nil {
@@ -424,10 +423,10 @@ func NewPipelineStages(ctx context.Context,
 	}
 	_ = depositContract
 
-	return stagedsync.PipelineStages(ctx,
+	return stagedsync.PipelineStages(
+		ctx,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
-		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
-		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
+		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
 		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
@@ -447,11 +446,11 @@ func NewInMemoryExecution(
 ) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,
-		stagedsync.StateStages(ctx,
+		stagedsync.StateStages(
+			ctx,
 			stagedsync.StageHeadersCfg(blockReader),
 			stagedsync.StageBodiesCfg(blockReader, blockWriter),
-			stagedsync.StageBlockHashesCfg(cfg.Dirs.Tmp, blockWriter),
-			stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, true /* badBlockHalt */, cfg.Dirs.Tmp, cfg.Prune, blockReader, readAheader),
+			stagedsync.StageSendersCfg(controlServer.ChainConfig, true /* badBlockHalt */, cfg.Dirs.Tmp, blockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		),
 		stagedsync.StateUnwindOrder,

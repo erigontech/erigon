@@ -29,7 +29,7 @@ Ethereum P2P is bidirectional:
 * your node connects outbound to peers
 * other nodes may connect inbound to you
 
-Nodes that are reachable from the internet (i.e. correctly advertised via NAT) tend to:
+Nodes that are reachable from the internet (i.e. correctly advertised via Network Address Translation (NAT)) tend to:
 
 * receive transactions earlier
 * receive a wider variety of transactions
@@ -74,7 +74,7 @@ Benefits:
 
 * enables inbound peer connections
 * improves transaction gossip freshness
-* leads to healthier TxPool "pending" state
+* leads to a healthier TxPool "pending" state
 * strongly recommended for validators
 
 Example:
@@ -85,7 +85,7 @@ nat: "extip:203.0.113.114"
 
 ### `nat: any`
 
-Enables automatic NAT detection (e.g. UPnP / NAT-PMP where available).
+Enables automatic NAT detection (e.g. Universal Plug and Play (UPnP) / NAT-PMP where available).
 
 Suitable for:
 
@@ -96,7 +96,7 @@ Less deterministic than extip, but generally better than none.
 
 ### `nat: stun`
 
-Uses STUN to discover the external address.
+Uses Session Traversal Utilities for NAT (STUN) to discover the external address.
 
 Useful when:
 
@@ -106,20 +106,22 @@ Useful when:
 
 ## Caplin (consensus layer) NAT
 
-If you are running Erigon with the embedded Caplin consensus layer, configure NAT for the CL P2P separately using `--caplin.nat`.
+If you are running Erigon with the embedded Caplin consensus layer, configure NAT for the Consensus Layer (CL) P2P separately using `--caplin.nat`.
 
-This flag sets the external address advertised in the **discv5 ENR** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
+This flag sets the external address advertised in the **discv5 Ethereum Node Record (ENR)** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
 
 | Value | Behavior |
 |-------|-----------|
 | `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
-| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for VPS / datacenters |
+| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for virtual private servers (VPS) / datacenters |
 | `stun` | Discover external IP via STUN |
 | `upnp` | Use UPnP to discover and map the port |
 | `pmp` | Use NAT-PMP; optionally `pmp:192.168.0.1` to specify the gateway |
 
 :::tip For validators running behind NAT or inside Docker
 Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your execution-layer peers and consensus-layer peers will see different (or no) reachable addresses.
+
+UPnP and NAT-PMP gateway discovery do not cross Docker's default bridge network, so use `extip` or host networking in that setup.
 
 ```bash
 --nat extip:203.0.113.114 --caplin.nat extip:203.0.113.114

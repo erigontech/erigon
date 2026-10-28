@@ -17,8 +17,13 @@
 package rpchelper
 
 import (
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // An unbuffered channel can hold no latest value: with no reader ready,
@@ -37,4 +42,23 @@ func TestSendLatestUnbufferedChannelReturns(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("SendLatest must return on an unbuffered channel with no ready reader")
 	}
+}
+
+func TestSharedEncodesOnce(t *testing.T) {
+	ev := &Shared[int]{Value: 7}
+	var calls atomic.Int32
+	encode := func(v int) ([]byte, error) {
+		calls.Add(1)
+		return []byte(strconv.Itoa(v)), nil
+	}
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			b, err := ev.Encode(encode)
+			require.NoError(t, err)
+			require.Equal(t, "7", string(b))
+		})
+	}
+	wg.Wait()
+	require.Equal(t, int32(1), calls.Load())
 }

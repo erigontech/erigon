@@ -34,9 +34,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -242,6 +244,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				calls:    syscalls,
 				failAt:   tc.failAt,
 			}
+			var completions int
 			txTask := &TxTask{
 				TxNum:   1,
 				TxIndex: 0,
@@ -251,6 +254,13 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				},
 				Config: chain.TestChainBerlinConfig,
 				Engine: engine,
+				Hooks: &tracing.Hooks{
+					OnTxEndV2: func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+						require.Nil(t, receipt)
+						require.Zero(t, txnGasUsage)
+						completions++
+					},
+				},
 			}
 			result := &TxResult{Task: txTask}
 
@@ -264,6 +274,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 
 			_, _, err = p.processResults(consumer, cfg, rws, txTask.TxNum, roTx, false, logger)
 			require.NoError(t, err)
+			require.Equal(t, 1, completions)
 
 			if tc.failAt > 0 {
 				require.Error(t, result.Err)
@@ -273,4 +284,18 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 			require.Len(t, result.Logs, tc.wantLogs)
 		})
 	}
+}
+
+// A value transfer debits the sender during execution, so charging the sender at
+// validation cannot let it run before its predecessor; only a zero-value call can.
+func TestChargesSenderAtValidationSkipsValueTransfer(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(value), GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.False(t, task(1).ChargesSenderAtValidation(0))
 }

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 
@@ -45,6 +46,8 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 }
 
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
+	out = slices.Grow(out, serializeDiffSetBufLen(diffSet))
+
 	// Version prefix: [0, 1]. Two bytes so we can distinguish from the old format where
 	// byte[0] is dictLen (>=1 for non-empty, 0 only when diffSetLen is also 0).
 	// New format: byte[0]==0, byte[1]>0 (version). Old format: byte[0]>=1 or both bytes==0.
@@ -52,29 +55,6 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0) // diffSet len (4) = 0
-	}
-
-	totalKeyLen := 0
-	totalValueLen := 0
-	for i := range diffSet {
-		totalKeyLen += len(diffSet[i].Key)
-		if diffSet[i].Value != nil {
-			totalValueLen += len(diffSet[i].Value)
-		}
-	}
-
-	// Format: version(2) + uint32(len) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
-	totalSize := len(out) + 4 + len(diffSet)*(4+1) + totalKeyLen + totalValueLen
-	// Add space for value length prefixes (only for entries with values)
-	for i := range diffSet {
-		if diffSet[i].Value != nil {
-			totalSize += 4
-		}
-	}
-	if cap(out) < totalSize {
-		ret := make([]byte, len(out), totalSize)
-		copy(ret, out)
-		out = ret
 	}
 	ret := out
 
@@ -243,12 +223,12 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	return result
 }
 
-func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
+func (s *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 	// Do  diff_length + diffSet
 	ret := out
 	tmp := make([]byte, 4)
-	for i := range d.Diffs {
-		diffSet := d.Diffs[i].GetDiffSet()
+	for i := range s.Diffs {
+		diffSet := s.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(serializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
 
@@ -417,8 +397,9 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	return deserializeKeys(val), true, nil
 }
+
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
+	// TODO: move this function somewhere from `commitment`/`state` pkg
 	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
 	if err != nil {
 		return 0, err
@@ -452,5 +433,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	return blockNumber, nil
-
 }

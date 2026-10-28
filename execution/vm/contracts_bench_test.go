@@ -26,7 +26,10 @@ import (
 	"testing"
 	"time"
 
+	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 )
 
 // Benchmarks the sample inputs from the SHA256 precompile.
@@ -164,7 +167,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas, nil)
+			res, _, err = RunPrecompiledContract(p, data, mdgas.MdGas{Execution: reqGas}, nil)
 		}
 		bench.StopTimer()
 		elapsed := max(uint64(time.Since(start)), 1)
@@ -173,7 +176,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		// Keep it as uint64, multiply 100 to get two digit float later
 		mgasps := (100 * 1000 * gasUsed) / elapsed
 		bench.ReportMetric(float64(mgasps)/100, "mgas/s")
-		//Check if it is correct
+		// Check if it is correct
 		if err != nil {
 			bench.Error(err)
 			return
@@ -192,5 +195,29 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 	for _, test := range tests {
 		benchmarkPrecompiled(b, addr, test)
+	}
+}
+
+func BenchmarkBLSRepeatedPoints(b *testing.B) {
+	_, _, g1, g2 := bls.Generators()
+	for _, size := range []int{1, 16, 128} {
+		for _, tc := range []struct {
+			name  string
+			point []byte
+			p     PrecompiledContract
+		}{{"G1", encodePointG1(&g1), &bls12381G1MultiExp{}}, {"G2", encodePointG2(&g2), &bls12381G2MultiExp{}}} {
+			b.Run(fmt.Sprintf("%s/%d", tc.name, size), func(b *testing.B) {
+				pair := make([]byte, len(tc.point)+32)
+				copy(pair, tc.point)
+				pair[len(pair)-1] = 1
+				input := bytes.Repeat(pair, size)
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := tc.p.Run(input); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }

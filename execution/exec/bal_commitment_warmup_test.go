@@ -62,6 +62,28 @@ func (db *commitmentBeginErrorDB) BeginRo(context.Context) (kv.Tx, error) {
 	return nil, db.errs[db.next.Add(1)-1]
 }
 
+type commitmentBeginFuncDB struct {
+	kv.RoDB
+	begin func(context.Context) (kv.Tx, error)
+	calls atomic.Int64
+}
+
+func (db *commitmentBeginFuncDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.calls.Add(1)
+	return db.begin(ctx)
+}
+
+func threeAccountChanges() types.BlockAccessList {
+	var bal types.BlockAccessList
+	for i := range 3 {
+		bal = append(bal, types.AccountChanges{
+			Address:        common.Address{19: byte(i + 1)},
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+		})
+	}
+	return bal
+}
+
 type commitmentBranchLookupTx struct {
 	kv.TemporalTx
 	data  []byte
@@ -98,9 +120,9 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
 	bal := types.BlockAccessList{
-		{Address: readOnlyAddress, StorageReads: []accounts.StorageKey{readSlot}},
-		{Address: accountAddress, BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
-		{Address: storageAddress, StorageChanges: []types.SlotChanges{{
+		{Address: readOnlyAddress.Value(), StorageReads: []common.Hash{readSlot.Value()}},
+		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
+		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
 			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
 		}}},
 	}
@@ -126,7 +148,7 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 	tx := new(commitmentRecordingTx)
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
-		Address:        accounts.InternAddress(common.Address{19: 2}),
+		Address:        common.Address{19: 2},
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
@@ -146,11 +168,11 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	db := &commitmentBeginErrorDB{errs: []error{firstErr, secondErr}}
 	bal := types.BlockAccessList{
 		{
-			Address:        accounts.InternAddress(common.Address{19: 1}),
+			Address:        common.Address{19: 1},
 			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 		},
 		{
-			Address:        accounts.InternAddress(common.Address{19: 2}),
+			Address:        common.Address{19: 2},
 			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(2)}},
 		},
 	}
@@ -158,6 +180,57 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	err := warmBALCommitment(t.Context(), db, bal, 2)
 	require.ErrorIs(t, err, firstErr)
 	require.ErrorIs(t, err, secondErr)
+}
+
+// A warmup whose context is already done does not open any read transaction.
+func TestWarmBALCommitmentSkipsAnEndedContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("unexpected BeginRo") }}
+
+	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+
+	require.Equal(t, context.Canceled, err)
+	require.Zero(t, db.calls.Load())
+}
+
+// A cancellation reaches every worker; it is reported once, not joined per worker.
+func TestWarmBALCommitmentReportsACancellationOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) {
+		cancel()
+		return nil, context.Canceled
+	}}
+
+	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+
+	require.Equal(t, context.Canceled, err)
+}
+
+// The first worker error cancels the other workers. Their context errors are consequences, so only
+// the cause is reported, once.
+func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
+	db := &commitmentBeginFuncDB{begin: func(ctx context.Context) (kv.Tx, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, kv.ErrReadTxLimitExceeded
+	}}
+
+	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+
+	require.Equal(t, int64(3), db.calls.Load())
+	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
+}
+
+// Workers that fail with errors allocated per call, such as a closed database's, report the
+// message once.
+func TestWarmBALCommitmentReportsAnErrorMessageOnce(t *testing.T) {
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("db closed") }}
+
+	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+
+	require.EqualError(t, err, "db closed")
 }
 
 func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
@@ -221,11 +294,29 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 	}
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
-		Address:        accounts.InternAddress(common.Address{19: 2}),
+		Address:        common.Address{19: 2},
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
 	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
 	require.Positive(t, tx.calls)
 	require.True(t, tx.opts.BranchCache())
+}
+
+func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
+	cache := commitment.NewBranchCache(100)
+	defer cache.Close()
+	tx := &commitmentBranchLookupTx{
+		data:  []byte("database"),
+		step:  9,
+		aggTx: commitmentBranchCacheProvider{cache: cache},
+	}
+	prefetch := StartBranchPrefetch(t.Context(), &singleTxRoDB{tx: tx}, 1)
+	address := common.Address{19: 2}
+	prefetch.WarmKey(commitment.KeyToHexNibbleHash(address[:]), 0, 0)
+	require.NoError(t, prefetch.WaitBufferFree(0))
+	prefetch.CloseAndWait()
+
+	require.Positive(t, tx.calls, "a touched key's path is read")
+	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
 }

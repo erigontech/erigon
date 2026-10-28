@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -147,7 +150,13 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 
 // OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
 // segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false) }
+func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
+
+func (s *CaplinSnapshots) OpenBeaconBlocks() error {
+	return s.openFolder(false, func(f snaptype.FileInfo) bool {
+		return f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks
+	})
+}
 
 // Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
 // Go embedding has no virtual dispatch, so they would call the base OpenFolder.
@@ -167,13 +176,16 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 	return nil
 }
 
-func (s *CaplinSnapshots) openFolder(optimistic bool) error {
+func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
 	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
 	if err != nil {
 		return err
 	}
 	list := make([]string, 0, len(files))
 	for i := range files {
+		if fileFilter != nil && !fileFilter(files[i]) {
+			continue
+		}
 		f := &files[i]
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
@@ -194,6 +206,7 @@ func (v *CaplinView) Close() { v.base.Close() }
 func (v *CaplinView) BeaconBlocks() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype.BeaconBlocks)
 }
+
 func (v *CaplinView) BlobSidecars() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype.BlobSidecars)
 }
@@ -232,7 +245,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if err != nil {
 			return err
 		}
-		parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, blockRoot)
+		parentRoot, err := beacon_indicies.ReadParentBlockRoot(tx, blockRoot)
 		if err != nil {
 			return err
 		}
@@ -274,14 +287,18 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 }
 
 func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
+	if blobCountFn == nil {
+		return errors.New("dump blob sidecars: a blob count from the blocks is required to tell a blobless slot from a missing count row")
+	}
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
 	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
+	stagingPath := f.Path + ".tmp"
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, compressCfg, lvl, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", stagingPath, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -295,8 +312,6 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 	reusableBuf := []byte{}
 
-	sanityCheckBlobCount := blobCountFn != nil
-
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		// read root.
@@ -309,25 +324,24 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		if err != nil {
 			return err
 		}
-		var blobCount uint64
-		if sanityCheckBlobCount {
-			blobCount, err = blobCountFn(i)
-			if err != nil {
-				return err
-			}
-			if blobCount != uint64(commitmentsCount) {
-				return fmt.Errorf("blob storage count mismatch at slot %d: %d != %d", i, blobCount, commitmentsCount)
-			}
+		blobCount, err := blobCountFn(i)
+		if err != nil {
+			return err
+		}
+		if blobCount != uint64(commitmentsCount) {
+			return fmt.Errorf("blob storage count mismatch at slot %d: %d != %d", i, blobCount, commitmentsCount)
 		}
 		if commitmentsCount == 0 {
-			sn.AddWord(nil)
+			if err := sn.AddWord(nil); err != nil {
+				return err
+			}
 			continue
 		}
 		sidecars, found, err := storage.ReadBlobSidecars(ctx, i, blockRoot)
 		if err != nil {
 			return err
 		}
-		if sanityCheckBlobCount && uint64(len(sidecars)) != blobCount {
+		if uint64(len(sidecars)) != blobCount {
 			return fmt.Errorf("blob sidecars count mismatch at slot %d: %d != %d", i, len(sidecars), blobCount)
 		}
 		if !found {
@@ -354,10 +368,39 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
+	if err := removeBlobIndexAndTorrents(snapDir, fromSlot, toSlot); err != nil {
+		return err
+	}
+	if err := os.Rename(stagingPath, f.Path); err != nil {
+		return err
+	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
 	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+}
+
+func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
+	idx := snaptype.IdxFileMask(from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	masks := []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"}
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if slices.ContainsFunc(masks, func(mask string) bool {
+			matched, _ := filepath.Match(mask, e.Name())
+			return matched
+		}) {
+			if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -378,6 +421,29 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 }
 
 type BlobCountBySlotFn func(slot uint64) (uint64, error)
+
+func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader) BlobCountBySlotFn {
+	return func(slot uint64) (uint64, error) {
+		block, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+		if err != nil {
+			return 0, err
+		}
+		if block == nil {
+			view := sn.View()
+			_, ok := view.BeaconBlocksSegment(slot)
+			view.Close()
+			if !ok {
+				return 0, fmt.Errorf("slot %d: no frozen beacon block segment to count its blobs against", slot)
+			}
+			return 0, nil
+		}
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			return 0, nil
+		}
+		return uint64(commitments.Len()), nil
+	}
+}
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
 	cfg := snapcfg.KnownCfgOrDevnet("")
@@ -411,7 +477,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	if err := s.openFolder(true); err != nil {
+	if err := s.openFolder(true, nil); err != nil {
 		return err
 	}
 
@@ -449,6 +515,29 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	}
 
 	return s.OpenFolder()
+}
+
+// ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.
+func (s *CaplinSnapshots) ReadFrozenBeaconBlockBodyForIntegrity(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	sn, ok, closeSegment := s.ViewSingleFile(snaptype.BeaconBlocks, slot)
+	defer closeSegment()
+	if !ok {
+		return nil, nil
+	}
+
+	buf, err := sn.Get(slot)
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	reader, err := getZstdReader(bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	defer putZstdReader(reader)
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshotForIntegrity(reader, s.beaconCfg)
 }
 
 func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {

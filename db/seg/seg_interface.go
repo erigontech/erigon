@@ -16,6 +16,8 @@
 
 package seg
 
+import "fmt"
+
 type FileCompression uint8
 
 const (
@@ -33,8 +35,6 @@ type FeatureFlag uint8
 
 const (
 	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b001
-	KeyCompressionEnabled                               // 0b010
-	ValCompressionEnabled                               // 0b100
 )
 
 type FeatureFlagBitmask uint8
@@ -47,31 +47,32 @@ func (m *FeatureFlagBitmask) Set(flag FeatureFlag) {
 	*m |= FeatureFlagBitmask(flag)
 }
 
+// FromString accepts both the short form used in file metadata ("k", "v",
+// "kv") and the long form CLI flags take ("keys", "values", "all").
+func (c *FileCompression) FromString(s string) error {
+	switch s {
+	case "none", "":
+		*c = CompressNone
+	case "k", "keys":
+		*c = CompressKeys
+	case "v", "values":
+		*c = CompressVals
+	case "kv", "all":
+		*c = CompressKeys | CompressVals
+	default:
+		return fmt.Errorf("invalid file compression type: %s", s)
+	}
+	return nil
+}
+
 func ParseFileCompression(s string) (FileCompression, error) {
-	// Implementation would be here
-	return CompressNone, nil
+	var c FileCompression
+	err := c.FromString(s)
+	return c, err
 }
 
 func (c FileCompression) Has(flag FileCompression) bool {
 	return c&flag != 0
-}
-
-func (c FileCompression) String() string {
-	return "none" // Simplified implementation
-}
-
-type ReaderI interface {
-	Next(buf []byte) ([]byte, uint64)
-	Size() int
-	Count() int
-	Reset(offset uint64)
-	HasNext() bool
-	Skip() (uint64, int)
-	FileName() string
-	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
-	GetMetadata() []byte
-	MadvNormal() MadvDisabler
-	DisableReadAhead()
 }
 
 type MadvDisabler interface {
