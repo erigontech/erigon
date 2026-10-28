@@ -320,6 +320,9 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
+			if _, err := t.TxSender(); err != nil {
+				return nil, err
+			}
 			if t.signer == nil {
 				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 			}
