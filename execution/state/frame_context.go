@@ -34,13 +34,17 @@ type FrameContext struct {
 	Payer          accounts.Address
 	SenderApproved bool
 	MaxCost        uint256.Int
-	SigningHash    common.Hash
-	NonceKeysHash  common.Hash
 	LegacyNonce    uint64 // Sender's account nonce before any frame executes, for TXPARAM.
 	GasBailout     bool
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8 // Charging frame index plus one; zero means no outstanding charge.
+
+	// Transaction data is fixed during execution, so hash caches survive frame reverts.
+	signingHash      common.Hash
+	nonceKeysHash    common.Hash
+	signingHashSet   bool
+	nonceKeysHashSet bool
 }
 
 type frameStorageSlot struct {
@@ -49,10 +53,26 @@ type frameStorageSlot struct {
 }
 
 func (ibs *IntraBlockState) NewFrameContext(tx *types.FrameTransaction, maxCost uint256.Int) *FrameContext {
-	ctx := &FrameContext{Transaction: tx, Receipts: make([]types.FrameReceipt, len(tx.Frames)), MaxCost: maxCost, SigningHash: tx.SigningHash(nil), NonceKeysHash: tx.NonceKeysHash(), journal: ibs.journal}
+	ctx := &FrameContext{Transaction: tx, Receipts: make([]types.FrameReceipt, len(tx.Frames)), MaxCost: maxCost, journal: ibs.journal}
 	ctx.undo.frame = ctx
 	ctx.storageOwners = make(map[frameStorageSlot]uint8)
 	return ctx
+}
+
+func (ctx *FrameContext) SigningHash() common.Hash {
+	if !ctx.signingHashSet {
+		ctx.signingHash = ctx.Transaction.SigningHash(nil)
+		ctx.signingHashSet = true
+	}
+	return ctx.signingHash
+}
+
+func (ctx *FrameContext) NonceKeysHash() common.Hash {
+	if !ctx.nonceKeysHashSet {
+		ctx.nonceKeysHash = ctx.Transaction.NonceKeysHash()
+		ctx.nonceKeysHashSet = true
+	}
+	return ctx.nonceKeysHash
 }
 
 // ResetFrameTransientStorage isolates transient storage between transaction frames.

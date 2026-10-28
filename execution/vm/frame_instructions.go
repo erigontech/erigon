@@ -53,7 +53,8 @@ func opTxParam(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	case 7:
 		param.SetUint64(uint64(len(tx.BlobVersionedHashes)))
 	case 8:
-		param.SetBytes(ctx.SigningHash[:])
+		hash := ctx.SigningHash()
+		param.SetBytes(hash[:])
 	case 9:
 		param.SetUint64(uint64(len(tx.Frames)))
 	case 10:
@@ -67,7 +68,8 @@ func opTxParam(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	case 14:
 		param.SetUint64(uint64(len(tx.NonceKeys)))
 	case 15:
-		param.SetBytes(ctx.NonceKeysHash[:])
+		hash := ctx.NonceKeysHash()
+		param.SetBytes(hash[:])
 	case 16:
 		param.Set(&tx.NonceKeys[0])
 	default:
