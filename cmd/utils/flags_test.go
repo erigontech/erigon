@@ -351,6 +351,26 @@ func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 	})
 }
 
+func TestNewP2PConfig_NetRestrictList(t *testing.T) {
+	newCfg := func(netRestrict string) (*p2p.Config, error) {
+		return NewP2PConfig(false, datadir.New(t.TempDir()), netRestrict, "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
+	}
+
+	t.Run("comma separated list", func(t *testing.T) {
+		cfg, err := newCfg("10.0.0.0/8, 192.168.0.0/16")
+		require.NoError(t, err)
+		require.NotNil(t, cfg.NetRestrict)
+		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
+		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("192.168.1.1")))
+		require.False(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("172.16.0.1")))
+	})
+
+	t.Run("invalid mask", func(t *testing.T) {
+		_, err := newCfg("10.0.0.1")
+		require.Error(t, err)
+	})
+}
+
 // The spec states column retention in epochs, so its slot count depends on SLOTS_PER_EPOCH.
 // Zero is the pruner's signal to derive the window from the active chain config, so an unset
 // flag must stay zero rather than pin one chain's slot count.
@@ -485,24 +505,4 @@ func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	require.True(t, ethCfg.TxPool.Disable)
 	require.False(t, builderCfg.EnabledPOS)
 	require.Equal(t, ethashcfg.ModeFake, ethCfg.Ethash.PowMode)
-}
-
-func TestNewP2PConfig_NetRestrictList(t *testing.T) {
-	newCfg := func(netRestrict string) (*p2p.Config, error) {
-		return NewP2PConfig(false, datadir.New(t.TempDir()), netRestrict, "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
-	}
-
-	t.Run("comma separated list", func(t *testing.T) {
-		cfg, err := newCfg("10.0.0.0/8, 192.168.0.0/16")
-		require.NoError(t, err)
-		require.NotNil(t, cfg.NetRestrict)
-		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
-		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("192.168.1.1")))
-		require.False(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("172.16.0.1")))
-	})
-
-	t.Run("invalid mask", func(t *testing.T) {
-		_, err := newCfg("10.0.0.1")
-		require.Error(t, err)
-	})
 }

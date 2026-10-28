@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -18,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -120,14 +122,11 @@ func (g *chainTipBatchForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeac
 	return g.ForkGraph.GetBlock(root)
 }
 
-func (g *chainTipBatchForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *chainTipBatchForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	if _, ok := g.parents[root]; ok {
-		if alwaysCopy {
-			return g.parentState.Copy()
-		}
-		return g.parentState, nil
+		return g.parentState.Copy()
 	}
-	return g.ForkGraph.GetState(root, alwaysCopy)
+	return g.ForkGraph.ReplayState(root)
 }
 
 func (g *chainTipBatchForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
@@ -385,22 +384,22 @@ func TestChainTipSyncDoesNotVerifyStoredGloasPayloadWhileExecutionEngineIsBusy(t
 	require.Zero(t, engine.newPayloadCalls)
 }
 
-func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T) {
+func TestVerifyUnverifiedGloasPayloadsDoesNotRecordInterruptedCallAsVerdict(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]
 	delete(graph.parents, headRoot)
 	graph.insertOnAdd = true
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
-		<-ctx.Done()
+		cancel()
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
 	cfg.gloasVerificationCursor = headRoot
 	// Through the store's own admission, which classifies the interrupted call.
 	cfg.gloasPayloadValidator = cfg.forkChoice
 
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
 	verifyUnverifiedGloasPayloads(ctx, cfg)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
@@ -660,7 +659,7 @@ func newChainTipBatchEnvelopeRPC(t *testing.T, cfg *clparams.BeaconChainConfig, 
 	var response bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
 	sentinel := &chainTipBatchEnvelopeSentinel{response: response.Bytes()}
-	return rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil), sentinel
+	return rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock), sentinel
 }
 
 func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
@@ -1334,7 +1333,7 @@ func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
 	require.NoError(t, err)
 	delete(graph.envelopes, parentRoot)
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
-	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{}, cfg.beaconCfg, clock, nil)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{}, cfg.beaconCfg, clock)
 	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
 	cfg.chainTipRejections.lastLog = time.Now()
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
@@ -1381,4 +1380,31 @@ func TestChainTipSyncSkipsFlushWhenStopped(t *testing.T) {
 	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
 
 	require.Zero(t, collector.flushCalls)
+}
+
+// A chain tip batch imports blocks and parent envelopes without checking their data, so it asks
+// the custody backfill for the slots it imported, the parent whose envelope it handled included.
+func TestChainTipBatchRequestsCustodyBackfillForImportedSlots(t *testing.T) {
+	cfg, graph, parentRoot, child, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+	parent := graph.parents[parentRoot]
+	peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().BackfillCustodyColumns(parent.Block.Slot, child.Block.Slot).Times(1)
+	cfg.peerDas = peerDas
+
+	processChainTipBatch(t.Context(), cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, 1, graph.added[common.Hash(childRoot)])
+}
+
+// A batch that imports nothing asks for no backfill.
+func TestChainTipBatchWithoutImportsRequestsNoCustodyBackfill(t *testing.T) {
+	cfg, _, _, child, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+	cfg.peerDas = das_mock_services.NewMockPeerDas(gomock.NewController(t)) // any call fails the test
+	orphan := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+	orphan.Block.Slot = child.Block.Slot
+	orphan.Block.ParentRoot = common.Hash{0xde, 0xad}
+
+	processChainTipBatch(t.Context(), cfg, Args{targetSlot: orphan.Block.Slot}, []*cltypes.SignedBeaconBlock{orphan}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
 }

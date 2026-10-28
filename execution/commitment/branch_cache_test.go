@@ -663,6 +663,60 @@ func TestBranchCache_FillDropsViewsOlderThanCommittedUnwind(t *testing.T) {
 	require.Equal(t, []byte("new-view"), got)
 }
 
+func TestBranchCache_FillDropsViewsOlderThanCommitted(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	c.Committed(7)
+	c.Put(key, []byte("committed"), 1, 20)
+
+	c.Fill(key, []byte("old-view"), 1, 19, 6)
+	got, _, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("committed"), got)
+
+	c.Committed(5)
+	c.Fill(key, []byte("old-view"), 1, 19, 6)
+	got, _, ok = c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("committed"), got, "an older commit view must not lower the bound")
+
+	other := []byte{0x01, 0x02, 0x03, 0x04, 0x06}
+	c.Fill(other, []byte("commit-view"), 1, 20, 7)
+	got, _, ok = c.Get(other)
+	require.True(t, ok, "a view opened at the commit must still fill")
+	require.Equal(t, []byte("commit-view"), got)
+}
+
+func TestBranchCache_FillRacingCommittedDeletion(t *testing.T) {
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	for range 2000 {
+		c := NewBranchCache(100)
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Go(func() {
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						c.Fill(key, []byte("replaced"), 1, 20, 1)
+					}
+				}
+			})
+		}
+		runtime.Gosched()
+		c.Committed(2)
+		c.Invalidate(key)
+		close(stop)
+		wg.Wait()
+		got, _, ok := c.Get(key)
+		c.Close()
+		require.False(t, ok, "served %q after the deletion committed", got)
+	}
+}
+
 func TestBranchCache_FillRacingUnwindCommitted(t *testing.T) {
 	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	for range 2000 {
