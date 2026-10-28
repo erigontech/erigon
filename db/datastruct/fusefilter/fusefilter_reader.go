@@ -195,16 +195,18 @@ func (r *Reader) MadvRandom() {
 		panic(err)
 	}
 }
-func (r *Reader) FileName() string { return r.fileName }
-func (r *Reader) ContainsHash(v uint64) bool {
-	if mmap.Probing() {
-		r.probe(v)
+func (r *Reader) FileName() string           { return r.fileName }
+func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
+
+// ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
+func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
+	if pr != nil {
+		r.probe(v, pr)
 	}
 	return r.inner.Contains(v)
 }
 
-// probe touches, through mmap.Populate, the three fingerprints BinaryFuse.Contains reads for v.
-func (r *Reader) probe(v uint64) {
+func (r *Reader) probe(v uint64, pr *mmap.Probe) {
 	f := r.inner
 	h := v + f.Seed
 	h ^= h >> 33
@@ -220,7 +222,7 @@ func (r *Reader) probe(v uint64) {
 	h2 ^= uint32(h) & f.SegmentLengthMask
 	for _, i := range [3]uint32{h0, h1, h2} {
 		if int(i) < len(f.Fingerprints) {
-			mmap.Populate(unsafe.Pointer(&f.Fingerprints[i]))
+			pr.Touch(unsafe.Pointer(&f.Fingerprints[i]))
 		}
 	}
 }
@@ -339,6 +341,14 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 	}
 	r.m = m[:offset]
 	return r, offset, nil
+}
+
+func (r *ReaderSharded) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
+	s := &r.shards[v>>56]
+	if s.inner == nil {
+		return false
+	}
+	return s.ContainsHashProbe(v, pr)
 }
 
 func (r *ReaderSharded) ContainsHash(v uint64) bool {

@@ -2742,12 +2742,13 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
 // stay correct without it.
 func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int) {
-	end, ok := mmap.BeginProbe()
-	if !ok || len(keys) == 0 {
+	dt := at.d[domain]
+	dt.probe = mmap.NewProbe()
+	if dt.probe == nil || len(keys) == 0 {
+		dt.probe = nil
 		return 0, 0
 	}
-	defer end()
-	dt := at.d[domain]
+	defer func() { dt.probe = nil }()
 	pending := keys
 	for ; len(pending) > 0 && waves < 64; waves++ {
 		cold := make([]uintptr, 0, len(pending))

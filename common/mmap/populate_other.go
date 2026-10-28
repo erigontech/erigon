@@ -19,8 +19,10 @@ var BatchPrefetch = false
 
 type ColdPage uintptr
 
-func Probing() bool { return false }
+type Probe struct{}
 
-func BeginProbe() (end func(), ok bool) { return nil, false }
+func NewProbe() *Probe { return nil }
+
+func (*Probe) Touch(unsafe.Pointer) {}
 
 func ReadPages([]uintptr) {}

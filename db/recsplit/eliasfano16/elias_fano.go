@@ -426,12 +426,13 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 	return ef.data
 }
 
-func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
+func (ef *DoubleEliasFano) get2(i uint64, pr *mmap.Probe) (cumKeys, position uint64,
 	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
 ) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64, shift := posLower/64, posLower%64
 	mmap.Populate(unsafe.Pointer(&ef.lowerBits[idx64]))
+	pr.Touch(unsafe.Pointer(&ef.lowerBits[idx64]))
 	lower = ef.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -445,7 +446,9 @@ func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
 	shift = 16 * (idx16 % 4)
 	mask := uint64(0xffff) << shift
 	mmap.Populate(unsafe.Pointer(&ef.jump[jumpSuperQ]))
+	pr.Touch(unsafe.Pointer(&ef.jump[jumpSuperQ]))
 	mmap.Populate(unsafe.Pointer(&ef.jump[idx64]))
+	pr.Touch(unsafe.Pointer(&ef.jump[idx64]))
 	jumpCumKeys := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 	idx16++
 	idx64 = idx16 / 4
@@ -457,7 +460,9 @@ func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
 	currWordCumKeys = jumpCumKeys / 64
 	currWordPosition := jumpPosition / 64
 	mmap.Populate(unsafe.Pointer(&ef.upperBitsCumKeys[currWordCumKeys]))
+	pr.Touch(unsafe.Pointer(&ef.upperBitsCumKeys[currWordCumKeys]))
 	mmap.Populate(unsafe.Pointer(&ef.upperBitsPosition[currWordPosition]))
+	pr.Touch(unsafe.Pointer(&ef.upperBitsPosition[currWordPosition]))
 	windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys] & (uint64(0xffffffffffffffff) << (jumpCumKeys % 64))
 	windowPosition := ef.upperBitsPosition[currWordPosition] & (uint64(0xffffffffffffffff) << (jumpPosition % 64))
 	deltaCumKeys := int(i & qMask)
@@ -491,16 +496,21 @@ func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
 }
 
 func (ef *DoubleEliasFano) Get2(i uint64) (cumKeys, position uint64) {
-	cumKeys, position, _, _, _, _, _ = ef.get2(i)
+	cumKeys, position, _, _, _, _, _ = ef.get2(i, nil)
 	return
 }
 
 func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64) {
+	return ef.Get3Probe(i, nil)
+}
+
+// Get3Probe is Get3 with pr touching the pages it reads.
+func (ef *DoubleEliasFano) Get3Probe(i uint64, pr *mmap.Probe) (cumKeys, cumKeysNext, position uint64) {
 	var (
 		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
 		selectCumKeys                                   int
 	)
-	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2(i)
+	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2(i, pr)
 	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
 	for windowCumKeys == 0 {
 		currWordCumKeys++

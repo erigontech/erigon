@@ -2,7 +2,6 @@ package mmap
 
 import (
 	"os"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -19,7 +18,7 @@ var (
 	populateMode    = os.Getenv("MMAP_POPULATE")
 	PopulateEnabled = populateMode == "true" || populateMode == "iouring"
 	populateIouring = populateMode == "iouring"
-	// BatchPrefetch enables probed reads (BeginProbe) and io_uring page batches (ReadPages).
+	// BatchPrefetch enables probed reads (Probe) and io_uring page batches (ReadPages).
 	BatchPrefetch    = os.Getenv("BAL_BATCH_PREFETCH") == "true"
 	registerMappings = populateIouring || BatchPrefetch
 )
@@ -86,19 +85,12 @@ func mappingOf(page uintptr) (mapping, bool) {
 	return (*ms)[i], true
 }
 
-// Populate makes the page holding p resident; a no-op unless PopulateEnabled. On a probing goroutine it instead
-// stops the read with a ColdPage panic when the page is not resident.
+// Populate makes the page holding p resident; a no-op unless PopulateEnabled.
 func Populate(p unsafe.Pointer) {
-	page := uintptr(p) &^ (osPageSize - 1)
-	if probesActive.Load() > 0 {
-		if s := probeOfThisThread(); s != nil {
-			s.check(page)
-			return
-		}
-	}
 	if !PopulateEnabled {
 		return
 	}
+	page := uintptr(p) &^ (osPageSize - 1)
 	if populateIouring {
 		if m, ok := mappingOf(page); ok {
 			iouring.BlockingRead(m.fd, int64(page-m.start), int(osPageSize))
@@ -111,55 +103,20 @@ func Populate(p unsafe.Pointer) {
 // ColdPage is the panic value a probed read raises at its first page that is not resident.
 type ColdPage uintptr
 
-type probeSlot struct {
-	tid      atomic.Int32
-	resident map[uintptr]struct{} // pages seen resident by this probe, owned by its thread
+// Probe makes the read it is handed to stop with a ColdPage panic at its first non-resident page; a nil Probe
+// probes nothing. A Probe belongs to one goroutine.
+type Probe struct {
+	resident map[uintptr]struct{}
 }
 
-var (
-	probes       [8]probeSlot
-	probesActive atomic.Int32
-)
+func NewProbe() *Probe { return &Probe{resident: map[uintptr]struct{}{}} }
 
-// Probing reports whether any goroutine probes; the hooks check it before anything else.
-func Probing() bool { return probesActive.Load() > 0 }
-
-// BeginProbe makes reads on the calling goroutine stop with a ColdPage panic at their first non-resident page, until
-// the returned end is called. The goroutine stays on its OS thread meanwhile. ok is false when all probe slots are busy.
-func BeginProbe() (end func(), ok bool) {
-	if !BatchPrefetch {
-		return nil, false
+func (pr *Probe) Touch(p unsafe.Pointer) {
+	if pr == nil {
+		return
 	}
-	runtime.LockOSThread()
-	tid := int32(unix.Gettid())
-	for i := range probes {
-		if probes[i].tid.CompareAndSwap(0, tid) {
-			probes[i].resident = map[uintptr]struct{}{}
-			probesActive.Add(1)
-			return func() {
-				probesActive.Add(-1)
-				probes[i].resident = nil
-				probes[i].tid.Store(0)
-				runtime.UnlockOSThread()
-			}, true
-		}
-	}
-	runtime.UnlockOSThread()
-	return nil, false
-}
-
-func probeOfThisThread() *probeSlot {
-	tid := int32(unix.Gettid())
-	for i := range probes {
-		if probes[i].tid.Load() == tid {
-			return &probes[i]
-		}
-	}
-	return nil
-}
-
-func (s *probeSlot) check(page uintptr) {
-	if _, ok := s.resident[page]; ok {
+	page := uintptr(p) &^ (osPageSize - 1)
+	if _, ok := pr.resident[page]; ok {
 		return
 	}
 	var vec [1]byte
@@ -167,7 +124,7 @@ func (s *probeSlot) check(page uintptr) {
 	if errno == 0 && vec[0]&1 == 0 {
 		panic(ColdPage(page))
 	}
-	s.resident[page] = struct{}{}
+	pr.resident[page] = struct{}{}
 }
 
 const batchRingEntries = 256
