@@ -572,6 +572,7 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 		{"above execution cap", 30_000_000, 20_000_000, 40_000_000, 1},
 		{"below execution cap", 30_000_000, params.MaxTxnGasLimit - 1, 40_000_000, 0},
 		{"at execution cap", 30_000_000, params.MaxTxnGasLimit, 30_000_000, 1},
+		{"at block gas limit", 40_000_000, params.MaxTxnGasLimit, 40_000_000, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), tc.gas)
@@ -581,6 +582,26 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 			require.Len(t, txns, tc.want)
 		})
 	}
+}
+
+func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
+	ctx := t.Context()
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 40_000_000)
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 200_000,
+		BlockGasLimit:       50_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 0,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, 1, pool.pending.Len())
+
+	change.BlockGasLimit = 40_000_000
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, 1, pool.pending.Len())
+	require.Equal(t, 0, pool.queued.Len())
 }
 
 func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
@@ -3307,6 +3328,64 @@ func TestOnNewBlockKeepsOriginalWhenUnwoundReplacementRejected(t *testing.T) {
 	require.Equal(t, original.IDHash, kept.TxnSlot.IDHash)
 	pending, baseFee, queued := pool.CountContent()
 	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestOnNewBlockKeepsUnwoundLocalTxnLocal(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		t.Run(fmt.Sprintf("local=%t", local), func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			slotsCount := 1
+			if local {
+				slotsCount = int(txpoolcfg.DefaultConfig.AccountSlots) + 4
+				var txns TxnSlots
+				for nonce := range slotsCount {
+					txn := newTestTxnSlot(uint64(nonce), 0, 1, 2, 100_000)
+					txn.IDHash[0] = byte(nonce + 1)
+					txns.Append(txn, sender[:], true)
+				}
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				for _, reason := range reasons {
+					require.Equal(t, txpoolcfg.Success, reason)
+				}
+			}
+
+			changeWithNonce := func(nonce uint64, blockHash common.Hash) *remoteproto.StateChangeBatch {
+				account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+				return &remoteproto.StateChangeBatch{
+					PendingBlockBaseFee: 1,
+					BlockGasLimit:       1_000_000,
+					ChangeBatch: []*remoteproto.StateChange{{
+						BlockHash: gointerfaces.ConvertHashToH256(blockHash),
+						Changes: []*remoteproto.AccountChange{{
+							Action:  remoteproto.Action_UPSERT,
+							Address: gointerfaces.ConvertAddressToH160(sender),
+							Data:    accounts.SerialiseV3(&account),
+						}},
+					}},
+				}
+			}
+
+			mined := newTestTxnSlot(0, 0, 1, 2, 100_000)
+			mined.IDHash[0] = 1
+			var minedTxns TxnSlots
+			minedTxns.Append(mined, sender[:], false)
+			require.NoError(t, pool.OnNewBlock(ctx, changeWithNonce(1, common.Hash{1}), TxnSlots{}, TxnSlots{}, minedTxns))
+			require.NotContains(t, pool.byHash, string(mined.IDHash[:]))
+
+			unwound := newTestTxnSlot(0, 0, 1, 2, 100_000)
+			unwound.IDHash[0] = 1
+			var unwindTxns TxnSlots
+			unwindTxns.Append(unwound, sender[:], false)
+			require.NoError(t, pool.OnNewBlock(ctx, changeWithNonce(0, common.Hash{2}), unwindTxns, TxnSlots{}, TxnSlots{}))
+
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, slotsCount, pending+baseFee+queued)
+			reunwound := pool.byHash[string(unwound.IDHash[:])]
+			require.NotNil(t, reunwound)
+			require.Equal(t, local, reunwound.subPool&IsLocal != 0)
+		})
+	}
 }
 
 func newTestSenderTxnSlot(sender common.Address, nonce uint64) *TxnSlot {
