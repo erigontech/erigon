@@ -248,9 +248,9 @@ func (f *forkGraphDisk) takeNextEpochStateLocked(block *cltypes.BeaconBlock, ful
 	if f.nextEpochState == nil || block.Slot < f.nextEpochState.Slot() {
 		return nil
 	}
-	precomputed, parentRoot := f.nextEpochState, f.nextEpochParentRoot
-	f.nextEpochState, f.nextEpochParentRoot = nil, common.Hash{}
-	if !fullValidation || parentRoot != block.ParentRoot {
+	precomputed := f.nextEpochState
+	f.nextEpochState = nil
+	if !fullValidation || f.nextEpochParentRoot != block.ParentRoot {
 		return nil
 	}
 	return precomputed
@@ -362,19 +362,16 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		precomputedState := f.takeNextEpochStateLocked(block, fullValidation)
 		var precomputedErr error
 		if precomputedState != nil {
-			advancedRewards := &eth2.BlockRewardsCollector{}
-			precomputedErr = transition.TransitionStateFromPrecomputedEpochState(precomputedState, signedBlock, advancedRewards, fullValidation)
+			precomputedErr = transition.TransitionStateFromPrecomputedEpochState(precomputedState, signedBlock, blockRewardsCollector, fullValidation)
 			if precomputedErr == nil {
 				newState = precomputedState
-				blockRewardsCollector = advancedRewards
+			} else {
+				blockRewardsCollector = &eth2.BlockRewardsCollector{}
 			}
 		}
 		if precomputedState == nil || precomputedErr != nil {
 			if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 				// Add block to list of invalid blocks
-				if precomputedErr != nil {
-					log.Debug("Precomputed epoch state transition failed", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", precomputedErr)
-				}
 				log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 				f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
 				f.badBlocks.Store(common.Hash(blockRoot), block.Slot)

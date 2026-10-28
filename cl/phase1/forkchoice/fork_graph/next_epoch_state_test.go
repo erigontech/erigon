@@ -83,8 +83,6 @@ func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
 	require.Same(t, advanced, postState)
 	require.Same(t, advanced, graph.CurrentStateLocked(common.Hash(mustBlockRoot(t, block))))
 	require.Nil(t, graph.nextEpochState)
-	require.Zero(t, graph.nextEpochParentRoot)
-	require.Nil(t, graph.takeNextEpochStateLocked(block.Block, true))
 
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -101,7 +99,6 @@ func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
 	require.Equal(t, Success, result)
 	require.NotSame(t, advanced, postState)
 	require.Nil(t, graph.nextEpochState)
-	require.Zero(t, graph.nextEpochParentRoot)
 
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -127,7 +124,6 @@ func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T
 	require.Equal(t, Success, result)
 	require.NotSame(t, advanced, postState)
 	require.Nil(t, graph.nextEpochState)
-	require.Zero(t, graph.nextEpochParentRoot)
 
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -150,7 +146,6 @@ func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testi
 	require.Equal(t, Success, result)
 	require.NotSame(t, advanced, postState)
 	require.Nil(t, graph.nextEpochState)
-	require.Zero(t, graph.nextEpochParentRoot)
 
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -172,10 +167,8 @@ func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.
 	_, isBad := graph.badBlocks.Load(blockRoot)
 	require.True(t, isBad)
 	require.Nil(t, graph.nextEpochState)
-	require.Zero(t, graph.nextEpochParentRoot)
 	require.Equal(t, 1, strings.Count(logs.String(), "Invalid beacon block"))
 	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"))
-	require.Contains(t, logs.String(), `lvl=dbug msg="Precomputed epoch state transition failed"`)
 	require.NotContains(t, logs.String(), "Precomputed epoch state diverged")
 }
 

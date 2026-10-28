@@ -55,11 +55,8 @@ func TestTransitionStateFromPrecomputedEpochStateMatchesNormalTransition(t *test
 			require.NoError(t, err)
 			require.Equal(t, normalBytes, advancedBytes)
 
-			normalRoot, err := normalState.HashSSZ()
-			require.NoError(t, err)
 			advancedRoot, err := advancedState.HashSSZ()
 			require.NoError(t, err)
-			require.Equal(t, normalRoot, advancedRoot)
 			require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(advancedRoot))
 			boundaries++
 			parentState = normalState

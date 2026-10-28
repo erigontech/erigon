@@ -53,7 +53,7 @@ func (f *ForkChoiceStore) RunNextEpochPrecompute(ctx context.Context) {
 }
 
 func (f *ForkChoiceStore) precomputeNextEpochState(ctx context.Context, nextEpochStart uint64) error {
-	if ctx.Err() != nil || !f.Synced() || f.syncedDataManager == nil {
+	if !f.Synced() || f.syncedDataManager == nil {
 		return nil
 	}
 
