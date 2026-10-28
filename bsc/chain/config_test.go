@@ -20,6 +20,7 @@ import (
 	"maps"
 	"math/big"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -264,5 +265,197 @@ func TestChapelForkHelpers(t *testing.T) {
 		assert.True(t, tc.active(londonBlock, tc.time), tc.name)
 		assert.True(t, tc.active(londonBlock, tc.time+1), tc.name)
 		assert.False(t, tc.active(londonBlock-1, tc.time), tc.name)
+	}
+}
+
+func TestBSCSpec(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+	require.False(t, spec.IsEmpty())
+
+	assert.Equal(t, uint64(56), spec.Config.ChainID.Uint64())
+	assert.Equal(t, chain.ParliaRules, spec.Config.Rules)
+	assert.Equal(t, common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"), spec.GenesisHash)
+	assert.Equal(t, uint64(34140700), *spec.Config.HertzfixBlock)
+	assert.Equal(t, uint64(1768357800), *spec.Config.FermiTime)
+}
+
+// TestBSCStaticPeers mirrors the Chapel test: the mainnet static peers come from
+// bsc-geth's mainnet.zip and the discv4 bootnodes from its params/bootnodes.go,
+// all on the devp2p listener port 30311.
+func TestBSCStaticPeers(t *testing.T) {
+	t.Parallel()
+
+	peers := chainspec.StaticPeerURLsOfChain(networkname.BSC)
+	require.Len(t, peers, 6)
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+	require.Len(t, spec.Bootnodes, 6)
+
+	nodes, err := enode.ParseNodesFromURLs(slices.Concat(peers, spec.Bootnodes))
+	require.NoError(t, err)
+	require.Len(t, nodes, 12)
+	for _, n := range nodes {
+		assert.Equal(t, 30311, n.TCP())
+	}
+}
+
+// TestBSCForkPrecompiles is the mainnet counterpart of TestChapelForkPrecompiles.
+// Haber shares Cancun's timestamp on mainnet, so P256VERIFY arrives with Cancun.
+func TestBSCForkPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	blsVerify, cometBFT, doubleSign, secp256k1Recover := addr(102), addr(103), addr(104), addr(105)
+	pointEvaluation, p256Verify, blsG1Add := addr(0x0a), addr(0x01, 0x00), addr(0x0b)
+
+	for _, tc := range []struct {
+		name       string
+		block      uint64
+		time       uint64
+		bls        bool
+		cometBFT   string
+		doubleSign bool
+		cancun     bool
+		haber      bool
+		prague     bool
+	}{
+		{"planck", 27281024, 1681259000, false, "", false, false, false, false},
+		{"luban", 29020050, 1686460000, true, "CometBFTLightBlockValidate", false, false, false, false},
+		{"plato", 30720096, 1691600000, true, "CometBFTLightBlockValidate", false, false, false, false},
+		{"hertz", 31302048, 1693350000, true, "CometBFTLightBlockValidateHertz", false, false, false, false},
+		{"feynman", 37500000, 1713419340, true, "CometBFTLightBlockValidateHertz", true, false, false, false},
+		{"cancun", 39500000, 1718863500, true, "CometBFTLightBlockValidateHertz", true, true, true, false},
+		{"prague", 47500000, 1742436600, true, "CometBFTLightBlockValidateHertz", true, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockContext := evmtypes.BlockContext{BlockNumber: tc.block, Time: tc.time}
+			set := vm.Precompiles(blockContext.Rules(spec.Config))
+			assert.Equal(t, tc.doubleSign, set[doubleSign] != nil)
+			assert.Equal(t, tc.doubleSign, set[secp256k1Recover] != nil)
+			assert.Equal(t, tc.cancun, set[pointEvaluation] != nil)
+			assert.Equal(t, tc.prague, set[blsG1Add] != nil)
+			if tc.haber {
+				require.Contains(t, set, p256Verify)
+				assert.Equal(t, params.P256VerifyGas, set[p256Verify].RequiredGas(nil))
+			} else {
+				assert.NotContains(t, set, p256Verify)
+			}
+			if !tc.bls {
+				require.NotContains(t, set, blsVerify)
+				return
+			}
+			require.Contains(t, set, blsVerify)
+			require.Contains(t, set, cometBFT)
+			assert.Equal(t, tc.cometBFT, set[cometBFT].Name())
+		})
+	}
+}
+
+func TestBSCMendelActivatesOsaka(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	require.NotNil(t, cfg.MendelTime)
+	require.NotNil(t, cfg.OsakaTime)
+	assert.Equal(t, uint64(1777343400), *cfg.MendelTime)
+	assert.Equal(t, *cfg.MendelTime, *cfg.OsakaTime)
+	assert.False(t, cfg.IsOsaka(*cfg.MendelTime-1))
+	assert.True(t, cfg.IsOsaka(*cfg.MendelTime))
+
+	assert.Equal(t, &params.BlobConfig{Target: 3, Max: 6, BaseFeeUpdateFraction: 3338477}, cfg.GetBlobConfig(*cfg.MendelTime))
+}
+
+func TestBSCIsPasteur(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	require.NotNil(t, cfg.PasteurTime)
+	assert.Equal(t, uint64(1787625000), *cfg.PasteurTime)
+	assert.False(t, cfg.IsPasteur(66000000, 1787624999))
+	assert.True(t, cfg.IsPasteur(66000001, 1787625000))
+	assert.False(t, cfg.IsPasteur(*cfg.LondonBlock-1, *cfg.PasteurTime))
+}
+
+func TestBSCPasteurPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	tmHeader, iavlProof, cometBFT := addr(0x64), addr(0x65), addr(0x67)
+	input := make([]byte, 1000)
+
+	for _, tc := range []struct {
+		name        string
+		block       uint64
+		time        uint64
+		tmHeader    string
+		iavlProof   string
+		cometBFT    string
+		cometBFTGas uint64
+	}{
+		{"mendel", 66000000, 1787624999, "TMHeaderValidate", "IAVLMerkleProofValidatePlato", "CometBFTLightBlockValidateHertz", 3000},
+		{"pasteur", 66000001, 1787625000, "TMHeaderValidateDeprecated", "IAVLMerkleProofValidateDeprecated", "CometBFTLightBlockValidatePasteur", 3000 + 16*1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockContext := evmtypes.BlockContext{BlockNumber: tc.block, Time: tc.time}
+			rules := blockContext.Rules(spec.Config)
+			set := vm.Precompiles(rules)
+			assert.ElementsMatch(t, slices.Collect(maps.Keys(set)), vm.ActivePrecompiles(rules))
+			assert.ElementsMatch(t, slices.Collect(maps.Keys(vm.PrecompiledContractsOsakaForBSC)), vm.ActivePrecompiles(rules))
+
+			assert.Equal(t, tc.tmHeader, set[tmHeader].Name())
+			assert.Equal(t, tc.iavlProof, set[iavlProof].Name())
+			assert.Equal(t, tc.cometBFT, set[cometBFT].Name())
+			assert.Equal(t, tc.cometBFTGas, set[cometBFT].RequiredGas(input))
+		})
+	}
+}
+
+// TestParliaUpgradeSchedule pins that every system-contract upgrade set is keyed on
+// a fork boundary of the same chain config, and that every fork bsc-geth ships
+// contract code for has one. A fork at genesis (mainnet Ramanujan and Niels) is
+// already in the genesis alloc and has no upgrade entry.
+func TestParliaUpgradeSchedule(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{networkname.BSC, networkname.Chapel} {
+		t.Run(network, func(t *testing.T) {
+			spec, err := chainspec.ChainSpecByName(network)
+			require.NoError(t, err)
+			cfg := spec.Config
+
+			want := map[string]struct{}{}
+			for _, v := range []*uint64{
+				cfg.RamanujanBlock, cfg.NielsBlock, cfg.MirrorSyncBlock, cfg.BrunoBlock, cfg.EulerBlock, cfg.GibbsBlock,
+				cfg.MoranBlock, cfg.PlanckBlock, cfg.LubanBlock, cfg.PlatoBlock,
+				cfg.KeplerTime, cfg.FeynmanTime, cfg.FeynmanFixTime, cfg.HaberFixTime, cfg.BohrTime, cfg.PascalTime,
+				cfg.LorentzTime, cfg.MaxwellTime, cfg.FermiTime, cfg.PasteurTime,
+			} {
+				require.NotNil(t, v)
+				if *v != 0 {
+					want[strconv.FormatUint(*v, 10)] = struct{}{}
+				}
+			}
+			got := map[string]struct{}{}
+			for k := range cfg.Parlia.BlockAlloc {
+				got[k] = struct{}{}
+			}
+			assert.Equal(t, want, got)
+		})
 	}
 }

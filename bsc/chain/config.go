@@ -33,6 +33,14 @@ func readParliaChainSpec(filename string) *chain.Config {
 }
 
 var (
+	BSC = chainspec.Spec{
+		Name:        networkname.BSC,
+		GenesisHash: common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
+		Config:      bscChainConfig,
+		Bootnodes:   bscBootnodes,
+		StaticPeers: bscStaticPeers,
+		Genesis:     BSCGenesisBlock(),
+	}
 	Chapel = chainspec.Spec{
 		Name:        networkname.Chapel,
 		GenesisHash: common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34"),
@@ -44,5 +52,6 @@ var (
 )
 
 func init() {
+	chainspec.RegisterChainSpec(networkname.BSC, BSC)
 	chainspec.RegisterChainSpec(networkname.Chapel, Chapel)
 }
