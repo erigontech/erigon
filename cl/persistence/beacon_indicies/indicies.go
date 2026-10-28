@@ -413,8 +413,9 @@ func WriteBeaconBlockAndIndicies(tx kv.RwTx, block *cltypes.SignedBeaconBlock, c
 	return nil
 }
 
-// PruneBlocks deletes at most snaptype.CaplinMergeLimit blocks below to, so one call
-// never holds a long write transaction; periodic callers delete the rest later.
+// PruneBlocks deletes at most snaptype.CaplinMergeLimit rows below to from each of the block
+// and envelope signature tables, so one call never holds a long write transaction; periodic
+// callers delete the rest later.
 func PruneBlocks(tx kv.RwTx, to uint64) error {
 	if _, _, err := PruneBlocksLimit(tx, to, snaptype.CaplinMergeLimit); err != nil {
 		return err
@@ -428,6 +429,7 @@ func PruneExecutionPayloadEnvelopeSignatures(tx kv.RwTx, to uint64) error {
 		return err
 	}
 	defer cursor.Close()
+	deleted := 0
 	for key, _, err := cursor.First(); ; key, _, err = cursor.Next() {
 		if err != nil {
 			return err
@@ -447,6 +449,10 @@ func PruneExecutionPayloadEnvelopeSignatures(tx kv.RwTx, to uint64) error {
 		}
 		if err := cursor.DeleteCurrent(); err != nil {
 			return err
+		}
+		deleted++
+		if deleted >= snaptype.CaplinMergeLimit {
+			return nil
 		}
 	}
 }
