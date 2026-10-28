@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -113,6 +114,12 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	return fv.extendingForkHeadHash
+}
+
+// IsValidated reports whether a payload with this hash already passed validation.
+func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
+	_, ok := fv.validHashes.Get(hash)
+	return ok
 }
 
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
@@ -279,7 +286,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
 	if fv.sharedDom != nil &&
-		(criticalError != nil || status == engine_types.InvalidStatus) {
+		(criticalError != nil || status == engine_types.InvalidStatus || status == engine_types.AcceptedStatus) {
 		fv.sharedDom.Close()
 		fv.sharedDom = nil
 	}
@@ -320,9 +327,13 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
 	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
-		if errors.Is(err, rules.ErrInvalidBlock) {
+		switch {
+		case errors.Is(err, rules.ErrInvalidBlock):
 			validationError = err
-		} else {
+		case errors.Is(err, stageloop.ErrStateStepHasMoreWork):
+			status = engine_types.AcceptedStatus
+			return
+		default:
 			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
 			return
 		}

@@ -73,7 +73,6 @@ func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 	mvhm.WriteCodeHash(addr, v0, ch, true)
 
 	s := NewWithVersionMap(reader, mvhm)
-	s.SetNoMaterialize(true)
 	s.txIndex = 1
 	// warm the read-set (first EXTCODEHASH)
 	_, _ = s.Empty(addr)

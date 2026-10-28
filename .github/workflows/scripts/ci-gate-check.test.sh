@@ -154,6 +154,21 @@ run_case "annotations fetch failure -> fail closed" 1 \
   CI_GATE_JOBS_JSON='{"jobs":[{"id":4,"name":"tests / tests-mac-linux (windows-2025, parallel)","conclusion":"cancelled","steps":[{"name":"Run tests","conclusion":"cancelled"}]}]}' \
   CI_GATE_ANNOTATIONS_FAIL=1
 
+# The gate excludes its own job, named by GITHUB_JOB (default ci-gate), so a
+# reshuffle passes even when the gate's own step is reported failed.
+self_jobs() {
+  printf '{"jobs":[{"id":1,"name":"hive","conclusion":"cancelled","steps":[{"name":"run","conclusion":"cancelled"}]},{"id":2,"name":"%s","steps":[{"name":"Check all required jobs","conclusion":"failure"}]}]}' "$1"
+}
+run_case "own job excluded by default name" 0 \
+  NEEDS='{"hive":{"result":"cancelled"}}' RUN_CANCELLED=true GITHUB_EVENT_NAME=merge_group \
+  CI_GATE_JOBS_JSON="$(self_jobs ci-gate)"
+run_case "own job excluded by GITHUB_JOB" 0 \
+  NEEDS='{"hive":{"result":"cancelled"}}' RUN_CANCELLED=true GITHUB_EVENT_NAME=merge_group \
+  GITHUB_JOB=eez-ci-gate CI_GATE_JOBS_JSON="$(self_jobs eez-ci-gate)"
+run_case "another gate's failure still counts" 1 \
+  NEEDS='{"hive":{"result":"cancelled"}}' RUN_CANCELLED=true GITHUB_EVENT_NAME=merge_group \
+  GITHUB_JOB=eez-ci-gate CI_GATE_JOBS_JSON="$(self_jobs ci-gate)"
+
 echo "----"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

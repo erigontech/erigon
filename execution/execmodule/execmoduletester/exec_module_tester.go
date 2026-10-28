@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -65,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester/txpoolwait"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -104,9 +106,9 @@ type StateChangesClient interface {
 type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
+	Cancel               context.CancelFunc
 	Log                  log.Logger
 	tb                   testing.TB
-	cancel               context.CancelFunc
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               rules.Engine
@@ -128,6 +130,7 @@ type ExecModuleTester struct {
 	Address              common.Address
 	ForkValidator        *execmodule.ForkValidator
 	ExecModule           *execmodule.ExecModule
+	ReadAheader          *exec.BlockReadAheader
 	BlockBuilder         *builder.Builder
 	StateCache           *execmodule.Cache
 	retirementStart      chan bool
@@ -153,7 +156,7 @@ type ExecModuleTester struct {
 }
 
 func (emt *ExecModuleTester) Close() {
-	emt.cancel()
+	emt.Cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
@@ -388,9 +391,27 @@ func WithMaxReorgDepth(d uint64) Option {
 	}
 }
 
+func WithLoopBlockLimit(n uint) Option {
+	return func(opts *options) {
+		opts.loopBlockLimit = n
+	}
+}
+
+func WithBatchSize(size datasize.ByteSize) Option {
+	return func(opts *options) {
+		opts.batchSize = size
+	}
+}
+
 func WithSlowBlockThreshold(d time.Duration) Option {
 	return func(opts *options) {
 		opts.slowBlockThreshold = &d
+	}
+}
+
+func WithExecWorkerCount(n int) Option {
+	return func(opts *options) {
+		opts.execWorkerCount = n
 	}
 }
 
@@ -428,7 +449,10 @@ type options struct {
 	parallelStateFlushing    bool
 	alwaysGenerateChangesets *bool
 	maxReorgDepth            *uint64
+	loopBlockLimit           uint
+	batchSize                datasize.ByteSize
 	slowBlockThreshold       *time.Duration
+	execWorkerCount          int
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
@@ -542,6 +566,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
 	}
+	if opt.loopBlockLimit > 0 {
+		cfg.Sync.LoopBlockLimit = opt.loopBlockLimit
+	}
+	if opt.batchSize > 0 {
+		cfg.BatchSize = opt.batchSize
+	}
+	if opt.execWorkerCount > 0 {
+		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
+	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -589,7 +622,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	br := freezeblocks.NewBlockReader(allSnapshots)
 
 	mock := &ExecModuleTester{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, Cancel: ctxCancel, DB: db,
 		tb:                 tb,
 		Log:                logger,
 		Dirs:               dirs,
@@ -716,6 +749,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
+	mock.ReadAheader = readAheader
 	blkBuilder := builder.NewBuilder(
 		mock.DB,
 		&cfg.Builder,
@@ -757,7 +791,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.BlockReader),
-			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
 			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
@@ -853,6 +886,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
 		mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
+	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadBlockAccessListsMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 		return nil
 	})
 	mock.StreamWg.Wait()
@@ -1016,6 +1055,9 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 }
 
 func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.Parameters) (uint64, error) {
+	if err := emt.WaitForTxPool(ctx, params.ParentHash); err != nil {
+		return 0, err
+	}
 	return retryBusy(ctx, func() (uint64, bool, error) {
 		result, err := emt.ExecModule.AssembleBlock(ctx, params)
 		if err != nil {
@@ -1023,6 +1065,10 @@ func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.
 		}
 		return result.PayloadID, result.Busy, nil
 	})
+}
+
+func (emt *ExecModuleTester) WaitForTxPool(ctx context.Context, parentHash common.Hash) error {
+	return txpoolwait.WaitForParent(ctx, emt.DB, emt.BlockReader, emt.TxPool, parentHash)
 }
 
 func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID uint64) (*types.Block, error) {
@@ -1242,4 +1288,48 @@ func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 		panic(err)
 	}
 	return b
+}
+
+func NewWithExecLag(tb testing.TB, lag, ahead int, opts ...Option) (*ExecModuleTester, *blockgen.ChainPack) {
+	tb.Helper()
+	ctx := tb.Context()
+	key, err := crypto.GenerateKey()
+	require.NoError(tb, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	genesis := &types.Genesis{Config: chain.AllProtocolChanges, Alloc: types.GenesisAlloc{addr: {Balance: big.NewInt(1e18)}}}
+	m := New(tb, append([]Option{WithGenesisSpec(genesis), WithKey(key)}, opts...)...)
+	chainPack, err := m.GenerateChain(1+lag+ahead, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), addr, uint256.NewInt(1), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(nil), key)
+		require.NoError(tb, err)
+		b.AddTx(txn)
+	})
+	require.NoError(tb, err)
+	require.NoError(tb, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:1]))
+
+	lagging := chainPack.Blocks[1 : 1+lag]
+	_, err = m.InsertBlocks(ctx, lagging)
+	require.NoError(tb, err)
+	head := lagging[len(lagging)-1].NumberU64()
+	require.NoError(tb, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, 1)
+		if err != nil {
+			return err
+		}
+		for _, b := range lagging {
+			maxTxNum += uint64(len(b.Transactions())) + 2
+			if err := rawdbv3.TxNums.Append(tx, b.NumberU64(), maxTxNum); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, b.Hash(), b.NumberU64()); err != nil {
+				return err
+			}
+		}
+		for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.Senders} {
+			if err := stages.SaveStageProgress(tx, stage, head); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	return m, chainPack
 }

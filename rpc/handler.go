@@ -173,9 +173,10 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 
 // inOrderMethods change state that a later call of the same batch may depend on, such as a
 // sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
+// eth_sendRawTransactionSync is left out: it holds its concurrency slot until its receipt,
+// so sends cannot overtake each other, and running them in order would wait for each receipt in turn.
 var inOrderMethods = map[string]struct{}{
 	"eth_sendRawTransaction":     {},
-	"eth_sendRawTransactionSync": {},
 	"graphql_sendRawTransaction": {},
 	"eth_uninstallFilter":        {},
 	"eth_getFilterChanges":       {},
@@ -634,12 +635,12 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			switch {
 			case answered != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+				h.logger.Log(servedLvl(answered), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
 			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			case resp != nil && resp.Error != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
 		}
@@ -750,6 +751,20 @@ func remapDBOverload(ctx context.Context, err error) error {
 		return errServerOverloaded
 	}
 	return err
+}
+
+// servedLvl logs an error the handler coded as an answer, such as a revert, at trace. Uncoded errors may be
+// infrastructure failures, so they stay at warn with internal and overload errors.
+func servedLvl(err error) log.Lvl {
+	var coded Error
+	if !errors.As(err, &coded) {
+		return log.LvlWarn
+	}
+	switch coded.ErrorCode() {
+	case ErrCodeDefault, ErrCodeInternalError, ErrCodeServerOverloaded:
+		return log.LvlWarn
+	}
+	return log.LvlTrace
 }
 
 // runMethod runs the Go callback for an RPC method. It returns either a response for the caller to

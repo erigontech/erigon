@@ -5,7 +5,7 @@ on:
     branches:
       - 'release/3.*'
   schedule:
-    - cron: '0 0 1 * *'  # Run on the 1st of each month at 00:00 AM UTC
+    - cron: '1 0 1 * *'  # Run on the 1st of each month at 00:01 AM UTC
   workflow_dispatch:     # Run manually
 
 concurrency:
@@ -41,6 +41,9 @@ jobs:
       RETIREMENT_SETTLE_SECONDS: 300 # a full -> minimal backlog is tens of GB to unlink
 
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Check out repository
         uses: actions/checkout@v7
         with:

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -43,6 +44,32 @@ func TestUpgradeAndExpectedWithdrawals(t *testing.T) {
 	w, err := GetExpectedWithdrawals(s, Epoch(s))
 	require.NoError(t, err)
 	assert.Empty(t, w.Withdrawals)
+}
+
+func TestUpgradeToGloasStateRootMatchesDecodedState(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+	require.NoError(t, s.UpgradeToAltair())
+	require.NoError(t, s.UpgradeToBellatrix())
+	require.NoError(t, s.UpgradeToCapella())
+	require.NoError(t, s.UpgradeToDeneb())
+	require.NoError(t, s.UpgradeToElectra())
+	require.NoError(t, s.UpgradeToFulu())
+	s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{ValidatorIndex: 1, Amount: 2, WithdrawableEpoch: 3})
+	s.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: 4, TargetIndex: 5})
+	_, err := s.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpgradeToGloas())
+	actual, err := s.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	fresh := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, fresh.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	expected, err := fresh.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
 }
 
 // TestUpgradeToElectraPropagatesQueueExcessActiveBalanceError pins that a

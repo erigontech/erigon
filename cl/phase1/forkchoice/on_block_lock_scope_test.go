@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/utils"
@@ -94,7 +95,7 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 
 	tickDone := make(chan struct{})
 	go func() {
-		store.OnTick(48)
+		store.OnTick(48 * 1000)
 		close(tickDone)
 	}()
 	awaitSignal(t, tickDone, "OnTick to acquire the fork-choice lock while NewPayload is blocked")
@@ -127,12 +128,13 @@ func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
 	awaitSignal(t, elEntered, "NewPayload to start")
 
 	headCached := make(chan struct{})
+	var headErr error
 	go func() {
 		defer close(headCached)
-		_, _, err := store.GetHead(nil)
-		require.NoError(t, err)
+		_, _, headErr = store.GetHead(nil)
 	}()
 	awaitSignal(t, headCached, "GetHead to populate the head cache")
+	require.NoError(t, headErr)
 
 	store.mu.RLock()
 	cachedHead := store.headHash
@@ -514,6 +516,23 @@ func TestOnBlockRejectsBlockThatWentStaleWaitingForAdmission(t *testing.T) {
 	})
 }
 
+func TestOnBlockRejectsPayloadInvalidatedDuringValidation(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusNotValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	store.MarkPayloadInvalid(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	close(releaseEL)
+
+	err = awaitOnBlock(t, done)
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+	require.ErrorIs(t, err, ErrBlockInvalid)
+}
+
 // Invalid is terminal. A root invalidated while the EL call was in flight must not be
 // reported as validated to a queued caller, nor have its validated marker revived.
 func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
@@ -655,7 +674,7 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 
 	select {
 	case err := <-done:
-		require.ErrorIs(t, err, errPayloadValidationAdmission)
+		require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 	case <-time.After(lockScopeTimeout):
 		t.Fatal("the caller did not return after cancellation")
 	}
@@ -685,8 +704,9 @@ func TestOnBlockMalformedHashIsNotCachedAgainstTheClaimedHash(t *testing.T) {
 	require.NotEqual(t, claimed, derivedHash, "the payload must not name its own hash")
 
 	for range 2 {
-		require.ErrorContains(t, store.OnBlock(context.Background(), block, true, true, false),
-			"invalid execution payload hash")
+		err = store.OnBlock(context.Background(), block, true, true, false)
+		require.ErrorContains(t, err, "invalid execution payload hash")
+		require.ErrorIs(t, err, ErrBlockInvalid)
 	}
 
 	_, cached := store.GetRecentExecutionPayloadStatus(claimed)
@@ -713,13 +733,14 @@ func TestNewPayloadDoesNotWaitForTheLockWhileHoldingTheToken(t *testing.T) {
 	store.payloadValidationAdmission <- struct{}{}
 
 	var checked atomic.Bool
+	blockRoot := mustRoot(t, block)
 	locked, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
 		store.mu.Lock()
 		close(locked)
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			mustRoot(t, block), func() error {
+			blockRoot, func() error {
 				checked.Store(true)
 				return nil
 			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
@@ -939,4 +960,20 @@ func TestNewPayloadFastPathPublishesNothingToRetract(t *testing.T) {
 	require.Equal(t, common.Hash{}, published, "the fast path must not claim the writer's entry")
 	_, held := store.inFlightInvalidPayloads.Load(executionHash)
 	require.True(t, held, "the writer's entry must survive a non-writer passing through")
+}
+
+// UpdateValidatorsCustody writes the indexing DB, so it must run without f.mu: the fork
+// choice stage holds an indexing-DB write tx while it waits for f.mu.
+func TestOnBlockUpdatesValidatorsCustodyWithoutForkChoiceLock(t *testing.T) {
+	store, block := buildExAnteStorePendingLast(t, nil)
+	store.localValidators.SetFeeRecipient(0, common.Address{})
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().UpdateValidatorsCustody(gomock.Any()).Times(1).Do(func(uint64) {
+		require.True(t, store.mu.TryLock(), "UpdateValidatorsCustody must not run under the fork-choice lock")
+		store.mu.Unlock()
+	})
+	store.InitPeerDas(peerDas)
+
+	require.NoError(t, store.OnBlock(context.Background(), block, false, true, false))
 }

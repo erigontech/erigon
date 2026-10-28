@@ -22,23 +22,27 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	gossipnames "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -143,7 +147,8 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 		SlotsPerEpoch:  32,
 		SecondsPerSlot: 12,
 	}
-	networkConfig := &clparams.NetworkConfig{}
+	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	networkConfig := &mainnetNetwork
 
 	// Setup mock expectations
 	s.mockClock.EXPECT().GetCurrentEpoch().Return(uint64(10)).AnyTimes()
@@ -597,7 +602,8 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 		SlotsPerEpoch:  32,
 		SecondsPerSlot: 12,
 	}
-	networkConfig := &clparams.NetworkConfig{}
+	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	networkConfig := &mainnetNetwork
 
 	// Setup mock expectations
 	s.mockClock.EXPECT().GetCurrentEpoch().Return(uint64(10)).AnyTimes()
@@ -821,6 +827,161 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_MultipleT
 		newTopic := composeTopic(newForkDigest, topicName)
 		s.Contains(allTopicsAfter, newTopic)
 	}
+}
+
+func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopicsSubscribesExistingTargetAndContinues() {
+	oldDigestA := common.Bytes4{0x11, 0x22, 0x33, 0x44}
+	oldDigestB := common.Bytes4{0x55, 0x66, 0x77, 0x88}
+	newDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
+	existingName := "already_joined"
+	remainingName := "remaining_topic"
+	validator := func(context.Context, peer.ID, *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	expiry := time.Now().Add(time.Hour)
+	addTopic := func(topic string, subscribe bool) {
+		handle, err := s.gm.p2p.Pubsub().Join(topic)
+		s.Require().NoError(err)
+		s.Require().NoError(s.gm.subscriptions.Add(topic, handle, validator))
+		if subscribe {
+			s.Require().NoError(s.gm.subscriptions.SubscribeWithExpiry(topic, expiry))
+		}
+	}
+
+	addTopic(composeTopic(oldDigestA, existingName), true)
+	addTopic(composeTopic(oldDigestB, existingName), true)
+	addTopic(composeTopic(newDigest, existingName), false)
+	addTopic(composeTopic(oldDigestA, remainingName), true)
+
+	s.Require().NoError(s.gm.subscribeUpcomingTopics(newDigest))
+	existing := s.gm.subscriptions.Get(composeTopic(newDigest, existingName))
+	s.Require().NotNil(existing)
+	s.NotNil(existing.sub)
+	remaining := s.gm.subscriptions.Get(composeTopic(newDigest, remainingName))
+	s.Require().NotNil(remaining)
+	s.NotNil(remaining.sub)
+}
+
+func newScoredGossipManagerForTest(
+	t *testing.T,
+	ctrl *gomock.Controller,
+	clock eth_clock.EthereumClock,
+	secondsPerSlot uint64,
+) *GossipManager {
+	t.Helper()
+	h, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, h.Close()) })
+	ps, err := pubsub.NewGossipSub(t.Context(), h, pubsub.WithPeerScore(
+		&pubsub.PeerScoreParams{
+			Topics:            make(map[string]*pubsub.TopicScoreParams),
+			AppSpecificScore:  func(peer.ID) float64 { return 0 },
+			AppSpecificWeight: 1,
+			DecayInterval:     time.Second,
+			DecayToZero:       0.01,
+			RetainScore:       time.Minute,
+		},
+		&pubsub.PeerScoreThresholds{},
+	))
+	require.NoError(t, err)
+	p2pManager := mock_services.NewMockP2PManager(ctrl)
+	p2pManager.EXPECT().Pubsub().Return(ps).AnyTimes()
+	p2pManager.EXPECT().Host().Return(h).AnyTimes()
+	p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
+	gm := NewGossipManager(
+		t.Context(), p2pManager,
+		&clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: secondsPerSlot},
+		&clparams.NetworkConfig{}, clock, false, 0, datasize.MB, datasize.MB, false,
+	)
+	t.Cleanup(func() { require.NoError(t, gm.Close()) })
+	return gm
+}
+
+func TestGossipManagerSubscribesProposerPreferencesOneEpochEarly(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const (
+		gloasForkEpoch = uint64(3)
+		slotsPerEpoch  = uint64(32)
+	)
+	var currentSlot atomic.Uint64
+	currentSlot.Store(gloasForkEpoch*slotsPerEpoch - 35)
+	oldDigest := common.Bytes4{0x11, 0x22, 0x33, 0x44}
+	newDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().CurrentForkDigest().Return(oldDigest, nil).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().DoAndReturn(currentSlot.Load).AnyTimes()
+	clock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 {
+		return slot / slotsPerEpoch
+	}).AnyTimes()
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).DoAndReturn(func(epoch uint64) (common.Bytes4, error) {
+		if epoch >= gloasForkEpoch {
+			return newDigest, nil
+		}
+		return oldDigest, nil
+	}).AnyTimes()
+	gm := newScoredGossipManagerForTest(t, ctrl, clock, 12)
+
+	service := &mockService{namesFunc: func() []string {
+		return []string{gossipnames.TopicNameProposerPreferences, gossipnames.TopicNameBeaconBlock}
+	}}
+	_, _, err := gm.registerGossipService(service)
+	require.NoError(t, err)
+
+	preferencesTopic := composeTopic(newDigest, gossipnames.TopicNameProposerPreferences)
+	gm.subscribeUpcomingProposerPreferences()
+	require.Nil(t, gm.subscriptions.Get(preferencesTopic))
+	currentSlot.Store(gloasForkEpoch*slotsPerEpoch - 34)
+	gm.subscribeUpcomingProposerPreferences()
+	subscription := gm.subscriptions.Get(preferencesTopic)
+	require.NotNil(t, subscription)
+	require.NotNil(t, subscription.sub)
+	require.Nil(t, gm.subscriptions.Get(composeTopic(newDigest, gossipnames.TopicNameBeaconBlock)))
+}
+
+func TestRegisterGossipServiceSubscribesProposerPreferencesForNextEpochImmediately(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const (
+		gloasForkEpoch = uint64(3)
+		slotsPerEpoch  = uint64(32)
+		currentSlot    = gloasForkEpoch*slotsPerEpoch - 1
+	)
+	oldDigest := common.Bytes4{0x11, 0x22, 0x33, 0x44}
+	gloasDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
+	bpoDigest := common.Bytes4{0xde, 0xad, 0xbe, 0xef}
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().CurrentForkDigest().Return(oldDigest, nil).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 {
+		return slot / slotsPerEpoch
+	}).AnyTimes()
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).DoAndReturn(func(epoch uint64) (common.Bytes4, error) {
+		switch {
+		case epoch < gloasForkEpoch:
+			return oldDigest, nil
+		case epoch == gloasForkEpoch:
+			return gloasDigest, nil
+		default:
+			return bpoDigest, nil
+		}
+	}).AnyTimes()
+	gm := newScoredGossipManagerForTest(t, ctrl, clock, 12)
+
+	service := &mockService{namesFunc: func() []string {
+		return []string{gossipnames.TopicNameProposerPreferences}
+	}}
+	_, _, err := gm.registerGossipService(service)
+	require.NoError(t, err)
+
+	gloasSubscription := gm.subscriptions.Get(composeTopic(gloasDigest, gossipnames.TopicNameProposerPreferences))
+	if assert.NotNil(t, gloasSubscription) {
+		assert.NotNil(t, gloasSubscription.sub)
+	}
+	bpoSubscription := gm.subscriptions.Get(composeTopic(bpoDigest, gossipnames.TopicNameProposerPreferences))
+	if assert.NotNil(t, bpoSubscription) {
+		assert.NotNil(t, bpoSubscription.sub)
+	}
+	require.NoError(t, gm.PublishToForkDigest(t.Context(), gloasDigest, gossipnames.TopicNameProposerPreferences, []byte("preference")))
+	require.NoError(t, gm.PublishToForkDigest(t.Context(), bpoDigest, gossipnames.TopicNameProposerPreferences, []byte("preference")))
 }
 
 // TestRegisterGossipService_ConditionsForwarded is a regression test for a bug
@@ -1645,4 +1806,26 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCounters
 func TestGossipManager(t *testing.T) {
 	suite.Run(t, new(subscribeUpcomingTopicsTestSuite))
 	suite.Run(t, new(newPubsubValidatorTestSuite))
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_RejectsPayloadAboveTopicBound() {
+	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	gm := NewGossipManager(ctx, s.mockP2P, &clparams.MainnetBeaconConfig, &mainnetNetwork, s.mockClock, false, 0,
+		datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+	bound := gossipnames.MaxUncompressedSize(gossipnames.TopicNameBeaconAggregateAndProof, gm.beaconConfig, gm.networkConfig)
+	topic := "/eth2/abcd1234/beacon_aggregate_and_proof/ssz_snappy"
+	decoded := 0
+	service := &mockService{decodeFunc: func(peer.ID, []byte, clparams.StateVersion) (any, error) {
+		decoded++
+		return "decoded_message", nil
+	}}
+	validator := gm.newPubsubValidator(service)
+	pid := peer.ID("test-peer")
+
+	s.Equal(pubsub.ValidationAccept, validator(ctx, pid, createMockMessage(topic, utils.CompressSnappy(make([]byte, bound)))))
+	s.Equal(1, decoded)
+	s.Equal(pubsub.ValidationReject, validator(ctx, pid, createMockMessage(topic, utils.CompressSnappy(make([]byte, bound+1)))))
+	s.Equal(1, decoded, "a payload above the topic bound must be rejected before decoding")
 }

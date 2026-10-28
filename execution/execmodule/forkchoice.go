@@ -112,6 +112,10 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 }
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
+	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
+		return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+	}
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 
 	// Spawn the actual forkchoice work using the module's background context so
@@ -134,7 +138,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
 			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
-			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+			return ForkChoiceResult{Status: ExecutionStatusBusy, UpdateInProgress: true}, nil
 		}
 		e.logger.Debug("forkChoiceUpdate cancelled")
 		return ForkChoiceResult{}, ctx.Err()
@@ -267,6 +271,7 @@ func (e *ExecModule) unwindIfNeeded(
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusMissingSegment,
+					MissingHash:     currentParentHash,
 				}, nil
 			}
 			currentParentHash = currentHeader.ParentHash
@@ -375,14 +380,6 @@ func (e *ExecModule) unwindIfNeeded(
 }
 
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
-	if !e.semaphore.TryAcquire(1) {
-		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
-		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-			LatestValidHash: common.Hash{},
-			Status:          ExecutionStatusBusy,
-		}, false)
-		return fmt.Errorf("semaphore timeout")
-	}
 	shouldReleaseSema := true
 	defer func() {
 		if shouldReleaseSema {
@@ -642,7 +639,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
-			if _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+			if _, _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			return nil
@@ -821,7 +818,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return e.runPostForkchoice(initialCycle)
 			})
 		} else {
-			pruneTimings, err := e.runForkchoicePrune(initialCycle)
+			pruneTimings, _, err := e.runForkchoicePrune(initialCycle)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
@@ -843,7 +840,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 // runPostForkchoice runs the background FCU prune. Flush+commit and the
 // notification dispatch have already run inline.
 func (e *ExecModule) runPostForkchoice(initialCycle bool) error {
-	timings, err := e.runForkchoicePrune(initialCycle)
+	timings, _, err := e.runForkchoicePrune(initialCycle)
 	if err != nil {
 		return err
 	}
@@ -954,7 +951,19 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	return timings, nil
 }
 
-func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
+// Prune runs one tip-mode prune pass, serialized with execution, and returns
+// the completion signal for its snapshot job. ctx limits waiting for execution;
+// once started, the pass uses the module lifetime, like forkchoice pruning.
+func (e *ExecModule) Prune(ctx context.Context) (<-chan struct{}, error) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer e.semaphore.Release(1)
+	_, finished, err := e.runForkchoicePrune(false)
+	return finished, err
+}
+
+func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, <-chan struct{}, error) {
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
@@ -976,7 +985,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	e.hook.NotifyStateRetirementStart(started)
 	if started {
@@ -990,7 +999,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	if len(timings) > 0 {
 		timings = append(timings, "initialCycle", initialCycle)
 	}
-	return timings, nil
+	return timings, finished, nil
 }
 
 func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {

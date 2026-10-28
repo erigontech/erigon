@@ -119,7 +119,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, nil
 	}
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
@@ -163,6 +163,9 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if txn == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, block.NumberU64(), txIndex); err != nil {
+		return nil, err
+	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -176,7 +179,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	defer ibs.Close()
 
-	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +270,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	if uint64(pageSize) > api.maxPageSize {
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
+	if blockNum == MaxBlockNum {
+		return &TransactionsWithReceipts{
+			Txs:       []*ethapi.RPCTransaction{},
+			Receipts:  []ReceiptWithTimestamp{},
+			FirstPage: true,
+		}, nil
+	}
 
 	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -274,9 +284,9 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	// blockNum 0 is the oldest-page sentinel; see SearchTransactionsBefore.
+	// The cursor block is excluded; zero instead requests the oldest page.
 	if blockNum != 0 {
-		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum+1)
 		if err != nil {
 			return nil, err
 		}
@@ -284,7 +294,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+func delegateGetBlockByNumber(b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
 	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
@@ -308,7 +318,7 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader) (internalIssuance, error) {
+func delegateIssuance(block *types.Block, chainConfig *chain.Config, engine rules.EngineReader) (internalIssuance, error) {
 	// TODO: aura seems to be already broken in the original version of this RPC method
 	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract accounts.Address, data []byte) ([]byte, error) {
 		return nil, nil
@@ -337,7 +347,7 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	return ret, nil
 }
 
-func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
+func delegateBlockFees(block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
 	var fee, gasUsed, totalFees uint256.Int
 	isLondon := chainConfig.IsLondon(block.NumberU64())
 	baseFee := block.BaseFee()
@@ -400,7 +410,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
+	getBlockRes, err := delegateGetBlockByNumber(b, number, false)
 	if err != nil {
 		return nil, err
 	}

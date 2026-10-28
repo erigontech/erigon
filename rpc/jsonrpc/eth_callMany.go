@@ -68,6 +68,18 @@ func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 	return nil
 }
 
+// capEVMTimeout lets a client lower the server EVM timeout, never raise or remove it.
+func capEVMTimeout(serverTimeout time.Duration, clientMilliSeconds int64) time.Duration {
+	if clientMilliSeconds <= 0 {
+		return serverTimeout
+	}
+	clientTimeout := time.Duration(min(clientMilliSeconds, math.MaxInt64/int64(time.Millisecond))) * time.Millisecond
+	if serverTimeout > 0 {
+		return min(clientTimeout, serverTimeout)
+	}
+	return clientTimeout
+}
+
 // setupEVMTimeout cancels the EVM registered via the returned store func once timeout
 // elapses (or ctx is cancelled), and returns the deadline-carrying context. Callers must
 // store the EVM once created — and again whenever it is recreated — so cancellation
@@ -182,14 +194,15 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 	defer st.Close()
+	transactions.VersionedCallState(st)
 
 	header := block.HeaderNoCopy()
 
-	timeout := api.evmCallTimeout
-
-	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
-		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
+	var timeoutMilliSeconds int64
+	if timeoutMilliSecondsPtr != nil {
+		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
+	timeout := capEVMTimeout(api.evmCallTimeout, timeoutMilliSeconds)
 
 	ctx, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
@@ -222,7 +235,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, err
 		}
 
-		_ = st.FinalizeTx(rules, state.NewNoopWriter())
+		if err := ethapi.FinalizeCallTx(st, rules); err != nil {
+			return nil, err
+		}
 
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -231,6 +246,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// after replaying the txns, we want to overload the state
 	// overload state
+	st.SetTxContext(blockNum, len(replayTransactions))
 	var activePrecompiles vm.PrecompiledContracts
 	if stateOverride != nil {
 		activePrecompiles = vm.ActivePrecompiledContracts(rules)
@@ -242,12 +258,16 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	ret := make([][]map[string]any, 0)
 
+	// Every transaction of the request gets the next index, so each sees the ones before it.
+	txIndex := st.TxnIndex()
 	for _, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		results := []map[string]any{}
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
+			st.SetTxContext(blockNum, txIndex)
+			txIndex++
 			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
@@ -265,7 +285,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				return nil, err
 			}
 
-			_ = st.FinalizeTx(rules, state.NewNoopWriter())
+			if err := ethapi.FinalizeCallTx(st, rules); err != nil {
+				return nil, err
+			}
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {
