@@ -149,3 +149,17 @@ func TestExecDownloadedBatch_RejectedForkChoiceFails(t *testing.T) {
 		})
 	}
 }
+
+func TestExecDownloadedBatch_BadBlockFromForkChoiceReportsBadHeaders(t *testing.T) {
+	e := newTestBadHeadersDownloader(t)
+	e.logger = testlog.Logger(t, log.LvlCrit)
+	e.chainRW = chainreader.NewChainReaderEth1(nil, &domainAheadExecStub{fcuStatus: execmodule.ExecutionStatusBadBlock}, 0)
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
+	requested := common.HexToHash("0xfeed")
+
+	require.Error(t, e.execDownloadedBatch(t.Context(), block, requested))
+	for _, h := range []common.Hash{block.Hash(), requested} {
+		bad, _, _ := e.IsBadHeader(h)
+		require.True(t, bad, h)
+	}
+}
