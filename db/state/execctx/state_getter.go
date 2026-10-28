@@ -61,6 +61,30 @@ func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
 }
 
+// AsOfGetter reads keys as of a txNum through sd.mem, the shared state cache, then its tx.
+type AsOfGetter struct {
+	sd   *SharedDomains
+	tx   kv.TemporalTx
+	view cache.ReadView
+}
+
+// AsOfGetter binds the cache view once per tx: building it can read the DB.
+var _ kv.AsOfGetter = (*AsOfGetter)(nil)
+
+func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
+	return &AsOfGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
+}
+
+func (g *AsOfGetter) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if v, ok, err := g.sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
+		return v, ok, err
+	}
+	if v, hit := g.view.GetAsOf(domain, key, ts); hit {
+		return v, len(v) > 0, nil // an empty value is a cached absence
+	}
+	return g.tx.GetAsOf(domain, key, ts)
+}
+
 // TemporalTxStateGetter exposes execution reads over a temporal transaction.
 type TemporalTxStateGetter struct {
 	kv.TemporalTx

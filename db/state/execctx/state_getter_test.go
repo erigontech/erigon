@@ -514,3 +514,40 @@ func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
 		})
 	}
 }
+
+type countingAsOfTx struct {
+	kv.TemporalTx
+	reads int
+}
+
+func (tx *countingAsOfTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	tx.reads++
+	return tx.TemporalTx.GetAsOf(domain, key, ts)
+}
+
+// The as-of read serves a value committed before ts from the state cache, and reads the tx for one written at ts.
+func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+
+	tx := &countingAsOfTx{TemporalTx: roTx}
+	asOf := sd.AsOfGetter(tx)
+	committed := make([]byte, 20)
+	committed[0] = 0xcc
+
+	v, ok, err := asOf.GetAsOf(kv.AccountsDomain, committed, 10)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, encAccount(1), v)
+	require.Zero(t, tx.reads, "a value committed at txNum 5 is the value as of 10")
+
+	_, _, err = asOf.GetAsOf(kv.AccountsDomain, committed, 5)
+	require.NoError(t, err)
+	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
+}
