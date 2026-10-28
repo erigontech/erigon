@@ -107,6 +107,20 @@ func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count
 	return out, "peer", nil
 }
 
+func (s *slowRangeServer) requestBlocksByRoot(_ context.Context, roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
+	var out []*cltypes.SignedBeaconBlock
+	for _, blk := range s.blocks {
+		root, err := blk.Block.HashSSZ()
+		if err != nil {
+			return nil, "", err
+		}
+		if slices.Contains(roots, root) {
+			out = append(out, blk)
+		}
+	}
+	return out, "peer", nil
+}
+
 func newRangeDownloader(t *testing.T, top *cltypes.SignedBeaconBlock, server *slowRangeServer) *BackwardBeaconDownloader {
 	t.Helper()
 	topRoot, err := top.Block.HashSSZ()
@@ -117,6 +131,7 @@ func newRangeDownloader(t *testing.T, top *cltypes.SignedBeaconBlock, server *sl
 		reqInterval:          time.NewTicker(time.Millisecond),
 		baseInterval:         time.Millisecond,
 		requestBlocksByRange: server.requestBlocksByRange,
+		requestBlocksByRoot:  server.requestBlocksByRoot,
 	}
 	t.Cleanup(downloader.reqInterval.Stop)
 	downloader.slotToDownload.Store(top.Block.Slot)
@@ -337,6 +352,13 @@ func TestBackwardBeaconDownloaderPrefetchesAcrossEmptySlots(t *testing.T) {
 
 	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
 	require.Greater(t, server.maxInFlight.Load(), int32(1))
+}
+
+func TestBackwardBeaconDownloaderFetchesParentByRootBelowEmptyRange(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(701, func(slot uint64) bool { return slot >= 500 && slot < 700 }))
+	server := &slowRangeServer{blocks: blocks, delay: 5 * time.Millisecond, calls: map[uint64]int{}}
+
+	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
 }
 
 func TestBlockWithRootReturnsFirstMatch(t *testing.T) {

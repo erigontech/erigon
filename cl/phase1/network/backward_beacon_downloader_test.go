@@ -299,7 +299,7 @@ func TestSendBlockRequestDoesNotBanOnEmptyResponse(t *testing.T) {
 	var requestSent atomic.Bool
 	requestSent.Store(true)
 	received := make(chan []*cltypes.SignedBeaconBlock, 1)
-	b.sendBlockRequest(ctx, 100, 10, received, &requestSent)
+	b.sendBlockRequest(ctx, 100, 10, common.Hash{}, received, &requestSent)
 
 	select {
 	case pid := <-sentinel.banned:

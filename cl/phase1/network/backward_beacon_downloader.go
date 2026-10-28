@@ -63,6 +63,7 @@ type BackwardBeaconDownloader struct {
 	expectedRoot           common.Hash
 	rpc                    *rpc.BeaconRpcP2P
 	requestBlocksByRange   func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error)
+	requestBlocksByRoot    func(context.Context, [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error)
 	requestEnvelopes       func(context.Context, [][32]byte, ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
 	engine                 execution_client.ExecutionEngine
 	onNewBlock             OnNewBlock
@@ -136,6 +137,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 	}
 	if rpc != nil {
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
+		b.requestBlocksByRoot = rpc.SendBeaconBlocksByRootReq
 		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
 			return RequestEnvelopesFrantically(ctx, rpc, roots, blocks...)
 		}
@@ -455,7 +457,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 				b.prefetchRange(ctx, bottom)
 				continue
 			}
-			go b.sendBlockRequest(ctx, start, count, received, &requestSent)
+			go b.sendBlockRequest(ctx, start, count, b.expectedRoot, received, &requestSent)
 
 		case blocks := <-prefetched:
 			prefetched = nil
@@ -534,6 +536,7 @@ func (b *BackwardBeaconDownloader) banPeerOnError(peerId string, err error, star
 func (b *BackwardBeaconDownloader) sendBlockRequest(
 	ctx context.Context,
 	start, count uint64,
+	root common.Hash,
 	received chan<- []*cltypes.SignedBeaconBlock,
 	requestSent *atomic.Bool,
 ) {
@@ -550,6 +553,9 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 	if len(blocks) == 0 {
 		// An empty response is protocol-legal: the peer may have pruned the range.
 		log.Debug("[Caplin] empty backward beacon block response", "peer", peerId, "start", start, "count", count)
+		blocks = b.blockByRoot(ctx, root, start, count)
+	}
+	if len(blocks) == 0 {
 		b.backOffEmpty()
 		requestSent.Store(false)
 		return
@@ -561,6 +567,21 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 	default:
 		// Response already received, discard
 	}
+}
+
+func (b *BackwardBeaconDownloader) blockByRoot(ctx context.Context, root common.Hash, start, count uint64) []*cltypes.SignedBeaconBlock {
+	if b.requestBlocksByRoot == nil {
+		return nil
+	}
+	blocks, peerId, err := b.requestBlocksByRoot(ctx, [][32]byte{root})
+	if err != nil {
+		b.banPeerOnError(peerId, err, start, count)
+		return nil
+	}
+	if blk := blockWithRoot(blocks, root); blk != nil {
+		return []*cltypes.SignedBeaconBlock{blk}
+	}
+	return nil
 }
 
 // processResponses processes downloaded blocks in reverse order.
