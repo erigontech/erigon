@@ -106,15 +106,24 @@ func (p *partitioner) done() (storage []storageTask, accounts []accountEntry) {
 		if accounts[i].storageDirty {
 			task, next = next, next+1
 		}
-		if accounts[i].update == nil || !accounts[i].update.Deleted() {
-			continue
+		update := accounts[i].update
+		switch {
+		case update == nil:
+		case update.Deleted():
+			wipe := storageTask{addrHash: hashAddressPath(accounts[i].hashedKey), wipe: true}
+			if task >= 0 {
+				storage[task] = wipe
+				continue
+			}
+			storage = append(storage, wipe)
+		case update.DeleteStorageSubtree:
+			if task >= 0 {
+				storage[task].wipe = true
+				continue
+			}
+			storage = append(storage, storageTask{addrHash: hashAddressPath(accounts[i].hashedKey), wipe: true})
+			accounts[i].storageDirty = true
 		}
-		wipe := storageTask{addrHash: hashAddressPath(accounts[i].hashedKey), wipe: true}
-		if task >= 0 {
-			storage[task] = wipe
-			continue
-		}
-		storage = append(storage, wipe)
 	}
 	return storage, accounts
 }
@@ -131,15 +140,21 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	if ctx == nil {
 		return [32]byte{}, nil, errors.New("commitment v3: nil phase A context")
 	}
+	g := graph{plane: planeStorage, addrHash: task.addrHash[:]}
 	if task.wipe {
 		records, err := enumerateStorageRecords(ctx, task.addrHash)
-		if err != nil || len(records) == 0 {
-			return empty.RootHash, nil, err
+		if err != nil {
+			return [32]byte{}, nil, err
+		}
+		if len(task.entries) != 0 {
+			return g.rebuildStorage(ctx, task.entries, records)
+		}
+		if len(records) == 0 {
+			return empty.RootHash, nil, nil
 		}
 		return empty.RootHash, deltaParts{records}, nil
 	}
 
-	g := graph{plane: planeStorage, addrHash: task.addrHash[:]}
 	root, err := g.loadRoot(ctx)
 	if err != nil {
 		return [32]byte{}, nil, err
@@ -190,4 +205,42 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	}
 	hash, err := fold(root, 0)
 	return hash, parts, err
+}
+
+func (g graph) rebuildStorage(ctx commitment.PatriciaContext, entries []storageEntry, wiped []recordDelta) ([32]byte, deltaParts, error) {
+	root := fork(nil)
+	root.loaded, root.plane = true, g.plane
+	for _, entry := range entries {
+		if entry.op != storagePut {
+			continue
+		}
+		if err := insertRoot(root, entry.path, entry.value); err != nil {
+			return [32]byte{}, nil, err
+		}
+	}
+	parts, err := g.persistGraph(ctx, root, foldPlan{})
+	if err != nil {
+		return [32]byte{}, nil, err
+	}
+	prev := make(map[string][]byte, len(wiped))
+	for _, r := range wiped {
+		prev[string(r.Key)] = r.Prev
+	}
+	var out deltaParts
+	for _, part := range parts {
+		for _, d := range part {
+			if p, ok := prev[string(d.Key)]; ok {
+				d.Prev = p
+				delete(prev, string(d.Key))
+			}
+			out.add(d)
+		}
+	}
+	for _, r := range wiped {
+		if _, ok := prev[string(r.Key)]; ok {
+			out.add(r)
+		}
+	}
+	hash, err := fold(root, 0)
+	return hash, out, err
 }

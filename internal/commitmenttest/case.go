@@ -25,11 +25,12 @@ func MathRand(seed int64) Seed { return Seed(seed) }
 func (s Seed) rand() *rand.Rand { return rand.New(rand.NewSource(int64(s))) }
 
 type Op struct {
-	Key     []byte
-	Account *AccountValue
-	Storage []byte
-	Delete  bool
-	Read    bool
+	Key                  []byte
+	Account              *AccountValue
+	Storage              []byte
+	Delete               bool
+	Read                 bool
+	DeleteStorageSubtree bool
 }
 
 type Assertions struct {

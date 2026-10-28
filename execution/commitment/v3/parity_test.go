@@ -111,6 +111,29 @@ func TestDifferential(t *testing.T) {
 		differential(t, commitmenttest.Case{ID: "wide_round_without_factory", Rounds: [][]commitmenttest.Op{initial, ops}}, engines)
 	})
 
+	t.Run("delete_storage_subtree", func(t *testing.T) {
+		wiped, kept := parityAddress(1), parityAddress(2)
+		initial := []commitmenttest.Op{parity(1), parity(2)}
+		for i := range 300 {
+			initial = append(initial, commitmenttest.StorageAt(incrSlot(wiped, i), i+1), commitmenttest.StorageAt(incrSlot(kept, i), i+1))
+		}
+		recreate := func(number int) commitmenttest.Op {
+			op := commitmenttest.AccountAt(wiped, commitmenttest.AccountSpec{Kind: "parity", Number: number})
+			op.DeleteStorageSubtree = true
+			return op
+		}
+		rounds := [][]commitmenttest.Op{
+			initial,
+			{recreate(1001), commitmenttest.StorageAt(incrSlot(wiped, 3), 7), commitmenttest.StorageAt(incrSlot(wiped, 500), 8)},
+			{recreate(1002)},
+			{commitmenttest.StorageAt(incrSlot(wiped, 9), 9)},
+		}
+		want, _, _ := differential(t, commitmenttest.Case{ID: "delete_storage_subtree", Rounds: rounds}, parityEngines)
+		for _, deferred := range []bool{false, true} {
+			require.Equal(t, want, requireSameRuns(t, nil, v3Config{deferred: deferred}, v3Config{deferred: deferred, feed: true}, rounds...))
+		}
+	})
+
 	t.Run("bulk", func(t *testing.T) {
 		for _, kind := range []string{"accounts", "storage", "mixed"} {
 			for _, count := range []int{1, 2, 16, 1000, 100000} {

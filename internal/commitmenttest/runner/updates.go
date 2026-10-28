@@ -44,6 +44,7 @@ func Update(op commitmenttest.Op) *commitment.Update {
 		if value.Fields&commitmenttest.CodeField != 0 {
 			u.Flags |= commitment.CodeUpdate
 		}
+		u.DeleteStorageSubtree = op.DeleteStorageSubtree
 	} else {
 		if len(op.Storage) > len(u.Storage) {
 			panic("storage value exceeds 32 bytes")

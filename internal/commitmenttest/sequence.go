@@ -160,6 +160,11 @@ type State map[string]Op
 
 func (s State) Apply(ops []Op) {
 	for _, op := range ops {
+		if op.DeleteStorageSubtree {
+			s.deleteStorage(op.Key)
+		}
+	}
+	for _, op := range ops {
 		if op.Read {
 			continue
 		}
@@ -167,14 +172,11 @@ func (s State) Apply(ops []Op) {
 		if op.Delete {
 			delete(s, key)
 			if len(op.Key) == 20 {
-				for k := range s {
-					if len(k) > 20 && bytes.HasPrefix([]byte(k), op.Key) {
-						delete(s, k)
-					}
-				}
+				s.deleteStorage(op.Key)
 			}
 			continue
 		}
+		op.DeleteStorageSubtree = false
 		op.Key = bytes.Clone(op.Key)
 		op.Storage = bytes.Clone(op.Storage)
 		if op.Account != nil {
@@ -194,6 +196,14 @@ func (s State) Apply(ops []Op) {
 			op.Account = &value
 		}
 		s[key] = op
+	}
+}
+
+func (s State) deleteStorage(addr []byte) {
+	for k := range s {
+		if len(k) > 20 && bytes.HasPrefix([]byte(k), addr) {
+			delete(s, k)
+		}
 	}
 }
 
