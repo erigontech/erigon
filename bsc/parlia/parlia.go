@@ -186,7 +186,8 @@ func (p *Parlia) IsServiceTransaction(sender accounts.Address, syscall rules.Sys
 func (p *Parlia) Type() chain.RulesName { return chain.ParliaRules }
 
 func (p *Parlia) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header,
-	syscall rules.SystemCall) ([]rules.Reward, error) {
+	syscall rules.SystemCall,
+) ([]rules.Reward, error) {
 	return nil, nil
 }
 
@@ -204,7 +205,8 @@ func (p *Parlia) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc { retur
 
 func (p *Parlia) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	if chainConfig.IsNano(header.Number.Uint64()) {
 		for i, tx := range txns {
 			if tx.GetTo() != nil {
@@ -244,7 +246,8 @@ func (p *Parlia) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 }
 
 func (p *Parlia) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
 	if err := p.upgradeSystemContracts(chain, header, ibs); err != nil {
 		return err
 	}
@@ -321,7 +324,8 @@ func (p *Parlia) upgradeSystemContracts(chain rules.ChainHeaderReader, header *t
 
 func (p *Parlia) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader,
-	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger) (types.FlatRequests, error) {
+	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
 	return nil, nil
 }
 
@@ -333,7 +337,8 @@ func (p *Parlia) FinalizeAndAssemble(config *chain.Config, header *types.Header,
 }
 
 func (p *Parlia) Seal(chain rules.ChainHeaderReader, block *types.BlockWithReceipts,
-	results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	results chan<- *types.BlockWithReceipts, stop <-chan struct{},
+) error {
 	return errNotSupported
 }
 
@@ -348,7 +353,8 @@ func (p *Parlia) SealHash(header *types.Header) common.Hash {
 
 func (p *Parlia) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64,
 	parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash,
-	parentAuRaStep uint64) uint256.Int {
+	parentAuRaStep uint64,
+) uint256.Int {
 	return *uint256.NewInt(2)
 }
 
