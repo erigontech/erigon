@@ -141,11 +141,11 @@ const (
 var FastChecks = []Check{
 	Publishable, HeaderNoGaps, BlocksTxnID, Blocks, CaplinStateRoots,
 	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
-	HistoryNoSystemTxs, CommitmentHistVal, HistoryVi, StateRootVerifyByHistory,
+	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
 var (
-	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify}
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify, HistoryVi}
 	DeprecatedChecks = []Check{
 		CommitmentKvDeref, // StateVerify - will overcome
 		StateProgress,

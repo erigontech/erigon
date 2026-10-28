@@ -46,7 +46,6 @@ type HistoryRangeAsOfFiles struct {
 	h          ReconHeap
 	startTxNum uint64
 	startTxKey [8]byte
-	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
 	orderAscend            order.By
@@ -144,7 +143,6 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		}
 		historyItem := hi.hc.files[top.histFileIdx]
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		offset, ok := historyItem.src.vOffset(keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
 			return fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",
@@ -427,7 +425,6 @@ type HistoryChangesIterFiles struct {
 	startTxNum uint64
 	endTxNum   int
 	startTxKey [8]byte
-	txnKey     [8]byte
 
 	kRot, vRot bufRotor
 	err        error
@@ -475,7 +472,6 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 		historyItem := hi.hc.files[top.histFileIdx]
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		offset, ok := historyItem.src.vOffset(keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
 			return fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",

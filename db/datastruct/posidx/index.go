@@ -126,6 +126,10 @@ func Open(path string) (*Index, error) {
 		idx.Close()
 		return nil, fmt.Errorf("%w: %s: page size is 0", ErrCorrupt, path)
 	}
+	if fi.Size() == headerLen && idx.itemCount != 0 {
+		idx.Close()
+		return nil, fmt.Errorf("%w: %s: header counts %d items, no sequences follow", ErrCorrupt, path, idx.itemCount)
+	}
 	if fi.Size() > headerLen {
 		starts, n, err := readEliasFano(m[headerLen:])
 		if err != nil {
@@ -178,7 +182,7 @@ func (i *Index) Get(run, item uint64) (uint64, bool) {
 		return 0, false
 	}
 	ordinal := i.starts.Get(run) + item
-	if ordinal >= i.runEnd(run) {
+	if ordinal >= min(i.runEnd(run), i.itemCount) { // a corrupt start can point past the items
 		return 0, false
 	}
 	return i.pages.Get(ordinal / i.pageSize), true

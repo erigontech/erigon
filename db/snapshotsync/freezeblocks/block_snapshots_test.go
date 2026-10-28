@@ -19,12 +19,14 @@ package freezeblocks
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -312,4 +314,20 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.BaseRoSnapshots)
 	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
+}
+
+// A v2 .vi is a positional accessor, not a recsplit index, and must not stop the scan.
+func TestRemoveIncompatibleIndicesSkipsPositionalVi(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	path := filepath.Join(dirs.SnapAccessors, "v2.0-accounts.0-1.vi")
+	w, err := posidx.NewWriter(path, dirs.Tmp, 1, 1, 1, 1)
+	require.NoError(t, err)
+	defer w.Close()
+	w.NoFsync()
+	w.AddRun(1)
+	w.AddPage(0)
+	require.NoError(t, w.Build())
+
+	require.NoError(t, RemoveIncompatibleIndices(dirs))
+	require.FileExists(t, path)
 }

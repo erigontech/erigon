@@ -139,7 +139,7 @@ func TestOpenCorrupt(t *testing.T) {
 	full, err := os.ReadFile(good)
 	require.NoError(t, err)
 
-	for _, size := range []int{headerLen + 1, headerLen + 16, len(full) - 1} {
+	for _, size := range []int{headerLen, headerLen + 1, headerLen + 16, len(full) - 1} {
 		path := filepath.Join(t.TempDir(), "trunc")
 		require.NoError(t, os.WriteFile(path, full[:size], 0o644))
 		idx, err := Open(path)
@@ -248,16 +248,29 @@ func TestOpenRejectsBitStreamNotMatchingHeader(t *testing.T) {
 // at a time over a whole index covers what a partial write or a bad block does
 // to the layout, without the header stopping being plausible.
 func TestNoAcceptedMutationPanics(t *testing.T) {
+	// the second fixture keeps several lower bits in a start close to the item count
+	for _, runs := range [][]uint64{{3, 1, 2}, {1, 1, 30, 1}} {
+		mutationSurvey(t, runs)
+	}
+}
+
+func mutationSurvey(t *testing.T, itemsPerRun []uint64) {
+	var items uint64
+	for _, n := range itemsPerRun {
+		items += n
+	}
+	const pageSize = 2
 	path := filepath.Join(t.TempDir(), "seed.vi")
-	w, err := NewWriter(path, t.TempDir(), 2, 3, 6, 90)
+	pages := (items + pageSize - 1) / pageSize
+	w, err := NewWriter(path, t.TempDir(), pageSize, uint64(len(itemsPerRun)), items, pages*40)
 	require.NoError(t, err)
 	defer w.Close()
 	w.NoFsync()
-	for _, n := range []uint64{3, 1, 2} {
+	for _, n := range itemsPerRun {
 		w.AddRun(n)
 	}
-	for _, v := range []uint64{0, 40, 90} {
-		w.AddPage(v)
+	for p := range pages {
+		w.AddPage(p * 40)
 	}
 	require.NoError(t, w.Build())
 	body, err := os.ReadFile(path)
@@ -277,12 +290,12 @@ func TestNoAcceptedMutationPanics(t *testing.T) {
 			}
 			accepted++
 			require.NotPanics(t, func() {
-				for run := range uint64(4) {
-					for item := range uint64(4) {
+				for run := range uint64(len(itemsPerRun) + 1) {
+					for item := range items + 1 {
 						idx.Get(run, item)
 					}
 				}
-			}, "byte %d bit %d", i, bit)
+			}, "runs %v byte %d bit %d", itemsPerRun, i, bit)
 			idx.Close()
 		}
 	}

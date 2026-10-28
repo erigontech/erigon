@@ -274,7 +274,7 @@ func (ht *HistoryRoTx) IntegrityHistoryValueAccessor(ctx context.Context, failFa
 		}
 		g.Go(func() error {
 			err := ht.checkValueAccessorOfFile(ctx, efItem, logEvery)
-			if err != nil && !failFast {
+			if err != nil && !failFast && ctx.Err() == nil {
 				log.Warn(err.Error())
 				return nil
 			}

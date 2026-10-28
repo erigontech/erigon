@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
@@ -2886,6 +2887,13 @@ func doMeta(ctx context.Context, cliCtx *cli.Command) error {
 		}
 
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
+	} else if v, _ := version.ParseVersion(filepath.Base(fname)); strings.HasSuffix(fname, ".vi") && v.GreaterOrEqual(version.V2_0) {
+		idx, err := posidx.Open(fname)
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
+		log.Info("meta", "format", "positional", "empty", idx.Empty())
 	} else if strings.HasSuffix(fname, ".kvi") || strings.HasSuffix(fname, ".idx") || strings.HasSuffix(fname, ".efi") || strings.HasSuffix(fname, ".vi") {
 		idx, err := recsplit.OpenIndex(fname)
 		if err != nil {
