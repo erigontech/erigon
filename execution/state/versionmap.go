@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -238,7 +239,7 @@ type VersionMap struct {
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
 	originAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = committed-absent)
-	originStorage  sync.Map // originStorageKey -> uint256.Int
+	originStorage  *xsync.Map[originStorageKey, uint256.Int]
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
@@ -278,10 +279,7 @@ func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.Sto
 
 // LoadOriginStorage returns the committed base slot value and whether it was seeded.
 func (vm *VersionMap) LoadOriginStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	if v, ok := vm.originStorage.Load(originStorageKey{addr, key}); ok {
-		return v.(uint256.Int), true
-	}
-	return uint256.Int{}, false
+	return vm.originStorage.Load(originStorageKey{addr, key})
 }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
@@ -306,7 +304,8 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{
-		HasBAL: len(changes) > 0,
+		HasBAL:        len(changes) > 0,
+		originStorage: xsync.NewMap[originStorageKey, uint256.Int](),
 	}
 	vm.WriteChanges(changes)
 	return vm
