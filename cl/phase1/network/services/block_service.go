@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -78,6 +79,7 @@ type blockJob struct {
 	retryDelay          time.Duration
 	storageErrorLogged  bool
 	finishPayloadImport func()
+	elColumnsStarted    atomic.Bool
 	// Block roots exclude the block signature, so different signed copies can share a job.
 	// Retain the accepted copy to preserve its validated signature on retries.
 	pendingBlockWrite *cltypes.SignedBeaconBlock
@@ -183,10 +185,12 @@ type blockValidationContext struct {
 }
 
 type blockService struct {
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	syncedData      *synced_data.SyncedDataManager
-	ethClock        eth_clock.EthereumClock
-	beaconCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	engine               execution_client.ExecutionEngine
+	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
+	syncedData           *synced_data.SyncedDataManager
+	ethClock             eth_clock.EthereumClock
+	beaconCfg            *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, seenBlock]
@@ -211,12 +215,14 @@ func NewBlockService(
 	ctx context.Context,
 	db kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	engine execution_client.ExecutionEngine,
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
 	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	b.engine = engine
 	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
 	return b
@@ -238,7 +244,7 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
-	return &blockService{
+	b := &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
 		ethClock:        ethClock,
@@ -251,6 +257,10 @@ func newBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
+	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
+	}
+	return b
 }
 
 func (b *blockService) Names() []string {
@@ -281,6 +291,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
+	b.startELColumnsImport(ctx, msg)
 	accepted, err := b.processAndStoreBlock(ctx, msg, false)
 	if err != nil {
 		if waitsForBlockDependency(err) {
@@ -299,6 +310,45 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	return nil
+}
+
+// importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
+// (engine_getBlobsV2), so the block need not wait for them on gossip.
+func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments.Len() == 0 || b.engine == nil {
+		return
+	}
+	peerDas := b.forkchoiceStore.GetPeerDas()
+	if peerDas == nil {
+		return
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return
+	}
+	if available, err := peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || available {
+		return
+	}
+	versionedHashes := make([]common.Hash, 0, block.Block.Body.BlobKzgCommitments.Len())
+	for i := range block.Block.Body.BlobKzgCommitments.Len() {
+		hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i)))
+		if err != nil {
+			return
+		}
+		versionedHashes = append(versionedHashes, hash)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(b.beaconCfg.SecondsPerSlot)*time.Second)
+	defer cancel()
+	blobs, proofs, err := b.engine.GetBlobs(ctx, versionedHashes, block.Version())
+	if err != nil {
+		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
+		return
+	}
+	if err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs); err != nil {
+		log.Debug("[blockService] columns not built from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
+		return
+	}
+	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }
 
 func waitsForBlockDependency(err error) bool {
@@ -1169,6 +1219,9 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
 				}
 				authenticated = true
+				if job.elColumnsStarted.CompareAndSwap(false, true) {
+					b.startELColumnsImport(ctx, job.block)
+				}
 			}
 			accepted, blockErr = b.processAndStoreBlock(ctx, block, hasPendingBlockWrite)
 			return blockErr
