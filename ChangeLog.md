@@ -63,7 +63,7 @@ match the postponed schedule. See the [Ethereum Foundation announcement](https:/
 - **Execution lag on `engine_newPayload`.** `engine_newPayload` now answers `ACCEPTED` instead of a
   JSON-RPC error when execution lags the payload by more than one state step can run (the parallel
   executor's `--batchSize` cut or `--sync.loop.block.limit`), and `latestValidHash` is null unless
-  the status is `VALID` or `INVALID` (#25382)
+  the status is `VALID` or `INVALID` (#25382) — by @awskii
 
 ### Caplin archive upgrade notes
 
