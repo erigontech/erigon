@@ -646,10 +646,10 @@ func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
 
 	// Pool entries may be dropped, so exercise several excess/empty pairs.
 	for range 32 {
-		_, err := decodeBlockBodiesResponse(encodedBodies, 1)
+		_, err := decodeBlockBodiesResponse(encodedBodies, 1, decodeBlockBodyRLP)
 		require.ErrorIs(t, err, &ErrTooManyBodies{})
 
-		bodies, err := decodeBlockBodiesResponse(nil, 1)
+		bodies, err := decodeBlockBodiesResponse(nil, 1, decodeBlockBodyRLP)
 		require.NoError(t, err)
 		require.Empty(t, bodies)
 	}

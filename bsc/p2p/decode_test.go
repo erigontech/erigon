@@ -30,35 +30,31 @@ import (
 
 var sidecars = rlp.RawValue{0xc3, 0xc2, 0x01, 0x02}
 
-func TestDecodeBlockBodiesSkipsSidecars(t *testing.T) {
+func TestDecodeBlockBodySkipsSidecars(t *testing.T) {
 	t.Parallel()
 
 	body := testBody()
-	packet := encodeBlockBodies(t, 9, withExtraField(t, encode(t, body), sidecars))
-
-	got, err := decodeBlockBodies(packet)
+	got, err := decodeBlockBody(rlp.NewBytesStream(withExtraField(t, encode(t, body), sidecars)))
 	require.NoError(t, err)
-	require.Equal(t, uint64(9), got.RequestId)
-	require.Len(t, got.BlockBodiesPacket, 1)
-	require.Len(t, got.BlockBodiesPacket[0].Transactions, 1)
-	require.Equal(t, body.Transactions[0].Hash(), got.BlockBodiesPacket[0].Transactions[0].Hash())
+	require.Len(t, got.Transactions, 1)
+	require.Equal(t, body.Transactions[0].Hash(), got.Transactions[0].Hash())
 }
 
-func TestDecodeBlockBodiesWithoutSidecars(t *testing.T) {
+func TestDecodeBlockBodyWithoutSidecars(t *testing.T) {
 	t.Parallel()
 
 	body := testBody()
-	got, err := decodeBlockBodies(encodeBlockBodies(t, 9, encode(t, body)))
+	got, err := decodeBlockBody(rlp.NewBytesStream(encode(t, body)))
 	require.NoError(t, err)
-	require.Len(t, got.BlockBodiesPacket, 1)
-	require.Equal(t, body.Transactions[0].Hash(), got.BlockBodiesPacket[0].Transactions[0].Hash())
+	require.Len(t, got.Transactions, 1)
+	require.Equal(t, body.Transactions[0].Hash(), got.Transactions[0].Hash())
 }
 
-func TestDecodeBlockBodiesRejectsFieldsAfterSidecars(t *testing.T) {
+func TestDecodeBlockBodyRejectsFieldsAfterSidecars(t *testing.T) {
 	t.Parallel()
 
 	body := withExtraField(t, withExtraField(t, encode(t, testBody()), sidecars), sidecars)
-	_, err := decodeBlockBodies(encodeBlockBodies(t, 9, body))
+	_, err := decodeBlockBody(rlp.NewBytesStream(body))
 	require.Error(t, err)
 }
 
@@ -94,15 +90,6 @@ func encode(t *testing.T, v any) []byte {
 	b, err := rlp.EncodeToBytes(v)
 	require.NoError(t, err)
 	return b
-}
-
-func encodeBlockBodies(t *testing.T, requestID uint64, bodies ...[]byte) []byte {
-	t.Helper()
-	raw := make([]rlp.RawValue, len(bodies))
-	for i, b := range bodies {
-		raw[i] = b
-	}
-	return encode(t, []any{requestID, raw})
 }
 
 // withExtraField appends one element to an encoded RLP list.

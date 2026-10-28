@@ -409,7 +409,7 @@ func (f *FetcherBase) fetchBodies(
 		return nil, err
 	}
 
-	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, len(headers))
+	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, len(headers), f.messageListener.decodeBlockBody)
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +442,7 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	return data, nil
 }
 
-func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Body, error) {
+func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int, decodeBody func(*rlp.Stream) (*types.Body, error)) ([]*types.Body, error) {
 	if len(encodedBodies) == 0 {
 		return nil, nil
 	}
@@ -459,8 +459,8 @@ func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Bo
 			}
 		}
 
-		body := new(types.Body)
-		if err := stream.Decode(body); err != nil {
+		body, err := decodeBody(stream)
+		if err != nil {
 			if rlp.IsInvalidRLPError(err) {
 				err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
 			}

@@ -172,7 +172,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 		observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(23), message.Decoded.RequestId)
-			bodies, err := decodeBlockBodiesResponse(message.Decoded.EncodedBodies, 1)
+			bodies, err := decodeBlockBodiesResponse(message.Decoded.EncodedBodies, 1, decodeBlockBodyRLP)
 			require.NoError(t, err)
 			require.Len(t, bodies, 1)
 			done.Store(true)
@@ -236,35 +236,35 @@ func TestMessageListenerUsesInjectedDecoders(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	payload := []byte{'n', 'o', 't', '.', 'r', 'l', 'p'}
+	var bodyDecoderCalled atomic.Bool
 	test := newMessageListenerTest(t,
-		WithBlockBodiesDecoder(func(data []byte) (*eth.BlockBodiesPacket66, error) {
-			require.Equal(t, payload, data)
-			return &eth.BlockBodiesPacket66{RequestId: 42}, nil
+		WithBlockBodyDecoder(func(s *rlp.Stream) (*types.Body, error) {
+			bodyDecoderCalled.Store(true)
+			return &types.Body{}, nil
 		}),
 		WithNewBlockDecoder(func(data []byte) (*eth.NewBlockPacket, error) {
 			require.Equal(t, payload, data)
 			return &eth.NewBlockPacket{TD: *uint256.NewInt(7)}, nil
 		}),
 	)
+	require.NotNil(t, test.messageListener.decodeBlockBody)
+	body, err := test.messageListener.decodeBlockBody(rlp.NewBytesStream(payload))
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.True(t, bodyDecoderCalled.Load())
+
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
-		var bodies, newBlock atomic.Bool
-		t.Cleanup(test.messageListener.RegisterBlockBodiesObserver(func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
-			require.Equal(t, uint64(42), message.Decoded.RequestId)
-			bodies.Store(true)
-		}))
+		var newBlock atomic.Bool
 		t.Cleanup(test.messageListener.RegisterNewBlockObserver(func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
 			require.Equal(t, uint64(7), message.Decoded.TD.Uint64())
 			newBlock.Store(true)
 		}))
 
-		for _, id := range []sentryproto.MessageId{sentryproto.MessageId_BLOCK_BODIES_66, sentryproto.MessageId_NEW_BLOCK_66} {
-			test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
-				message: &sentryproto.InboundMessage{Id: id, PeerId: peerId.H512(), Data: payload},
-			}
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, PeerId: peerId.H512(), Data: payload},
 		}
 
-		require.Eventually(t, bodies.Load, time.Second, 5*time.Millisecond)
 		require.Eventually(t, newBlock.Load, time.Second, 5*time.Millisecond)
 	})
 }
