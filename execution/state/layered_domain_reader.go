@@ -28,10 +28,6 @@ type LayeredDomainReader struct {
 // NewLayeredDomainReader composes the window + sd + files. A nil prevBlocks
 // layers nothing, giving the plain sd+files path.
 func NewLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
-	return newLayeredDomainReader(sd, roTx, prevBlocks)
-}
-
-func newLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlocks *PrevBlockList) *LayeredDomainReader {
 	l := &LayeredDomainReader{sd: sd, roTx: roTx, prevBlocks: prevBlocks}
 	if c, ok := sd.(cachedCommittedReader); ok && roTx != nil {
 		l.cached = c.CachedCommittedReader(roTx)
@@ -42,7 +38,7 @@ func newLayeredDomainReader(sd execctx.DomainReader, roTx kv.TemporalTx, prevBlo
 // CloneWithTx returns a copy bound to tx — each concurrent user carries its own
 // files-fallback tx rather than sharing the base reader's.
 func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader {
-	return newLayeredDomainReader(l.sd, tx, l.prevBlocks)
+	return NewLayeredDomainReader(l.sd, tx, l.prevBlocks)
 }
 
 // baseGetAsOf reads sd.mem, then the shared state cache, then the domain files — the
