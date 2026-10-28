@@ -2201,6 +2201,13 @@ type execResult struct {
 	cumulativeBlobGasUsed uint64
 }
 
+// isFeeRecipient returns a predicate that reports whether calcFees credits an address after the
+// tx of result is validated: the coinbase, or the burnt-fee recipient.
+func (be *blockExecutor) isFeeRecipient(result *execResult) func(accounts.Address) bool {
+	burnt := result.ExecutionResult.BurntContractAddress
+	return func(addr accounts.Address) bool { return addr == be.coinbase || addr == burnt }
+}
+
 func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
 	task, ok := result.Task.(*taskVersion)
 
@@ -3479,8 +3486,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				if txVersion.TxIndex < 0 || be.tasks[tx].Task.IsBlockEnd() {
 					be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
 				} else {
-					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex),
-						func(addr accounts.Address) bool { return addr == be.coinbase })
+					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
 				be.validateTasks.markComplete(tx)
 				// Validated against current state; only a later write to one of its
