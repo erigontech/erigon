@@ -116,7 +116,7 @@ func (s *Merge) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header
 		return rules.ErrUnknownAncestor
 	}
 
-	return s.verifyHeader(chain, header, parent)
+	return VerifyHeaderWithParent(chain.Config(), header, parent)
 }
 
 // VerifyUncles implements rules.Engine, always returning an error for any
@@ -315,9 +315,9 @@ func (s *Merge) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
-// verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
+// VerifyHeaderWithParent checks whether a Proof-of-Stake header conforms to the consensus rules of the
 // stock Ethereum rules engine with EIP-3675 modifications.
-func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *types.Header) error {
+func VerifyHeaderWithParent(config *chain.Config, header, parent *types.Header) error {
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data longer than %d bytes (%d)", params.MaximumExtraDataSize, len(header.Extra))
 	}
@@ -352,15 +352,15 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return errInvalidUncleHash
 	}
 
-	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+	if err := misc.VerifyEip1559Header(config, parent, header); err != nil {
 		return err
 	}
-	if err := misc.VerifyParentGasLimit(chain.Config(), parent, header); err != nil {
+	if err := misc.VerifyParentGasLimit(config, parent, header); err != nil {
 		return err
 	}
 
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Time)
+	shanghai := config.IsShanghai(header.Time)
 	if shanghai && header.WithdrawalsHash == nil {
 		return errors.New("missing withdrawalsHash")
 	}
@@ -368,19 +368,19 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time) {
+	if !config.IsCancun(header.Time) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
 		return err
 	}
-	expectedExcessBlobGas := misc.CalcExcessBlobGas(chain.Config(), parent, header.Time)
+	expectedExcessBlobGas := misc.CalcExcessBlobGas(config, parent, header.Time)
 	if *header.ExcessBlobGas != expectedExcessBlobGas {
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}
 
 	// Verify existence / non-existence of requestsHash
-	prague := chain.Config().IsPrague(header.Time)
+	prague := config.IsPrague(header.Time)
 	if prague && header.RequestsHash == nil {
 		return errors.New("missing requestsHash")
 	}
@@ -389,12 +389,12 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	}
 
 	// Verify existence / non-existence of slotNumber & blockAccessListHash
-	amsterdam := chain.Config().IsAmsterdam(header.Time)
+	amsterdam := config.IsAmsterdam(header.Time)
 	if amsterdam {
 		if header.SlotNumber == nil {
 			return rules.ErrMissingSlotNumber
 		}
-		if chain.Config().IsEIPEnabled(7928, header.Time) {
+		if config.IsEIPEnabled(7928, header.Time) {
 			if header.BlockAccessListHash == nil {
 				return rules.ErrMissingBlockAccessListHash
 			}
