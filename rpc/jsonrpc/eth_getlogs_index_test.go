@@ -44,7 +44,7 @@ func TestGetLogsIndexFiltersMatchFullScan(t *testing.T) {
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 
 	// LOG2 with topic0 = calldata[0:32] and topic1 = calldata[32:64], no data.
-	emitterCode := common.FromHex("0x602035600035600060006000a200")
+	emitterCode := common.FromHex("0x60203560003560006000a200")
 	emitters := []common.Address{{0xe1}, {0xe2}, {0xe3}}
 	alloc := types.GenesisAlloc{sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)}}
 	for _, e := range emitters {
