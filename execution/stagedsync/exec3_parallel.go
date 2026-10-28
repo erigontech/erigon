@@ -2973,9 +2973,12 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	return be
 }
 
-// pathReaders holds, per AccountPath, the ascending task indices that read it at one address;
-// StoragePath holds the readers of any slot.
-type pathReaders [state.CreateContractPath + 1][]int
+// pathReaders holds the ascending task indices that read one address: all of them, and per
+// AccountPath (StoragePath holds the readers of any slot).
+type pathReaders struct {
+	all    []int
+	byPath [state.CreateContractPath + 1][]int
+}
 
 // indexReads records taskIdx as a reader of every (address, path) in rs. Append-only across
 // incarnations; the DependsOn re-check filters stale entries, so over-inclusion
@@ -2987,34 +2990,38 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 			pr = &pathReaders{}
 			be.readerByAddr[a] = pr
 		}
-		if i, found := slices.BinarySearch(pr[p], taskIdx); !found {
-			pr[p] = slices.Insert(pr[p], i, taskIdx)
-		}
+		pr.all = insertSorted(pr.all, taskIdx)
+		pr.byPath[p] = insertSorted(pr.byPath[p], taskIdx)
 		return true
 	})
+}
+
+func insertSorted(l []int, v int) []int {
+	if i, found := slices.BinarySearch(l, v); !found {
+		return slices.Insert(l, i, v)
+	}
+	return l
 }
 
 // readersOf returns, ascending, the tasks that read a cell a write of h can invalidate: readers
 // of h's path at its address, or of any path there when h changes the account lifecycle.
 func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
-	if pr := be.readerByAddr[h.Address]; pr != nil && !h.Path.AffectsAccountLifecycle() {
-		return pr[h.Path]
+	pr := be.readerByAddr[h.Address]
+	if pr == nil {
+		return nil
 	}
-	return be.readersAt(h.Address)
+	if h.Path.AffectsAccountLifecycle() {
+		return pr.all
+	}
+	return pr.byPath[h.Path]
 }
 
 // readersAt returns, ascending, the tasks that read any path at addr.
 func (be *blockExecutor) readersAt(addr accounts.Address) []int {
-	pr := be.readerByAddr[addr]
-	if pr == nil {
-		return nil
+	if pr := be.readerByAddr[addr]; pr != nil {
+		return pr.all
 	}
-	var all []int
-	for _, l := range pr {
-		all = append(all, l...)
-	}
-	slices.Sort(all)
-	return slices.Compact(all)
+	return nil
 }
 
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
