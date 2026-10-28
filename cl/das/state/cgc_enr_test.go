@@ -50,15 +50,13 @@ func TestEncodeCgcMatchesTheEnrSpec(t *testing.T) {
 }
 
 // fulu/validator.md requires a node whose custody requirement falls to keep advertising
-// the previous (highest) count. No test can reach SetCustodyGroupCount through peerdas -
-// the only production caller is on_block.go and every test route is a gomock stub - so
-// the ratchet is pinned here directly.
+// the previous (highest) count.
 func TestSetCustodyGroupCountKeepsTheHighestAdvertised(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 
-	require.True(t, s.SetCustodyGroupCount(8), "an increase must be advertised")
-	require.False(t, s.SetCustodyGroupCount(4), "a decrease must not be advertised")
+	require.True(t, s.SetCustodyGroupCount(8, 0), "an increase must be advertised")
+	require.False(t, s.SetCustodyGroupCount(4, 0), "a decrease must not be advertised")
 	require.Equal(t, uint64(8), s.GetAdvertisedCgc(), "the highest count must survive a decrease")
 }
 
