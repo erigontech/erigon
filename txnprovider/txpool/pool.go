@@ -169,6 +169,7 @@ type TxPool struct {
 	blobs                   *blobStore
 	frameValidationGate     chan struct{}
 	frameReservations       map[common.Address]frameReservation
+	frameBalanceChanges     map[common.Address]struct{}
 	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
@@ -264,6 +265,7 @@ func New(
 		auths:                   make(map[AuthAndNonce]*metaTxn),
 		blobs:                   newBlobStore(),
 		frameValidationGate:     make(chan struct{}, 1),
+		frameBalanceChanges:     make(map[common.Address]struct{}),
 		frameRejections:         frameRejections,
 		senderLastActivity:      make(map[uint64]uint64),
 	}
@@ -352,7 +354,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
-	p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash)
+	if err := p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash); err != nil {
+		return err
+	}
 	if len(frames.unwound.Txns) > 0 {
 		_, err = p.addNewTxns(ctx, frames.unwound, false)
 	}
@@ -478,7 +482,9 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
-	p.promote(pendingBaseFee, pendingBlobFee, &announcements, p.logger)
+	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, p.logger); err != nil {
+		return frames, err
+	}
 	p.pending.EnforceBestInvariants()
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
@@ -1751,7 +1757,9 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
-	p.promote(pendingBaseFee, pendingBlobFee, &announcements, logger)
+	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, logger); err != nil {
+		return announcements, discardReasons, err
+	}
 	p.pending.EnforceBestInvariants()
 
 	return announcements, discardReasons, nil
@@ -2312,6 +2320,14 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
 // reservations cover their fees.
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
+	sender := p.senders.senderID2Addr[senderID]
+	delete(p.frameBalanceChanges, sender)
+	reserved := p.frameReservations[sender]
+	if senderBalance.Gt(&reserved.cost) {
+		senderBalance.Sub(&senderBalance, &reserved.cost)
+	} else {
+		senderBalance.Clear()
+	}
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
@@ -2391,8 +2407,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			noGapsNonce++
 		}
 
-		// Compare the sender's balance with cumulative costs in account-nonce order.
-		// Frame transactions contribute zero because their funding is checked separately.
+		// Compare ordinary costs in account-nonce order with the unreserved balance.
+		// Frame fees are already reserved against the payer, which may differ from the sender.
 		mt.subPool &^= EnoughBalance
 		mt.cumulativeBalanceDistance = math.MaxUint64
 		if mt.TxnSlot.Nonce >= senderNonce {
@@ -2432,7 +2448,21 @@ func announceFirstPending(announcements *Announcements, mt *metaTxn) {
 
 // promote reasserts the sub-pool invariants and adds to announcements each txn that enters pending
 // for the first time.
-func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
+func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) error {
+	for {
+		if err := p.refreshFramePayers(cacheView); err != nil {
+			return err
+		}
+		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements, logger)
+		// Capacity eviction can release a frame reservation and make ordinary
+		// transactions eligible. Recheck those payers before finishing promotion.
+		if len(p.frameBalanceChanges) == 0 {
+			return nil
+		}
+	}
+}
+
+func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.HasBlobs() && worst.TxnSlot.GetBlobFeeCap().LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()

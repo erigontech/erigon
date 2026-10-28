@@ -26,6 +26,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -238,21 +240,19 @@ func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.Dis
 	if v == nil || pendingFrame != nil && pendingFrame != found {
 		return txpoolcfg.InvalidFrame
 	}
-	var previous *protocol.FrameValidation
-	if found != nil {
-		previous = found.TxnSlot.frameValidation
-	}
-	return p.checkFrameReservation(v, previous)
+	return p.checkFrameReservation(v, found)
 }
 
 // checkFrameReservation requires the pool lock. Replacements and revalidation
 // reuse the previous reservation, so only their net change counts against balance.
-func (p *TxPool) checkFrameReservation(v, previous *protocol.FrameValidation) txpoolcfg.DiscardReason {
+func (p *TxPool) checkFrameReservation(v *protocol.FrameValidation, previous *metaTxn) txpoolcfg.DiscardReason {
 	reserved := p.frameReservations[v.Payer]
-	if previous != nil && previous.Payer == v.Payer {
-		reserved.cost.Sub(&reserved.cost, &previous.MaxCost)
-		if previous.Paymaster {
-			reserved.paymasters--
+	if previous != nil {
+		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == v.Payer {
+			reserved.cost.Sub(&reserved.cost, &old.MaxCost)
+			if old.Paymaster {
+				reserved.paymasters--
+			}
 		}
 	}
 	// All coded paymasters use the non-canonical pool policy: one pending frame
@@ -262,6 +262,22 @@ func (p *TxPool) checkFrameReservation(v, previous *protocol.FrameValidation) tx
 	}
 	var total uint256.Int
 	if _, overflow := total.AddOverflow(&reserved.cost, &v.MaxCost); overflow || total.Gt(&v.PayerBalance) {
+		return txpoolcfg.InsufficientFunds
+	}
+	// Ordinary transactions spend the same balance. Include their pooled costs,
+	// except for the transaction being replaced, before reserving a frame's fees.
+	funded := true
+	if senderID, ok := p.senders.getID(v.Payer); ok {
+		p.all.ascend(senderID, func(mt *metaTxn) bool {
+			if mt == previous {
+				return true
+			}
+			_, overflow := total.AddOverflow(&total, requiredBalance(mt.TxnSlot))
+			funded = !overflow && !total.Gt(&v.PayerBalance)
+			return funded
+		})
+	}
+	if !funded {
 		return txpoolcfg.InsufficientFunds
 	}
 	return txpoolcfg.NotSet
@@ -280,6 +296,7 @@ func (p *TxPool) reserveFrame(v *protocol.FrameValidation) {
 		r.paymasters++
 	}
 	p.frameReservations[v.Payer] = r
+	p.frameBalanceChanges[v.Payer] = struct{}{}
 }
 
 func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
@@ -296,6 +313,28 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	} else {
 		p.frameReservations[v.Payer] = r
 	}
+	p.frameBalanceChanges[v.Payer] = struct{}{}
+}
+
+// Reservation changes can affect another sender's ordinary transactions. Defer
+// their eligibility update until promotion has a current state view and no
+// sender-index iteration is in progress.
+func (p *TxPool) refreshFramePayers(cacheView kvcache.CacheView) error {
+	for len(p.frameBalanceChanges) > 0 {
+		for payer := range p.frameBalanceChanges {
+			senderID, ok := p.senders.getID(payer)
+			if !ok || !p.all.hasTxns(senderID) {
+				delete(p.frameBalanceChanges, payer)
+				continue
+			}
+			nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
+			if err != nil {
+				return err
+			}
+			p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load(), p.logger)
+		}
+	}
+	return nil
 }
 
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
@@ -368,26 +407,26 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 
 // revalidateFrames simulates parked transactions outside the pool lock. Results
 // apply only while both the state generation and the pooled entry still match.
-func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, generation uint64, stateBlockHash common.Hash) {
+func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, generation uint64, stateBlockHash common.Hash) error {
 	if len(pending) == 0 {
-		return
+		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, frameValidationTimeout)
+	validationCtx, cancel := context.WithTimeout(ctx, frameValidationTimeout)
 	defer cancel()
 	for _, mt := range pending {
-		result := p.simulateFrameResult(ctx, mt.TxnSlot, generation, stateBlockHash)
+		result := p.simulateFrameResult(validationCtx, mt.TxnSlot, generation, stateBlockHash)
 		p.lock.Lock()
 		if generation != p.stateGeneration {
 			// The newer block update also picks up parked transactions.
 			p.lock.Unlock()
-			return
+			return nil
 		}
 		if p.byHash[string(mt.TxnSlot.IDHash[:])] != mt || mt.currentSubPool != 0 {
 			p.lock.Unlock()
 			continue
 		}
 		previous, validation := mt.TxnSlot.frameValidation, result.validation
-		if validation != nil && p.checkFrameReservation(validation, previous) == txpoolcfg.NotSet {
+		if validation != nil && p.checkFrameReservation(validation, mt) == txpoolcfg.NotSet {
 			p.releaseFrame(previous)
 			mt.TxnSlot.frameValidation = validation
 			p.reserveFrame(validation)
@@ -401,15 +440,18 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 		}
 		p.lock.Unlock()
 	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	var announcements Announcements
-	p.promote(p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger)
-	p.pending.EnforceBestInvariants()
-	if announcements.Len() > 0 {
-		select {
-		case p.newPendingTxns <- announcements.Copy():
-		default:
+	return p.withLockedState(ctx, nil, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		var announcements Announcements
+		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger); err != nil {
+			return err
 		}
-	}
+		p.pending.EnforceBestInvariants()
+		if announcements.Len() > 0 {
+			select {
+			case p.newPendingTxns <- announcements.Copy():
+			default:
+			}
+		}
+		return nil
+	})
 }

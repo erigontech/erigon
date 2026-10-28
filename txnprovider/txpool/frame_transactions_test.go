@@ -247,6 +247,202 @@ func TestFramePoolKeyedAndOrdinaryNoncesCoexist(t *testing.T) {
 	}
 }
 
+func TestFramePoolSharesOrdinaryBalance(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		frameFirst bool
+		batch      bool
+	}{
+		{name: "ordinary first"},
+		{name: "frame first", frameFirst: true},
+		{name: "ordinary first in batch", batch: true},
+		{name: "frame first in batch", frameFirst: true, batch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, sponsored := range []bool{false, true} {
+				name := "self paid"
+				if sponsored {
+					name = "sponsored"
+				}
+				t.Run(name, func(t *testing.T) {
+					ctx, pool, payer := keyedFramePoolEnv(t)
+					pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+					sender := payer
+					if sponsored {
+						sender = common.Address{2}
+					}
+					frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+					ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+					ordinary.IDHash[0] = 2
+					ordinary.Txn.GetValue().SetUint64(common.Ether - 42_000)
+					var txns TxnSlots
+					txns.Append(ordinary, payer[:], true)
+					want := []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.InsufficientFunds}
+					wantOrdinaryPool := PendingSubPool
+					if tc.frameFirst {
+						txns = TxnSlots{}
+						txns.Append(frame, sender[:], true)
+						txns.Append(ordinary, payer[:], true)
+						want[1] = txpoolcfg.Success
+						wantOrdinaryPool = QueuedSubPool
+					} else {
+						txns.Append(frame, sender[:], true)
+					}
+					if tc.batch {
+						reasons, err := pool.AddLocalTxns(ctx, txns)
+						require.NoError(t, err)
+						require.Equal(t, want, reasons)
+					} else {
+						for i, txn := range txns.Txns {
+							var single TxnSlots
+							single.Append(txn, txns.Senders.At(i), true)
+							reasons, err := pool.AddLocalTxns(ctx, single)
+							require.NoError(t, err)
+							require.Equal(t, []txpoolcfg.DiscardReason{want[i]}, reasons)
+						}
+					}
+					require.Equal(t, wantOrdinaryPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+					require.Equal(t, 1, pool.pending.Len(), "the payer cannot fund both transactions")
+				})
+			}
+		})
+	}
+}
+
+func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
+	for _, action := range []string{"replacement", "mined", "expired", "revalidation failure", "revalidation payer change", "pool overflow"} {
+		t.Run(action, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.balance = common.Ether
+			sender := common.Address{2}
+			tx := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{1}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+				Frames: []types.Frame{
+					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, 100), Limits: mdgas.MdGas{Execution: 5_000}},
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
+				},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&encoded))
+			frame := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+			ordinary := newTestTxnSlot(0, 0, 1, 4, 21_000)
+			ordinary.IDHash[0] = 2
+			ordinary.Txn.GetValue().SetUint64(common.Ether - 84_000)
+			var txns TxnSlots
+			txns.Append(frame, sender[:], true)
+			txns.Append(ordinary, payer[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Equal(t, QueuedSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+
+			change := newBlockChangeForAccounts(common.Hash{1}, 0)
+			var mined TxnSlots
+			switch action {
+			case "replacement":
+				backend.payer = common.Address{3}
+				var replacement TxnSlots
+				replacement.Append(framePoolSlot(t, sender, 2, 4, uint256.Int{1}), sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, replacement)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			case "mined":
+				mined.Append(frame, sender[:], false)
+			case "expired":
+				change.ChangeBatch[0].BlockTime = 101
+			case "revalidation failure":
+				backend.err = errors.New("validation unavailable")
+				change = newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+			case "revalidation payer change":
+				backend.payer = common.Address{3}
+				change = newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+			case "pool overflow":
+				pool.baseFee.limit = 0
+				change.PendingBlockBaseFee = 3
+			}
+			if action != "replacement" {
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, mined))
+			}
+			require.NotContains(t, pool.frameReservations, payer)
+			require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+		})
+	}
+}
+
+func TestFramePoolSharedBalanceReplacements(t *testing.T) {
+	ctx, pool, payer := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	sender := common.Address{2}
+	add := func(slot *TxnSlot, sender common.Address) txpoolcfg.DiscardReason {
+		var txns TxnSlots
+		txns.Append(slot, sender[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		return reasons[0]
+	}
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	require.Equal(t, txpoolcfg.Success, add(frame, sender))
+	frameCost := frame.frameValidation.MaxCost.Uint64()
+	for _, tc := range []struct {
+		fee      uint64
+		cost     uint64
+		wantPool SubPoolType
+	}{
+		{2, common.Ether - frameCost, PendingSubPool},
+		{4, common.Ether, QueuedSubPool},
+		{8, common.Ether - frameCost, PendingSubPool},
+	} {
+		ordinary := newTestTxnSlot(0, 0, tc.fee, tc.fee, 21_000)
+		ordinary.IDHash[0] = byte(tc.fee)
+		ordinary.Txn.GetValue().SetUint64(tc.cost - 21_000*tc.fee)
+		require.Equal(t, txpoolcfg.Success, add(ordinary, payer))
+		require.Equal(t, tc.wantPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+		require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[payer].cost)
+	}
+
+	replacement := framePoolSlot(t, sender, 2, 4, uint256.Int{1})
+	require.Equal(t, txpoolcfg.InsufficientFunds, add(replacement, sender))
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[payer].cost)
+
+	ordinary := newTestTxnSlot(0, 0, 16, 16, 21_000)
+	ordinary.IDHash[0] = 16
+	ordinary.Txn.GetValue().SetUint64(common.Ether - 2*frameCost - 21_000*16)
+	require.Equal(t, txpoolcfg.Success, add(ordinary, payer))
+	require.Equal(t, txpoolcfg.Success, add(replacement, sender))
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Equal(t, replacement.frameValidation.MaxCost, pool.frameReservations[payer].cost)
+	require.Equal(t, 2, pool.pending.Len())
+}
+
+func TestFramePoolReservationExcludesReplacedOrdinary(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	frame := framePoolSlot(t, sender, 2, 4)
+	frameCost := frame.GetGas() * frame.GetFeeCap().Uint64()
+	first := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	first.IDHash[0] = 1
+	second := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	second.IDHash[0] = 2
+	second.Txn.GetValue().SetUint64(common.Ether - frameCost - 42_000)
+	var txns TxnSlots
+	txns.Append(first, sender[:], true)
+	txns.Append(second, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	txns = TxnSlots{}
+	txns.Append(frame, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.NotContains(t, pool.byHash, string(first.IDHash[:]))
+	require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+	require.Equal(t, 2, pool.pending.Len())
+}
+
 func TestFramePoolKeyedNonceDoesNotConflictWithAuthorization(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	ordinary := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
@@ -647,7 +843,7 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			}}}}})
 			generation := pool.stateGeneration
 			pool.lock.Unlock()
-			pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash)
+			require.NoError(t, pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash))
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 			require.Empty(t, pool.frameReservations)
 			if failure == "invalid prefix" {
@@ -735,7 +931,7 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
 			generation := pool.stateGeneration
 			pool.lock.Unlock()
-			pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash)
+			require.NoError(t, pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash))
 			if tc.revalidate {
 				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
