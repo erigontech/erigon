@@ -224,7 +224,7 @@ func (p *Parlia) ValidateBlockPostExecution(chainConfig *chain.Config, header *t
 			}
 		}
 	}
-	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+	return rules.DefaultBlockPostValidation(header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (p *Parlia) Close() error { return nil }
@@ -249,9 +249,23 @@ func (p *Parlia) Initialize(config *chain.Config, chain rules.ChainHeaderReader,
 		return err
 	}
 	if p.chainConfig.IsPrague(header.Time) {
-		return misc.StoreBlockHashesEip2935(header, ibs)
+		return storeParentHashEip2935(header, ibs)
 	}
 	return nil
+}
+
+const blockHashHistoryServeWindow uint64 = 8191
+
+func storeParentHashEip2935(header *types.Header, ibs *state.IntraBlockState) error {
+	codeSize, err := ibs.GetCodeSize(params.HistoryStorageAddress)
+	if err != nil {
+		return err
+	}
+	if codeSize == 0 || header.Number.IsZero() {
+		return nil
+	}
+	slot := common.BytesToHash(uint256.NewInt((header.Number.Uint64() - 1) % blockHashHistoryServeWindow).Bytes())
+	return ibs.SetState(params.HistoryStorageAddress, accounts.InternKey(slot), *uint256.NewInt(0).SetBytes32(header.ParentHash[:]))
 }
 
 func (p *Parlia) upgradeSystemContracts(chain rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) error {
