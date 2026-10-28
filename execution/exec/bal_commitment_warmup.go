@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -235,7 +236,52 @@ func (s *prefetchStats) add(waves, pages int, plan, io time.Duration) {
 	s.waves, s.pages, s.plan, s.io = s.waves+waves, s.pages+pages, s.plan+plan, s.io+io
 }
 
-var prefetchFlatDepth = dbg.EnvInt("BAL_PREFETCH_FLAT_DEPTH", -1)
+var (
+	prefetchFlatDepth = dbg.EnvInt("BAL_PREFETCH_FLAT_DEPTH", -1)
+	prefetchPar       = dbg.EnvInt("BAL_PREFETCH_PAR", 1)
+)
+
+// prefetchKeys splits keys over prefetchPar planners, each with its own tx; stats keep the slowest planner's times.
+func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
+	if prefetchPar <= 1 || len(keys) < 2*prefetchPar {
+		stats.add(p.PrefetchLatest(domain, keys))
+		return nil
+	}
+	var mu sync.Mutex
+	var part prefetchStats
+	var g errgroup.Group
+	chunk := (len(keys) + prefetchPar - 1) / prefetchPar
+	for i := 0; i < len(keys); i += chunk {
+		keys := keys[i:min(i+chunk, len(keys))]
+		first := i == 0
+		g.Go(func() error {
+			pp := p
+			if !first {
+				tx, err := db.BeginRo(ctx)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+				ttx, ok := tx.(kv.TemporalTx)
+				if !ok {
+					return nil
+				}
+				if pp, ok = ttx.AggTx().(latestPrefetcher); !ok {
+					return nil
+				}
+			}
+			waves, pages, plan, io := pp.PrefetchLatest(domain, keys)
+			mu.Lock()
+			defer mu.Unlock()
+			part.waves, part.pages = max(part.waves, waves), part.pages+pages
+			part.plan, part.io = max(part.plan, plan), max(part.io, io)
+			return nil
+		})
+	}
+	err := g.Wait()
+	stats.add(part.waves, part.pages, part.plan, part.io)
+	return err
+}
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
@@ -263,7 +309,7 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
 		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
-		"flatDepth", prefetchFlatDepth, "elapsed", time.Since(started), "err", err)
+		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
@@ -280,8 +326,7 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	if !ok {
 		return nil
 	}
-	stats.add(p.PrefetchLatest(domain, keys))
-	return nil
+	return prefetchKeys(ctx, db, p, domain, keys, stats)
 }
 
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *prefetchStats) error {
@@ -311,7 +356,9 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 				}
 			}
 		}
-		stats.add(p.PrefetchLatest(kv.CommitmentDomain, prefixes))
+		if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
+			return err
+		}
 	}
 	active := hashedKeys
 	for depth := 0; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
@@ -328,7 +375,9 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 			}
 		}
 		if depth > prefetchFlatDepth {
-			stats.add(p.PrefetchLatest(kv.CommitmentDomain, prefixes))
+			if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
+				return err
+			}
 		}
 		t0 := time.Now()
 		next := active[:0:0]
