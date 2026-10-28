@@ -101,6 +101,14 @@ func applyFrameTest(t testing.TB, evm *vm.EVM, tx *types.FrameTransaction) (*evm
 	return ApplyMessage(evm, msg, NewGasPool(30_000_000, 10_000_000), true, false, nil)
 }
 
+func TestFrameTransactionGasCostOverflow(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
+	tx.Fees.FeeCap.SetAllOne()
+	_, err := applyFrameTest(t, evm, tx)
+	require.EqualError(t, err, "frame transaction gas cost overflow")
+}
+
 func TestFrameTransactionContractApproval(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)

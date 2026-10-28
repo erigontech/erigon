@@ -93,7 +93,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	// unused gas and the difference from the effective execution gas price.
 	maxCost, overflow := u256.MulOverflow(u256.U64(limits.Total()), tx.Fees.FeeCap)
 	if overflow {
-		return nil, ErrInsufficientFunds
+		return nil, errors.New("frame transaction gas cost overflow")
 	}
 	blobCost, overflow := u256.MulOverflow(u256.U64(tx.GetBlobGas()), st.evm.Context.BlobBaseFee)
 	if overflow {

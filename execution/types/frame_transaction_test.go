@@ -243,20 +243,24 @@ func TestFrameTransactionConcurrentValidation(t *testing.T) {
 
 func TestFrameTransactionMalformedSignature(t *testing.T) {
 	t.Parallel()
-	for name, sig := range map[string]FrameSignature{
-		"scheme":           {Scheme: 3},
-		"arbitrary signer": {Signer: make([]byte, 20)},
-		"message length":   {Message: []byte{1}},
-		"zero message":     {Message: make([]byte, 32)},
-		"secp length":      {Scheme: 1},
-		"p256 length":      {Scheme: 2},
-		"secp scalars":     {Scheme: 1, Signature: make([]byte, 65)},
-		"p256 scalars":     {Scheme: 2, Signature: make([]byte, 128)},
+	for name, test := range map[string]struct {
+		sig  FrameSignature
+		want string
+	}{
+		"scheme":           {FrameSignature{Scheme: 3}, "unknown scheme"},
+		"signer length":    {FrameSignature{Signer: []byte{1}}, "invalid signer length"},
+		"arbitrary signer": {FrameSignature{Signer: make([]byte, 20)}, "arbitrary signature has signer"},
+		"message length":   {FrameSignature{Message: []byte{1}}, "invalid message length"},
+		"zero message":     {FrameSignature{Message: make([]byte, 32)}, "zero message digest"},
+		"secp length":      {FrameSignature{Scheme: 1}, "invalid signature length"},
+		"p256 length":      {FrameSignature{Scheme: 2}, "invalid signature length"},
+		"secp scalars":     {FrameSignature{Scheme: 1, Signature: make([]byte, 65)}, "signature verification failed"},
+		"p256 scalars":     {FrameSignature{Scheme: 2, Signature: make([]byte, 128)}, "signature verification failed"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, Signatures: []FrameSignature{sig}}
+			tx := FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}, Signatures: []FrameSignature{test.sig}}
 			_, err := tx.AsMessage(Signer{}, nil, &chain.Rules{IsBogota: true, ChainID: new(uint256.Int)})
-			require.Error(t, err)
+			require.EqualError(t, err, "invalid frame signature 0: "+test.want)
 		})
 	}
 }

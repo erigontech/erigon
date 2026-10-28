@@ -137,47 +137,60 @@ func (sig *FrameSignature) ResolvedSigner(sender common.Address) common.Address 
 	return common.BytesToAddress(sig.Signer)
 }
 
-func (sig *FrameSignature) validate(sender common.Address, hash common.Hash) bool {
+func (sig *FrameSignature) validate(sender common.Address, hash common.Hash) error {
 	if len(sig.Signer) != 0 && len(sig.Signer) != 20 {
-		return false
+		return errors.New("invalid signer length")
 	}
 	if len(sig.Message) != 0 {
-		if len(sig.Message) != 32 || common.BytesToHash(sig.Message) == (common.Hash{}) {
-			return false
+		if len(sig.Message) != 32 {
+			return errors.New("invalid message length")
+		}
+		if common.BytesToHash(sig.Message) == (common.Hash{}) {
+			return errors.New("zero message digest")
 		}
 		hash = common.BytesToHash(sig.Message)
 	}
 	switch sig.Scheme {
 	case FrameSignatureArbitrary:
-		return len(sig.Signer) == 0
+		if len(sig.Signer) != 0 {
+			return errors.New("arbitrary signature has signer")
+		}
 	case FrameSignatureSecp256k1:
 		if len(sig.Signature) != 65 {
-			return false
+			return errors.New("invalid signature length")
 		}
 		var r, s uint256.Int
 		r.SetBytes(sig.Signature[1:33])
 		s.SetBytes(sig.Signature[33:])
 		recovered, err := recoverSignerFromHash(hash, sig.Signature[0], r, s)
-		return err == nil && recovered == sig.ResolvedSigner(sender)
+		if err != nil {
+			return errors.New("signature verification failed")
+		}
+		if recovered != sig.ResolvedSigner(sender) {
+			return errors.New("signer mismatch")
+		}
 	case FrameSignatureP256:
 		if len(sig.Signature) != 128 {
-			return false
+			return errors.New("invalid signature length")
 		}
 		r := new(big.Int).SetBytes(sig.Signature[:32])
 		s := new(big.Int).SetBytes(sig.Signature[32:64])
 		n := elliptic.P256().Params().N
 		if r.Sign() == 0 || r.Cmp(n) >= 0 || s.Sign() == 0 || s.Cmp(new(big.Int).Rsh(new(big.Int).Set(n), 1)) > 0 {
-			return false
+			return errors.New("signature verification failed")
 		}
 		if common.BytesToAddress(crypto.Keccak256(sig.Signature[64:])[12:]) != sig.ResolvedSigner(sender) {
-			return false
+			return errors.New("signer mismatch")
 		}
 		x := new(big.Int).SetBytes(sig.Signature[64:96])
 		y := new(big.Int).SetBytes(sig.Signature[96:])
-		return secp256r1.Verify(hash[:], r, s, x, y)
+		if !secp256r1.Verify(hash[:], r, s, x, y) {
+			return errors.New("signature verification failed")
+		}
 	default:
-		return false
+		return errors.New("unknown scheme")
 	}
+	return nil
 }
 
 // Validate checks structure, gas limits and cryptographic signatures without state.
@@ -244,8 +257,8 @@ func (tx *FrameTransaction) Validate() error {
 	}
 	hash := tx.SigningHash(nil)
 	for i := range tx.Signatures {
-		if !tx.Signatures[i].validate(tx.SenderAddress, hash) {
-			return fmt.Errorf("invalid frame signature %d", i)
+		if err := tx.Signatures[i].validate(tx.SenderAddress, hash); err != nil {
+			return fmt.Errorf("invalid frame signature %d: %w", i, err)
 		}
 	}
 	tx.verifiedSignatures.Store(&validationHash)
