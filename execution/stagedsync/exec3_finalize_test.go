@@ -1773,7 +1773,7 @@ func TestCalcFees_EstimateDestructDoesNotPruneCoinbase(t *testing.T) {
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 			}
 			task := &taskVersion{
-				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				execTask: &execTask{Task: txTask},
 				version:  version,
 			}
 			result := &execResult{TxResult: &exec.TxResult{
@@ -1816,7 +1816,7 @@ func TestCalcFees_DoneDestructStillPrunesCoinbase(t *testing.T) {
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
 	task := &taskVersion{
-		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		execTask: &execTask{Task: txTask},
 		version:  version,
 	}
 	result := &execResult{TxResult: &exec.TxResult{
@@ -2248,7 +2248,7 @@ func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
 	task := &taskVersion{
-		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		execTask: &execTask{Task: txTask},
 		version:  version,
 	}
 	result := &execResult{TxResult: &exec.TxResult{
@@ -2297,7 +2297,7 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 			}
 			task := &taskVersion{
-				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				execTask: &execTask{Task: txTask},
 				version:  version,
 			}
 			result := &execResult{TxResult: &exec.TxResult{
