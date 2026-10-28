@@ -75,6 +75,8 @@ type ForkChoiceResult struct {
 	LatestValidHash common.Hash
 	ValidationError string
 	MissingHash     common.Hash
+	// UpdateInProgress distinguishes admitted asynchronous work from a Busy rejection.
+	UpdateInProgress bool
 }
 
 // ForkChoiceState is the native return type for GetForkChoice.
@@ -141,8 +143,8 @@ type ExecutionModule interface {
 
 	// UpdateForkChoice updates the canonical head, safe, and finalized block
 	// hashes.  The caller may set a deadline on ctx to bound how long to wait
-	// synchronously: a DeadlineExceeded returns ForkChoiceResult{Status:Busy}
-	// so the caller can poll with GetForkChoice.
+	// synchronously: an admitted update that exceeds the deadline returns Busy
+	// with UpdateInProgress set so the caller can poll with GetForkChoice.
 	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error)
 
 	// GetForkChoice returns the current fork choice state (head, safe,

@@ -171,12 +171,13 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
+	nonceTooHigh := map[accounts.Address][][32]byte{}
 
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, nonceTooHigh, filterReader, filterWriter, logger, filtration)
 		if err != nil {
 			return err
 		}
@@ -197,9 +198,11 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
-				select {
-				case <-time.After(50 * time.Millisecond):
-				case <-stopSignalsOf(ctx).stopped:
+				if provided < amount {
+					select {
+					case <-time.After(50 * time.Millisecond):
+					case <-stopSignalsOf(ctx).stopped:
+					}
 				}
 			} else {
 				break
@@ -276,11 +279,12 @@ func getNextTransactions(
 	amount int,
 	executionAt uint64,
 	alreadyYielded mapset.Set[[32]byte],
+	nonceTooHigh map[accounts.Address][][32]byte,
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 	stats *filtrationStats,
-) ([]types.Transaction, error) {
+) ([]types.Transaction, int, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -309,47 +313,31 @@ func getNextTransactions(
 
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	blockNum := executionAt + 1
-	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
+	txns, nonceTooHighTxns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
-	// in subsequent iterations. When best() skips blob TXs that exceed remaining blob gas,
-	// it can create nonce gaps in the returned set. filterBadTransactions rejects the
-	// higher-nonce TXs, but they get stuck in the yielded set and are never returned again.
-	// By removing only nonce-too-high TXs (nonce > sim state nonce), we allow them to be
-	// reconsidered after earlier-nonce TXs are accepted. TXs rejected for other reasons
-	// (nonce-too-low, fee-too-low, etc.) remain yielded to avoid infinite re-evaluation.
-	if len(txns) < len(allTxns) && alreadyYielded != nil {
-		accepted := make(map[[32]byte]struct{}, len(txns))
-		for _, tx := range txns {
-			accepted[tx.Hash()] = struct{}{}
+	// A nonce-too-high txn stays yielded until a later batch accepts a txn from the same sender,
+	// so the provider moves on to lower-ranked txns instead of returning the same batch again.
+	// The provider can skip a lower nonce for lack of gas in one call and return it later.
+	for _, txn := range txns {
+		sender, _ := txn.GetSender()
+		for _, h := range nonceTooHigh[sender] {
+			alreadyYielded.Remove(h)
 		}
-		for _, tx := range allTxns {
-			h := tx.Hash()
-			if _, ok := accepted[h]; ok {
-				continue
-			}
-			sender, ok := tx.GetSender()
-			if !ok {
-				continue
-			}
-			account, err := simStateReader.ReadAccountData(sender)
-			if err != nil || account == nil {
-				continue
-			}
-			if tx.GetNonce() > account.Nonce {
-				alreadyYielded.Remove(h)
-			}
-		}
+		delete(nonceTooHigh, sender)
+	}
+	for _, txn := range nonceTooHighTxns {
+		sender, _ := txn.GetSender()
+		nonceTooHigh[sender] = append(nonceTooHigh[sender], txn.Hash())
 	}
 
-	return txns, nil
+	return txns, len(allTxns), nil
 }
 
 // filtrationStats accumulates txpool-filtration outcomes across all batches of a
@@ -390,7 +378,7 @@ func (s *filtrationStats) logArgs() []any {
 	return args
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger, stats *filtrationStats) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger, stats *filtrationStats) ([]types.Transaction, []types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -420,7 +408,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		}
 		account, err := simStateReader.ReadAccountData(senderAddress)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if account == nil {
 			transactions = transactions[1:]
@@ -446,7 +434,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				_, isDelegated := types.ParseDelegation(code)
@@ -503,7 +491,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		newAccount.Nonce++
 		newAccount.Balance.Sub(&account.Balance, want)
 		if err := simStateWriter.UpdateAccountData(senderAddress, account, newAccount); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Mark transaction as valid
 		filtered = append(filtered, transaction)
@@ -521,7 +509,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		stats.overflow += overflowCnt
 		stats.balanceTooLow += balanceTooLowCnt
 	}
-	return filtered, nil
+	return filtered, transactions, nil
 }
 
 func NotifyPendingLogs(logPrefix string, notifier stagedsync.ChainEventNotifier, logs types.Logs, logger log.Logger) {

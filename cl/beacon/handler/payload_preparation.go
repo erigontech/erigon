@@ -689,7 +689,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		key.headRoot = root
 		// Beyond the proposer lookahead the index has to be reshuffled from the seed, which is far
 		// too costly to repeat every tick on a large validator set.
-		if a.proposerLookupTooFarAhead(headState, targetSlot) {
+		if a.proposerLookupTooFarAhead(headState.Slot(), targetSlot) {
 			return errHeadTooFarBack
 		}
 
@@ -805,9 +805,9 @@ func (a *ApiHandler) registeredProposer(beaconState *state.CachingBeaconState, t
 	return proposerIndex, feeRecipient, nil
 }
 
-func (a *ApiHandler) proposerLookupTooFarAhead(beaconState *state.CachingBeaconState, targetSlot uint64) bool {
+func (a *ApiHandler) proposerLookupTooFarAhead(headSlot, targetSlot uint64) bool {
 	slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
-	return targetSlot/slotsPerEpoch > beaconState.Slot()/slotsPerEpoch+a.beaconChainCfg.MinSeedLookahead
+	return targetSlot/slotsPerEpoch > headSlot/slotsPerEpoch+a.beaconChainCfg.MinSeedLookahead
 }
 
 func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationKey, error) {
@@ -815,7 +815,7 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 		if root != key.headRoot {
 			return errPreparationHeadChanged
 		}
-		if a.proposerLookupTooFarAhead(headState, key.targetSlot) {
+		if a.proposerLookupTooFarAhead(headState.Slot(), key.targetSlot) {
 			return errHeadTooFarBack
 		}
 		// Before Fulu, finding the proposer may require an epoch transition, so the sampled
