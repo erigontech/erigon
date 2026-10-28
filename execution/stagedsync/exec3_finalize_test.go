@@ -754,6 +754,73 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 		reExecutedPostBal, tip, expectedFinal, abandonedPostBal, abandonedPostBal+tip)
 }
 
+// calcFees credits the coinbase and the burnt-fee recipient after a tx is validated, and undoes the
+// tx's EIP-161 removal of a recipient it credits. A later reader of their balance or existence must
+// wait for that write, not continue on the validated write of the tx.
+func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
+	t.Parallel()
+
+	t.Run("balance", func(t *testing.T) {
+		t.Parallel()
+		s := londonTransferScenario()
+		sender := fAddr("sender")
+		for _, addr := range []accounts.Address{s.coinbase, s.burntAddr, sender} {
+			s.txOut.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 0}},
+				Val:         *uint256.NewInt(1_000),
+			})
+			s.txOut.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: state.Version{TxIndex: 0}},
+				Val:         &accounts.Account{Balance: *uint256.NewInt(1_000), CodeHash: accounts.EmptyCodeHash},
+			})
+		}
+		r := s.buildExecResult()
+		r.TxOut = copyWrites(s.txOut)
+
+		vm := state.NewVersionMap(nil)
+		vm.FlushVersionedWrites(r.TxOut, false, "")
+		be := &blockExecutor{coinbase: s.coinbase}
+		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
+
+		for addr, want := range map[accounts.Address]int{
+			s.coinbase:  state.MVReadResultDependency,
+			s.burntAddr: state.MVReadResultDependency,
+			sender:      state.MVReadResultValidated,
+		} {
+			_, res, ok := vm.ReadBalance(addr, 1)
+			require.True(t, ok)
+			require.Equal(t, want, res.Status(), "balance of %x", addr.Value())
+			_, res, ok = vm.ReadAddress(addr, 1)
+			require.True(t, ok)
+			require.Equal(t, want, res.Status(), "account record of %x", addr.Value())
+		}
+	})
+
+	t.Run("EIP-161 removal", func(t *testing.T) {
+		t.Parallel()
+		s := londonTransferScenario()
+		s.accts[s.burntAddr] = fMakeAccount(0, 0)
+		s.txOut.SetEmptyRemoval(s.burntAddr, state.Version{TxIndex: 0})
+		r := s.buildExecResult()
+		r.TxOut = copyWrites(s.txOut)
+
+		vm := state.NewVersionMap(nil)
+		vm.FlushVersionedWrites(r.TxOut, false, "")
+		be := &blockExecutor{coinbase: s.coinbase}
+		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
+		_, res, ok := vm.ReadSelfDestruct(s.burntAddr, 1)
+		require.True(t, ok)
+		require.Equal(t, state.MVReadResultDependency, res.Status())
+
+		writes, err := r.calcFees(r.Task.(*taskVersion), vm, s.makeReader(), s.rules)
+		require.NoError(t, err)
+		revived, ok := writes.GetSelfDestruct(s.burntAddr)
+		require.True(t, ok)
+		require.False(t, revived.Val, "the base fee revives the removed recipient")
+		require.Equal(t, 0, revived.Version.TxIndex)
+	})
+}
+
 // TestFinalizeTx_BurntRecipient_HeldEstimateUntilSeal pins the single-Done-writer
 // invariant under the unified flow: the worker flushes every write (including a
 // sender==burnt gas-debit) as an Estimate, calcFees flushes the fee tip as an

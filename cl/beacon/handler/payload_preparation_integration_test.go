@@ -561,7 +561,6 @@ func newPreparationCollectionFixture(t *testing.T, path preparationCollectionPat
 	if path.canonicalFull {
 		canonical = full.Hash()
 	}
-	// ForkChoiceUpdate reports a busy execution module as success without applying the head.
 	module.ExecModule.WaitIdle(t.Context())
 	_, err = client.ForkChoiceUpdate(t.Context(), parent.Hash(), parent.Hash(), canonical, nil, version)
 	require.NoError(t, err)
