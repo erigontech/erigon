@@ -1236,12 +1236,21 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	return nil
 }
 
+// sdProbeMemo returns the SelfDestruct probe memoized for the current execution
+// attempt, or a zero entry, without probing the version map.
+func (ibs *IntraBlockState) sdProbeMemo(addr accounts.Address) (sdProbeEntry, bool) {
+	if e, hit := ibs.sdProbe[addr]; hit && e.epoch == ibs.sdProbeEpoch {
+		return e, true
+	}
+	return sdProbeEntry{}, false
+}
+
 // readSelfDestructMemo returns the shared-versionMap SelfDestruct probe for the
 // current execution attempt, caching it so a warm multi-field read does not
 // re-acquire the versionMap RWMutex per field. The probe reads only prior-tx SD
 // writes, so the memoized value is stable for the attempt.
 func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, ReadResult, bool) {
-	if e, hit := ibs.sdProbe[addr]; hit && e.epoch == ibs.sdProbeEpoch {
+	if e, hit := ibs.sdProbeMemo(addr); hit {
 		return e.destructed, e.res, e.ok
 	}
 	destructed, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex)
@@ -1306,6 +1315,17 @@ func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
 	return ok && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
+// absenceIsFinal is readAbsentFromMap, except for an absence recorded at a destruct that
+// kept a balance: this tx read the kept account there, and validation rejects it if a
+// re-creation stays.
+func (ibs *IntraBlockState) absenceIsFinal(addr accounts.Address) bool {
+	if !ibs.readAbsentFromMap(addr) {
+		return false
+	}
+	tr, _ := ibs.versionedReads.GetAddress(addr)
+	return !ibs.versionMap.destructKeptBalance(addr, tr.Version.TxIndex)
+}
+
 // versionedAccountBase resolves account existence via the AddressPath read (and
 // storage fallback), applying the self-destruct/revival gate, but does NOT
 // overlay the per-field versionMap cells. It returns nil when the account is
@@ -1334,7 +1354,8 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// Prefer the destruct that the read above saw, so that an in-flight re-creation
 		// does not hide it; without one, probe the version map, as a destruct may have
 		// been flushed since.
-		destructed, sdRes, ok := ibs.readSelfDestructMemo(addr)
+		memo, _ := ibs.sdProbeMemo(addr)
+		destructed, sdRes, ok := memo.destructed, memo.res, memo.ok
 		if !ok || !sdRes.resolved() || !destructed {
 			destructed, sdRes, ok = ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex)
 		}
@@ -1346,13 +1367,14 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			revived := false
 			if hi, ok := ibs.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, ibs.txIndex-1); ok && hi > destructTxIndex {
 				// The re-creation may have been flushed after the read above. If the
-				// re-read finds no account either and this tx has not read it as absent,
-				// the re-creation was withdrawn, so the reconstruction applies.
+				// re-read finds no account either and this tx has no final absence of it,
+				// the re-creation was withdrawn, or this tx read the account before the
+				// re-creation, which validation rejects. The reconstruction applies.
 				readAccount, source, version, err = readAccountInternal(ibs, addr)
 				if err != nil {
 					return nil, UnknownSource, UnknownVersion, err
 				}
-				revived = readAccount != nil || ibs.readAbsentFromMap(addr)
+				revived = readAccount != nil || ibs.absenceIsFinal(addr)
 			}
 			if !revived {
 				preserved, err := ibs.eip8246PreservedAccount(addr)
