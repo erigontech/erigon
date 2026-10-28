@@ -2743,6 +2743,10 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // stay correct without it.
 func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
 	dt := at.d[domain]
+	span := uintptr(1)
+	if domain == kv.CodeDomain {
+		span = uintptr(prefetchCodeSpanPages)
+	}
 	dt.probe = mmap.NewProbe()
 	if dt.probe == nil || len(keys) == 0 {
 		dt.probe = nil
@@ -2756,7 +2760,9 @@ func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves
 		next := pending[:0:0]
 		for _, k := range pending {
 			if page, ok := probeLatestFromFiles(dt, k); ok {
-				cold = append(cold, page)
+				for i := range span {
+					cold = append(cold, page+i*uintptr(os.Getpagesize()))
+				}
 				next = append(next, k)
 			}
 		}
@@ -2768,6 +2774,9 @@ func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves
 	}
 	return waves, pages, plan, io
 }
+
+// prefetchCodeSpanPages is how many pages from a cold code page are read at once, since a code value spans many pages.
+var prefetchCodeSpanPages = dbg.EnvInt("BAL_PREFETCH_CODE_SPAN", 8)
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
 	defer func() {

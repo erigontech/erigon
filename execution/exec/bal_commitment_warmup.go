@@ -239,6 +239,7 @@ func (s *prefetchStats) add(waves, pages int, plan, io time.Duration) {
 var (
 	prefetchFlatDepth = dbg.EnvInt("BAL_PREFETCH_FLAT_DEPTH", -1)
 	prefetchPar       = dbg.EnvInt("BAL_PREFETCH_PAR", 1)
+	prefetchCode      = dbg.EnvBool("BAL_PREFETCH_CODE", false)
 )
 
 // keysWithChild keeps the keys whose branch at depth has their next nibble, checked by prefetchPar goroutines.
@@ -343,15 +344,19 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
 		}
 	}
-	var stats [3]prefetchStats
+	var stats [4]prefetchStats
 	var g errgroup.Group
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
+	if prefetchCode {
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.CodeDomain, accs, &stats[3]) })
+	}
 	err := g.Wait()
 	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
+		"code", fmt.Sprintf("%d/%d plan=%s io=%s", stats[3].waves, stats[3].pages, stats[3].plan, stats[3].io),
 		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
 		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
 }
