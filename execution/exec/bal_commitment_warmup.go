@@ -21,12 +21,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -221,8 +223,19 @@ func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitme
 }
 
 type latestPrefetcher interface {
-	PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int)
+	PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
 }
+
+type prefetchStats struct {
+	waves, pages        int
+	plan, io, branchChk time.Duration
+}
+
+func (s *prefetchStats) add(waves, pages int, plan, io time.Duration) {
+	s.waves, s.pages, s.plan, s.io = s.waves+waves, s.pages+pages, s.plan+plan, s.io+io
+}
+
+var prefetchFlatDepth = dbg.EnvInt("BAL_PREFETCH_FLAT_DEPTH", -1)
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
@@ -240,18 +253,20 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
 		}
 	}
-	var stats [3][2]int
+	var stats [3]prefetchStats
 	var g errgroup.Group
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
 	err := g.Wait()
 	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
-		"accWaves", stats[0][0], "accPages", stats[0][1], "slotWaves", stats[1][0], "slotPages", stats[1][1],
-		"trieWaves", stats[2][0], "triePages", stats[2][1], "elapsed", time.Since(started), "err", err)
+		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
+		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
+		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
+		"flatDepth", prefetchFlatDepth, "elapsed", time.Since(started), "err", err)
 }
 
-func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *[2]int) error {
+func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -265,11 +280,11 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	if !ok {
 		return nil
 	}
-	stats[0], stats[1] = p.PrefetchLatest(domain, keys)
+	stats.add(p.PrefetchLatest(domain, keys))
 	return nil
 }
 
-func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *[2]int) error {
+func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *prefetchStats) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -284,6 +299,20 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 		return nil
 	}
 	compact := make([]byte, 0, 128)
+	if prefetchFlatDepth >= 0 {
+		seen := map[string]struct{}{}
+		var prefixes [][]byte
+		for _, k := range hashedKeys {
+			for depth := 0; depth <= min(prefetchFlatDepth, len(k)); depth++ {
+				pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+				if _, ok := seen[pfx]; !ok {
+					seen[pfx] = struct{}{}
+					prefixes = append(prefixes, []byte(pfx))
+				}
+			}
+		}
+		stats.add(p.PrefetchLatest(kv.CommitmentDomain, prefixes))
+	}
 	active := hashedKeys
 	for depth := 0; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		seen := map[string]struct{}{}
@@ -298,9 +327,10 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 				prefixes = append(prefixes, []byte(pfx))
 			}
 		}
-		waves, pages := p.PrefetchLatest(kv.CommitmentDomain, prefixes)
-		stats[0] += waves
-		stats[1] += pages
+		if depth > prefetchFlatDepth {
+			stats.add(p.PrefetchLatest(kv.CommitmentDomain, prefixes))
+		}
+		t0 := time.Now()
 		next := active[:0:0]
 		for _, k := range active {
 			if depth >= len(k) || ctx.Err() != nil {
@@ -315,6 +345,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 			}
 			next = append(next, k)
 		}
+		stats.branchChk += time.Since(t0)
 		active = next
 	}
 	return nil
