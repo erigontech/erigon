@@ -497,6 +497,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
+	mmap.Populate(unsafe.Pointer(&idx.data[pos]))
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
 	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {

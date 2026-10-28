@@ -954,6 +954,9 @@ func (g *Getter) DataLen() int {
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if mmap.PopulateEnabled && offset < uint64(len(g.data)) {
+		mmap.Populate(unsafe.Pointer(&g.data[offset]))
+	}
 	if g.residencyGate {
 		g.ensureResident(offset)
 	}

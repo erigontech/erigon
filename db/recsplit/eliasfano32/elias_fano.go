@@ -275,6 +275,7 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 	if ef.l != 0 {
 		lowerPos := i * ef.l
 		idx64, shift := lowerPos/64, lowerPos%64
+		mmap.Populate(unsafe.Pointer(&ef.lowerBits[idx64]))
 		lower = ef.lowerBits[idx64] >> shift
 		if shift > 0 {
 			lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -285,9 +286,12 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 	jumpInsideSuperQ := (i % superQ) / q
 	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
+	mmap.Populate(unsafe.Pointer(&ef.jump[jumpSuperQ]))
+	mmap.Populate(unsafe.Pointer(&ef.jump[idx64]))
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
 	currWord = jump / 64
+	mmap.Populate(unsafe.Pointer(&ef.upperBits[currWord]))
 	window = ef.upperBits[currWord] & (uint64(0xffffffffffffffff) << (jump % 64))
 	d := int(i & qMask)
 
