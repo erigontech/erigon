@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -648,23 +649,36 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 	}
 }
 
-// dropAccessorNotMatching unlinks an accessor whose key count disagrees with
-// the data it is named for. A file name states the range it covers, not which
-// generation produced it, so a .kv rewritten locally over a downloaded one
-// inherits the accessor built for the bytes that are gone. Lookups then resolve
-// keys the data no longer holds and read past its end. Removing it is what
-// makes it count as missed, which is the only thing that rebuilds it.
+// accessorMatchesData reports whether an accessor can have been built from the
+// data it is named for. A name states the range a file covers, not which
+// generation produced it, so a primary replaced in place inherits the accessor
+// built for the bytes that are gone. Two generations of one range hold the same
+// keys, so the counts agree while every offset has moved — hence the second
+// test: an accessor older than its data was built from something else.
+func accessorMatchesData(dataKeys, accessorKeys uint64, dataModified, accessorModified time.Time) bool {
+	if dataKeys != accessorKeys {
+		return false
+	}
+	return !accessorModified.Before(dataModified)
+}
+
+// dropAccessorNotMatching unlinks an accessor that cannot have been built from
+// the data it is named for. Lookups through one resolve keys the data no longer
+// holds and read past its end. Removing it is what makes it count as missed,
+// which is the only thing that rebuilds it.
 func (d *Domain) dropAccessorNotMatching(item *FilesItem, fPath string) error {
 	dataKeys := uint64(d.dataReader(item.decompressor).Count()) / 2
 	accessorKeys := item.index.KeyCount()
-	if dataKeys == accessorKeys {
+	dataModified, accessorModified := item.decompressor.ModTime(), item.index.ModTime()
+	if accessorMatchesData(dataKeys, accessorKeys, dataModified, accessorModified) {
 		return nil
 	}
 	item.index.Close()
 	item.index = nil
 	d.logger.Warn("[agg] accessor does not match its data; dropping it to be rebuilt",
 		"accessor", filepath.Base(fPath), "data", item.decompressor.FileName(),
-		"dataKeys", dataKeys, "accessorKeys", accessorKeys)
+		"dataKeys", dataKeys, "accessorKeys", accessorKeys,
+		"dataModified", dataModified, "accessorModified", accessorModified)
 	return dir.RemoveFile(fPath)
 }
 

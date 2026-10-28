@@ -104,3 +104,19 @@ func TestFilesItem_IsStaleOnDisk_FileGone(t *testing.T) {
 	require.False(t, item.isStaleOnDisk(),
 		"missing file falls through to existing invalidFileItems path — not stale")
 }
+
+func TestAccessorMatchesData(t *testing.T) {
+	built := time.Unix(1000, 0)
+
+	t.Run("same generation", func(t *testing.T) {
+		require.True(t, accessorMatchesData(10, 10, built, built.Add(time.Second)))
+	})
+	t.Run("key count disagrees", func(t *testing.T) {
+		require.False(t, accessorMatchesData(10, 9, built, built.Add(time.Second)))
+	})
+	// The replacement carries the same keys as the generation it displaced, so
+	// counting them agrees while every offset has moved.
+	t.Run("data replaced after the accessor was built", func(t *testing.T) {
+		require.False(t, accessorMatchesData(10, 10, built.Add(time.Second), built))
+	})
+}
