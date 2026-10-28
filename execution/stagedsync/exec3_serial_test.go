@@ -108,7 +108,7 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), finalizeErr: tc.engineErr(cause)}
 			se, task := newSerialFinalizeTestExec(t, engine)
 
-			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
+			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
 
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
@@ -130,7 +130,7 @@ func TestSerialBlockEndChecksInclusionList(t *testing.T) {
 	blockHash := task.BlockHash()
 	se.cfg.readAheader.AddInclusionList(blockHash, types.Transactions{omitted})
 
-	_, err = se.executeBlock(t.Context(), []exec.Task{task}, true, false)
+	_, err = se.executeBlock(t.Context(), []exec.Task{task}, true)
 	require.NoError(t, err)
 
 	_, ilHash, ok := se.cfg.readAheader.ReadInclusionList(blockHash)

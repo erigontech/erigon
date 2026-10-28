@@ -119,6 +119,38 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 		"storage slot referenced by a faulted SLOAD must not be recorded in the prestate")
 }
 
+// codeIBS serves one contract whose code hash is stored apart from its code, as the
+// state stores it.
+type codeIBS struct {
+	postTxIBS
+	code     []byte
+	codeHash accounts.CodeHash
+}
+
+func (m *codeIBS) GetCode(accounts.Address) ([]byte, error) { return m.code, nil }
+func (m *codeIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
+	return m.codeHash, nil
+}
+
+// The state already holds each account's code hash, so lookupAccount reports it
+// instead of hashing the whole bytecode again. The fake's hash is not keccak(code),
+// which shows where the reported hash comes from.
+func TestPrestateTracerTakesCodeHashFromState(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000003333"))
+	stateHash := common.HexToHash("0x0101010101010101010101010101010101010101010101010101010101010101")
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &codeIBS{code: []byte{0x60, 0x00, 0x60, 0x00, 0xf3}, codeHash: accounts.InternCodeHash(stateHash)},
+	}
+	tr.lookupAccount(addr)
+
+	acc, ok := tr.pre[addr]
+	require.True(t, ok)
+	require.NotNil(t, acc.CodeHash)
+	require.Equal(t, stateHash, *acc.CodeHash)
+}
+
 // TestPrestateTracerDiffModeDeletedAccount verifies that an account deleted during
 // a tx appears in the diff-mode post state with codeHash == 0x000...000.
 func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {

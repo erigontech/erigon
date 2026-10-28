@@ -161,7 +161,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
 		}
-		b.versionMap.FlushVersionedWrites(writes, true, "")
+		b.versionMap.FlushVersionedWrites(writes, true)
 		b.ibs.ResetVersionedIO()
 	}
 
@@ -206,7 +206,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
 		}
-		b.versionMap.FlushVersionedWrites(writes, true, "")
+		b.versionMap.FlushVersionedWrites(writes, true)
 		b.ibs.ResetVersionedIO()
 	}
 	b.txs = append(b.txs, txn)
@@ -558,7 +558,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
-					b.versionMap.FlushVersionedWrites(writes, true, "")
+					b.versionMap.FlushVersionedWrites(writes, true)
 				}
 				ibs.ResetVersionedIO()
 			}
@@ -600,7 +600,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {
-					b.versionMap.FlushVersionedWrites(writes, true, "")
+					b.versionMap.FlushVersionedWrites(writes, true)
 				}
 				ibs.ResetVersionedIO()
 			}

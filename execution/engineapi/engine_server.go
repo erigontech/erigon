@@ -494,7 +494,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var sendersRecovery *exec.SendersRecovery
-	if invalidTransactionStatus == nil && len(transactions) > 0 {
+	// With a non-empty BAL the exec workers recover the senders themselves.
+	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
+	if invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
@@ -1131,7 +1133,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1150,7 +1152,7 @@ func (e *EngineServer) HandleNewPayload(
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
-				return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
+				return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
 			}
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -1189,19 +1191,23 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
+	return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
+}
+
+func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmodule.ExecutionStatus, validationErr *string, latestValidHash common.Hash) *engine_types.PayloadStatus {
 	if status == execmodule.ExecutionStatusBadBlock {
 		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, common.Deref(validationErr))
 	}
 
-	resp := &engine_types.PayloadStatus{
-		Status:          convertGrpcStatusToEngineStatus(status),
-		LatestValidHash: &latestValidHash,
+	resp := &engine_types.PayloadStatus{Status: convertGrpcStatusToEngineStatus(status)}
+	if resp.Status == engine_types.ValidStatus || resp.Status == engine_types.InvalidStatus {
+		resp.LatestValidHash = &latestValidHash
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 
-	return resp, nil
+	return resp
 }
 
 func (e *EngineServer) resolveInclusionListSatisfied(ctx context.Context, resp *engine_types.PayloadStatus, blockHash common.Hash, blockNumber uint64, il types.Transactions) error {
