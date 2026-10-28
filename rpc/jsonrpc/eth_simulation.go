@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,7 +40,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -237,7 +240,19 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
+	var domainOpts []execctx.SharedDomainOption
+	if !latest {
+		baseTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+		mem, ok := tx.Debug().NewMemBatch(kvmetrics.NewDomainMetrics()).(*dbstate.TemporalMemBatch)
+		if !ok {
+			return nil, errors.New("eth_simulateV1: unexpected in-memory batch type")
+		}
+		domainOpts = append(domainOpts, execctx.WithMemBatch(&baseStateMemBatch{TemporalMemBatch: mem, tx: tx, txNum: baseTxNum, touchedKeys: sim.touchedKeys}))
+	}
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger, domainOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1334,6 +1349,67 @@ func (tx baseStateTx) GetLatest(domain kv.Domain, k []byte, opts kv.GetLatestOpt
 	}
 	v, _, err := tx.GetAsOf(domain, k, tx.txNum)
 	return v, 0, err
+}
+
+// baseStateMemBatch is the in-memory batch of a simulation on an old base. A storage
+// wipe lists the account's slots through IteratePrefix, which would read the latest
+// state; here it lists the slots at the end of the base block (txNum) together with
+// the simulated writes. Deleted storage keys are added to touchedKeys, so the state
+// root replay updates them too.
+type baseStateMemBatch struct {
+	*dbstate.TemporalMemBatch
+	tx          kv.TemporalTx
+	txNum       uint64
+	touchedKeys keysByAccount
+}
+
+func (m *baseStateMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, prevVal []byte) error {
+	if domain == kv.StorageDomain {
+		address := accounts.InternAddress(common.BytesToAddress([]byte(k[:length.Addr])))
+		m.touchedKeys[address] = append(m.touchedKeys[address], accounts.InternKey(common.BytesToHash([]byte(k[length.Addr:]))))
+	}
+	return m.TemporalMemBatch.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (m *baseStateMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
+	if domain != kv.StorageDomain {
+		return m.TemporalMemBatch.IteratePrefix(domain, prefix, roTx, it)
+	}
+	// The batch lists the simulated writes together with the latest state. Only the
+	// keys are taken; a key that is neither written nor in the base state is skipped.
+	values := map[string][]byte{}
+	if err := m.TemporalMemBatch.IteratePrefix(domain, prefix, roTx, func(k, _ []byte) (bool, error) {
+		values[string(k)] = nil
+		return true, nil
+	}); err != nil {
+		return err
+	}
+	to, _ := kv.NextSubtree(prefix)
+	base, err := m.tx.RangeAsOf(domain, prefix, to, m.txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer base.Close()
+	for base.HasNext() {
+		k, v, err := base.Next()
+		if err != nil {
+			return err
+		}
+		values[string(k)] = bytes.Clone(v)
+	}
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		v := values[k]
+		if written, _, ok := m.TemporalMemBatch.GetLatest(domain, []byte(k)); ok {
+			v = written
+		}
+		if len(v) == 0 {
+			continue
+		}
+		if cont, err := it([]byte(k), v); err != nil || !cont {
+			return err
+		}
+	}
+	return nil
 }
 
 // simulationIntraBlockStateReader is a state.StateReader for the 2nd+ block of an eth_simulateV1

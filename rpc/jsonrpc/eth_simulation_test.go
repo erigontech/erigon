@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -1382,6 +1384,11 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 	readSlot := ethapi.CallArgs{To: &slotStore}
 	readBalance := ethapi.CallArgs{To: &balanceReader}
 	deployReturning42 := hexutil.Bytes(deployCode(returningByte(42)))
+	replaceStorage := ethapi.Account{State: &map[common.Hash]common.Hash{{31: 1}: {31: 2}}}
+	codeOverride := func(code []byte) ethapi.Account { c := hexutil.Bytes(code); return ethapi.Account{Code: &c} }
+	selfDestructCode := []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}
+	beforeCancun := chain.TestChainOsakaConfig.Copy()
+	beforeCancun.CancunTime, beforeCancun.PragueTime, beforeCancun.OsakaTime = nil, nil, nil
 	returns := func(values ...int64) []string {
 		encoded := make([]string, len(values))
 		for i, v := range values {
@@ -1394,8 +1401,10 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 		baseSlot0             int64
 		headTxs               []blockTx
 		simulatedBlocks       [][]ethapi.CallArgs
+		slotStoreOverrides    map[int]ethapi.Account // by simulated block index
 		wantReturnData        []string
 		callsDeployedContract bool // the second block calls the contract the first block deploys
+		beforeCancun          bool // SELFDESTRUCT only wipes storage before Cancun
 	}{
 		{
 			name:            "storage write equal to head",
@@ -1442,8 +1451,47 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 			simulatedBlocks: [][]ethapi.CallArgs{{{From: &recipient, To: &slotStore}}, {readBalance}},
 			wantReturnData:  returns(0, 0),
 		},
+		{
+			name:               "storage override of a slot set at base and head",
+			baseSlot0:          1,
+			headTxs:            []blockTx{{to: &recipient, value: 1}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{0: replaceStorage},
+			wantReturnData:     returns(0, 0),
+		},
+		{
+			name:               "storage override of a slot cleared at head",
+			baseSlot0:          1,
+			headTxs:            []blockTx{{to: &slotStore, data: slotValue(0)}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{0: replaceStorage},
+			wantReturnData:     returns(0, 0),
+		},
+		{
+			name:               "storage override after a simulated write to a slot absent at base",
+			headTxs:            []blockTx{{to: &recipient, value: 1}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{writeSlot(7)}, {readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{1: replaceStorage},
+			wantReturnData:     returns(7, 0, 0),
+		},
+		{
+			name:               "self-destruct of a contract whose slot is cleared at head",
+			baseSlot0:          1,
+			headTxs:            []blockTx{{to: &slotStore, data: slotValue(0)}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{0: codeOverride(selfDestructCode), 1: codeOverride(slotStoreCode)},
+			wantReturnData:     []string{"0x", slotValue(0).String()},
+			beforeCancun:       true,
+		},
 	} {
-		for _, cfg := range simulateOverrideConfigs {
+		configs := simulateOverrideConfigs
+		if tc.beforeCancun {
+			configs = []struct {
+				name string
+				cfg  *chain.Config
+			}{{"shanghai", beforeCancun}}
+		}
+		for _, cfg := range configs {
 			for _, variant := range []struct {
 				baseNumber        uint64
 				commitmentHistory bool
@@ -1471,8 +1519,11 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 					buildRequest := func() SimulationRequest {
 						gas := hexutil.Uint64(1_000_000)
 						req := SimulationRequest{}
-						for _, calls := range tc.simulatedBlocks {
+						for i, calls := range tc.simulatedBlocks {
 							block := SimulatedBlock{}
+							if override, ok := tc.slotStoreOverrides[i]; ok {
+								block.StateOverrides = &ethapi.StateOverrides{accounts.InternAddress(slotStore): override}
+							}
 							for _, call := range calls {
 								if tc.callsDeployedContract && call.Data == nil {
 									call.To = &deployed
@@ -1504,6 +1555,39 @@ func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestBaseStateMemBatchListsStorageAtBase(t *testing.T) {
+	slotStore := slotStoreAddress
+	node, _ := newHistoricalBaseChain(t, chain.TestChainOsakaConfig, 1, [][]blockTx{{{to: &slotStore, data: make([]byte, 32)}}})
+	tx, err := node.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	baseTxNum, err := node.BlockReader.TxnumReader().Min(t.Context(), tx, 1)
+	require.NoError(t, err)
+	touched := keysByAccount{}
+	mem := &baseStateMemBatch{TemporalMemBatch: tx.Debug().NewMemBatch(kvmetrics.NewDomainMetrics()).(*dbstate.TemporalMemBatch), tx: tx, txNum: baseTxNum, touchedKeys: touched}
+	defer mem.Close()
+	slotKey := func(slot byte) string {
+		h := common.Hash{31: slot}
+		return string(slotStore[:]) + string(h[:])
+	}
+	listStorage := func() map[string]string {
+		listed := map[string]string{}
+		require.NoError(t, mem.IteratePrefix(kv.StorageDomain, slotStore[:], tx, func(k, v []byte) (bool, error) {
+			listed[string(k)] = common.Bytes2Hex(v)
+			return true, nil
+		}))
+		return listed
+	}
+
+	// Slot 0 is 1 at the base and cleared at the head.
+	require.Equal(t, map[string]string{slotKey(0): "01"}, listStorage())
+
+	require.NoError(t, mem.DomainPut(kv.StorageDomain, slotKey(1), []byte{5}, baseTxNum, nil))
+	require.NoError(t, mem.DomainDel(kv.StorageDomain, slotKey(0), baseTxNum, []byte{1}))
+	require.Equal(t, map[string]string{slotKey(1): "05"}, listStorage())
+	require.Equal(t, storageKeys{accounts.InternKey(common.Hash{})}, touched[accounts.InternAddress(slotStore)])
 }
 
 // latestAndHistoryTx answers latest and historical reads with different values.
