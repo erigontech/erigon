@@ -138,9 +138,16 @@ func (p *Provider) watchInitialValidation(ctx context.Context, downloadsComplete
 				status[name] = settleFailed
 			default: // RevalidationRedownload
 				if status[name] != settleRedownloading {
-					if p.Orchestrator.RequeueForDownload(name) {
+					// Re-fetch what the validator rejected. A StepValidator
+					// runs across the whole group, so that is often a sibling
+					// of this entry, and re-fetching the entry cannot heal it.
+					target := name
+					if rejected, ok := p.LifecycleDriver.QuarantineRejectedFile(name); ok {
+						target = rejected
+					}
+					if p.Orchestrator.RequeueForDownload(target) {
 						p.logger.Warn("[storage] startup re-validation failed; re-downloading file",
-							"file", name, "policy", policy.String())
+							"file", target, "quarantined", name, "policy", policy.String())
 						status[name] = settleRedownloading
 						mu.Lock()
 						redownloadDone[name] = false

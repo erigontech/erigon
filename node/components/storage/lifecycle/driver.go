@@ -148,6 +148,12 @@ type Driver struct {
 	subUnsub    func() // returned by Inv.Subscribe; called on Stop
 	failures    map[string]int
 	quarantined map[string]bool
+
+	// quarantineBlame maps a quarantined entry to the file a validator
+	// actually rejected. A StepValidator runs across a whole group, so that
+	// file is often a sibling of the entry whose transition was dispatched,
+	// and remediation applied to the entry cannot heal it.
+	quarantineBlame map[string]string
 	// pauseLogged records (file, pause-reason) tuples we've already
 	// Info-logged, so a validator that keeps pausing for the same
 	// reason across sweeps only surfaces once — enough for an operator
@@ -566,7 +572,7 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 						return
 					}
 					logger.Debug("[storage-lifecycle] OnMetaReady failed", "name", e.Name, "err", err)
-					d.recordFailure(e.Name, "OnMetaReady", logger)
+					d.recordFailure(e.Name, "OnMetaReady", err, logger)
 				} else {
 					d.clearFailure(e.Name)
 				}
@@ -588,7 +594,7 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 				return
 			}
 			logger.Debug("[storage-lifecycle] OnIndexing failed", "name", e.Name, "err", err)
-			d.recordFailure(e.Name, "OnIndexing", logger)
+			d.recordFailure(e.Name, "OnIndexing", err, logger)
 		} else {
 			d.clearFailure(e.Name)
 		}
@@ -619,7 +625,7 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 				return
 			}
 			logger.Debug("[storage-lifecycle] OnValidation failed", "name", e.Name, "err", err)
-			d.recordFailure(e.Name, "OnValidation", logger)
+			d.recordFailure(e.Name, "OnValidation", err, logger)
 		} else {
 			d.clearFailure(e.Name)
 		}
@@ -630,7 +636,7 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 // counter reaches QuarantineThreshold the file is moved to the
 // quarantine map and an Info log fires once. Subsequent failures for
 // the same file are silently absorbed.
-func (d *Driver) recordFailure(name, phase string, logger log.Logger) {
+func (d *Driver) recordFailure(name, phase string, cause error, logger log.Logger) {
 	threshold := d.QuarantineThreshold
 	if threshold == 0 {
 		threshold = defaultQuarantineThreshold
@@ -642,16 +648,23 @@ func (d *Driver) recordFailure(name, phase string, logger log.Logger) {
 	d.failures[name]++
 	count := d.failures[name]
 	hitThreshold := count == threshold
+	blamed, named := validation.BlamedFile(cause)
 	if hitThreshold {
 		if d.quarantined == nil {
 			d.quarantined = make(map[string]bool)
 		}
 		d.quarantined[name] = true
+		if named {
+			if d.quarantineBlame == nil {
+				d.quarantineBlame = make(map[string]string)
+			}
+			d.quarantineBlame[name] = blamed
+		}
 	}
 	d.mu.Unlock()
 	if hitThreshold {
 		logger.Info("[storage-lifecycle] quarantining file after repeated failures",
-			"file", name, "phase", phase, "failures", count,
+			"file", name, "phase", phase, "failures", count, "rejected", blamed,
 			"hint", "the underlying handler keeps failing — operator should investigate (missing segments, corrupt file, etc.); ChangeSet for this file clears the quarantine")
 	}
 }
@@ -663,6 +676,7 @@ func (d *Driver) clearFailure(name string) {
 	defer d.mu.Unlock()
 	delete(d.failures, name)
 	delete(d.quarantined, name)
+	delete(d.quarantineBlame, name)
 }
 
 // clearFailures bulk-clears under one lock acquisition. Short-circuits
@@ -680,6 +694,7 @@ func (d *Driver) clearFailures(names []string) {
 	for _, name := range names {
 		delete(d.failures, name)
 		delete(d.quarantined, name)
+		delete(d.quarantineBlame, name)
 	}
 }
 
@@ -697,4 +712,13 @@ func (d *Driver) isQuarantined(name string) bool {
 // startup pre-flight settle-watcher.
 func (d *Driver) IsQuarantined(name string) bool {
 	return d.isQuarantined(name)
+}
+
+// QuarantineRejectedFile reports the file a validator rejected when the named
+// entry was quarantined, which is not always the entry itself.
+func (d *Driver) QuarantineRejectedFile(name string) (string, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	blamed, ok := d.quarantineBlame[name]
+	return blamed, ok
 }

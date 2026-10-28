@@ -141,3 +141,24 @@ func (a AllFilesPresent) ValidateStep(_ context.Context, files []*snapshot.FileE
 func DefaultStepChain(snapDir string) StepChain {
 	return StepChain{AllFilesPresent{SnapDir: snapDir}}
 }
+
+// FileError marks a validator failure as belonging to a named file. A
+// StepValidator runs across a whole group, so the file it rejects is often not
+// the entry whose lifecycle transition is being dispatched. Without this the
+// caller only knows the group failed and remediation lands on the wrong file.
+type FileError struct {
+	File string
+	Err  error
+}
+
+func (e *FileError) Error() string { return fmt.Sprintf("file %q: %v", e.File, e.Err) }
+func (e *FileError) Unwrap() error { return e.Err }
+
+// BlamedFile reports the file a validator rejected, when the error names one.
+func BlamedFile(err error) (string, bool) {
+	var fe *FileError
+	if errors.As(err, &fe) && fe.File != "" {
+		return fe.File, true
+	}
+	return "", false
+}

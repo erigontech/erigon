@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 func TestQuarantine_StopsRetryingAfterThreshold(t *testing.T) {
@@ -130,4 +131,52 @@ func TestQuarantine_SuccessfulDispatchClearsCounter(t *testing.T) {
 	}
 	require.Equal(t, int32(6), calls.Load(),
 		"counter was clear; quarantine threshold (3) must apply fresh")
+}
+
+// A StepValidator runs across a whole group, so the file it rejects is often a
+// sibling of the entry whose transition was dispatched. Remediation needs the
+// rejected file, not the entry.
+func TestQuarantine_RecordsTheRejectedFile(t *testing.T) {
+	inv := snapshot.NewInventory()
+	_ = inv.AddFile(&snapshot.FileEntry{
+		Name: "domain/v2.2-commitment.355-356.kv", Domain: snapshot.DomainCommitment, Local: true,
+	})
+
+	sibling := "domain/v2.1-commitment.355-356.kvi"
+	d := &Driver{
+		Inv:                 inv,
+		QuarantineThreshold: 2,
+		OnIndexing: func(_ context.Context, _ *snapshot.FileEntry) error {
+			return &validation.FileError{File: sibling, Err: errors.New("infohash mismatch")}
+		},
+	}
+
+	for range 3 {
+		d.Sweep(context.Background(), nil)
+	}
+
+	require.True(t, d.IsQuarantined("domain/v2.2-commitment.355-356.kv"))
+	rejected, ok := d.QuarantineRejectedFile("domain/v2.2-commitment.355-356.kv")
+	require.True(t, ok)
+	require.Equal(t, sibling, rejected)
+}
+
+func TestQuarantine_NoRejectedFileWhenTheErrorNamesNone(t *testing.T) {
+	inv := snapshot.NewInventory()
+	_ = inv.AddFile(&snapshot.FileEntry{Name: "stuck.kv", Domain: snapshot.DomainAccounts, Local: true})
+
+	d := &Driver{
+		Inv:                 inv,
+		QuarantineThreshold: 2,
+		OnIndexing: func(_ context.Context, _ *snapshot.FileEntry) error {
+			return errors.New("simulated failure")
+		},
+	}
+	for range 3 {
+		d.Sweep(context.Background(), nil)
+	}
+
+	require.True(t, d.IsQuarantined("stuck.kv"))
+	_, ok := d.QuarantineRejectedFile("stuck.kv")
+	require.False(t, ok)
 }

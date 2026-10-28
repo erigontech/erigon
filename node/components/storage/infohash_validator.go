@@ -68,7 +68,7 @@ func (v *InfoHashValidator) ValidateStep(ctx context.Context, files []*snapshot.
 			continue
 		}
 		if err := v.checkFile(ctx, f.Name); err != nil {
-			return fmt.Errorf("file %q: %w", f.Name, err)
+			return &validation.FileError{File: f.Name, Err: err}
 		}
 	}
 	return nil
