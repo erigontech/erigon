@@ -1213,66 +1213,70 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				}
 			}
 		}
-		e := vm.entryOrCreate(addr)
-		e.mu.Lock()
-		// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
-		// disqualifies the no-bump skip for its value writes: an equal value there does not
-		// mean an unchanged state, so every cell must record normally.
-		_, hasSD := writes.selfDestruct[addr]
-		_, hasCC := writes.createContract[addr]
-		_, hasInc := writes.incarnation[addr]
-		hasLifecycle := hasSD || hasCC || hasInc
-		if vw, ok := writes.address[addr]; ok {
-			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, complete, hasLifecycle)
-		}
-		if vw, ok := writes.selfDestruct[addr]; ok {
-			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
-		}
-		if vw, ok := writes.balance[addr]; ok {
-			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, complete, hasLifecycle)
-		}
-		if vw, ok := writes.nonce[addr]; ok {
-			e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, complete, hasLifecycle)
-		}
-		if vw, ok := writes.incarnation[addr]; ok {
-			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
-		}
-		if vw, ok := writes.code[addr]; ok {
-			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
-		}
-		if vw, ok := writes.codeHash[addr]; ok {
-			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, complete, hasLifecycle)
-		}
-		if vw, ok := writes.codeSize[addr]; ok {
-			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
-		}
-		if vw, ok := writes.createContract[addr]; ok {
-			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
-		}
-		if inner, ok := writes.storage[addr]; ok {
-			if e.Storage == nil {
-				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
-			}
-			for key, vw := range inner {
-				// On a BAL block a net-zero write is omitted from the BAL and folded away by
-				// StoragesChanged, so it is never materialized here (nor sealed below), and the cell
-				// an earlier run of the tx left is removed. A reader resolves the floor, which
-				// already holds this unchanged value. Before the seal only the access list seeds a
-				// Done cell, so a Done cell stays.
-				if vm.HasBAL && vw.valStatus == ValueUnchanged {
-					if cells := e.Storage[key]; cells != nil {
-						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
-							cells.Delete(vw.Version.TxIndex)
-							releaseCellStorage(c)
-						}
-					}
-					continue
-				}
-				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, hasLifecycle)
-			}
-		}
-		e.mu.Unlock()
+		vm.flushAddr(vm.entryOrCreate(addr), addr, writes, flag, complete)
 	})
+}
+
+// flushAddr routes the writes to addr into its entry under the entry's lock.
+func (vm *VersionMap) flushAddr(e *AddressEntry, addr accounts.Address, writes *WriteSet, flag statusFlag, complete bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
+	// disqualifies the no-bump skip for its value writes: an equal value there does not
+	// mean an unchanged state, so every cell must record normally.
+	_, hasSD := writes.selfDestruct[addr]
+	_, hasCC := writes.createContract[addr]
+	_, hasInc := writes.incarnation[addr]
+	hasLifecycle := hasSD || hasCC || hasInc
+	if vw, ok := writes.address[addr]; ok {
+		e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, complete, hasLifecycle)
+	}
+	if vw, ok := writes.selfDestruct[addr]; ok {
+		e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
+	}
+	if vw, ok := writes.balance[addr]; ok {
+		e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, complete, hasLifecycle)
+	}
+	if vw, ok := writes.nonce[addr]; ok {
+		e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, complete, hasLifecycle)
+	}
+	if vw, ok := writes.incarnation[addr]; ok {
+		e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
+	}
+	if vw, ok := writes.code[addr]; ok {
+		e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
+	}
+	if vw, ok := writes.codeHash[addr]; ok {
+		e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, complete, hasLifecycle)
+	}
+	if vw, ok := writes.codeSize[addr]; ok {
+		e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
+	}
+	if vw, ok := writes.createContract[addr]; ok {
+		e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
+	}
+	if inner, ok := writes.storage[addr]; ok {
+		if e.Storage == nil {
+			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
+		}
+		for key, vw := range inner {
+			// On a BAL block a net-zero write is omitted from the BAL and folded away by
+			// StoragesChanged, so it is never materialized here (nor sealed below), and the cell
+			// an earlier run of the tx left is removed. A reader resolves the floor, which
+			// already holds this unchanged value. Before the seal only the access list seeds a
+			// Done cell, so a Done cell stays.
+			if vm.HasBAL && vw.valStatus == ValueUnchanged {
+				if cells := e.Storage[key]; cells != nil {
+					if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
+						cells.Delete(vw.Version.TxIndex)
+						releaseCellStorage(c)
+					}
+				}
+				continue
+			}
+			e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, hasLifecycle)
+		}
+	}
 }
 
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
