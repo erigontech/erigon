@@ -48,20 +48,17 @@ func opApprove(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if !scope.IsUint64() {
 		return pc, nil, ErrExecutionReverted
 	}
-	if err := evm.ApproveFrame(call.Address(), scope.Uint64()); err != nil {
+	if err := evm.approveFrame(call.Address(), scope.Uint64()); err != nil {
 		return pc, nil, err
 	}
 	// Successful approval also returns from the current EVM call.
 	return pc, evm.output(&call.Memory, offset, length), errStopToken
 }
 
-// ApproveFrame is shared by the APPROVE opcode and default EOA verification so
+// approveFrame is shared by the APPROVE opcode and default EOA verification so
 // both paths enforce the same approval scopes and payment side effects.
-func (evm *EVM) ApproveFrame(address accounts.Address, scope uint64) error {
+func (evm *EVM) approveFrame(address accounts.Address, scope uint64) error {
 	ctx := evm.FrameContext
-	if ctx == nil {
-		return ErrFrameContext
-	}
 	tx := ctx.Transaction
 	frame := &tx.Frames[ctx.Index]
 	target := accounts.InternAddress(frame.ResolvedTarget(tx.SenderAddress))
@@ -239,7 +236,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 			if sig.Scheme != types.FrameSignatureSecp256k1 || len(sig.Message) != 0 || sig.ResolvedSigner(tx.SenderAddress) != target.Value() {
 				return nil, gas.Execution, ErrExecutionReverted
 			}
-			err = evm.ApproveFrame(target, uint64(scope))
+			err = evm.approveFrame(target, uint64(scope))
 			if errors.Is(err, ErrOutOfGas) {
 				return nil, 0, err
 			}
