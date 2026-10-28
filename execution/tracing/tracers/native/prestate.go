@@ -397,8 +397,9 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 
 	if len(code) > 0 {
 		acc.Code = (*hexutil.Bytes)(&code)
-		codeHash := crypto.Keccak256Hash(code)
-		acc.CodeHash = &codeHash
+		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
+		hash := codeHash.Value()
+		acc.CodeHash = &hash
 	}
 	acc.empty = !acc.exists()
 	// The code must be fetched first for the emptiness check.

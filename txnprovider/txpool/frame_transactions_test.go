@@ -731,6 +731,37 @@ func TestFramePoolRevalidationReleasesLock(t *testing.T) {
 	require.Equal(t, 1, pool.pending.Len())
 }
 
+func TestFramePoolUnwindPreservesLocalFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		local bool
+	}{
+		{name: "local", local: true},
+		{name: "remote"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(frame, sender[:], tc.local)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			txns.IsLocal[0] = false
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, txns))
+			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+
+			var unwind TxnSlots
+			unwind.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], false)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, sender), unwind, TxnSlots{}, TxnSlots{}))
+			restored := pool.byHash[string(frame.IDHash[:])]
+			require.NotNil(t, restored)
+			require.Equal(t, tc.local, restored.subPool&IsLocal != 0)
+		})
+	}
+}
+
 func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 	for _, mode := range []string{"unwind", "reload"} {
 		t.Run(mode, func(t *testing.T) {
