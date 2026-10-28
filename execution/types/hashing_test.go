@@ -147,6 +147,24 @@ func TestDeriveShaRawValues(t *testing.T) {
 	}
 }
 
+func TestDeriveShaRawValuesAllocationGrowth(t *testing.T) {
+	allocations := func(count int) float64 {
+		encoded := bytes.Repeat([]byte{rlp.EmptyListCode}, count)
+		return testing.AllocsPerRun(10, func() {
+			if _, err := DeriveShaRawValues(encoded); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+
+	small := allocations(128)
+	large := allocations(4096)
+	// Builder buffers may grow, but allocations must not scale with the leaf count.
+	if large > 2*small {
+		t.Fatalf("allocations grew from %.0f to %.0f for 128 and 4096 leaves", small, large)
+	}
+}
+
 func checkDeriveSha(t *testing.T, list DerivableList) {
 	t.Helper()
 

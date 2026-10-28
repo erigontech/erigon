@@ -149,10 +149,14 @@ type rawDeriveShaBuilder struct {
 	branches    []uint16
 	hashes      []uint16
 	leafData    trie.GenStructStepLeafData
+	value       rlp.RlpEncodedBytes
 }
 
 func newRawDeriveShaBuilder(firstIndex int) *rawDeriveShaBuilder {
 	builder := &rawDeriveShaBuilder{hashBuilder: trie.NewHashBuilder(false)}
+	// Store a pointer in the interface to avoid allocating a slice header per leaf.
+	// GenStructStep consumes the value before the next leaf replaces it.
+	builder.leafData.Value = &builder.value
 	builder.keyWriter.w = &builder.nextKey
 	builder.hashBuilder.Reset()
 	builder.prepareNextKey(firstIndex)
@@ -169,7 +173,7 @@ func (b *rawDeriveShaBuilder) addValue(value []byte, nextIndex int) {
 		return
 	}
 
-	b.leafData.Value = rlp.RlpEncodedBytes(value)
+	b.value = value
 	b.groups, b.branches, b.hashes, _ = trie.GenStructStep(
 		retain,
 		b.currentKey.Bytes(),

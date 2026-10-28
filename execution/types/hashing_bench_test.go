@@ -17,7 +17,11 @@
 package types
 
 import (
+	"bytes"
+	"fmt"
 	"testing"
+
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 func BenchmarkLegacySmallList(b *testing.B) {
@@ -41,6 +45,20 @@ func BenchmarkLegacyLargeList(b *testing.B) {
 func BenchmarkCurrentLargeList(b *testing.B) {
 	for b.Loop() {
 		DeriveSha(largeTxList)
+	}
+}
+
+func BenchmarkDeriveShaRawValues(b *testing.B) {
+	for _, count := range []int{128, 4096, 10_000_000} {
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			encoded := bytes.Repeat([]byte{rlp.EmptyListCode}, count)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := DeriveShaRawValues(encoded); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
