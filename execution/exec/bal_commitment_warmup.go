@@ -241,6 +241,50 @@ var (
 	prefetchPar       = dbg.EnvInt("BAL_PREFETCH_PAR", 1)
 )
 
+// keysWithChild keeps the keys whose branch at depth has their next nibble, checked by prefetchPar goroutines.
+// A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
+func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) ([][]byte, error) {
+	keep := make([]bool, len(keys))
+	check := func(tx kv.TemporalTx, from, to int) {
+		compact := make([]byte, 0, 128)
+		for i := from; i < to && ctx.Err() == nil; i++ {
+			k := keys[i]
+			if depth >= len(k) {
+				continue
+			}
+			branch, _, err := tx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
+			keep[i] = err == nil && len(branch) >= 4 && binary.BigEndian.Uint16(branch[2:4])&(uint16(1)<<k[depth]) != 0
+		}
+	}
+	par := max(1, min(prefetchPar, len(keys)/256))
+	chunk := (len(keys) + par - 1) / par
+	var g errgroup.Group
+	for from := chunk; from < len(keys); from += chunk {
+		g.Go(func() error {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if ttx, ok := tx.(kv.TemporalTx); ok {
+				check(ttx, from, min(from+chunk, len(keys)))
+			}
+			return nil
+		})
+	}
+	check(ttx, 0, min(chunk, len(keys)))
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	next := keys[:0:0]
+	for i, k := range keys {
+		if keep[i] {
+			next = append(next, k)
+		}
+	}
+	return next, nil
+}
+
 // prefetchKeys splits keys over prefetchPar planners, each with its own tx; stats keep the slowest planner's times.
 func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
 	if prefetchPar <= 1 || len(keys) < 2*prefetchPar {
@@ -380,19 +424,12 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 			}
 		}
 		t0 := time.Now()
-		next := active[:0:0]
-		for _, k := range active {
-			if depth >= len(k) || ctx.Err() != nil {
-				continue
+		next := active
+		if depth >= prefetchFlatDepth {
+			var err error
+			if next, err = keysWithChild(ctx, db, ttx, active, depth); err != nil {
+				return err
 			}
-			branch, _, err := ttx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
-			if err != nil || len(branch) < 4 {
-				continue
-			}
-			if binary.BigEndian.Uint16(branch[2:4])&(uint16(1)<<k[depth]) == 0 {
-				continue
-			}
-			next = append(next, k)
 		}
 		stats.branchChk += time.Since(t0)
 		active = next
