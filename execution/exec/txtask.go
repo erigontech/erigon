@@ -291,7 +291,7 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	}
 	sender, err := t.Tx().Sender(*t.signer)
 	if err != nil {
-		return accounts.NilAddress, err
+		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
 	t.sender = sender
 	if RecoversSenders(t.Header) {
