@@ -1702,16 +1702,10 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 		if ws == nil {
 			return
 		}
-		if !eachWriteHeaderOf(ws.address, yield) ||
-			!eachWriteHeaderOf(ws.balance, yield) ||
-			!eachWriteHeaderOf(ws.nonce, yield) ||
-			!eachWriteHeaderOf(ws.incarnation, yield) ||
-			!eachWriteHeaderOf(ws.selfDestruct, yield) ||
-			!eachWriteHeaderOf(ws.createContract, yield) ||
-			!eachWriteHeaderOf(ws.code, yield) ||
-			!eachWriteHeaderOf(ws.codeHash, yield) ||
-			!eachWriteHeaderOf(ws.codeSize, yield) {
-			return
+		for h := range ws.accountHeaders() {
+			if !yield(h) {
+				return
+			}
 		}
 		for _, inner := range ws.storage {
 			for _, vw := range inner {
@@ -1720,6 +1714,24 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 				}
 			}
 		}
+	}
+}
+
+// accountHeaders is AllHeaders without the storage writes.
+func (ws *WriteSet) accountHeaders() iter.Seq[WriteHeader] {
+	return func(yield func(WriteHeader) bool) {
+		if ws == nil {
+			return
+		}
+		_ = eachWriteHeaderOf(ws.address, yield) &&
+			eachWriteHeaderOf(ws.balance, yield) &&
+			eachWriteHeaderOf(ws.nonce, yield) &&
+			eachWriteHeaderOf(ws.incarnation, yield) &&
+			eachWriteHeaderOf(ws.selfDestruct, yield) &&
+			eachWriteHeaderOf(ws.createContract, yield) &&
+			eachWriteHeaderOf(ws.code, yield) &&
+			eachWriteHeaderOf(ws.codeHash, yield) &&
+			eachWriteHeaderOf(ws.codeSize, yield)
 	}
 }
 
@@ -3247,15 +3259,56 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	if txFrom == nil {
 		return false
 	}
-	for h := range txFrom.AllHeaders() {
-		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
+	for addr, writes := range txFrom.storage {
+		if anyCommonKey(writes, txTo.storage[addr]) {
 			return true
 		}
-		if h.Path.AffectsAccountLifecycle() && txTo.hasAnyReadAt(h.Address) {
+	}
+	for h := range txFrom.accountHeaders() {
+		if txTo.DependsOn(h) {
 			return true
 		}
 	}
 	return false
+}
+
+// DependsOnAt is HasReadDep for the writes ws makes at addr.
+func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
+	if ws == nil {
+		return false
+	}
+	if anyCommonKey(ws.storage[addr], s.storage[addr]) {
+		return true
+	}
+	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodePath, CodeHashPath, CodeSizePath, CreateContractPath} {
+		h := WriteHeader{Address: addr, Path: p}
+		if ws.hasHeader(h) && s.DependsOn(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// anyCommonKey probes the smaller map's keys in the larger one.
+func anyCommonKey[K comparable, A, B any](a map[K]A, b map[K]B) bool {
+	if len(a) > len(b) {
+		return anyCommonKey(b, a)
+	}
+	for k := range a {
+		if _, ok := b[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// DependsOn reports whether a write of h can invalidate a read in s: a read of the same
+// cell, or any read of the address when h changes the account lifecycle.
+func (s ReadSet) DependsOn(h WriteHeader) bool {
+	if _, ok := s.getHeader(h.Address, h.Path, h.Key); ok {
+		return true
+	}
+	return h.Path.AffectsAccountLifecycle() && s.hasAnyReadAt(h.Address)
 }
 
 func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {

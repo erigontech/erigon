@@ -282,7 +282,7 @@ func newProposerPreferencesViewCache() *lru.Cache[proposerPreferencesViewKey, *p
 func newProposerPreferencesValidationView(validationState *state.CachingBeaconState) (*proposerPreferencesValidationView, error) {
 	lookahead := validationState.GetProposerLookahead()
 	if lookahead == nil {
-		return nil, fmt.Errorf("proposer lookahead not available")
+		return nil, errors.New("proposer lookahead not available")
 	}
 	view := &proposerPreferencesValidationView{
 		epoch:                 state.GetEpochAtSlot(validationState.BeaconConfig(), validationState.Slot()),
