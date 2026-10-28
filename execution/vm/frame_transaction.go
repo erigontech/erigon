@@ -142,6 +142,7 @@ func (evm *EVM) consumeFrameNonce() error {
 		}
 		if sequence.IsZero() {
 			stateGas += params.StateGasPerStorageSet
+			ctx.RecordStorageCharge(manager, slots[i])
 		}
 	}
 	if !ctx.ChargeStateGas(stateGas) {

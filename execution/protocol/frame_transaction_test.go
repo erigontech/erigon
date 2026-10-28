@@ -145,6 +145,46 @@ func TestFrameTransactionKeyedNonce(t *testing.T) {
 	require.False(t, warm)
 }
 
+func TestFrameTransactionKeyedNonceRefill(t *testing.T) {
+	for _, revert := range []bool{false, true} {
+		t.Run(fmt.Sprintf("revert=%t", revert), func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			tx.NonceKeys = []uint256.Int{{1}}
+			manager := accounts.InternAddress(types.FrameNonceManager)
+			slot := types.FrameNonceSlot(tx.SenderAddress, tx.NonceKeys[0])
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+			// Non-canonical manager code can clear a slot created by protocol bookkeeping.
+			code := program.New().Sstore(slot, 0)
+			if revert {
+				code.Push0().Push0().Op(vm.REVERT)
+			}
+			require.NoError(t, ibs.SetCode(manager, code.Bytes(), tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}},
+				{Mode: types.FrameSender, Target: &types.FrameNonceManager, Limits: mdgas.MdGas{Execution: 20_000}},
+			}
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			var wantStateGas uint64
+			var wantSequence uint256.Int
+			if revert {
+				require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
+				wantStateGas = params.StateGasPerStorageSet
+				wantSequence.SetUint64(1)
+			} else {
+				require.NoError(t, result.Err)
+			}
+			require.Equal(t, wantStateGas, result.FrameReceipts[0].GasUsed.State)
+			require.Zero(t, result.FrameReceipts[1].GasUsed.State)
+			require.Equal(t, wantStateGas, result.BlockStateGasUsed)
+			sequence, err := ibs.GetState(manager, accounts.InternKey(slot))
+			require.NoError(t, err)
+			require.Equal(t, wantSequence, sequence)
+		})
+	}
+}
+
 func TestFrameTransactionRPCNonceCheck(t *testing.T) {
 	for _, keyed := range []bool{false, true} {
 		for _, checkNonce := range []bool{false, true} {
