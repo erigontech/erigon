@@ -247,6 +247,9 @@ type VersionMap struct {
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
+	// absentAccountHook runs after an account read found no account, before the
+	// self-destruct and revival probes. Tests set it to land a flush there.
+	absentAccountHook func()
 }
 
 type originStorageKey struct {
@@ -1042,6 +1045,14 @@ func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 	return state == LifecycleAbsent
 }
 
+// destructKeptBalance reports whether the destruct at destructTxIndex kept a non-zero balance
+// (EIP-8246), so that the account survived it although the destruct dropped its record. A balance
+// that is still an estimate is not a verdict yet, so it counts as kept.
+func (vm *VersionMap) destructKeptBalance(addr accounts.Address, destructTxIndex int) bool {
+	bal, res, ok := vm.ReadBalance(addr, destructTxIndex+1)
+	return ok && (!res.resolved() || res.ValStatus() != ValueDeleted && !bal.IsZero())
+}
+
 // netAbsentDestruct reports whether a lower tx left addr net-absent via create+self-destruct with no revival above it, so a base read of it is not stale (see IsNetAbsent).
 func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool {
 	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
@@ -1111,8 +1122,9 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // per-tx flush can be skipped without taking the write lock (and thus without parking the
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
 // is omitted from the BAL and folded away by StoragesChanged, so it is never materialized and
-// counts as already-present. Lifecycle transitions and the putCell-only paths (which never
-// no-bump) force the slow path. Caller holds e's read lock; only used on the BAL fast path.
+// counts as already-present, unless an earlier run of the tx left a cell the flush removes.
+// Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
+// Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
 	if _, ok := writes.selfDestruct[addr]; ok {
 		return false
@@ -1151,12 +1163,17 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 	}
 	if inner, ok := writes.storage[addr]; ok {
 		for key, vw := range inner {
-			if vw.valStatus == ValueUnchanged {
-				continue
-			}
 			var cells *btree.Map[int, *WriteCell[uint256.Int]]
 			if e.Storage != nil {
 				cells = e.Storage[key]
+			}
+			if vw.valStatus == ValueUnchanged {
+				if cells != nil {
+					if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
+						return false
+					}
+				}
+				continue
 			}
 			if !cellNoOp(cells, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqUint256) {
 				return false
@@ -1238,9 +1255,17 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 			}
 			for key, vw := range inner {
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
-				// StoragesChanged, so it is never materialized here (nor sealed below). A reader
-				// resolves the floor, which already holds this unchanged value.
+				// StoragesChanged, so it is never materialized here (nor sealed below), and the cell
+				// an earlier run of the tx left is removed. A reader resolves the floor, which
+				// already holds this unchanged value. Before the seal only the access list seeds a
+				// Done cell, so a Done cell stays.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
+					if cells := e.Storage[key]; cells != nil {
+						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
+							cells.Delete(vw.Version.TxIndex)
+							releaseCellStorage(c)
+						}
+					}
 					continue
 				}
 				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, hasLifecycle)
@@ -1311,10 +1336,10 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 
 // MarkWritesValidated flips every cell named by writes Estimate->Validated: the tx
 // validated its read-set out-of-order but is not yet sealed, so a reader continues on it
-// (early break) while it stays revertible until the in-order seal. A fee-recipient's
-// Address and Balance cells are left Estimate so readers keep pausing until calcFees
-// finalizes the tip.
-func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(accounts.Address) bool) {
+// (early break) while it stays revertible until the in-order seal. A fee recipient's
+// Address, Balance and SelfDestruct cells are left Estimate: calcFees credits its fee,
+// and may undo its EIP-161 removal, at the same version, so readers keep pausing until the seal.
+func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
@@ -1333,11 +1358,11 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(acc
 		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
 			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
 		}
-		feeAddr := feeEstimate != nil && feeEstimate(addr)
+		feeAddr := isFeeRecipient != nil && isFeeRecipient(addr)
 		if vw, ok := writes.address[addr]; ok && !feeAddr {
 			mark(AddressPath, accounts.NilKey, vw.Version)
 		}
-		if vw, ok := writes.selfDestruct[addr]; ok {
+		if vw, ok := writes.selfDestruct[addr]; ok && !feeAddr {
 			mark(SelfDestructPath, accounts.NilKey, vw.Version)
 		}
 		if vw, ok := writes.balance[addr]; ok && !feeAddr {

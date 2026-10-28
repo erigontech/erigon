@@ -11,7 +11,7 @@ import json
 import os
 import statistics
 
-CLIENT_ORDER = ["erigon", "geth", "nethermind"]
+CLIENT_ORDER = ["erigon", "geth", "nethermind", "reth"]
 
 
 def load_results(root):

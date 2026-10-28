@@ -141,8 +141,7 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 // (normalised to EmptyCodeHash for an absent or code-less account), without
 // recording an OCC read.
 func (ibs *IntraBlockState) originCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	acc, err := ibs.stateReader.ReadAccountData(addr)
-	ibs.recordStateReadError(err)
+	acc, err := ibs.committedAccount(addr)
 	if err != nil {
 		return accounts.EmptyCodeHash, err
 	}
@@ -342,10 +341,11 @@ reread:
 	var destructedVersion Version
 	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
 	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
-	if ok && sdRes.Status() == MVReadResultDependency && s.waitCommit != nil && s.waitCommit(sdRes.DepIdx()) {
-		s.wakeGen++
-		s.sdProbeEpoch++
-		goto reread
+	if ok && sdRes.Status() == MVReadResultDependency {
+		if s.waitFor(sdRes.DepIdx()) {
+			goto reread
+		}
+		s.dep = max(s.dep, sdRes.DepIdx())
 	}
 	if ok && sdRes.resolved() && destructed {
 		destructTxIndex := sdRes.DepIdx()
@@ -460,9 +460,7 @@ reread:
 			if res.Status() == MVReadResultDone {
 				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
 					if hdr.Version.TxIndex > destructedVersion.TxIndex && hdr.Version != prHeader.Version {
-						if hdr.Version.TxIndex > s.dep {
-							s.dep = hdr.Version.TxIndex
-						}
+						s.dep = max(s.dep, hdr.Version.TxIndex)
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
 								s.blockNum, s.txIndex, s.version,
@@ -471,9 +469,7 @@ reread:
 								addr, AccountKey{path, key})
 						}
 						s.versionedReads.SetHeader(addr, path, key, hdr)
-						if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
-							s.wakeGen++
-							s.sdProbeEpoch++
+						if s.waitFor(hdr.Version.TxIndex) {
 							goto reread
 						}
 						// Shutdown / no pause hook: fall through to the tx's own write.
@@ -577,17 +573,13 @@ reread:
 				addr, AccountKey{path, key})
 		}
 		// The predecessor write is in flight (Estimate): wait for it to commit, then
-		// re-read the now-committed cell rather than aborting. waitCommit returns false
-		// only on shutdown; callers with no pause hook (serial/historical) never observe
-		// an Estimate and fall back to the in-flight value.
-		if s.waitCommit != nil && s.waitCommit(res.DepIdx()) {
-			s.wakeGen++
-			s.sdProbeEpoch++
+		// re-read the now-committed cell rather than aborting. waitCommit returns false only
+		// on shutdown; callers with no pause hook (serial/historical) never observe an
+		// Estimate and fall back to the in-flight value.
+		if s.waitFor(res.DepIdx()) {
 			goto reread
 		}
-		if res.DepIdx() > s.dep {
-			s.dep = res.DepIdx()
-		}
+		s.dep = max(s.dep, res.DepIdx())
 		hdr.Source = MapRead
 		s.versionedReads.SetHeader(addr, path, key, hdr)
 		r.outcome = outcomeMapDone
@@ -634,9 +626,7 @@ reread:
 					// on the vanished writer to force re-execution rather than committing a
 					// torn result the version-only validator can't catch. Only a real (>=0)
 					// writer forces the re-exec.
-					if prHeader.Version.TxIndex > s.dep {
-						s.dep = prHeader.Version.TxIndex
-					}
+					s.dep = max(s.dep, prHeader.Version.TxIndex)
 					// Fall through to storage read.
 				}
 			}
@@ -1746,4 +1736,15 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch, ibs.wakeGen}, true
+}
+
+// waitFor parks the run until tx commits. On true the caller re-reads, and the self-destruct
+// probe is invalidated because the committed predecessor may have destructed the account.
+func (ibs *IntraBlockState) waitFor(tx int) bool {
+	if ibs.waitCommit == nil || !ibs.waitCommit(tx) {
+		return false
+	}
+	ibs.wakeGen++
+	ibs.sdProbeEpoch++
+	return true
 }

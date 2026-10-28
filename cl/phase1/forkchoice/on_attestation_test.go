@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
@@ -52,6 +53,79 @@ type targetShufflingFixture struct {
 	headRoot            common.Hash
 	headTargetRoot      common.Hash
 	targetRoot          common.Hash
+}
+
+type attestationPayloadForkGraph struct {
+	payloadVoteForkGraph
+}
+
+func (attestationPayloadForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return &cltypes.BeaconBlockHeader{}, true
+}
+
+func TestValidateOnAttestationPayloadPresentVote(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	root := common.Hash{0x01}
+
+	for _, test := range []struct {
+		name         string
+		index        uint64
+		status       execution_client.PayloadStatus
+		hasEnvelope  bool
+		blockInvalid bool
+		unavailable  bool
+		wantErr      bool
+	}{
+		{name: "payload present optimistic", index: 1, status: execution_client.PayloadStatusNotValidated, hasEnvelope: true},
+		{name: "payload present validated", index: 1, status: execution_client.PayloadStatusValidated, hasEnvelope: true},
+		{name: "payload present invalidated", index: 1, status: execution_client.PayloadStatusInvalidated, hasEnvelope: true, wantErr: true},
+		{name: "payload present not imported", index: 1, hasEnvelope: true, wantErr: true},
+		{name: "payload present optimistic without envelope", index: 1, status: execution_client.PayloadStatusNotValidated, wantErr: true},
+		{name: "payload present optimistic block invalid", index: 1, status: execution_client.PayloadStatusNotValidated, hasEnvelope: true, blockInvalid: true, wantErr: true},
+		{name: "payload present optimistic payload unavailable", index: 1, status: execution_client.PayloadStatusNotValidated, hasEnvelope: true, unavailable: true, wantErr: true},
+		{name: "payload absent not imported"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newPayloadVoteTestStore(t, root, false, false)
+			store.beaconCfg = &cfg
+			graph := payloadVoteForkGraph{
+				hasEnvelope:        test.hasEnvelope,
+				invalidatedHeader:  &common.Hash{},
+				unavailablePayload: &common.Hash{},
+				acceptedPayloads:   map[common.Hash]bool{},
+			}
+			store.forkGraph = attestationPayloadForkGraph{graph}
+			if test.status != execution_client.PayloadStatusNone {
+				store.MarkPayloadStatus(root, common.Hash{0x02}, test.status)
+			}
+			if test.blockInvalid {
+				graph.MarkHeaderAsInvalid(root)
+			}
+			if test.unavailable {
+				graph.MarkPayloadUnavailable(root)
+			}
+			attestation := &solid.Attestation{Data: &solid.AttestationData{
+				Slot:            1,
+				CommitteeIndex:  test.index,
+				BeaconBlockRoot: root,
+				Target:          solid.Checkpoint{Root: root},
+			}}
+
+			err := store.ValidateOnAttestation(attestation)
+			if test.wantErr {
+				require.ErrorContains(t, err, "index 1")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestOnAttestationUsesTargetShuffling(t *testing.T) {

@@ -66,14 +66,6 @@ var (
 	twoOpMethods map[string]executionFunc
 )
 
-type contractRef struct {
-	addr common.Address
-}
-
-func (c contractRef) Address() common.Address {
-	return c.addr
-}
-
 func init() {
 	// Params is a list of common edgecases that should be used for some common tests
 	params := []string{
@@ -1308,4 +1300,15 @@ func TestContextAddressWordsReusedFrame(t *testing.T) {
 		}
 		evm.putCallContext(scope)
 	}
+}
+
+// A context idle in the pool must not pin interned keys: a handle keeps its canonical
+// map entry alive.
+func TestPutReleasesFrameSlotKeys(t *testing.T) {
+	var evm EVM
+	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
+	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
+	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
+	evm.putCallContext(ctx)
+	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
 }
