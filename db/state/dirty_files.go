@@ -512,7 +512,7 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 		if item.index == nil && item.vAccessor == nil {
 			openDirtyAccessor(h.vAccessorFileNameMask(fromStep, toStep), accessorEntries, h.dirs.SnapAccessors, h.FileVersion.AccessorVI, func(fPath string, fileVer version.Version) (err error) {
 				if fileVer.Less(version.V2_0) {
-					item.index, err = h.openHashMapAccessor(fPath)
+					item.index, err = recsplit.OpenIndex(fPath)
 					return err
 				}
 				item.vAccessor, err = posidx.Open(fPath)

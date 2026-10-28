@@ -118,14 +118,6 @@ func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
 
-func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
-	accessor, err := recsplit.OpenIndex(fPath)
-	if err != nil {
-		return nil, err
-	}
-	return accessor, nil
-}
-
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
