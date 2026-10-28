@@ -132,7 +132,6 @@ type ExecModuleTester struct {
 	ReadAheader          *exec.BlockReadAheader
 	BlockBuilder         *builder.Builder
 	StateCache           *execmodule.Cache
-	ReadAheader          *exec.BlockReadAheader
 	retirementStart      chan bool
 	retirementDone       chan struct{}
 	stateRetirementStart chan bool
