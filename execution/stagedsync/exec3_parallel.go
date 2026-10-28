@@ -2106,6 +2106,13 @@ const (
 	feeCreditNone
 )
 
+func feeRecipient(chainRules *chain.Rules, coinbase accounts.Address) accounts.Address {
+	if chainRules.IsParlia {
+		return params.SystemAddress
+	}
+	return coinbase
+}
+
 func (result *execResult) calcFees(
 	task *taskVersion,
 	vm *state.VersionMap,
@@ -2116,10 +2123,7 @@ func (result *execResult) calcFees(
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
-	recipient := result.Coinbase
-	if chainRules.IsParlia {
-		recipient = params.SystemAddress
-	}
+	recipient := feeRecipient(chainRules, result.Coinbase)
 
 	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
 	// own prior incarnations that would double-apply the tip on re-execution.
@@ -3099,7 +3103,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 			be.recordFeeMerge(txVersion, existingWrites, tipWrites, outcome,
-				[2]accounts.Address{txResult.Coinbase, txResult.ExecutionResult.BurntContractAddress})
+				[2]accounts.Address{feeRecipient(txTask.Rules(), txResult.Coinbase), txResult.ExecutionResult.BurntContractAddress})
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
