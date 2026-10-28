@@ -1822,9 +1822,8 @@ func (sd *SharedDomains) AsOfReader(tx kv.TemporalTx) func(domain kv.Domain, key
 		if v, ok, err := sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
 			return v, ok, err
 		}
-		// A committed value written before ts is the value as of ts; an empty one is a cached absence.
-		if v, txNum, hit := view.GetVisible(domain, key); hit && txNum < ts && domain != kv.CommitmentDomain {
-			return v, len(v) > 0, nil
+		if v, hit := view.GetAsOf(domain, key, ts); hit {
+			return v, len(v) > 0, nil // an empty value is a cached absence
 		}
 		return tx.GetAsOf(domain, key, ts)
 	}
