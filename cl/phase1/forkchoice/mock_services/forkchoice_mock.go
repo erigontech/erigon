@@ -45,6 +45,7 @@ import (
 type ForkChoiceStorageMock struct {
 	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
+	AttestationDataFn                     func(common.Hash, uint64) (solid.AttestationData, bool)
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AncestorCalls                         atomic.Int64
 	AnchorSlotVal                         uint64
@@ -59,6 +60,7 @@ type ForkChoiceStorageMock struct {
 	HeadPayloadStatusVal                  cltypes.PayloadStatus
 	BlockProcessingVal                    bool
 	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
+	TryGetHeadNodeFn                      func() (forkchoice.ForkChoiceNode, bool)
 	GetStateAtBlockRootFn                 func(common.Hash) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
@@ -140,6 +142,10 @@ type ForkChoiceStorageMock struct {
 
 func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
 	return f.PreparationImports.BeginImport(slot)
+}
+
+func (f *ForkChoiceStorageMock) PayloadImportInProgress(slot uint64) bool {
+	return f.PreparationImports.ImportInProgress(slot)
 }
 
 func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
@@ -300,6 +306,13 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
 	f.AncestorCalls.Add(1)
 	return f.Ancestors[slot]
+}
+
+func (f *ForkChoiceStorageMock) AttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+	if f.AttestationDataFn == nil {
+		return solid.AttestationData{}, false
+	}
+	return f.AttestationDataFn(headRoot, slot)
 }
 
 func (f *ForkChoiceStorageMock) AnchorSlot() uint64 {
@@ -771,6 +784,14 @@ func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, uint64
 		return f.GetHeadNodeFn()
 	}
 	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, f.HeadSlotVal, nil
+}
+
+func (f *ForkChoiceStorageMock) TryGetHeadNode() (forkchoice.ForkChoiceNode, bool) {
+	if f.TryGetHeadNodeFn != nil {
+		return f.TryGetHeadNodeFn()
+	}
+	head, _, err := f.GetHeadNode()
+	return head, err == nil
 }
 
 func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
