@@ -250,7 +250,6 @@ func notifyAccumulatorFromAppliedWrites(t *testing.T, addr accounts.Address, see
 }
 
 func TestNotifyAccumulatorUsesFinalAccount(t *testing.T) {
-
 	addr := accounts.InternAddress(common.HexToAddress("0xacc0"))
 	codeHash := accounts.NewCode([]byte{0x60, 0x01}).Hash
 	seed := accounts.Account{
@@ -280,7 +279,6 @@ func TestNotifyAccumulatorUsesFinalAccount(t *testing.T) {
 }
 
 func TestNotifyAccumulatorMergesBalanceAndStorageAtFinalIncarnation(t *testing.T) {
-
 	addr := accounts.InternAddress(common.HexToAddress("0xacc1"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
 	seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
@@ -306,7 +304,6 @@ func TestNotifyAccumulatorMergesBalanceAndStorageAtFinalIncarnation(t *testing.T
 }
 
 func TestNotifyAccumulatorKeepsFinalIncarnationAcrossWriteSets(t *testing.T) {
-
 	addr := accounts.InternAddress(common.HexToAddress("0xacc2"))
 	key := accounts.InternKey(common.HexToHash("0x02"))
 	seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
@@ -334,7 +331,6 @@ func TestNotifyAccumulatorKeepsFinalIncarnationAcrossWriteSets(t *testing.T) {
 }
 
 func TestNotifyAccumulatorMergesBalanceAndCodeAtFinalIncarnation(t *testing.T) {
-
 	addr := accounts.InternAddress(common.HexToAddress("0xacc3"))
 	seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
 	code := []byte{0x60, 0x02}
