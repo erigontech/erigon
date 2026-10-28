@@ -58,6 +58,7 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion7,
 		dropLegacyE2Tables,
 		createPtcWindowEpochTable,
+		dropCodeCacheTable,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

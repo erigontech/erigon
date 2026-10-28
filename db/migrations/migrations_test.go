@@ -298,3 +298,22 @@ func TestCommitCallRequired(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestDropCodeCacheTable(t *testing.T) {
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.CreateTable(kv.CodeCacheDeprecated); err != nil {
+			return err
+		}
+		return tx.Put(kv.CodeCacheDeprecated, []byte{1}, []byte{2})
+	}))
+	noop := func(kv.RwTx, []byte, bool) error { return nil }
+	for range 2 {
+		require.NoError(dropCodeCacheTable.Up(db, datadir.Dirs{}, nil, noop, log.New()))
+		require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+			exists, err := tx.ExistsTable(kv.CodeCacheDeprecated)
+			require.False(exists)
+			return err
+		}))
+	}
+}
