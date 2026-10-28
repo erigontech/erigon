@@ -29,13 +29,17 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 func TestFloorFor(t *testing.T) {
@@ -293,4 +297,79 @@ func TestCleanupAndPruningKeepsExplicitColumnSlotsUnaligned(t *testing.T) {
 	peerDas.EXPECT().PruneBelow(uint64(head - 1_000)).Return(nil)
 
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+}
+
+func runBlockPruning(t *testing.T, seenSlot, currentSlot, highestFinalized uint64, slots []uint64) map[uint64]bool {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	beaconCfg := clparams.MainnetBeaconConfig
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := &Cfg{
+		indiciesDB: db,
+		ethClock:   clock,
+		beaconCfg:  &beaconCfg,
+		blobStore:  blobStore,
+		peerDas:    peerDas,
+	}
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, slot := range slots {
+		require.NoError(t, tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, common.Hash{1}), []byte{1}))
+	}
+	require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, highestFinalized))
+	require.NoError(t, tx.Commit())
+
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot)
+	blobStore.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+	peerDas.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{seenSlot: seenSlot}))
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	kept := make(map[uint64]bool, len(slots))
+	for _, slot := range slots {
+		found, err := roTx.Has(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, common.Hash{1}))
+		require.NoError(t, err)
+		kept[slot] = found
+	}
+	return kept
+}
+
+func TestCleanupAndPruningKeepsBlocksForTheBlockRequestWindow(t *testing.T) {
+	// Epoch 62500 minus MIN_EPOCHS_FOR_BLOCK_REQUESTS (33024) starts at slot 943232.
+	kept := runBlockPruning(t, 2_000_017, 2_000_017, 2_000_017, []uint64{943_231, 943_232, 999_999, 2_000_017})
+	require.Equal(t, map[uint64]bool{943_231: false, 943_232: true, 999_999: true, 2_000_017: true}, kept)
+}
+
+func TestCleanupAndPruningKeepsBlocksAfterTheFinalizedCheckpoint(t *testing.T) {
+	// Highest finalized slot 900031 is the last slot of epoch 28125, which starts at slot 900000.
+	kept := runBlockPruning(t, 2_000_017, 2_000_017, 900_031, []uint64{899_999, 900_000, 943_231})
+	require.Equal(t, map[uint64]bool{899_999: false, 900_000: true, 943_231: true}, kept)
+}
+
+func TestCleanupAndPruningBoundsBlocksPrunedPerRun(t *testing.T) {
+	slots := make([]uint64, snaptype.CaplinMergeLimit+1)
+	for i := range slots {
+		slots[i] = uint64(i)
+	}
+	kept := runBlockPruning(t, 2_000_017, 2_000_017, 2_000_017, slots)
+	require.False(t, kept[snaptype.CaplinMergeLimit-1])
+	require.True(t, kept[snaptype.CaplinMergeLimit])
+}
+
+func TestCleanupAndPruningUsesTheWallClockWhenItIsBehindTheStageHead(t *testing.T) {
+	// The wall clock at slot 2000031 is in epoch 62500, whose window starts at slot 943232.
+	kept := runBlockPruning(t, 2_000_032, 2_000_031, 2_000_032, []uint64{943_231, 943_232})
+	require.Equal(t, map[uint64]bool{943_231: false, 943_232: true}, kept)
+}
+
+func TestCleanupAndPruningKeepsBlocksWhileFinalityIsUnknown(t *testing.T) {
+	kept := runBlockPruning(t, 2_000_017, 2_000_017, 0, []uint64{0, 943_231})
+	require.Equal(t, map[uint64]bool{0: true, 943_231: true}, kept)
 }
