@@ -73,8 +73,22 @@ type IndexBuilder interface {
 // logger may be nil; on successful advance the handler emits an Info
 // log line "advanced X to LifecycleIndexed" so each completed step is
 // observable. nil logger silently skips the line.
-func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, logger log.Logger) Handler {
+func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, snapDir string, logger log.Logger) Handler {
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
+		if known, present := accessorsOnDisk(snapDir, e); known {
+			if present {
+				advance(inv, e.Name, logger)
+				return nil
+			}
+			if err := builder.BuildMissedIndices(ctx, e); err != nil {
+				return err
+			}
+			if _, present := accessorsOnDisk(snapDir, e); present {
+				advance(inv, e.Name, logger)
+			}
+			return nil
+		}
+
 		if depsAllLocal(inv, e.Dependencies) {
 			advance(inv, e.Name, logger)
 			return nil
@@ -90,6 +104,22 @@ func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, logger log.L
 		advance(inv, e.Name, logger)
 		return nil
 	}
+}
+
+// accessorsOnDisk answers whether the entry's accessors are present, and
+// whether that question applies to it at all. Dependencies cannot carry the
+// answer: accessors take their own version prefix, so their names are not
+// derivable from the primary's, and in practice nothing populates the field.
+// Entries it cannot speak for — caplin, accessors themselves, anything without
+// a snapshot dir — report known=false and keep the Dependencies path.
+func accessorsOnDisk(snapDir string, e *snapshot.FileEntry) (known, present bool) {
+	if snapDir == "" || e == nil || e.Kind == snapshot.KindCaplin {
+		return false, false
+	}
+	if !snapshot.HasAccessors(e.Name) {
+		return false, false
+	}
+	return true, len(snapshot.AccessorsOnDisk(snapDir, e.Name)) > 0
 }
 
 func depsAllLocal(inv *snapshot.Inventory, deps []string) bool {
