@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -341,10 +340,8 @@ type ParentState interface {
 }
 
 var (
-	parentRecords      atomic.Pointer[ParentRecords]
-	parentReadsWanted  atomic.Bool
-	mxParentRecordHit  = metrics.GetOrCreateCounter("witness_parent_record_hits_total")
-	mxParentRecordMiss = metrics.GetOrCreateCounter("witness_parent_record_misses_total")
+	parentRecords     atomic.Pointer[ParentRecords]
+	parentReadsWanted atomic.Bool
 )
 
 func WantParentReads(want bool) { parentReadsWanted.Store(want) }
@@ -374,10 +371,8 @@ func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return n
 func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if d == kv.CommitmentDomain && r.recs != nil {
 		if enc, step, ok := r.recs.Get(plainKey); ok {
-			mxParentRecordHit.Inc()
 			return bytes.Clone(enc), step, nil
 		}
-		mxParentRecordMiss.Inc()
 	}
 	enc, step, err := r.tx.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
