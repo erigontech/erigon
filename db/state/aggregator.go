@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -2735,6 +2736,47 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 	if branchCache := at.BranchCache(); branchCache != nil {
 		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
 	}
+}
+
+// PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
+// Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
+// stay correct without it.
+func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int) {
+	end, ok := mmap.BeginProbe()
+	if !ok || len(keys) == 0 {
+		return 0, 0
+	}
+	defer end()
+	dt := at.d[domain]
+	pending := keys
+	for ; len(pending) > 0 && waves < 64; waves++ {
+		cold := make([]uintptr, 0, len(pending))
+		next := pending[:0:0]
+		for _, k := range pending {
+			if page, ok := probeLatestFromFiles(dt, k); ok {
+				cold = append(cold, page)
+				next = append(next, k)
+			}
+		}
+		mmap.ReadPages(cold)
+		pages += len(cold)
+		pending = next
+	}
+	return waves, pages
+}
+
+func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			p, ok := r.(mmap.ColdPage)
+			if !ok {
+				panic(r)
+			}
+			page, cold = uintptr(p), true
+		}
+	}()
+	_, _, _, _, _ = dt.lookupLatestFromFiles(k, nil, 0, false)
+	return 0, false
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {

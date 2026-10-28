@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -194,8 +195,35 @@ func (r *Reader) MadvRandom() {
 		panic(err)
 	}
 }
-func (r *Reader) FileName() string           { return r.fileName }
-func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
+func (r *Reader) FileName() string { return r.fileName }
+func (r *Reader) ContainsHash(v uint64) bool {
+	if mmap.Probing() {
+		r.probe(v)
+	}
+	return r.inner.Contains(v)
+}
+
+// probe touches, through mmap.Populate, the three fingerprints BinaryFuse.Contains reads for v.
+func (r *Reader) probe(v uint64) {
+	f := r.inner
+	h := v + f.Seed
+	h ^= h >> 33
+	h *= 0xff51afd7ed558ccd
+	h ^= h >> 33
+	h *= 0xc4ceb9fe1a85ec53
+	h ^= h >> 33
+	hi, _ := bits.Mul64(h, uint64(f.SegmentCountLength))
+	h0 := uint32(hi)
+	h1 := h0 + f.SegmentLength
+	h2 := h1 + f.SegmentLength
+	h1 ^= uint32(h>>18) & f.SegmentLengthMask
+	h2 ^= uint32(h) & f.SegmentLengthMask
+	for _, i := range [3]uint32{h0, h1, h2} {
+		if int(i) < len(f.Fingerprints) {
+			mmap.Populate(unsafe.Pointer(&f.Fingerprints[i]))
+		}
+	}
+}
 func (r *Reader) Close() {
 	if r == nil {
 		return

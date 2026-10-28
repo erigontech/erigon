@@ -19,14 +19,18 @@ package exec
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"slices"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -214,4 +218,104 @@ func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitme
 	})
 	prefetch.Start()
 	return prefetch
+}
+
+type latestPrefetcher interface {
+	PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int)
+}
+
+// prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
+// storage, and the commitment trie level by level, since a branch decides whether the next level exists.
+func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
+	started := time.Now()
+	var accs, slots [][]byte
+	for i := range bal {
+		addr := bal[i].Address
+		accs = append(accs, bytes.Clone(addr[:]))
+		for _, sc := range bal[i].StorageChanges {
+			slot := sc.Slot.Value()
+			slots = append(slots, append(bytes.Clone(addr[:]), slot[:]...))
+		}
+		for _, sr := range bal[i].StorageReads {
+			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
+		}
+	}
+	var stats [3][2]int
+	var g errgroup.Group
+	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
+	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
+	err := g.Wait()
+	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
+		"accWaves", stats[0][0], "accPages", stats[0][1], "slotWaves", stats[1][0], "slotPages", stats[1][1],
+		"trieWaves", stats[2][0], "triePages", stats[2][1], "elapsed", time.Since(started), "err", err)
+}
+
+func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *[2]int) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return nil
+	}
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok {
+		return nil
+	}
+	stats[0], stats[1] = p.PrefetchLatest(domain, keys)
+	return nil
+}
+
+func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *[2]int) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return nil
+	}
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok {
+		return nil
+	}
+	compact := make([]byte, 0, 128)
+	active := hashedKeys
+	for depth := 0; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
+		seen := map[string]struct{}{}
+		prefixes := make([][]byte, 0, len(active))
+		for _, k := range active {
+			if depth > len(k) {
+				continue
+			}
+			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+			if _, ok := seen[pfx]; !ok {
+				seen[pfx] = struct{}{}
+				prefixes = append(prefixes, []byte(pfx))
+			}
+		}
+		waves, pages := p.PrefetchLatest(kv.CommitmentDomain, prefixes)
+		stats[0] += waves
+		stats[1] += pages
+		next := active[:0:0]
+		for _, k := range active {
+			if depth >= len(k) || ctx.Err() != nil {
+				continue
+			}
+			branch, _, err := ttx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
+			if err != nil || len(branch) < 4 {
+				continue
+			}
+			if binary.BigEndian.Uint16(branch[2:4])&(uint16(1)<<k[depth]) == 0 {
+				continue
+			}
+			next = append(next, k)
+		}
+		active = next
+	}
+	return nil
 }
