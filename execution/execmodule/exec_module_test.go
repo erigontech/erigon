@@ -1326,6 +1326,59 @@ func TestInclusionListSatisfiedUsesCachedResult(t *testing.T) {
 	require.False(t, *satisfied)
 }
 
+// The block's only txn is a self-transfer that uses execution gas alone, so the
+// header's max-of-dimensions GasUsed hides that the state dimension is still
+// empty. An IL txn over the per-txn execution cap fits only in that real pool.
+func TestInclusionListSatisfiedResolvesAmbiguousGasPools(t *testing.T) {
+	t.Parallel()
+	exact := inclusionListResultForExecutionOnlyBlock(t, true)
+	require.NotNil(t, exact)
+	require.False(t, *exact, "the IL txn must fit the block's exact gas pool")
+
+	fallback := inclusionListResultForExecutionOnlyBlock(t, false)
+	require.NotNil(t, fallback)
+	require.Equal(t, *exact, *fallback)
+}
+
+// inclusionListResultForExecutionOnlyBlock returns the IL result from execution
+// when executeWithIL is set, otherwise from the state history fallback.
+func inclusionListResultForExecutionOnlyBlock(t *testing.T, executeWithIL bool) *bool {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 2 * params.MaxTxnGasLimit,
+		Alloc:    types.GenesisAlloc{sender: {Balance: big.NewInt(common.Ether)}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	blockTxn, err := types.SignTx(types.NewTransaction(0, sender, uint256.NewInt(1), params.TxGas, gasPrice, nil), signer, key)
+	require.NoError(t, err)
+	chainPack, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.AddTx(blockTxn)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.Greater(t, block.GasLimit()-block.GasUsed(), params.MaxTxnGasLimit)
+	ilTxn, err := types.SignTx(types.NewTransaction(1, sender, uint256.NewInt(1), block.GasLimit(), gasPrice, nil), signer, key)
+	require.NoError(t, err)
+	il := types.Transactions{ilTxn}
+
+	if executeWithIL {
+		block = block.WithInclusionList(il)
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	_, cached := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
+	require.Equal(t, executeWithIL, cached)
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	return satisfied
+}
+
 func TestInclusionListSatisfiedUnknownBlockIsNil(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))

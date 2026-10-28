@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -105,12 +106,45 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 			return nil, err
 		}
 		if result != nil && *result != satisfied {
-			return nil, nil
+			result = nil
+			break
+		}
+		result = &satisfied
+	}
+	if result == nil {
+		gasPool, err := e.replayBlockGasPool(tx, block, blockStartTxNum, getHeader)
+		if err != nil {
+			return nil, err
+		}
+		satisfied, err := protocol.CheckInclusionListTransactions(gasPool, block.Transactions(), il, reader, &blockContext, e.config, &vm.Config{})
+		if err != nil {
+			return nil, err
 		}
 		result = &satisfied
 	}
 	e.readAheader.SetInclusionListResult(blockHash, ilHash, *result)
 	return result, nil
+}
+
+// replayBlockGasPool re-executes block on the state before it to recover the
+// per-dimension gas left, which the header's max-of-dimensions GasUsed hides.
+func (e *ExecModule) replayBlockGasPool(tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, getHeader func(common.Hash, uint64) (*types.Header, error)) (*protocol.GasPool, error) {
+	header := block.Header()
+	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
+	defer ibs.Close()
+	chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
+	if err := protocol.InitializeBlockExecution(e.engine, chainReader, header, e.config, ibs, state.NewNoopWriter(), e.logger, nil); err != nil {
+		return nil, err
+	}
+	gasPool := protocol.NewGasPool(header.GasLimit, e.config.GetMaxBlobGasPerBlock(header.Time))
+	blockHashFunc := protocol.GetHashFn(header, getHeader)
+	for i, txn := range block.Transactions() {
+		ibs.SetTxContext(block.NumberU64(), i)
+		if _, err := protocol.ApplyTransaction(e.config, blockHashFunc, e.engine, accounts.NilAddress, gasPool, ibs, state.NewNoopWriter(), header, txn, new(protocol.GasUsed), vm.Config{}); err != nil {
+			return nil, err
+		}
+	}
+	return gasPool, nil
 }
 
 func (e *ExecModule) stateHistoryCovers(ctx context.Context, tx kv.TemporalTx, blockNumber, fromTxNum, toTxNum uint64) (bool, error) {
