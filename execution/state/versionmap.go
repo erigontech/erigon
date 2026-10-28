@@ -1045,6 +1045,14 @@ func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 	return state == LifecycleAbsent
 }
 
+// destructKeptBalance reports whether the destruct at destructTxIndex kept a non-zero balance
+// (EIP-8246), so that the account survived it although the destruct dropped its record. A balance
+// that is still an estimate is not a verdict yet, so it counts as kept.
+func (vm *VersionMap) destructKeptBalance(addr accounts.Address, destructTxIndex int) bool {
+	bal, res, ok := vm.ReadBalance(addr, destructTxIndex+1)
+	return ok && (!res.resolved() || res.ValStatus() != ValueDeleted && !bal.IsZero())
+}
+
 // netAbsentDestruct reports whether a lower tx left addr net-absent via create+self-destruct with no revival above it, so a base read of it is not stale (see IsNetAbsent).
 func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool {
 	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
