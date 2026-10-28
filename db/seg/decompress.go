@@ -962,7 +962,7 @@ func (g *Getter) Reset(offset uint64) {
 	g.dataBit = 0
 	if (mmap.PopulateEnabled || g.probe != nil) && offset < uint64(len(g.data)) {
 		mmap.Populate(unsafe.Pointer(&g.data[offset]))
-		g.probe.Touch(unsafe.Pointer(&g.data[offset]))
+		g.probe.TouchData(unsafe.Pointer(&g.data[offset]))
 	}
 	if g.residencyGate {
 		g.ensureResident(offset)

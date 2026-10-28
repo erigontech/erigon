@@ -25,4 +25,8 @@ func NewProbe() *Probe { return nil }
 
 func (*Probe) Touch(unsafe.Pointer) {}
 
+func (*Probe) TouchData(unsafe.Pointer) {}
+
+func (*Probe) ColdData() bool { return false }
+
 func ReadPages([]uintptr) {}

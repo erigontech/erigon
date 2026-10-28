@@ -107,9 +107,27 @@ type ColdPage uintptr
 // probes nothing. A Probe belongs to one goroutine.
 type Probe struct {
 	resident map[uintptr]struct{}
+	coldData bool
 }
 
 func NewProbe() *Probe { return &Probe{resident: map[uintptr]struct{}{}} }
+
+// TouchData is Touch for the first page of a value, so the caller can read the whole value once it is cold.
+func (pr *Probe) TouchData(p unsafe.Pointer) {
+	if pr == nil {
+		return
+	}
+	pr.coldData = true
+	pr.Touch(p)
+	pr.coldData = false
+}
+
+// ColdData reports whether the last ColdPage came from TouchData, and clears it.
+func (pr *Probe) ColdData() bool {
+	d := pr.coldData
+	pr.coldData = false
+	return d
+}
 
 func (pr *Probe) Touch(p unsafe.Pointer) {
 	if pr == nil {
