@@ -119,10 +119,11 @@ type WorkerContext struct {
 	prevBlockReg *state.PrevBlockList
 	chainConfig  *chain.Config
 
-	ctx     context.Context
-	engine  rules.Engine
-	genesis *types.Genesis
-	chain   rules.ChainReader
+	ctx        context.Context
+	stopCancel func() bool
+	engine     rules.Engine
+	genesis    *types.Genesis
+	chain      rules.ChainReader
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -179,6 +180,7 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
+	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
 	return w
 }
 
@@ -210,6 +212,7 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 func (rw *WorkerContext) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	rw.stopCancel()
 	rw.ibs.Close()
 	_ = rw.bindTx(nil)
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
@@ -425,12 +428,20 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 			Err:  err,
 		}
 	}
+	// Task reset may clear EVM cancellation, so check the worker context afterward.
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	if rw.background && rw.chainTx != nil && rw.blockReader != nil {
 		rw.installWorkerGetHash(txTask)
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	// The EVM can return a nil error after cancellation; reject that result.
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	if result.Task == nil {
 		result.Task = txTask
