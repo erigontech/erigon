@@ -193,3 +193,41 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 
 	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
 }
+
+func TestMarkReadersDirty(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+	slot2 := accounts.InternKey(common.HexToHash("0x02"))
+	read := func(be *blockExecutor, tx int, incarnation state.Incarnation, key accounts.StorageKey) {
+		rs := state.ReadSet{}
+		rs.SetHeader(addr, state.StoragePath, key, state.ReadHeader{Source: state.StorageRead})
+		be.blockIO.RecordReads(state.Version{TxIndex: tx, Incarnation: incarnation}, rs)
+		be.indexReads(tx, rs)
+	}
+	newBE := func() *blockExecutor {
+		be := newDetExecutor(t, 4)
+		be.revalidate = map[int]bool{}
+		read(be, 0, 0, slot1)
+		read(be, 2, 0, slot1)
+		read(be, 3, 0, slot2)
+		return be
+	}
+	writer := state.Version{TxIndex: 1}
+
+	t.Run("storage write flags only the later reader of the slot", func(t *testing.T) {
+		be := newBE()
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("self-destruct flags every later reader of the address", func(t *testing.T) {
+		be := newBE()
+		be.markReadersDirty(1, newWS().selfDestruct(addr, writer, true).build())
+		require.Equal(t, map[int]bool{2: true, 3: true}, be.revalidate)
+	})
+	t.Run("a reader whose latest incarnation no longer reads the cell is not flagged", func(t *testing.T) {
+		be := newBE()
+		read(be, 2, 1, slot2)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+	})
+}
