@@ -3011,8 +3011,13 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		}
 		seen[h.Address] = struct{}{}
 		for _, tx := range readersAbove(be.readerByAddr[h.Address], writerTx) {
-			if !be.revalidate[tx] && be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOnAt(ws, h.Address) {
+			txIndex := be.tasks[tx].Task.Version().TxIndex
+			if !be.revalidate[tx] && be.blockIO.ReadSet(txIndex).DependsOnAt(ws, h.Address) {
 				be.revalidate[tx] = true
+			}
+			// Readers above tx see tx's write or a later one; publishing tx's write flags them.
+			if be.blockIO.WriteSet(txIndex).ShadowsAt(ws, h.Address) {
+				break
 			}
 		}
 	}
