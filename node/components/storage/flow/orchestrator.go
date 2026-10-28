@@ -1787,11 +1787,32 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 
 	if shouldFireStateReady {
 		o.tryFireInitialStateReady(o.ctx)
+	} else if isStatePhase {
+		o.refreshReadersForLateArrival(e.FileName)
 	}
 
 	// Covers the phase-2 case: this completion may have drained the last
 	// caplin (or any post-stateReady) download.
 	o.maybeFireInitialDownloadsComplete()
+}
+
+// refreshReadersForLateArrival re-runs the post-index refresh for a state file
+// that landed after the initial gate. Readers open files only when something
+// tells them to, and the gate's own flag records that the initial set has been
+// refreshed — a question a later arrival does not ask. Without this the file
+// stays on disk and nothing ever opens it.
+func (o *Orchestrator) refreshReadersForLateArrival(name string) {
+	o.peerMu.Lock()
+	postIndexed, fired := o.postIndexed, o.stateReadyFired
+	o.peerMu.Unlock()
+	if postIndexed == nil || !fired {
+		return
+	}
+	if err := postIndexed(o.ctx); err != nil {
+		o.log.Warn("[flow] reader refresh after late file arrival failed", "file", name, "err", err)
+		return
+	}
+	o.log.Info("[flow] refreshed readers after late file arrival", "file", name)
 }
 
 // filterPeerBlockEntriesByLocalTip drops peer block-file entries that

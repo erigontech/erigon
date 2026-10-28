@@ -156,3 +156,40 @@ var errPostIndexed = postIndexedTestErr{}
 type postIndexedTestErr struct{}
 
 func (postIndexedTestErr) Error() string { return "synthetic postIndexed failure" }
+
+// postIndexedDone answers "has the initial set been refreshed into the
+// readers". A file landing later asks a different question, and the readers
+// open files only when something tells them to — so a re-download that
+// completes after the gate has fired must refresh them too, or its bytes sit
+// on disk unread.
+func TestPostIndexed_RefreshesReadersForAFileLandingAfterTheGate(t *testing.T) {
+	bus := newBusForTest()
+	inv := snapshot.NewInventory()
+	storage := &recordingStorage{inv: inv}
+	o := NewWithStorage(bus, storage, logger())
+
+	var postIndexedCalls atomic.Int32
+	require.NoError(t, o.SetPostIndexed(func(ctx context.Context) error {
+		postIndexedCalls.Add(1)
+		return nil
+	}))
+
+	require.NoError(t, o.Start(context.Background()))
+	t.Cleanup(func() { _ = o.Close() })
+
+	stateFile := peerEntry("v1.0-accounts.0-256.kv", 0, 256)
+	bus.Publish(PeerManifestReceived{
+		PeerID:  "peer-1",
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateFile}},
+	})
+	bus.Publish(DownloadComplete{FileName: stateFile.Name, Size: stateFile.Size})
+	require.True(t, inv.AdvanceTo(stateFile.Name, snapshot.LifecycleIndexed))
+	waitUntil(t, func() bool {
+		return postIndexedCalls.Load() == 1
+	}, 2*time.Second, "postIndexed to run for the initial set")
+
+	bus.Publish(DownloadComplete{FileName: stateFile.Name, Size: stateFile.Size})
+	waitUntil(t, func() bool {
+		return postIndexedCalls.Load() == 2
+	}, 2*time.Second, "postIndexed to run again for the re-downloaded file")
+}
