@@ -3274,12 +3274,7 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 
 // DependsOnAny reports whether a write of any of headers can invalidate a read in s.
 func (s ReadSet) DependsOnAny(headers []WriteHeader) bool {
-	for _, h := range headers {
-		if s.DependsOn(h) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(headers, s.DependsOn)
 }
 
 // anyCommonKey probes the smaller map's keys in the larger one.
