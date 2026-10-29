@@ -193,8 +193,8 @@ func MetaCatchingUp(args Args) StageName {
 	}
 	// ForwardSync can work without peers via the beacon API HTTP fallback,
 	// so allow it even when peers == 0.
-	tipBlocksForwardSync := args.atForwardSyncTip && (args.peers > 0 || args.headUnpublished)
-	if args.seenEpoch < args.targetEpoch && !tipBlocksForwardSync {
+	heldAtForwardSyncTip := args.atForwardSyncTip && (args.peers > 0 || args.headUnpublished)
+	if args.seenEpoch < args.targetEpoch && !heldAtForwardSyncTip {
 		return ForwardSync
 	}
 	// ChainTipSync relies on gossip for real-time updates, skip it without peers.
