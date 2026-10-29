@@ -130,8 +130,9 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidati
 }
 
 // applyFrameValidation requires the pool lock. Stale results trigger another
-// simulation while time remains; after the batch deadline, only frame transactions
-// are rejected so unrelated transactions can still be admitted.
+// simulation while time remains; after the deadline, they cause retryable rejection
+// of frame transactions while ordinary transactions can proceed. Results for the
+// current state generation remain usable after the deadline.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason) ([]txpoolcfg.DiscardReason, error) {
 	if len(batch.results) == 0 {
 		return precheckReasons, nil

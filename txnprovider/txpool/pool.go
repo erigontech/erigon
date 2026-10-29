@@ -132,7 +132,7 @@ type TxPool struct {
 	minedBlobTxnsByHash     map[string]*metaTxn              // (hash => mt): map of recently mined blobs
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
-	all                     *BySenderAndNonce                // senderID => (sorted map of txn nonce => *metaTxn)
+	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
 	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
@@ -932,10 +932,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
-		// For blob transactions, slot.Txn is the inner BlobTx without the
-		// sidecar (blobs/commitments/proofs). Leave ParsedTxn nil so that
-		// ProvideTxns falls back to DecodeWrappedTransaction on the full
-		// wrapper RLP, which produces a BlobTxWrapper with sidecar intact.
+		// For type-3 and frame transactions with blobs, Txn holds only the inner
+		// transaction. Leave ParsedTxn nil so the provider decodes the full wrapper
+		// and preserves its sidecar.
 		if !mt.TxnSlot.HasBlobs() {
 			txns.ParsedTxn[count] = mt.TxnSlot.Txn
 		}
