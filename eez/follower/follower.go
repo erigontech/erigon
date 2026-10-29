@@ -428,6 +428,7 @@ func (f *Follower) Sync(ctx context.Context) error {
 			return err
 		}
 		f.scanned = reached
+		f.publish()
 	}
 	return f.deriver.OnFinalized(ctx, f.l1Finalized)
 }

@@ -179,6 +179,52 @@ func TestFollow(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 }
 
+// observing reports the follower's status on every log query.
+type observing struct {
+	l1.ChainReader
+	follower *follower.Follower
+	mu       sync.Mutex
+	seen     map[uint64]follower.Status
+}
+
+func (o *observing) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	if f := o.follower; f != nil {
+		o.mu.Lock()
+		o.seen[from] = f.Status()
+		o.mu.Unlock()
+	}
+	return o.ChainReader.Logs(ctx, from, to, address, topics)
+}
+
+// TestStatusDuringCatchUp checks that the status follows each scanned
+// range of a catch-up, not only its end.
+func TestStatusDuringCatchUp(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	c.Post(derivertest.Posting{Batch: first})
+	second := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	l1Second := c.Post(derivertest.Posting{Batch: second}).Header.Number
+
+	reader := &observing{ChainReader: c.L1, seen: map[uint64]follower.Status{}}
+	_, chain := derivertest.NewL2(t)
+	cfg := testConfig
+	cfg.Dir = t.TempDir()
+	cfg.LogChunk = 1
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	f, err := follower.New(reader, chain, derivertest.Config(), cfg, logger)
+	require.NoError(t, err)
+	reader.follower = f
+	require.NoError(t, f.Boot(t.Context()))
+
+	during, ok := reader.seen[l1Second]
+	require.True(t, ok)
+	require.Equal(t, l1Second-1, during.L1Scanned)
+	require.Equal(t, uint64(1), during.Cursor)
+	require.Equal(t, l1Second, f.Status().L1Scanned)
+	require.Equal(t, uint64(2), f.Status().Cursor)
+}
+
 // tampered composes a block whose settlement the DA payload contradicts.
 func tampered(c *derivertest.Composer) *derivertest.Batch {
 	b := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 9)}})
