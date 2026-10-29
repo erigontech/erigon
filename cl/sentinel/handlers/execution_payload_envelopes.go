@@ -341,10 +341,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			}
 		}
 		if envelope == nil && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
-			rebuilds++
 			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, *slot, blockRoot)
 			err = prepareErr
 			if err == nil && prepared != nil {
+				rebuilds++
 				envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, prepared)
 			}
 			if err != nil {

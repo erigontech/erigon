@@ -38,6 +38,7 @@ import (
 type testEnvelopeRebuilder struct {
 	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	prepared  map[*envelope_history.PreparedRebuild]common.Hash
+	rejected  map[common.Hash]struct{}
 	err       error
 	calls     int
 	called    []common.Hash
@@ -57,6 +58,9 @@ func (s *envelopeHandlerStream) Conn() network.Conn          { return s.conn }
 func (s *envelopeHandlerStream) Protocol() protocol.ID       { return s.protocol }
 
 func (r *testEnvelopeRebuilder) Prepare(_ context.Context, _ kv.Tx, _ uint64, blockRoot common.Hash) (*envelope_history.PreparedRebuild, error) {
+	if _, rejected := r.rejected[blockRoot]; rejected {
+		return nil, nil
+	}
 	prepared := new(envelope_history.PreparedRebuild)
 	if r.prepared == nil {
 		r.prepared = make(map[*envelope_history.PreparedRebuild]common.Hash)
@@ -708,6 +712,48 @@ func TestExecutionPayloadEnvelopesByRootCapsRebuilds(t *testing.T) {
 	require.Len(t, indices, envelope_history.MaxRebuildsPerRequest+1)
 	require.Equal(t, uint64(999), indices[len(indices)-1])
 	require.Equal(t, envelope_history.MaxRebuildsPerRequest, rebuilder.calls)
+}
+
+func TestExecutionPayloadEnvelopesByRootCapIgnoresCheapRejections(t *testing.T) {
+	ctx := t.Context()
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+	ethClock, cfg := getGloasEthClockAndConfig(t)
+	startSlot := ethClock.GetCurrentSlot() - envelope_history.MaxRebuildsPerRequest - 2
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	blocks := populateDatabaseWithBlocks(t, store, tx, startSlot, envelope_history.MaxRebuildsPerRequest+1)
+	require.NoError(t, tx.Commit())
+
+	roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+	rejected := make(map[common.Hash]struct{}, envelope_history.MaxRebuildsPerRequest+1)
+	for i, block := range blocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		roots.Append(root)
+		if i < envelope_history.MaxRebuildsPerRequest+1 {
+			rejected[root] = struct{}{}
+		}
+	}
+	lastRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	lastEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	lastEnvelope.Message.BuilderIndex = 999
+	rebuilder := &testEnvelopeRebuilder{
+		envelopes: map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{lastRoot: lastEnvelope},
+		rejected:  rejected,
+	}
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+	var request bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
+	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
+
+	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
+	require.Equal(t, []uint64{999}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
+	require.Equal(t, 1, rebuilder.calls)
 }
 
 func TestExecutionPayloadEnvelopesByRootContinuesAfterRebuildError(t *testing.T) {
