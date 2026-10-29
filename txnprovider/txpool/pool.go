@@ -134,7 +134,6 @@ type TxPool struct {
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // senderID => (sorted map of txn nonce => *metaTxn)
 	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
-	promoted                Announcements
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -487,15 +486,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		return frames, err
 	}
 	p.pending.EnforceBestInvariants()
-	p.promoted.Reset()
-	p.promoted.AppendOther(announcements)
-
-	if p.promoted.Len() > 0 {
-		select {
-		case p.newPendingTxns <- p.promoted.Copy():
-		default:
-		}
-	}
+	p.notifyPendingTxns(announcements)
 
 	p.publishDepthMetrics()
 	return frames, nil
@@ -1669,16 +1660,8 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 				reasons[i] = addReasons[j]
 				j++
 			}
-			p.promoted.Reset()
-			p.promoted.AppendOther(announcements)
-
 			reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
-			if p.promoted.Len() > 0 {
-				select {
-				case p.newPendingTxns <- p.promoted.Copy():
-				default:
-				}
-			}
+			p.notifyPendingTxns(announcements)
 			if fromRemoteQueue {
 				p.removeProcessedRemoteTxns(len(newTxns.Txns))
 			}
@@ -2424,6 +2407,16 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	}
 
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+}
+
+func (p *TxPool) notifyPendingTxns(announcements Announcements) {
+	if announcements.Len() == 0 {
+		return
+	}
+	select {
+	case p.newPendingTxns <- announcements.Copy():
+	default:
+	}
 }
 
 func announceFirstPending(announcements *Announcements, mt *metaTxn) {

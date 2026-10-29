@@ -478,12 +478,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 			return err
 		}
 		p.pending.EnforceBestInvariants()
-		if announcements.Len() > 0 {
-			select {
-			case p.newPendingTxns <- announcements.Copy():
-			default:
-			}
-		}
+		p.notifyPendingTxns(announcements)
 		return nil
 	})
 }
