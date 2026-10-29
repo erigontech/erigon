@@ -140,7 +140,7 @@ func (f *ForkChoiceStore) ensureClaimedEnvelopeIndexRepair(
 	applied bool,
 ) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
 	if tracked && token.valuesKnown {
-		envelope, indexed, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, token.root, envelopeForIndexRepair(token), false)
+		envelope, indexed, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, token.root, envelopeForIndexRepair(token), applied)
 		return envelope, token.notify || indexed, err
 	}
 	return f.ensureExecutionPayloadEnvelopeIndices(ctx, blockRoot, signedEnvelope, applied)
