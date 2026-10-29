@@ -900,3 +900,27 @@ func TestStartSendersRecoveryCancelled(t *testing.T) {
 	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
 	require.False(t, ok)
 }
+
+// Execution recovers senders only for a block whose access list it can load; a header
+// that commits to a BAL whose sidecar is missing keeps the Senders stage path.
+func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+	balHash := common.Hash{0x01}
+	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
+	require.True(t, RecoversSenders(header))
+
+	bra := NewBlockReadAheader()
+	require.False(t, bra.ExecRecoversSenders(header), "no sidecar")
+	bra.bals.Add(header.Hash(), types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0x02}}}))
+	require.True(t, bra.ExecRecoversSenders(header))
+
+	dbg.StagesOnlyBlocks = true
+	t.Cleanup(func() { dbg.StagesOnlyBlocks = false })
+	require.False(t, bra.ExecRecoversSenders(header), "execution is disabled, so the Senders stage recovers")
+
+	dbg.StagesOnlyBlocks = false
+	dbg.Exec3Parallel = false
+	require.False(t, bra.ExecRecoversSenders(header), "serial exec has no workers, so the Senders stage recovers")
+}
