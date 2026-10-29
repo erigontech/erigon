@@ -175,6 +175,7 @@ type legacyHistoryValues struct {
 	accounts, storage *DomainRoTx
 	asOf              uint64
 	cache             map[string]historyValue
+	cacheCap          int
 }
 
 type historyValue struct {
@@ -208,13 +209,15 @@ func (v *legacyHistoryValues) lookup(dt *DomainRoTx, plainKey []byte) ([]byte, e
 	} else if value, _, _, _, err = dt.getLatestFromFiles(plainKey, nil, kv.NoStepBound); err != nil {
 		return nil, err
 	}
-	if len(v.cache) >= 1<<20 {
+	if len(v.cache) >= v.cacheCap {
 		clear(v.cache)
 	}
 	c := historyValue{value: bytes.Clone(value), from: v.asOf, until: until}
 	v.cache[string(plainKey)] = c
 	return c.value, nil
 }
+
+const historyValueCacheTotal = 1 << 20
 
 func appendEscapedKey(dst, key []byte) []byte {
 	for _, b := range key {
@@ -571,7 +574,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			wat := at.a.BeginFilesRo()
 			defer wat.Close()
 			wdt := wat.d[kv.CommitmentDomain]
-			vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}}
+			vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}, cacheCap: max(1<<14, historyValueCacheTotal/workers)}
 			conv := v3.NewLegacyConverter(vals, keysV2, false)
 			var cur, nextVersion, childCur, childNext, scratch historyVersion
 			var beforeChildren, afterChildren []legacyChild
