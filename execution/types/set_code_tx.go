@@ -38,21 +38,24 @@ const DelegateDesignationCodeSize = 23
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
-	// authorities is published by the block pre-pass while the block runs, so it is read and written atomically.
+	// authorities is set by the block pre-pass when it starts a list, so the executor waits for it rather than
+	// recovering the same list again; it is read and written atomically.
 	authorities atomic.Pointer[RecoveredAuthorities]
 }
 
-// RecoveredAuthorities is RecoverSigners of a tx's authorization list.
+// RecoveredAuthorities is RecoverSigners of a tx's authorization list; Signers and Errs are set once done is closed.
 type RecoveredAuthorities struct {
+	done    chan struct{}
 	Signers []common.Address
 	Errs    []error
 }
 
-// WarmAuthorities recovers the authorization list on several goroutines and publishes it to the tx's Message.
+// WarmAuthorities recovers the authorization list on several goroutines for the tx's Message.
 func (tx *SetCodeTransaction) WarmAuthorities(chainID *uint256.Int) {
-	if tx.authorities.Load() == nil {
-		signers, errs := RecoverSigners(tx.Authorizations, chainID)
-		tx.authorities.CompareAndSwap(nil, &RecoveredAuthorities{Signers: signers, Errs: errs})
+	r := &RecoveredAuthorities{done: make(chan struct{})}
+	if tx.authorities.Load() == nil && tx.authorities.CompareAndSwap(nil, r) {
+		r.Signers, r.Errs = RecoverSigners(tx.Authorizations, chainID)
+		close(r.done)
 	}
 }
 

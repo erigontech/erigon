@@ -463,12 +463,17 @@ func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
 
-// RecoveredAuthorities is the authorization list the block pre-pass recovered for the message's tx, or nil.
+// RecoveredAuthorities is the authorization list the block pre-pass recovers for the message's tx, waiting for a
+// list it started, or nil when it has not started.
 func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
 	if m.authorities == nil {
 		return nil
 	}
-	return m.authorities.Load()
+	r := m.authorities.Load()
+	if r != nil {
+		<-r.done
+	}
+	return r
 }
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
