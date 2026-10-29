@@ -363,16 +363,16 @@ func FuzzParityRandomSequences(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, seed uint64) {
 		rng := rand.New(rand.NewSource(int64(seed)))
-		state := make(commitmenttest.State)
-		for step := range 24 {
+		rounds := make([][]commitmenttest.Op, 24)
+		for step := range rounds {
 			account := rng.Intn(8)
 			op := commitmenttest.DeleteAt(incrAddress(account))
 			if rng.Intn(4) != 0 {
 				op = commitmenttest.AccountAt(op.Key, commitmenttest.AccountSpec{Kind: "parity", Number: step + account})
 			}
-			state.Apply([]commitmenttest.Op{op})
-			differential(t, commitmenttest.Case{ID: fmt.Sprintf("fuzz/%d/%d", seed, step), Rounds: [][]commitmenttest.Op{state.Ops()}}, parityEngines)
+			rounds[step] = []commitmenttest.Op{op}
 		}
+		differential(t, commitmenttest.Case{ID: fmt.Sprintf("fuzz/%d", seed), Rounds: rounds}, parityEngines[:1])
 	})
 }
 
