@@ -323,7 +323,6 @@ func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
 	require.NoError(t, selectedDomains.DomainPut(kv.AccountsDomain, rpcTx, key, selectedValue, 1, nil))
 
 	events := shards.NewEvents()
-	events.PublishOverlay(selectedDomains)
 	selectedTx := selectedDomains.BlockOverlay().NewReadView(rpcTx)
 
 	replacementDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
