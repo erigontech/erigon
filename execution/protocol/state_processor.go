@@ -33,6 +33,16 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+// PostProcessTx runs the per-transaction rule of engine, when it has one,
+// after txs[i] executed on ibs.
+func PostProcessTx(engine rules.EngineReader, config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error {
+	p, ok := engine.(rules.TxPostProcessor)
+	if !ok {
+		return nil
+	}
+	return p.PostProcessTx(config, ibs, txs, i)
+}
+
 type GasUsed struct {
 	Receipt        uint64 // Gas used with refunds (what the user pays) - see EIP-7778
 	BlockExecution uint64 // Execution gas accumulated across block (pre-Amsterdam: same as block gas)

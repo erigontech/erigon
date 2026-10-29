@@ -232,6 +232,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 
 			// MA applytx
 			applyRes, err := protocol.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
+			if err == nil {
+				err = protocol.PostProcessTx(rw.execArgs.Engine, rw.execArgs.ChainConfig, ibs, txTask.Txs, txTask.TxIndex)
+			}
 			if err != nil {
 				return err
 			} else {

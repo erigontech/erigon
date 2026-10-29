@@ -126,6 +126,9 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
+		if err == nil {
+			err = PostProcessTx(engine, chainConfig, ibs, block.Transactions(), i)
+		}
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil

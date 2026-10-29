@@ -107,6 +107,14 @@ type Reward struct {
 	Amount      uint256.Int
 }
 
+// TxPostProcessor is implemented by engines whose rules change the state
+// after a transaction depending on the transactions before it in its block.
+type TxPostProcessor interface {
+	// PostProcessTx runs after txs[i] executed without error, on the state
+	// it left.
+	PostProcessTx(config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error
+}
+
 // Engine is an algorithm agnostic rules engine.
 type Engine interface {
 	EngineReader

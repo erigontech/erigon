@@ -395,6 +395,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 				genEnv.ibs.SetTxContext(blockNum, txnIndex)
 				_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
+				if err == nil {
+					err = protocol.PostProcessTx(g.engine, cfg, genEnv.ibs, postState.Txns, txnIndex)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
 				}
@@ -619,6 +622,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
 				return protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
 			})
+			if err == nil {
+				err = protocol.PostProcessTx(g.engine, cfg, genEnv.ibs, block.Transactions(), i)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 			}

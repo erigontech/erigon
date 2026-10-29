@@ -636,6 +636,9 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
+			result.Err = protocol.PostProcessTx(engine, chainConfig, ibs, t.Txs, t.TxIndex)
+		}
+		if result.Err == nil {
 			// The versionMap path produces its write-set from the recorded IO
 			// after the switch; only the serial path clears pending changes here.
 			if !ibs.IsVersioned() {
