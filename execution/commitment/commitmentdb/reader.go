@@ -117,8 +117,25 @@ type syncStateReader struct {
 
 var _ StateReader = (*syncStateReader)(nil)
 
-func newSyncStateReader(mu *sync.Mutex, src StateReader) *syncStateReader {
-	return &syncStateReader{mu: mu, src: src}
+func newSyncStateReader(mu *sync.Mutex, src StateReader) StateReader {
+	r := &syncStateReader{mu: mu, src: src}
+	if _, ok := src.(ownedBranchReader); ok {
+		return ownedSyncStateReader{r}
+	}
+	return r
+}
+
+type ownedSyncStateReader struct{ *syncStateReader }
+
+func (ownedSyncStateReader) ReadsOwnedBranches() {}
+
+func (r ownedSyncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if d != kv.CommitmentDomain {
+		return r.syncStateReader.Read(d, plainKey, stepSize)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.src.Read(d, plainKey, stepSize)
 }
 
 func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
