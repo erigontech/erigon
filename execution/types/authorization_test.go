@@ -141,8 +141,16 @@ func TestRecoverSignersMatchesRecoverSigner(t *testing.T) {
 	auths[50].YParity = 5
 	auths[99].S.Clear()
 
-	signers, errs := RecoverSigners(auths)
+	auths[7].ChainID = *uint256.NewInt(2)
+
+	signers, errs := RecoverSigners(auths, uint256.NewInt(1))
+	if signers[7] != (common.Address{}) || errs[7] != nil {
+		t.Errorf("foreign-chain auth 7 was recovered: %v, %v", signers[7], errs[7])
+	}
 	for i := range auths {
+		if i == 7 {
+			continue
+		}
 		want, wantErr := auths[i].RecoverSigner()
 		if signers[i] != want || (errs[i] == nil) != (wantErr == nil) {
 			t.Errorf("auth %d: got %v, %v; want %v, %v", i, signers[i], errs[i], want, wantErr)

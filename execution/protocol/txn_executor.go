@@ -869,7 +869,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
-	signers, recoverErrs := types.RecoverSigners(auths)
+	signers, recoverErrs := types.RecoverSigners(auths, chainID)
 	for i := range auths {
 		auth := &auths[i]
 
