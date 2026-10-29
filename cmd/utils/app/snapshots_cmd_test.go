@@ -27,11 +27,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -1597,4 +1601,29 @@ func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasState)
 	require.False(t, broken)
+}
+
+func TestPruneChangeSetsKeepsPruneToBlock(t *testing.T) {
+	ctx := context.Background()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	key := func(blockNum uint64) []byte { return dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}) }
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for _, blockNum := range []uint64{10, 99, 100, 150} {
+			if err := tx.Put(kv.ChangeSets3, key(blockNum), []byte{0x01}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(t, pruneChangeSets(ctx, db, 100, log.New()))
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		for blockNum, want := range map[uint64]bool{10: false, 99: false, 100: true, 150: true} {
+			has, err := tx.Has(kv.ChangeSets3, key(blockNum))
+			require.NoError(t, err)
+			require.Equal(t, want, has, "block %d", blockNum)
+		}
+		return nil
+	}))
 }
