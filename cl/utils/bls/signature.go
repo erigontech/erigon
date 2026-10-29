@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"runtime"
 	"sync"
 
 	blst "github.com/supranational/blst/bindings/go"
@@ -17,6 +18,8 @@ const (
 	signatureLength = 96
 	scalarBytes     = 32
 	randBitsEntropy = 64
+	// blst allocates bulk-add scratch on the C stack; this fits musl's 128 KiB thread stack.
+	maxPublicKeysPerBatch = 512
 )
 
 // ETH2 uses BLS12381-G2 Curve
@@ -46,11 +49,51 @@ func NewSignatureFromBytes(b []byte) (*Signature, error) {
 
 // VerifyAggregate verify signature against many public keys.
 func (s Signature) VerifyAggregate(msg []byte, publicKeys []PublicKey) bool {
-	affines := make([]*blst.P1Affine, 0, len(publicKeys))
-	for _, publicKey := range publicKeys {
-		affines = append(affines, publicKey)
+	if len(publicKeys) == 0 {
+		return false
 	}
-	return s.affine.FastAggregateVerify(true, affines, msg, eth2Curve)
+	for _, publicKey := range publicKeys {
+		if publicKey == nil {
+			return false
+		}
+	}
+	return s.affine.Verify(true, aggregatePublicKeys(publicKeys).ToAffine(), false, msg, eth2Curve)
+}
+
+func aggregatePublicKeys(publicKeys []PublicKey) *blst.P1 {
+	chunkCount := (len(publicKeys) + maxPublicKeysPerBatch - 1) / maxPublicKeysPerBatch
+	partials := make([]*blst.P1, chunkCount)
+	workerCount := min(runtime.GOMAXPROCS(0), chunkCount)
+	addChunks := func(worker int) {
+		affines := make(blst.P1Affines, min(maxPublicKeysPerBatch, len(publicKeys)-worker*maxPublicKeysPerBatch))
+		for chunk := worker; chunk < chunkCount; chunk += workerCount {
+			start := chunk * maxPublicKeysPerBatch
+			end := min(start+maxPublicKeysPerBatch, len(publicKeys))
+			for i, publicKey := range publicKeys[start:end] {
+				affines[i] = *publicKey
+			}
+			partials[chunk] = affines[:end-start].Add()
+		}
+	}
+	if workerCount == 1 {
+		addChunks(0)
+	} else {
+		var workers sync.WaitGroup
+		workers.Add(workerCount)
+		for worker := range workerCount {
+			go func() {
+				defer workers.Done()
+				addChunks(worker)
+			}()
+		}
+		workers.Wait()
+	}
+
+	aggregate := partials[0]
+	for _, partial := range partials[1:] {
+		aggregate.AddAssign(partial)
+	}
+	return aggregate
 }
 
 // Verify verify signature against one public key.
