@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -97,4 +98,53 @@ func TestIndexedPayloadAttestationDecodeMainnetDefault(t *testing.T) {
 	root, err := decoded.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, expected, root)
+}
+
+func TestIndexedPayloadAttestationEmptyConfig(t *testing.T) {
+	att := NewIndexedPayloadAttestation(&clparams.BeaconChainConfig{})
+	require.Equal(t, int(clparams.MaxPtcSize), att.AttestingIndices.Cap())
+	root, err := att.HashSSZ()
+	require.NoError(t, err)
+	expected, err := NewIndexedPayloadAttestation(nil).HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expected, root)
+}
+
+func TestIndexedPayloadAttestationDecodeZeroLimit(t *testing.T) {
+	source := NewIndexedPayloadAttestation(nil)
+	source.AttestingIndices.Append(1)
+	encoded, err := source.EncodeSSZ(nil)
+	require.NoError(t, err)
+	expected, err := source.HashSSZ()
+	require.NoError(t, err)
+	for _, fromJSON := range []bool{false, true} {
+		t.Run(fmt.Sprint("json=", fromJSON), func(t *testing.T) {
+			decoded := &IndexedPayloadAttestation{AttestingIndices: solid.NewRawUint64List(0, nil)}
+			if fromJSON {
+				require.NoError(t, json.Unmarshal([]byte(`{"attesting_indices":["2"],"data":{}}`), decoded))
+			}
+			require.Equal(t, 0, decoded.AttestingIndices.Cap())
+			require.NoError(t, decoded.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+			require.Equal(t, int(clparams.MaxPtcSize), decoded.AttestingIndices.Cap())
+			root, err := decoded.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, expected, root)
+		})
+	}
+}
+
+func TestIndexedPayloadAttestationCloneZeroLimit(t *testing.T) {
+	var source IndexedPayloadAttestation
+	require.NoError(t, json.Unmarshal([]byte(`{"attesting_indices":["1"],"data":{}}`), &source))
+	require.Equal(t, 0, source.AttestingIndices.Cap())
+	cloned := source.Clone().(*IndexedPayloadAttestation)
+	require.Equal(t, int(clparams.MaxPtcSize), cloned.AttestingIndices.Cap())
+	expected := NewIndexedPayloadAttestation(nil)
+	expected.AttestingIndices.Append(1)
+	expectedRoot, err := expected.HashSSZ()
+	require.NoError(t, err)
+	root, err := cloned.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expectedRoot, root)
+	require.Equal(t, 0, source.AttestingIndices.Cap())
 }
