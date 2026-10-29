@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -196,6 +197,27 @@ func (f *envelopeOpenCountingFs) Open(name string) (afero.File, error) {
 		f.opens.Add(1)
 	}
 	return f.Fs.Open(name)
+}
+
+type stateTruncateCountingFs struct {
+	afero.Fs
+	opens atomic.Int32
+}
+
+func (f *stateTruncateCountingFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if flag&os.O_TRUNC != 0 && strings.HasSuffix(name, ".snappy_ssz") && !strings.HasSuffix(name, ".envelope.snappy_ssz") {
+		f.opens.Add(1)
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+func beaconStateAtNextDumpSlot(t *testing.T) *state.CachingBeaconState {
+	t.Helper()
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	nextDumpSlot := (anchorState.Slot()/dumpSlotFrequency + 1) * dumpSlotFrequency
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(anchorState, nextDumpSlot))
+	return anchorState
 }
 
 type envelopeWriteFailureFs struct {
@@ -425,6 +447,93 @@ func TestDumpBeaconStateReturnsCloseError(t *testing.T) {
 
 	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, anchorState, true), errTestEnvelopeIO)
 	require.Equal(t, int32(1), closes.Load())
+}
+
+func TestDumpBeaconStateSkipsRepeatedRootAndSlot(t *testing.T) {
+	anchorState := beaconStateAtNextDumpSlot(t)
+	fs := &stateTruncateCountingFs{Fs: afero.NewMemMapFs()}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, false))
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, false))
+	require.Equal(t, int32(1), fs.opens.Load())
+}
+
+func TestDumpBeaconStateRetriesAfterFailedClose(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	wantHash, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+	baseFs := afero.NewMemMapFs()
+	fs := &stateTruncateCountingFs{Fs: envelopeWriteFailureFs{Fs: baseFs, stage: "close"}}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, anchorState, true), errTestEnvelopeIO)
+	fs.Fs = baseFs
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.Equal(t, int32(2), fs.opens.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
+}
+
+func TestDumpBeaconStateWritesDifferentRoot(t *testing.T) {
+	anchorState := beaconStateAtNextDumpSlot(t)
+	fs := &stateTruncateCountingFs{Fs: afero.NewMemMapFs()}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(common.HexToHash("0x1234"), anchorState, false))
+	require.NoError(t, f.DumpBeaconStateOnDisk(common.HexToHash("0x5678"), anchorState, false))
+	require.Equal(t, int32(2), fs.opens.Load())
+}
+
+func TestDumpBeaconStateWritesSameRootAtDifferentSlot(t *testing.T) {
+	anchorState := beaconStateAtNextDumpSlot(t)
+	fs := &stateTruncateCountingFs{Fs: afero.NewMemMapFs()}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, false))
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(anchorState, anchorState.Slot()+dumpSlotFrequency))
+	wantHash, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, false))
+	require.Equal(t, int32(2), fs.opens.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	require.Equal(t, anchorState.Slot(), persisted.Slot())
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
+}
+
+func TestDumpBeaconStateRetriesEarlierSlotAfterLaterSlotFailure(t *testing.T) {
+	laterState := beaconStateAtNextDumpSlot(t)
+	earlierState, err := laterState.Copy()
+	require.NoError(t, err)
+	wantHash, err := earlierState.HashSSZ()
+	require.NoError(t, err)
+	baseFs := afero.NewMemMapFs()
+	fs := &stateTruncateCountingFs{Fs: baseFs}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, earlierState, false))
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(laterState, laterState.Slot()+dumpSlotFrequency))
+	fs.Fs = envelopeWriteFailureFs{Fs: baseFs, stage: "write"}
+	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, laterState, false), errTestEnvelopeIO)
+	fs.Fs = baseFs
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, earlierState, false))
+	require.Equal(t, int32(3), fs.opens.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
 }
 
 func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
