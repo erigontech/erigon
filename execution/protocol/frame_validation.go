@@ -78,7 +78,8 @@ type frameCreationTrace struct {
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
 // ValidateFrameTransactionPrefix checks public-pool structure and gas budgets
-// without verifying signatures or accessing state.
+// without verifying signatures or accessing state. Root hashes are derived
+// separately to keep repeated prechecks cheap.
 func ValidateFrameTransactionPrefix(tx *types.FrameTransaction) error {
 	_, err := frameValidationPrefix(tx)
 	return err

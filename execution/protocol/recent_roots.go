@@ -39,8 +39,9 @@ var (
 	recentRootStorageDomain = crypto.Keccak256Hash([]byte("RECENT_ROOT_STORAGE"))
 )
 
-// RecentRootReference records a storage dependency and its age window. The first
-// invalid slot is Slot + RecentRootLength, which may exceed the uint64 slot range.
+// RecentRootReference records a storage dependency and the referenced slot.
+// It is usable only at later slots and expires at Slot + RecentRootLength;
+// keeping Slot avoids storing an expiry that can overflow uint64.
 type RecentRootReference struct {
 	StorageKey common.Hash
 	EntryHash  common.Hash

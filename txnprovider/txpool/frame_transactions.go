@@ -248,8 +248,8 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
 		})
 	}
-	// Root dependencies are signed transaction data, so they do not need to be
-	// duplicated in the validation RPC reply.
+	// Root storage references are derived locally from frame calldata. The RPC
+	// reply supplies the verifier's account dependency.
 	for _, frame := range txn.Txn.(*types.FrameTransaction).Frames {
 		if frame.IsRecentRootVerifier() {
 			v.RecentRoots, err = protocol.ParseRecentRootReferences(frame.Data)
