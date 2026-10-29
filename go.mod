@@ -19,7 +19,7 @@ require (
 	github.com/FastFilter/xorfilter v0.5.1
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/OffchainLabs/go-bitfield v0.0.0-20260504143531-5cbb6d0f5f2e
-	github.com/RoaringBitmap/roaring/v2 v2.30.0
+	github.com/RoaringBitmap/roaring/v2 v2.26.0
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
