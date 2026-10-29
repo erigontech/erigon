@@ -149,8 +149,6 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-// OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
-// segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
 func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
 
 func (s *CaplinSnapshots) OpenBeaconBlocks() error {
