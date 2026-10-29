@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/networks"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -169,4 +170,81 @@ func TestL1Reference(t *testing.T) {
 	f, err := follower.New(replayL1(t, r, &other), chain, spec.Config, testConfig, log.New())
 	require.NoError(t, err)
 	require.ErrorIs(t, f.Boot(t.Context()), follower.ErrL1Reference)
+}
+
+// v01L1 returns the L1 of a rollupX v0.1 replay: its recorded headers, its
+// batches' blocks holding their posting transactions and the registry's
+// logs, finalized at the last.
+func v01L1(t *testing.T, r *testfixtures.RollupXL1Replay) *recording.MemoryChain {
+	t.Helper()
+	blocks := map[uint64]*recording.Block{}
+	for _, h := range r.L1Headers {
+		blocks[uint64(h.Number)] = &recording.Block{Header: l1.Header{Number: uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Time: uint64(h.Timestamp), MixDigest: h.MixHash}}
+	}
+	grow := func(b *recording.Block, index uint64) {
+		if index >= uint64(len(b.Txs)) {
+			b.Txs = append(b.Txs, make([]types.Transaction, index+1-uint64(len(b.Txs)))...)
+		}
+	}
+	for i := range r.Batches {
+		batch := &r.Batches[i]
+		b := blocks[uint64(batch.L1Block)]
+		grow(b, uint64(batch.Transaction.Index))
+		b.Txs[batch.Transaction.Index] = &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: uint64(i), To: &r.Registry, Data: batch.Transaction.Input},
+				ChainID:  *uint256.NewInt(10200),
+			},
+			BlobVersionedHashes: batch.Transaction.BlobVersionedHashes,
+		}
+	}
+	for _, l := range r.Logs {
+		b := blocks[uint64(l.BlockNumber)]
+		grow(b, uint64(l.TransactionIndex))
+		b.Logs = append(b.Logs, &types.Log{Address: r.Registry, Topics: l.Topics, Data: l.Data, TxIndex: hexutil.Uint(l.TransactionIndex), Index: hexutil.Uint(l.LogIndex)})
+	}
+	first, last := uint64(r.L1Headers[0].Number), uint64(r.L1Headers[len(r.L1Headers)-1].Number)
+	c, err := recording.NewMemoryChain(10200, blocks[first])
+	require.NoError(t, err)
+	for n := first + 1; n <= last; n++ {
+		require.NoError(t, c.Append(blocks[n]))
+	}
+	require.NoError(t, c.Finalize(last))
+	return c
+}
+
+// TestRollupXV01Replay derives 699169 and 916969, the rollupX v0.1
+// networks on Chiado, from the L1 data of their first settlements: history
+// updates checked against the L1 headers, 699169's historical first anchor,
+// deliveries, outbound pairs, and a Sync block of both. Every block either
+// derives has the hash the network served.
+func TestRollupXV01Replay(t *testing.T) {
+	for _, spec := range []chainspec.Spec{networks.Chiado699169, networks.Chiado916969} {
+		t.Run(spec.Name, func(t *testing.T) {
+			r, err := testfixtures.LoadRollupXL1Replay(spec.Config.ChainID.Uint64())
+			require.NoError(t, err)
+			_, chain := derivertest.NewL2Of(t, spec)
+			var blobs replayBlobs
+			for _, b := range r.Batches {
+				for _, trimmed := range b.SlotBlobs {
+					blob := make([]byte, testfixtures.BlobSize)
+					copy(blob, trimmed)
+					blobs = append(blobs, blob)
+				}
+			}
+			cfg := testConfig
+			cfg.Blobs = blobs
+			f, err := follower.New(v01L1(t, r), chain, spec.Config, cfg, log.New())
+			require.NoError(t, err)
+			require.NoError(t, f.Boot(t.Context()))
+			safe := f.Deriver().Safe()
+			require.Equal(t, uint64(len(r.L2Hashes)-1), safe)
+			for n := range safe + 1 {
+				h, ok, err := chain.CanonicalHash(t.Context(), n)
+				require.NoError(t, err)
+				require.True(t, ok, "block %d", n)
+				require.Equal(t, r.L2Hashes[n], h, "block %d", n)
+			}
+		})
+	}
 }

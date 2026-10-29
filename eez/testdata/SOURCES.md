@@ -63,6 +63,8 @@ License: `LGPL-3.0-only` (nethermind).
 
 `chiado-699169/blocks-0-2600.hex.gz` and `chiado-916969/blocks-0-770.hex.gz` are the first L2 blocks of the eez-rollupX v0.1 networks on Chiado, eez.dev (699169) and eez.asuscomm.com (916969), from genesis: `debug_getRawBlock` of `https://eez.dev/rpc/l2` and `https://eez.asuscomm.com/rpc/l2` (reth v2.7.0-3d592ec) on 2026-10-29, one 0x-prefixed hex block per line, gzip-compressed. The loader requires the hash `eth_getBlockByNumber` served for the last block: `0x2e4b3f30a9c03fad6d12252b940803a090b26ba24d17447c3651c4a19d4b54f1` for 699169 block 2600, `0x78f2c1113228ca31132d09dd13104526a0d388da347cb705a2869e41bb978617` for 916969 block 770. They carry history updates from block 3, native deliveries from blocks 475 and 300, and outbound pairs from blocks 2555 and 345.
 
+`chiado-699169/l1-23731489-23731968.json.gz` and `chiado-916969/l1-23731445-23731589.json.gz` are the L1 side of the first 31 settlements of 699169 and the first 12 of 916969, read on 2026-10-29: every header from the network's L1 reference to its last batch's block and the registry's logs from its first batch on, by `eth_getBlockByNumber` and `eth_getLogs` of an Erigon archive Chiado node; the batches' posting transactions by `eth_getTransactionByHash` of the same node; their blobs, trailing zeros trimmed, from `https://rpc-gbc.chiadochain.net`, each checked against its versioned hash; and the hashes of the L2 blocks up to the last batch's time, by `eth_getBlockByNumber` of the networks' L2 RPCs.
+
 ## SHA-256
 
 | File | SHA-256 |
@@ -71,8 +73,10 @@ License: `LGPL-3.0-only` (nethermind).
 | `chiado/blob-23507949-0.hex` | `384eaae16ad11854a0b1b83c2ff67542b7903b86ecd1ee189444699242b76f40` |
 | `chiado/header-23507949.rlp.hex` | `b6c2ffc4aea6c879093cd6bf111dddf24807997d1b1b6bda485953950b22d373` |
 | `chiado/rollup-created-23413747.json` | `986dbf338aa6ed9b8bae098578d5421665aa298caddc72095ce7aa0cca2a953d` |
+| `rollupx/chiado-699169/l1-23731489-23731968.json.gz` | `092105abd787aa955c97acda2aadfeb542b60365a6fbfb2661a946468e8b8eba` |
 | `rollupx/chiado-699169/blocks-0-2600.hex.gz` | `10cbd741d8d5ed0ed77f392829e45c8e4b30a64f1258fe38262266fe3e5102f1` |
 | `rollupx/chiado-916969/blocks-0-770.hex.gz` | `7baf18765a4e74fe78214f416f9ee8ec31529542980a3d495ba1e2b81104bacd` |
+| `rollupx/chiado-916969/l1-23731445-23731589.json.gz` | `1d14be06abf94ea69220b3c55a8c399774be24d03887e769729304daa4f356d1` |
 | `rollupx/eezdev-699069/replay-0-2250.json` | `6815ec581ed88eedada5a53e09bb485907139311f7d8a170b7af851314717096` |
 | `vectors/native-profile-v1.json` | `e34194f2a2cba5151f27fb3964be1c6a22961a3ad7a11ff46d66668e9d966276` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |

@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/erigontech/erigon/common"
@@ -149,4 +150,82 @@ func LoadRollupXBlocks(chainID uint64) (*RollupXBlocks, error) {
 		return nil, fmt.Errorf("%s: %d blocks, want %d", src.file, len(b.Raw), src.last+1)
 	}
 	return b, nil
+}
+
+// RollupXL1Replay is the start of a rollupX v0.1 network's settlement: every
+// L1 header from its L1 reference to its last batch's block, the registry
+// logs from its first batch on, its batches' posting transactions and
+// blobs, and the hashes of the L2 blocks they settle.
+type RollupXL1Replay struct {
+	ChainID   uint64         `json:"chainId"`
+	Registry  common.Address `json:"registry"`
+	RollupID  uint64         `json:"rollupId"`
+	L1Headers []struct {
+		Number     hexutil.Uint64 `json:"number"`
+		Hash       common.Hash    `json:"hash"`
+		ParentHash common.Hash    `json:"parentHash"`
+		Timestamp  hexutil.Uint64 `json:"timestamp"`
+		MixHash    common.Hash    `json:"mixHash"`
+	} `json:"l1Headers"`
+	Logs []struct {
+		BlockNumber      hexutil.Uint64 `json:"blockNumber"`
+		TransactionHash  common.Hash    `json:"transactionHash"`
+		TransactionIndex hexutil.Uint64 `json:"transactionIndex"`
+		LogIndex         hexutil.Uint64 `json:"logIndex"`
+		Topics           []common.Hash  `json:"topics"`
+		Data             hexutil.Bytes  `json:"data"`
+	} `json:"logs"`
+	Batches []struct {
+		L1Block     hexutil.Uint64 `json:"l1Block"`
+		Transaction struct {
+			Hash                common.Hash    `json:"hash"`
+			Index               hexutil.Uint64 `json:"index"`
+			From                common.Address `json:"from"`
+			Input               hexutil.Bytes  `json:"input"`
+			BlobVersionedHashes []common.Hash  `json:"blobVersionedHashes"`
+		} `json:"transaction"`
+		// SlotBlobs are the batch's blobs with their zero suffix trimmed.
+		SlotBlobs []hexutil.Bytes `json:"slotBlobs"`
+	} `json:"batches"`
+	L2Hashes []common.Hash `json:"l2Hashes"`
+}
+
+var rollupXL1Replays = map[uint64][2]string{
+	699169: {"chiado-699169", "l1-23731489-23731968.json.gz"},
+	916969: {"chiado-916969", "l1-23731445-23731589.json.gz"},
+}
+
+// LoadRollupXL1Replay reads the L1 replay of network chainID under
+// rollupx/.
+func LoadRollupXL1Replay(chainID uint64) (*RollupXL1Replay, error) {
+	src, ok := rollupXL1Replays[chainID]
+	if !ok {
+		return nil, fmt.Errorf("no L1 replay of chain %d", chainID)
+	}
+	file := src[1]
+	f, err := os.Open(Path("rollupx", src[0], file))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	z, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	data, err := io.ReadAll(z)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	var r RollupXL1Replay
+	if err := decodeStrict(data, &r); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	for i := range r.Batches {
+		for j, blob := range r.Batches[i].SlotBlobs {
+			if len(blob) > BlobSize {
+				return nil, fmt.Errorf("%s: batch %d blob %d: %d bytes", file, i, j, len(blob))
+			}
+		}
+	}
+	return &r, nil
 }

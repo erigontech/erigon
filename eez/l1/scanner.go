@@ -48,6 +48,8 @@ type ScannedBatch struct {
 	L1MixDigest common.Hash
 	TxHash      common.Hash
 	TxIndex     uint64
+	// Input is the posting transaction's input.
+	Input []byte
 	// BlobHashes are the versioned hashes of the posting transaction's
 	// blobs.
 	BlobHashes []common.Hash
@@ -161,6 +163,7 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 
 	var posted []protocol.PostedBatch
 	var txHashes []common.Hash
+	var inputs [][]byte
 	var blobHashes [][]common.Hash
 	for _, l := range logs {
 		if l.Topics[0] != protocol.BatchPostedTopic {
@@ -198,6 +201,7 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 		}
 		posted = append(posted, protocol.PostedBatch{Batch: batch, TxIndex: uint64(l.TxIndex), LogIndex: uint64(l.Index), ListsRollup: listed != nil})
 		txHashes = append(txHashes, l.TxHash)
+		inputs = append(inputs, tx.GetData())
 		blobHashes = append(blobHashes, tx.GetBlobHashes())
 	}
 
@@ -230,6 +234,7 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 			L1MixDigest: h.MixDigest,
 			TxHash:      txHashes[i],
 			TxIndex:     p.TxIndex,
+			Input:       inputs[i],
 			BlobHashes:  blobHashes[i],
 			Batch:       p.Batch,
 			Settlement:  settlements[i],

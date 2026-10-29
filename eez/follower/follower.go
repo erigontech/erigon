@@ -155,7 +155,7 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
 	}
-	d, err := deriver.New(chain, cfg, c.Dir, c.Blobs, logger)
+	d, err := deriver.New(chain, cfg, c.Dir, c.Blobs, reader, logger)
 	if err != nil {
 		return nil, err
 	}

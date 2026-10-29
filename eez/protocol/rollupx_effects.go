@@ -279,20 +279,39 @@ func (e *RollupXEffects) Bind(b *ProofSystemBatch) error {
 // delivery of in an executeIncomingCrossChainCall minting its value. System
 // nonces count up from nonce.
 func (e *RollupXEffects) SyncSuffix(ctx SyncTxContext, out, in []int, nonce uint64) ([][]byte, error) {
-	var txs [][]byte
-	emit := func(value uint256.Int, input []byte) error {
+	return e.suffix(out, in, func(_ int, value uint256.Int, input []byte) ([]byte, error) {
 		if nonce == math.MaxUint64 {
-			return errNonceOverflow
+			return nil, errNonceOverflow
 		}
 		tx := SystemTx{ChainID: ctx.ChainID, Nonce: nonce, To: ctx.EEZL2, Value: value, Input: input}
-		enc, err := tx.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		txs = append(txs, enc)
 		nonce++
-		return nil
-	}
+		return tx.MarshalBinary()
+	})
+}
+
+// NativeSuffix is SyncSuffix under rollupX v0.1: type-0x45 transactions,
+// each identified by its group's index among the batch's outbound groups
+// then deliveries, under the L1 parent parentHash of the batch. Their gas
+// limits are the cap; building the block lowers them to what their
+// positions leave.
+func (e *RollupXEffects) NativeSuffix(ctx SyncTxContext, out, in []int, parentHash common.Hash) ([][]byte, error) {
+	return e.suffix(out, in, func(group int, value uint256.Int, input []byte) ([]byte, error) {
+		tx := NativeTx{
+			ChainID:    ctx.ChainID,
+			SourceHash: SourceHash(ctx.ChainID, parentHash, uint64(group)),
+			GasLimit:   NativeTxGasCap,
+			To:         ctx.EEZL2,
+			Value:      value,
+			Input:      input,
+		}
+		return tx.MarshalBinary()
+	})
+}
+
+// suffix builds the Sync suffix of out and in, encoding each system
+// transaction of the group at its index with system.
+func (e *RollupXEffects) suffix(out, in []int, system func(group int, value uint256.Int, input []byte) ([]byte, error)) ([][]byte, error) {
+	var txs [][]byte
 	for _, i := range out {
 		o := &e.Outbound[i]
 		input, err := EncodeLoadExecutionTable(&L2ExecutionTable{Entries: o.Sources, StaticEntries: []L2StaticExecutionEntry{}})
@@ -303,10 +322,11 @@ func (e *RollupXEffects) SyncSuffix(ctx SyncTxContext, out, in []int, nonce uint
 		if err != nil {
 			return nil, err
 		}
-		if err := emit(value, input); err != nil {
+		tx, err := system(i, value, input)
+		if err != nil {
 			return nil, err
 		}
-		txs = append(txs, o.UserTx)
+		txs = append(txs, tx, o.UserTx)
 	}
 	for _, i := range in {
 		d := &e.Inbound[i]
@@ -314,9 +334,11 @@ func (e *RollupXEffects) SyncSuffix(ctx SyncTxContext, out, in []int, nonce uint
 		if err != nil {
 			return nil, err
 		}
-		if err := emit(d.Value, input); err != nil {
+		tx, err := system(len(e.Outbound)+i, d.Value, input)
+		if err != nil {
 			return nil, err
 		}
+		txs = append(txs, tx)
 	}
 	return txs, nil
 }
@@ -366,7 +388,7 @@ func CheckOriginTx(enc []byte, chainID uint64) error {
 	switch {
 	case !bytes.Equal(buf.Bytes(), enc):
 		return errors.New("non-canonical transaction")
-	case tx.Type() == types.BlobTxType || tx.Type() == SystemTxType:
+	case tx.Type() == types.BlobTxType || tx.Type() == SystemTxType || tx.Type() == NativeTxType || tx.Type() == HistoryTxType:
 		return fmt.Errorf("transaction of type %d", tx.Type())
 	}
 	id := uint256.NewInt(chainID)

@@ -55,12 +55,20 @@ type Deriver struct {
 	// schedule, read from the genesis when first needed.
 	blobs l1.BlobSource
 	sched *Schedule
+	// l1 serves the L1 headers rollupX v0.1 history updates import.
+	l1 L1HeaderProvider
+}
+
+// L1HeaderProvider reads canonical L1 headers.
+type L1HeaderProvider interface {
+	HeaderByNumber(ctx context.Context, number uint64) (*l1.Header, error)
 }
 
 // New returns a deriver extending chain, an EEZ chain configured by cfg,
 // that keeps its checkpoint in dir unless dir is empty. blobs serves the
-// payloads of rollupX batches.
-func New(chain Chain, cfg *chain.Config, dir string, blobs l1.BlobSource, logger log.Logger) (*Deriver, error) {
+// payloads of rollupX batches, headers the L1 headers of rollupX v0.1
+// history.
+func New(chain Chain, cfg *chain.Config, dir string, blobs l1.BlobSource, headers L1HeaderProvider, logger log.Logger) (*Deriver, error) {
 	l2, ok := cfg.L2.(*config.L2Config)
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
@@ -72,6 +80,7 @@ func New(chain Chain, cfg *chain.Config, dir string, blobs l1.BlobSource, logger
 		sync:   protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID, EEZL2: l2.EEZL2()},
 		dir:    dir,
 		blobs:  blobs,
+		l1:     headers,
 		logger: logger,
 	}, nil
 }

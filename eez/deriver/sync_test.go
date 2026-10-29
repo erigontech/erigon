@@ -163,3 +163,69 @@ func TestResumeTxs(t *testing.T) {
 	require.True(t, replay, "a differing block is rebuilt even without new content")
 	require.Equal(t, [][]byte{a}, txs)
 }
+
+func TestResumeNativeTxs(t *testing.T) {
+	native := func(gas uint64) []byte {
+		enc, err := (&protocol.NativeTx{ChainID: 699169, SourceHash: common.Hash{7}, GasLimit: gas, To: protocol.RollupXEEZL2Address, Input: []byte{1}}).MarshalBinary()
+		require.NoError(t, err)
+		return enc
+	}
+	user := []byte{2}
+	entry, final, other := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	s := &protocol.Settlement{EntryState: entry, FinalState: final}
+	suffix := [][]byte{native(protocol.NativeTxGasCap), user}
+
+	_, replay, err := ResumeNativeTxs(final, s, [][]byte{user, native(1_000), user}, suffix)
+	require.NoError(t, err)
+	require.False(t, replay, "the settled block, its native gas limit bound to its position")
+
+	txs, replay, err := ResumeNativeTxs(entry, s, [][]byte{user}, suffix)
+	require.NoError(t, err)
+	require.True(t, replay)
+	require.Equal(t, append([][]byte{user}, suffix...), txs)
+
+	_, _, err = ResumeNativeTxs(final, s, [][]byte{user, user, user}, suffix)
+	require.ErrorIs(t, err, ErrResume, "the settled block ends with other transactions")
+	_, _, err = ResumeNativeTxs(final, s, [][]byte{user}, suffix)
+	require.ErrorIs(t, err, ErrResume, "the settled block is shorter than its suffix")
+	_, _, err = ResumeNativeTxs(other, s, [][]byte{user}, suffix)
+	require.ErrorIs(t, err, ErrResume)
+}
+
+func TestBindNativeGas(t *testing.T) {
+	systemtx.Register()
+	native := func(gas uint64) types.Transaction {
+		tx, err := systemtx.NewNative(protocol.NativeTx{ChainID: 699169, GasLimit: gas, To: protocol.RollupXEEZL2Address, Input: []byte{1}})
+		require.NoError(t, err)
+		return tx
+	}
+	user := &types.DynamicFeeTransaction{}
+	receipts := func(cumulative ...uint64) types.Receipts {
+		rs := make(types.Receipts, len(cumulative))
+		for i, c := range cumulative {
+			rs[i] = &types.Receipt{CumulativeGasUsed: c}
+		}
+		return rs
+	}
+
+	txs := []types.Transaction{native(protocol.NativeTxGasCap), user}
+	got, bound, err := bindNativeGas(txs, receipts(100_000, 200_000), 30_000_000)
+	require.NoError(t, err)
+	require.True(t, bound, "the cap is what a block with room leaves")
+	require.Equal(t, txs, got)
+
+	txs = []types.Transaction{user, native(protocol.NativeTxGasCap), native(protocol.NativeTxGasCap)}
+	got, bound, err = bindNativeGas(txs, receipts(29_000_000, 29_400_000, 29_500_000), 30_000_000)
+	require.NoError(t, err)
+	require.False(t, bound)
+	require.Equal(t, uint64(1_000_000), got[1].GetGasLimit())
+	require.Equal(t, uint64(600_000), got[2].GetGasLimit())
+	require.Equal(t, protocol.NativeTxGasCap, txs[1].GetGasLimit(), "the input is not modified")
+
+	_, bound, err = bindNativeGas(got, receipts(29_000_000, 29_400_000, 29_500_000), 30_000_000)
+	require.NoError(t, err)
+	require.True(t, bound)
+
+	_, _, err = bindNativeGas(txs, receipts(1), 30_000_000)
+	require.Error(t, err)
+}

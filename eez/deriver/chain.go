@@ -20,12 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -56,6 +59,9 @@ type Chain interface {
 	// Nonce returns the nonce of addr in the state after canonical block
 	// number.
 	Nonce(ctx context.Context, number uint64, addr common.Address) (uint64, error)
+	// Storage returns the value of slot of addr in the state after
+	// canonical block number.
+	Storage(ctx context.Context, number uint64, addr common.Address, slot common.Hash) (common.Hash, error)
 	// Receipts returns the receipts of a canonical block.
 	Receipts(ctx context.Context, block *types.Block) (types.Receipts, error)
 	// Extend builds the block of exactly txs on parent with header inputs in,
@@ -160,6 +166,26 @@ func (c *ExecChain) Nonce(ctx context.Context, number uint64, addr common.Addres
 	return nonce, err
 }
 
+func (c *ExecChain) Storage(ctx context.Context, number uint64, addr common.Address, slot common.Hash) (value common.Hash, err error) {
+	err = c.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		executed, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if number > executed {
+			return fmt.Errorf("state after block %d: executed up to %d", number, executed)
+		}
+		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, 0, c.reader.TxnumReader())
+		if err != nil {
+			return err
+		}
+		v, _, err := r.ReadAccountStorage(accounts.InternAddress(addr), accounts.InternKey(slot))
+		value = v.Bytes32()
+		return err
+	})
+	return value, err
+}
+
 func (c *ExecChain) Receipts(ctx context.Context, block *types.Block) (rs types.Receipts, err error) {
 	err = c.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		rs, err = c.receipts.GetReceipts(ctx, c.config, tx, block, eth.ReceiptsOpts{})
@@ -201,27 +227,17 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	if c.config.IsCancun(in.Time) {
 		params.ParentBeaconBlockRoot = &common.Hash{}
 	}
-	id, err := retryBusy(ctx, func() (uint64, bool, error) {
-		r, err := c.exec.AssembleBlock(ctx, params)
-		return r.PayloadID, r.Busy, err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("assemble block %d: %w", in.Number, err)
-	}
-	built, err := retryBusy(ctx, func() (*types.BlockWithReceipts, bool, error) {
-		r, err := c.exec.GetAssembledBlock(ctx, id)
-		if err == nil && r.Unknown {
-			err = errors.New("payload dropped")
+	// A native transaction's gas limit is the gas its block leaves it: the
+	// block is rebuilt with the limits its receipts give until they agree.
+	var built *types.BlockWithReceipts
+	for bound := false; !bound; {
+		if built, err = c.assemble(ctx, in.Number, params); err != nil {
+			return nil, err
 		}
-		return r.Block, r.Busy, err
-	})
-	switch {
-	case errors.Is(err, exec.ErrTxnNotIncluded):
-		return nil, fmt.Errorf("%w: block %d: %w", ErrRejected, in.Number, err)
-	case err != nil:
-		return nil, fmt.Errorf("assemble block %d: %w", in.Number, err)
-	case built == nil:
-		return nil, fmt.Errorf("assemble block %d: no block", in.Number)
+		if txs, bound, err = bindNativeGas(txs, built.Receipts, gasLimit); err != nil {
+			return nil, fmt.Errorf("%w: block %d: %w", ErrRejected, in.Number, err)
+		}
+		params.CustomTxnProvider = staticTxns(txs)
 	}
 	block := built.Block
 	if !in.Matches(block.Header()) {
@@ -253,6 +269,66 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 		return nil, err
 	}
 	return built, nil
+}
+
+func (c *ExecChain) assemble(ctx context.Context, number uint64, params *builder.Parameters) (*types.BlockWithReceipts, error) {
+	id, err := retryBusy(ctx, func() (uint64, bool, error) {
+		r, err := c.exec.AssembleBlock(ctx, params)
+		return r.PayloadID, r.Busy, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("assemble block %d: %w", number, err)
+	}
+	built, err := retryBusy(ctx, func() (*types.BlockWithReceipts, bool, error) {
+		r, err := c.exec.GetAssembledBlock(ctx, id)
+		if err == nil && r.Unknown {
+			err = errors.New("payload dropped")
+		}
+		return r.Block, r.Busy, err
+	})
+	switch {
+	case errors.Is(err, exec.ErrTxnNotIncluded):
+		return nil, fmt.Errorf("%w: block %d: %w", ErrRejected, number, err)
+	case err != nil:
+		return nil, fmt.Errorf("assemble block %d: %w", number, err)
+	case built == nil:
+		return nil, fmt.Errorf("assemble block %d: no block", number)
+	}
+	return built, nil
+}
+
+// bindNativeGas sets the gas limit of every native transaction of txs to
+// what the block of receipts left it, and reports whether every limit
+// already was.
+func bindNativeGas(txs []types.Transaction, receipts types.Receipts, gasLimit uint64) ([]types.Transaction, bool, error) {
+	if len(receipts) != len(txs) {
+		return nil, false, fmt.Errorf("%d receipts for %d transactions", len(receipts), len(txs))
+	}
+	bound := true
+	out := txs
+	for i, tx := range txs {
+		native, ok := tx.(*systemtx.NativeTransaction)
+		if !ok {
+			continue
+		}
+		var cumulative uint64
+		if i > 0 {
+			cumulative = receipts[i-1].CumulativeGasUsed
+		}
+		body := native.Body()
+		if body.GasLimit = protocol.NativeTxGasLimit(gasLimit, cumulative); body.GasLimit == native.GetGasLimit() {
+			continue
+		}
+		rebound, err := systemtx.NewNative(body)
+		if err != nil {
+			return nil, false, err
+		}
+		if bound {
+			out, bound = slices.Clone(txs), false
+		}
+		out[i] = rebound
+	}
+	return out, bound, nil
 }
 
 func (c *ExecChain) Insert(ctx context.Context, blocks []*types.Block) error {
