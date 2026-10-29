@@ -608,6 +608,7 @@ type StateChange struct {
 	Changes       []*AccountChange       `protobuf:"bytes,4,rep,name=changes,proto3" json:"changes,omitempty"`
 	Txs           [][]byte               `protobuf:"bytes,5,rep,name=txs,proto3" json:"txs,omitempty"` // enable by withTransactions=true
 	BlockTime     uint64                 `protobuf:"varint,6,opt,name=block_time,json=blockTime,proto3" json:"block_time,omitempty"`
+	SlotNumber    *uint64                `protobuf:"varint,7,opt,name=slot_number,json=slotNumber,proto3,oneof" json:"slot_number,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -680,6 +681,13 @@ func (x *StateChange) GetTxs() [][]byte {
 func (x *StateChange) GetBlockTime() uint64 {
 	if x != nil {
 		return x.BlockTime
+	}
+	return 0
+}
+
+func (x *StateChange) GetSlotNumber() uint64 {
+	if x != nil && x.SlotNumber != nil {
+		return *x.SlotNumber
 	}
 	return 0
 }
@@ -2213,7 +2221,7 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\x16pending_block_base_fee\x18\x03 \x01(\x04R\x13pendingBlockBaseFee\x12&\n" +
 	"\x0fblock_gas_limit\x18\x04 \x01(\x04R\rblockGasLimit\x12'\n" +
 	"\x0ffinalized_block\x18\x05 \x01(\x04R\x0efinalizedBlock\x126\n" +
-	"\x18pending_blob_fee_per_gas\x18\x06 \x01(\x04R\x14pendingBlobFeePerGas\"\xef\x01\n" +
+	"\x18pending_blob_fee_per_gas\x18\x06 \x01(\x04R\x14pendingBlobFeePerGas\"\xa5\x02\n" +
 	"\vStateChange\x12/\n" +
 	"\tdirection\x18\x01 \x01(\x0e2\x11.remote.DirectionR\tdirection\x12!\n" +
 	"\fblock_height\x18\x02 \x01(\x04R\vblockHeight\x12*\n" +
@@ -2222,7 +2230,10 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\achanges\x18\x04 \x03(\v2\x15.remote.AccountChangeR\achanges\x12\x10\n" +
 	"\x03txs\x18\x05 \x03(\fR\x03txs\x12\x1d\n" +
 	"\n" +
-	"block_time\x18\x06 \x01(\x04R\tblockTime\"d\n" +
+	"block_time\x18\x06 \x01(\x04R\tblockTime\x12$\n" +
+	"\vslot_number\x18\a \x01(\x04H\x00R\n" +
+	"slotNumber\x88\x01\x01B\x0e\n" +
+	"\f_slot_number\"d\n" +
 	"\x12StateChangeRequest\x12!\n" +
 	"\fwith_storage\x18\x01 \x01(\bR\vwithStorage\x12+\n" +
 	"\x11with_transactions\x18\x02 \x01(\bR\x10withTransactions\"\x12\n" +
@@ -2490,6 +2501,7 @@ func file_remote_kv_proto_init() {
 		return
 	}
 	file_remote_kv_proto_msgTypes[1].OneofWrappers = []any{}
+	file_remote_kv_proto_msgTypes[5].OneofWrappers = []any{}
 	file_remote_kv_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

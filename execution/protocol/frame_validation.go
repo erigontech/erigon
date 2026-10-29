@@ -44,6 +44,7 @@ type FrameValidation struct {
 	Paymaster    bool
 	Deadline     uint64
 	Dependencies []common.Address
+	RecentRoots  []RecentRootReference
 }
 
 // frameValidationTracer enforces pool-only restrictions through EVM hooks, so
@@ -53,6 +54,7 @@ type frameValidationTracer struct {
 	evm          *vm.EVM
 	end          int
 	deploy       int
+	recentRoot   int
 	err          error
 	dependencies map[common.Address]struct{}
 }
@@ -99,7 +101,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	return &validation.FrameValidation, nil
 }
 
-// frameValidationPrefix recognizes optional expiry and deployment frames followed by
+// frameValidationPrefix recognizes optional expiry, recent-root and deployment frames followed by
 // sender approval and, if separate, payer approval. Restricting this prefix
 // bounds unpaid validation work; execution frames after it are not simulated.
 func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, error) {
@@ -107,7 +109,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	if len(tx.Frames) == 0 {
 		return nil, invalid
 	}
-	v := &frameValidationTracer{deploy: -1}
+	v := &frameValidationTracer{deploy: -1, recentRoot: -1}
 	i := 0
 	if f := &tx.Frames[0]; f.Mode == types.FrameVerify && f.Target != nil && *f.Target == types.FrameExpiryVerifier {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
@@ -115,6 +117,21 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 		}
 		v.Deadline = binary.BigEndian.Uint64(f.Data)
 		i++
+	}
+	if i < len(tx.Frames) {
+		f := &tx.Frames[i]
+		if f.Mode == types.FrameVerify && f.Target != nil && *f.Target == types.FrameRecentRootVerifier {
+			if f.Flags != 0 || !f.Value.IsZero() || f.Limits.State != 0 {
+				return nil, invalid
+			}
+			var err error
+			v.RecentRoots, err = ParseRecentRootReferences(f.Data)
+			if err != nil {
+				return nil, err
+			}
+			v.recentRoot = i
+			i++
+		}
 	}
 	if i < len(tx.Frames) && tx.Frames[i].Mode == types.FrameDefault && tx.Frames[i].Flags == 0 {
 		v.deploy = i
@@ -204,6 +221,15 @@ func (v *frameValidationTracer) beforeFrame() error {
 	ctx := v.evm.FrameContext
 	f := &ctx.Transaction.Frames[ctx.Index]
 	target := accounts.InternAddress(f.ResolvedTarget(ctx.Transaction.SenderAddress))
+	if ctx.Index == v.recentRoot {
+		code, err := v.evm.IntraBlockState().GetCode(target)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(code, RecentRootCode) {
+			return errors.New("non-canonical recent root verifier code")
+		}
+	}
 	v.checkTarget(target, true)
 	if ctx.Index == v.end {
 		// APPROVE debits MaxCost. Reservations need the payer's balance before
@@ -255,8 +281,10 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 	stack := scope.StackData()
 	banned := false
 	switch vm.OpCode(op) {
-	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.SLOTNUM, vm.INVALID, vm.SELFDESTRUCT, vm.BALANCE, vm.SELFBALANCE:
+	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.INVALID, vm.SELFDESTRUCT, vm.BALANCE, vm.SELFBALANCE:
 		banned = true
+	case vm.SLOTNUM:
+		banned = ctx.Index != v.recentRoot || depth != 1
 	case vm.TIMESTAMP:
 		frame := &ctx.Transaction.Frames[ctx.Index]
 		banned = ctx.Index != 0 || frame.Mode != types.FrameVerify || frame.Target == nil || *frame.Target != types.FrameExpiryVerifier || scope.Address().Value() != types.FrameExpiryVerifier || !bytes.Equal(scope.Code(), frameExpiryCode)
@@ -273,6 +301,10 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		banned = !deploy || scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.SLOAD:
 		banned = scope.Address().Value() != ctx.Transaction.SenderAddress
+		if ctx.Index == v.recentRoot && depth == 1 && len(stack) > 0 {
+			key := common.Hash(stack[len(stack)-1].Bytes32())
+			banned = !slices.ContainsFunc(v.RecentRoots, func(ref RecentRootReference) bool { return ref.StorageKey == key })
+		}
 	case vm.EXTCODESIZE, vm.EXTCODEHASH, vm.EXTCODECOPY:
 		if len(stack) > 0 {
 			v.checkTarget(accounts.InternAddress(common.Address(stack[len(stack)-1].Bytes20())), false)

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -574,6 +575,14 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	// block. Its context must account for fee changes and fork activation.
 	blockContext := protocol.NewEVMBlockContext(header, rejectBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
 	blockContext.BlockNumber++
+	// EIP-8272 uses head slot + 1 for pool validation, even after empty slots.
+	// https://eips.ethereum.org/EIPS/eip-8272#current-slot
+	if header.SlotNumber != nil {
+		if *header.SlotNumber == math.MaxUint64 {
+			return nil, errors.New("frame validation: next slot overflows uint64")
+		}
+		blockContext.SlotNumber++
+	}
 	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	if header.BaseFee != nil {
 		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)

@@ -50,6 +50,7 @@ type StateChange struct {
 	BlockHeight uint64
 	BlockHash   common.Hash
 	BlockTime   uint64
+	SlotNumber  *uint64
 	Direction   Direction
 	Txs         [][]byte
 	Changes     []AccountChange
@@ -129,6 +130,7 @@ func (sc *StateChange) ToProto() *remoteproto.StateChange {
 		BlockHeight: sc.BlockHeight,
 		BlockHash:   gointerfaces.ConvertHashToH256(sc.BlockHash),
 		BlockTime:   sc.BlockTime,
+		SlotNumber:  sc.SlotNumber,
 		Direction:   directionToProto(sc.Direction),
 	}
 	if sc.Txs != nil {

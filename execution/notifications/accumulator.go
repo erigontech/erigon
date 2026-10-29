@@ -82,6 +82,9 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 		BlockTime:   h.Time,
 	})
 	a.latestChange = &a.changes[len(a.changes)-1]
+	if h.SlotNumber != nil {
+		a.latestChange.SlotNumber = common.NewUint64(*h.SlotNumber)
+	}
 	if unwind {
 		a.latestChange.Direction = DirectionUnwind
 	}

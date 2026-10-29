@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"time"
 
@@ -229,6 +230,18 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		}
 		v.Dependencies = append(v.Dependencies, common.BytesToAddress(dependency))
 	}
+	// Root dependencies are signed transaction data, so they do not need to be
+	// duplicated in the validation RPC reply.
+	for _, frame := range txn.Txn.(*types.FrameTransaction).Frames {
+		if frame.Mode == types.FrameVerify && frame.Target != nil && *frame.Target == types.FrameRecentRootVerifier {
+			v.RecentRoots, err = protocol.ParseRecentRootReferences(frame.Data)
+			if err != nil {
+				return nil, err
+			}
+			v.Dependencies = append(v.Dependencies, types.FrameRecentRootVerifier)
+			break
+		}
+	}
 	return v, nil
 }
 
@@ -343,10 +356,13 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
-	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
+	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
+	blockTime := head.BlockTime
 	touched := make(map[common.Address]struct{})
 	nonceSlots := make(map[common.Hash]struct{})
+	rootSlots := make(map[common.Hash]struct{})
 	var nonceManagerAccountChanged bool
+	var rootAccountChanged bool
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
@@ -357,12 +373,34 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 				}
 			}
+			if address == types.FrameRecentRootVerifier {
+				rootAccountChanged = rootAccountChanged || change.Action != remoteproto.Action_STORAGE
+				for _, storage := range change.StorageChanges {
+					rootSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
+				}
+			}
 		}
 	}
 	var pending []*metaTxn
 	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		if len(previous.RecentRoots) > 0 {
+			valid := p.chainConfig.IsBogota(blockTime) && head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
+			if valid {
+				for _, ref := range previous.RecentRoots {
+					if !ref.ValidAt(*head.SlotNumber + 1) {
+						valid = false
+						break
+					}
+				}
+			}
+			if !valid {
+				p.removeFromSubPool(mt, "recent root outside slot window")
+				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+				continue
+			}
+		}
 		first := &frame.Frames[0]
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
@@ -376,9 +414,12 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		for _, dependency := range previous.Dependencies {
-			// Storage-only changes to the nonce manager need only the selected slots
-			// checked below. If the manager is the sender, validation can read all its storage.
+			// Protocol storage dependencies need only the selected slots checked below.
+			// If the contract is the sender, validation can read all its storage.
 			if dependency == types.FrameNonceManager && keyedNonce && frame.SenderAddress != types.FrameNonceManager && !nonceManagerAccountChanged {
+				continue
+			}
+			if dependency == types.FrameRecentRootVerifier && len(previous.RecentRoots) > 0 && frame.SenderAddress != types.FrameRecentRootVerifier && !rootAccountChanged {
 				continue
 			}
 			if _, ok := touched[dependency]; ok {
@@ -389,6 +430,14 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
 			for _, key := range frame.NonceKeys {
 				if _, ok := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]; ok {
+					affected = true
+					break
+				}
+			}
+		}
+		if !affected && len(rootSlots) > 0 {
+			for _, ref := range previous.RecentRoots {
+				if _, ok := rootSlots[ref.StorageKey]; ok {
 					affected = true
 					break
 				}

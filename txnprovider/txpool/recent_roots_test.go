@@ -1,0 +1,189 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package txpool
+
+import (
+	"bytes"
+	"encoding/binary"
+	"math"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+)
+
+func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, fee uint64) *TxnSlot {
+	t.Helper()
+	data := make([]byte, 72)
+	data[0], data[71] = 1, 2
+	binary.BigEndian.PutUint64(data[32:40], rootSlot)
+	tx := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
+		},
+		Fees: types.FrameFees{TipCap: *uint256.NewInt(fee), FeeCap: *uint256.NewInt(fee)},
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&encoded))
+	return &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+}
+
+func TestFramePoolRecentRootExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		slot           *uint64
+		inactive, keep bool
+	}{
+		{"oldest usable", common.NewUint64(10 + protocol.RecentRootLength - 2), false, true},
+		{"expired", common.NewUint64(10 + protocol.RecentRootLength - 1), false, false},
+		{"current slot after reorg", common.NewUint64(9), false, false},
+		{"future slot after reorg", common.NewUint64(8), false, false},
+		{"missing slot", nil, false, false},
+		{"slot overflow", common.NewUint64(math.MaxUint64), false, false},
+		{"activation unwound", common.NewUint64(11), true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+			initial.ChangeBatch[0].SlotNumber = common.NewUint64(10)
+			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			slot := recentRootPoolSlot(t, sender, 10, 1)
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.calls = nil
+
+			change := newBlockChangeForAccounts(common.Hash{2}, 0)
+			change.ChangeBatch[0].SlotNumber = tc.slot
+			if tc.inactive {
+				pool.chainConfig.BogotaTime = common.NewUint64(100)
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			if tc.keep {
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+			} else {
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+				require.Empty(t, pool.all.senderIDFrameTxn)
+			}
+			require.Empty(t, backend.calls, "age checks must not require EVM simulation")
+		})
+	}
+}
+
+func TestFramePoolRecentRootDependencies(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		action     remoteproto.Action
+		selected   bool
+		unwind     bool
+		revalidate bool
+	}{
+		{"unrelated root", remoteproto.Action_STORAGE, false, false, false},
+		{"referenced root changed", remoteproto.Action_STORAGE, true, false, true},
+		{"referenced root cleared by unwind", remoteproto.Action_STORAGE, true, true, true},
+		{"verifier code changed", remoteproto.Action_CODE, false, false, true},
+		{"verifier deployment unwound", remoteproto.Action_REMOVE, false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			slot := recentRootPoolSlot(t, sender, 10, 1)
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Len(t, slot.frameValidation.RecentRoots, 1)
+			ref := slot.frameValidation.RecentRoots[0]
+			key := common.Hash{99}
+			if tc.selected {
+				key = ref.StorageKey
+			}
+			change := newBlockChangeForAccounts(common.Hash{2}, 0)
+			head := change.ChangeBatch[0]
+			head.SlotNumber = common.NewUint64(11)
+			head.Changes = []*remoteproto.AccountChange{{
+				Address: gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier), Action: tc.action,
+				StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(key)}},
+			}}
+			if tc.unwind {
+				head.Direction = remoteproto.Direction_UNWIND
+			}
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.valid, backend.calls = false, nil
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			if tc.revalidate {
+				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+			} else {
+				require.Empty(t, backend.calls)
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+			}
+		})
+	}
+}
+
+func TestFramePoolRecentRootReplacement(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	first := recentRootPoolSlot(t, sender, 10, 1)
+	replacement := recentRootPoolSlot(t, sender, 20, 2)
+	for _, slot := range []*TxnSlot{first, replacement} {
+		var txns TxnSlots
+		txns.Append(slot, sender[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	}
+	require.NotContains(t, pool.byHash, string(first.IDHash[:]))
+	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
+	require.Len(t, pool.all.senderIDFrameTxn, 1)
+	require.Len(t, replacement.frameValidation.RecentRoots, 1)
+	require.Equal(t, uint64(20), replacement.frameValidation.RecentRoots[0].Slot)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.valid, backend.calls = false, nil
+	for _, slot := range []*TxnSlot{first, replacement} {
+		change := newBlockChangeForAccounts(common.Hash{3}, 0)
+		change.ChangeBatch[0].SlotNumber = common.NewUint64(30)
+		change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+			Address: gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier), Action: remoteproto.Action_STORAGE,
+			StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(slot.frameValidation.RecentRoots[0].StorageKey)}},
+		}}
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		if slot == first {
+			require.Empty(t, backend.calls)
+			require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
+		} else {
+			require.Equal(t, []common.Hash{replacement.IDHash}, backend.calls)
+			require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+			require.Empty(t, pool.frameReservations)
+		}
+	}
+}
