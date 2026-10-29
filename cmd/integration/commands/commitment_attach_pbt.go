@@ -19,7 +19,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +27,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync/atomic"
 
 	"github.com/spf13/cobra"
@@ -281,7 +279,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	if marker != nil {
 		if marker.ManifestBlake3 == "" {
-			return errors.New("commitment attach-pbt: marker has no manifest digest; rerun attach-pbt from the published datadir")
+			return fmt.Errorf("commitment attach-pbt: marker has no manifest digest; remove only %s and rerun attach-pbt --from %s", dbstate.PBTAttachMarkerPath(nodeDirs), publishedPath)
 		}
 		if marker.ManifestBlake3 != manifestDigest {
 			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
@@ -342,7 +340,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := validatePBTAttachManifestFiles(ctx, manifest, publishedDirs, hooks.workers, hooks.skipVerify, logger, "attach published manifest digest"); err != nil {
 		return err
 	}
-	if _, err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
+	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
 	}
 	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, manifestPbtRoot, logger); err != nil {
@@ -461,14 +459,11 @@ func parsePBTManifestHash(name, value string) (common.Hash, error) {
 }
 
 func parsePBTAttachHash(name, value string) (common.Hash, error) {
-	if len(value) != 66 || !strings.HasPrefix(value, "0x") {
-		return common.Hash{}, fmt.Errorf("commitment attach-pbt: %s is not a 32-byte hash", name)
+	var hash common.Hash
+	if err := hash.UnmarshalText([]byte(value)); err != nil {
+		return common.Hash{}, fmt.Errorf("commitment attach-pbt: %s is not a 32-byte hash: %w", name, err)
 	}
-	decoded, err := hex.DecodeString(value[2:])
-	if err != nil || len(decoded) != len(common.Hash{}) {
-		return common.Hash{}, fmt.Errorf("commitment attach-pbt: %s is not a 32-byte hash", name)
-	}
-	return common.BytesToHash(decoded), nil
+	return hash, nil
 }
 
 func pbtAttachManifestSources(dirs datadir.Dirs) ([]dbstate.PBTManifestFileSource, error) {
@@ -746,21 +741,21 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 	return nil
 }
 
-func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
+func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) error {
 	configurePBTSourceVariant(settings)
 	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	defer agg.Close()
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	publishedFiles, err := pbtAttachFiles(dirs)
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	opened := make(map[kv.Domain]map[string]struct{})
@@ -776,14 +771,14 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 		files := at.Files(domain)
 		needsOpened := domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain
 		if (needsOpened && len(opened[domain]) == 0) || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() <= txNum {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
+			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
 			if file.domain != domain || !file.data || file.from*settings.StepSize > txNum {
 				continue
 			}
 			if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
-				return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
+				return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
 			}
 		}
 	}
@@ -808,20 +803,20 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	for _, check := range checks {
 		value, found, start, end, err := at.DebugGetLatestFromFiles(check.domain, check.key, math.MaxUint64)
 		if err != nil {
-			return common.Hash{}, err
+			return err
 		}
 		if !found || start > txNum || end <= txNum {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
+			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
 		}
 		gotBlock, gotTx, err := check.decode(value)
 		if err != nil {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
+			return fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
 		}
 		if gotBlock != blockNum || gotTx != txNum {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
+			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
 	}
-	return common.Hash{}, nil
+	return nil
 }
 
 func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {

@@ -141,9 +141,8 @@ func copyPBTResumeSnapshot(t *testing.T, source, destination string) {
 	}))
 }
 
-func TestPBTResumeEmptyOutputFailureLeavesNoFiles(t *testing.T) {
-	source, baseOutput := pbtResumeFixture(t, 1, false, false)
-	output := filepath.Join(t.TempDir(), "empty-output")
+func pbtResumeStopSourceBin(t *testing.T, source *execmoduletester.PBTAcceptanceChain, baseOutput string) *dbstate.ErigonDBSettings {
+	t.Helper()
 	settings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
@@ -161,8 +160,15 @@ func TestPBTResumeEmptyOutputFailureLeavesNoFiles(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(destination), 0o755))
 		require.NoError(t, os.Link(file.path, destination))
 	}
+	return settings
+}
+
+func TestPBTResumeEmptyOutputFailureLeavesNoFiles(t *testing.T) {
+	source, baseOutput := pbtResumeFixture(t, 1, false, false)
+	output := filepath.Join(t.TempDir(), "empty-output")
+	pbtResumeStopSourceBin(t, source, baseOutput)
 	require.NoError(t, os.MkdirAll(output, 0o755))
-	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{
+	err := convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{
 		resume:     true,
 		workers:    1,
 		standalone: func(datadir.Dirs) error { return errors.New("empty resume failure") },
@@ -376,6 +382,25 @@ func TestPBTResumeStraddleRefusalPreservesOutput(t *testing.T) {
 	require.ErrorContains(t, err, "base bin file range 1-4 straddles source commitment ranges 1-2 and 2-3")
 	after := snapshotTreeDigest(t, output)
 	require.Equal(t, before, after, "straddle refusal must happen before any output change")
+}
+
+func TestPBTResumeEmptyOutputStraddleRefusedBeforeGapWalk(t *testing.T) {
+	source, baseOutput := pbtResumeFixture(t, 1, false, false)
+	settings := pbtResumeStopSourceBin(t, source, baseOutput)
+	agg, err := openPBTState(t.Context(), source.Tester.Dirs, settings, nil, log.New())
+	require.NoError(t, err)
+	require.NoError(t, agg.MergePBinRange(t.Context(), kv.CommitmentBinDomain, 1, 4))
+	agg.Close()
+	output := filepath.Join(t.TempDir(), "empty-output")
+	require.NoError(t, os.MkdirAll(output, 0o755))
+	outputPrepared := false
+	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{
+		resume:      true,
+		workers:     1,
+		afterOutput: func() error { outputPrepared = true; return nil },
+	})
+	require.ErrorContains(t, err, "base bin file range 1-4 straddles source commitment ranges 1-2 and 2-3")
+	require.False(t, outputPrepared, "straddle refusal must happen before the output is prepared for the gap walk")
 }
 
 func TestPBTResumeZeroStartSpanningRangeMatchesFresh(t *testing.T) {

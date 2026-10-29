@@ -71,7 +71,6 @@ type PBinRangeWriterLimits struct {
 	MaxBytes            int
 	NoRangePastFrontier bool
 	Workers             int
-	DetachMDBXReads     *atomic.Uint64
 	AbsentProbe         PBinAbsentProbeFunc
 }
 
@@ -1062,11 +1061,6 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return common.Hash{}, err
 	}
 	if w.resumeSourceLayout {
-		for _, outputRange := range w.ranges {
-			if err := w.aggregator.MergePBinRange(ctx, w.domain, outputRange.start, outputRange.end); err != nil {
-				return common.Hash{}, err
-			}
-		}
 		if err := w.aggregator.RemoveOverlapsAfterMerge(); err != nil {
 			return common.Hash{}, err
 		}
@@ -1404,17 +1398,16 @@ func (w *PBinRangeWriter) mergeResumeRange(ctx context.Context, domain *Domain, 
 	defer at.Close()
 	visible, err := at.filesInRange(ranges)
 	if err != nil {
-		delta.CleanupOnError()
+		deltaItem.closeFilesAndRemove()
 		return StaticFiles{}, err
 	}
-	defer visible.Close()
 	inputs := append(visible.DomainFiles(w.domain), deltaItem)
 	merged, _, _, err := at.d[w.domain].mergeFiles(ctx, inputs, nil, nil, ranges.domain[w.domain], nil, true, background.NewProgressSet())
 	if err != nil {
-		delta.CleanupOnError()
+		deltaItem.closeFilesAndRemove()
 		return StaticFiles{}, err
 	}
-	delta.CleanupOnError()
+	deltaItem.closeFilesAndRemove()
 	return StaticFiles{valuesDecomp: merged.decompressor, valuesIdx: merged.index, valuesBt: merged.bindex, existenceFilter: merged.existence}, nil
 }
 

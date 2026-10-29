@@ -17,6 +17,7 @@
 package state_test
 
 import (
+	"bytes"
 	"sync/atomic"
 	"testing"
 
@@ -24,9 +25,23 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
+
+type pbinCommitmentReadCounter struct {
+	kv.TemporalRwTx
+	reads *atomic.Uint64
+}
+
+func (tx pbinCommitmentReadCounter) GetLatest(domain kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.CommitmentBinDomain && !bytes.Equal(k, pbt.GlobalRootKey()) && !bytes.Equal(k, commitment.KeyCommitmentState) {
+		tx.reads.Add(1)
+	}
+	return tx.TemporalRwTx.GetLatest(domain, k, opts)
+}
 
 func TestConvertPBinDetachDoesNotReadMDBX(t *testing.T) {
 	selectPBinConvertHash(t)
@@ -45,13 +60,10 @@ func TestConvertPBinDetachDoesNotReadMDBX(t *testing.T) {
 		SourceAggregator: agg,
 		SourceTx:         sourceTx,
 		TargetAggregator: agg,
-		TargetTx:         targetTx,
+		TargetTx:         pbinCommitmentReadCounter{TemporalRwTx: targetTx, reads: &reads},
 		TargetDomain:     kv.CommitmentBinDomain,
 		EndTxNum:         7,
 		Hash:             eip8297.HashBytes,
-		RangeWriterLimits: &state.PBinRangeWriterLimits{
-			DetachMDBXReads: &reads,
-		},
 	})
 	require.NoError(t, err)
 	require.Zero(t, reads.Load(), "detach must not read previous commitment values")

@@ -124,7 +124,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	sourceDirs := datadir.Open(sourcePath)
 	publishedOutputDirs := datadir.Open(outputPath)
 	outputDirs := publishedOutputDirs
-	resume := hooks.resume || convertPBTResume
+	resume := hooks.resume
 	if err := checkPBTChainName(ctx, sourceDirs, chainName, "commitment convert-pbt", "source"); err != nil {
 		return err
 	}
@@ -1219,7 +1219,14 @@ func pbtResumeBaseMergeRanges(sourceDirs, outputDirs datadir.Dirs, sourceSetting
 	if err != nil {
 		return nil, fmt.Errorf("commitment convert-pbt: resume source commitment files: %w", err)
 	}
-	outputFiles, err := pbtResumeCommitmentFiles(outputDirs, targetDomain)
+	baseDirs, baseDomain := outputDirs, targetDomain
+	if !outputHasFiles {
+		baseDirs, baseDomain = sourceDirs, kv.CommitmentDomain
+		if baseSettings.TrieVariantName() == dbstate.TrieVariantHexBin {
+			baseDomain = kv.CommitmentBinDomain
+		}
+	}
+	outputFiles, err := pbtResumeCommitmentFiles(baseDirs, baseDomain)
 	if err != nil {
 		return nil, fmt.Errorf("commitment convert-pbt: resume base commitment files: %w", err)
 	}

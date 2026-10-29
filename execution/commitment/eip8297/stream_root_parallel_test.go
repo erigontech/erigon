@@ -283,9 +283,15 @@ func TestParallelRejectsCrossShardPrefix(t *testing.T) {
 	require.NoError(t, serial.Add([]byte{0x12}, value))
 	require.ErrorContains(t, serial.Add([]byte{0x12, 0x80}, value), "not prefix-free")
 	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12}, value))
-	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12, 0x80}, value))
-	root, err := parallel.RootHash()
-	require.Error(t, err, "parallel accepted prefix-related keys 12 and 1280: root=%x, err=%v", root, err)
+	require.ErrorContains(t, parallel.AddContext(t.Context(), []byte{0x12, 0x80}, value), "not prefix-free")
+}
+
+func TestParallelRejectsEqualKeys(t *testing.T) {
+	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 2)
+	require.NoError(t, err)
+	value := streamRootValue(1)
+	require.NoError(t, parallel.AddContext(t.Context(), []byte{0x12}, value))
+	require.ErrorContains(t, parallel.AddContext(t.Context(), []byte{0x12}, value), "not strictly ascending")
 }
 
 func TestParallelBufferReuse(t *testing.T) {
@@ -320,6 +326,7 @@ func TestParallelStreamRootWorkerErrorReachesProducer(t *testing.T) {
 	if err := builder.AddContext(ctx, key, value); err != nil {
 		t.Fatal(err)
 	}
+	builder.hasShard = false
 	if err := builder.AddContext(ctx, key, value); err != nil {
 		t.Fatal(err)
 	}

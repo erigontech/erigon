@@ -699,7 +699,7 @@ func linkSnapshotsExceptCommitmentWithSalt(srcRoot, dstRoot string, preserveSalt
 		if !d.Type().IsRegular() {
 			return fmt.Errorf("commitment rebuild: %s is not a regular file; the output can only be staged from a tree the hardlink walk can reproduce", p)
 		}
-		if isCommitmentFileName(d.Name()) || isPBTCommitmentSnapshotFile(p) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
+		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
 			return nil
 		}
 		if dstInfo, err := os.Lstat(dst); err == nil {
@@ -724,11 +724,6 @@ func linkSnapshotsExceptCommitmentWithSalt(srcRoot, dstRoot string, preserveSalt
 		return nil
 	})
 	return linked, err
-}
-
-func isPBTCommitmentSnapshotFile(path string) bool {
-	parsed, _, ok := snaptype.ParseFileName(filepath.Dir(path), filepath.Base(path))
-	return ok && (parsed.TypeString == kv.CommitmentDomain.String() || parsed.TypeString == kv.CommitmentBinDomain.String())
 }
 
 // integration commitment rebuild

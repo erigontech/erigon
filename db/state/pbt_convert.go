@@ -146,9 +146,6 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, err
 	}
 	defer domains.Close()
-	if limits.DetachMDBXReads != nil {
-		domains.SetCommitmentPrevValueReadCounter(limits.DetachMDBXReads)
-	}
 	if opts.Resume != nil {
 		baseTxNum := opts.Resume.BaseTxNum
 		baseFiles := opts.TargetAggregator.BeginFilesRo()
@@ -193,7 +190,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		if rootErr != nil {
 			return rootErr
 		}
-		returnErr := ForEachPBinLeafWithWorkers(sourceFiles, opts.SourceTx, true, workers, opts.SourceWorkerRuns, func(leaf PBinLeaf) error {
+		returnErr := ForEachPBinLeafWithWorkers(ctx, sourceFiles, opts.SourceTx, true, workers, opts.SourceWorkerRuns, func(leaf PBinLeaf) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

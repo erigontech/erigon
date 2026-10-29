@@ -137,15 +137,15 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 		return err
 	}
 	bits := bytesToBits(key)
-	if b.hasShard && bytes.Compare(key, b.prevKey) < 0 {
+	if b.hasShard && bytes.Compare(key, b.prevKey) <= 0 {
 		b.err = errors.New("eip8297: stream keys are not strictly ascending")
 		return b.err
 	}
-	if b.hasShard && !bytes.Equal(key, b.prevKey) {
+	if b.hasShard {
 		commonBits := streamRootCommonPrefix(b.prevBits, bits)
 		if commonBits == len(b.prevBits) || commonBits == len(bits) {
 			b.err = errors.New("eip8297: stream keys are not prefix-free")
-			return nil
+			return b.err
 		}
 	}
 	shard := streamRootShard(key)

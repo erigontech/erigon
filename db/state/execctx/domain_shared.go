@@ -245,8 +245,7 @@ type SharedDomains struct {
 	metrics           kvmetrics.DomainMetrics
 	nonExecMetrics    kvmetrics.DomainMetrics
 
-	commitmentNanos          atomic.Int64
-	commitmentPrevValueReads *atomic.Uint64
+	commitmentNanos atomic.Int64
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -2049,10 +2048,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	return sd.domainPut(domain, roTx, k, v, txNum, prevVal)
 }
 
-func (sd *SharedDomains) SetCommitmentPrevValueReadCounter(counter *atomic.Uint64) {
-	sd.commitmentPrevValueReads = counter
-}
-
 func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	if err := sd.ensureDomainWritable(roTx, domain); err != nil {
 		return err
@@ -2095,9 +2090,6 @@ func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, k 
 		sd.sdCtx.TouchKey(domain, ks, v)
 	}
 	if prevVal == nil {
-		if domain == sd.commitmentDomainValue() && sd.commitmentPrevValueReads != nil {
-			sd.commitmentPrevValueReads.Add(1)
-		}
 		var err error
 		prevVal, _, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {

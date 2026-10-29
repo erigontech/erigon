@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -462,14 +465,17 @@ func TestPBinResumeZeroStartPreservesUntouchedBaseRows(t *testing.T) {
 }
 
 func TestPBinResumeNonzeroSpanPreservesUntouchedBaseRows(t *testing.T) {
-	pbinCheckResumeRows(t, 1, 8, 16, 24, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 12}, {12, 16}})
+	covered := pbinCheckResumeRows(t, 1, 8, 16, 24, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 12}, {12, 16}})
+	for _, base := range []string{"-commitment.8-12.kv", "-commitment.8-12.kvi", "-commitment.12-16.kv", "-commitment.12-16.kvi"} {
+		require.True(t, slices.ContainsFunc(covered, func(path string) bool { return strings.HasSuffix(path, base) }), "base file %s under output range [8,24) must exist before the resume", base)
+	}
 }
 
 func TestPBinResumeAtRangeLastStamp(t *testing.T) {
 	pbinCheckResumeRows(t, 1, 8, 23, 25, [][2]uint64{{0, 8}, {8, 24}, {24, 32}}, [][2]uint64{{0, 8}, {8, 24}})
 }
 
-func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, sourceRanges, baseMerges [][2]uint64) {
+func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, sourceRanges, baseMerges [][2]uint64) []string {
 	t.Helper()
 	selectPBinLeafStreamHash(t)
 	baseDB, baseAgg := testDbAndAggregatorv3(t, step)
@@ -505,7 +511,18 @@ func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, 
 		require.NoError(t, targetAgg.MergePBinRange(t.Context(), kv.CommitmentDomain, bounds[0], bounds[1]))
 	}
 	freshRoot := convertPBinAt(t, freshDB, freshAgg, endTx)
+	covered := pbinFilesInsideRanges(t, targetAgg, sourceRanges)
+	var aggregatorMerges atomic.Int32
+	targetAgg.OnFilesChange(func([]string) { aggregatorMerges.Add(1) }, func([]string) {})
 	resumeRoot := resumePBinAtWithBase(t, sourceDB, sourceAgg, targetDB, targetAgg, baseTx, endTx, sourceRanges)
+	require.Zero(t, aggregatorMerges.Load(), "each resume range must be merged once, inside the range writer")
+	for _, path := range covered {
+		_, err := os.Stat(path)
+		require.ErrorIs(t, err, os.ErrNotExist, "base file %s under a merged resume range must be removed", filepath.Base(path))
+	}
+	leftovers, err := filepath.Glob(filepath.Join(targetAgg.Dirs().Tmp, "pbin-resume-delta-*"))
+	require.NoError(t, err)
+	require.Empty(t, leftovers, "resume delta files must be removed after the merge")
 	resumeRows := pbinCommitmentRows(t, targetAgg)
 	freshRows := pbinCommitmentRows(t, freshAgg)
 	delete(resumeRows, string(commitment.KeyCommitmentState))
@@ -513,6 +530,32 @@ func pbinCheckResumeRows(t *testing.T, step, initialFrom, baseTx, endTx uint64, 
 	require.Equal(t, freshRoot, resumeRoot)
 	require.Equal(t, len(freshRows), len(resumeRows), "resume spanning range must preserve untouched base rows")
 	require.Equal(t, freshRows, resumeRows)
+	return covered
+}
+
+func pbinFilesInsideRanges(t *testing.T, agg *state.Aggregator, ranges [][2]uint64) []string {
+	t.Helper()
+	pattern := regexp.MustCompile(`-commitment\.(\d+)-(\d+)\.(kv|kvi|bt|kvei)$`)
+	entries, err := os.ReadDir(agg.Dirs().SnapDomain)
+	require.NoError(t, err)
+	var paths []string
+	for _, entry := range entries {
+		match := pattern.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+		from, err := strconv.ParseUint(match[1], 10, 64)
+		require.NoError(t, err)
+		to, err := strconv.ParseUint(match[2], 10, 64)
+		require.NoError(t, err)
+		from, to = from*agg.StepSize(), to*agg.StepSize()
+		for _, r := range ranges {
+			if r[0] <= from && to <= r[1] && (r[0] != from || r[1] != to) {
+				paths = append(paths, filepath.Join(agg.Dirs().SnapDomain, entry.Name()))
+			}
+		}
+	}
+	return paths
 }
 
 func TestPBinResumeZeroStartDropsDeletionTombstones(t *testing.T) {

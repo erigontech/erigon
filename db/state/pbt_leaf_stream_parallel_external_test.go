@@ -18,14 +18,72 @@ package state_test
 
 import (
 	"bytes"
+	"encoding/binary"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
+
+func TestForEachPBinLeafWithWorkersStopsSiblingsOnError(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	const valid = 20000
+	accounts := make([]pbinLeafStreamAccount, valid)
+	for i := range accounts {
+		address := make([]byte, length.Addr)
+		address[0] = 0xff
+		binary.BigEndian.PutUint32(address[length.Addr-4:], uint32(i+1))
+		accounts[i] = pbinLeafStreamAccount{address: address, nonce: 1, balance: 1}
+	}
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, accounts)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer sd.Close()
+	corrupt := make([]byte, length.Addr)
+	corrupt[length.Addr-1] = 1
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, corrupt, []byte{0, 0, 0}, 1, nil))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+
+	previousHandler := log.Root().GetHandler()
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat())))
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	err = state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, 2, nil, func(state.PBinLeaf) error { return nil })
+	require.ErrorContains(t, err, "pbin leaf stream: account")
+
+	donePattern := regexp.MustCompile(`done=(\d+)`)
+	var walked uint64
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if !strings.Contains(line, `phase="source leaf walk"`) {
+			continue
+		}
+		if done := donePattern.FindStringSubmatch(line); len(done) == 2 {
+			value, parseErr := strconv.ParseUint(done[1], 10, 64)
+			require.NoError(t, parseErr)
+			walked = max(walked, value)
+		}
+	}
+	require.Less(t, walked, uint64(valid), "workers must stop once one worker fails")
+}
 
 func TestForEachPBinLeafWithWorkersMatchesSerial(t *testing.T) {
 	selectPBinLeafStreamHash(t)
@@ -44,7 +102,7 @@ func TestForEachPBinLeafWithWorkersMatchesSerial(t *testing.T) {
 		at := agg.BeginFilesRo()
 		runs := new(atomic.Int32)
 		var parallel []state.PBinLeaf
-		err := state.ForEachPBinLeafWithWorkers(at, nil, true, workers, runs, func(leaf state.PBinLeaf) error {
+		err := state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, workers, runs, func(leaf state.PBinLeaf) error {
 			parallel = append(parallel, state.PBinLeaf{Key: bytes.Clone(leaf.Key), Value: bytes.Clone(leaf.Value), Stamp: leaf.Stamp})
 			return nil
 		})

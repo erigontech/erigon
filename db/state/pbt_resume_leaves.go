@@ -64,7 +64,7 @@ func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOp
 	}
 	collectors := make([]*etl.Collector, workers)
 	for worker := range workers {
-		collectors[worker] = etl.NewCollector(fmt.Sprintf("pbin-resume-leaves-%d", worker), at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true).MergeInBackground(true)
+		collectors[worker] = etl.NewCollector(fmt.Sprintf("pbin-resume-leaves-%d", worker), at.Dirs().Tmp, etl.NewSortableBuffer(pbinLeafWorkerBuffer(workers)), log.Root()).MergeInBackground(true)
 	}
 	defer func() {
 		for _, collector := range collectors {

@@ -19,11 +19,11 @@ package state
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -209,9 +209,8 @@ func (p *PBTProgress) log(done uint64) {
 }
 
 func pbtHeapBytes() uint64 {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	return stats.HeapAlloc
+	alloc, _ := dbg.MemUsage()
+	return alloc
 }
 
 func pbtDirSize(root string) uint64 {
