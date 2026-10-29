@@ -219,6 +219,15 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
+	t.Run("a lone reader is flagged only by a write of a cell it read", func(t *testing.T) {
+		be := newDetExecutor(t, 4)
+		be.revalidate = map[int]bool{}
+		read(be, 2, 0, slot1)
+		be.markReadersDirty(1, newWS().stor(addr, slot2, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
 	t.Run("self-destruct flags every later reader of the address", func(t *testing.T) {
 		be := newBE()
 		be.markReadersDirty(1, newWS().selfDestruct(addr, writer, true).build())

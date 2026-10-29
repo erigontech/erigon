@@ -2975,10 +2975,16 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 
 // pathReaders holds the ascending task indices that read one address: all of them, and per
 // AccountPath (StoragePath holds the readers of any slot).
+// pathReaders builds byPath only once a second task reads the address: most addresses have one
+// reader, and all (a superset) serves it; firstPaths remembers that reader's paths until then.
 type pathReaders struct {
-	all    []int
-	byPath [state.CreateContractPath + 1][]int
+	all        []int
+	firstPaths uint16
+	byPath     *[state.CreateContractPath + 1][]int
 }
+
+// firstPaths holds one bit per AccountPath.
+const _ = uint16(1 << state.CreateContractPath)
 
 // indexReads records taskIdx as a reader of every (address, path) in rs. Append-only across
 // incarnations; the DependsOn re-check filters stale entries, so over-inclusion
@@ -2991,6 +2997,22 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 			be.readerByAddr[a] = pr
 		}
 		pr.all = insertSorted(pr.all, taskIdx)
+		if pr.byPath == nil && len(pr.all) == 1 {
+			pr.firstPaths |= 1 << p
+			return true
+		}
+		if pr.byPath == nil {
+			pr.byPath = new([state.CreateContractPath + 1][]int)
+			first := pr.all[0]
+			if first == taskIdx {
+				first = pr.all[1]
+			}
+			for fp := range pr.byPath {
+				if pr.firstPaths&(1<<fp) != 0 {
+					pr.byPath[fp] = []int{first}
+				}
+			}
+		}
 		pr.byPath[p] = insertSorted(pr.byPath[p], taskIdx)
 		return true
 	})
@@ -3010,7 +3032,7 @@ func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
 	if pr == nil {
 		return nil
 	}
-	if h.Path.AffectsAccountLifecycle() {
+	if h.Path.AffectsAccountLifecycle() || pr.byPath == nil {
 		return pr.all
 	}
 	return pr.byPath[h.Path]
