@@ -447,6 +447,8 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	}
 
 	body := executionPayload.Body()
+	// Execution payloads carry typed transactions without an RLP string wrapper.
+	// DecodeTransactions also accepts the wrapped form used in stored block bodies.
 	if slices.ContainsFunc(body.Transactions, types.TypedTransactionMarshalledAsRlpString) {
 		return nil, errors.New("typed txn marshalled as RLP string")
 	}

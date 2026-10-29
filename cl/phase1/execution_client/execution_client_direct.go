@@ -82,6 +82,8 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	body := payload.Body()
+	// Execution payloads carry typed transactions without an RLP string wrapper.
+	// DecodeTransactions also accepts the wrapped form used in stored block bodies.
 	if slices.ContainsFunc(body.Transactions, types.TypedTransactionMarshalledAsRlpString) {
 		return PayloadStatusInvalidated, errors.New("typed txn marshalled as RLP string")
 	}
