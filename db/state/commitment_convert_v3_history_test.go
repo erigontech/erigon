@@ -311,3 +311,38 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
 	}
 }
+
+func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
+	const stepSize, steps = 4, 8
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	next := uint64(1)
+	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+	roots := map[uint64][]byte{}
+	for txNum := range uint64(stepSize * steps) {
+		putAccount(addrs[txNum%2], txNum)
+		if txNum == 0 {
+			putAccount(addrs[1], txNum)
+		}
+		root, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+		roots[txNum] = root
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	for _, txNum := range slices.Sorted(maps.Keys(roots)) {
+		if txNum >= stepSize*(steps-1) {
+			break
+		}
+		root, err := state.DebugCommitmentV3RootAsOf(t.Context(), agg, txNum+1)
+		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
+	}
+}

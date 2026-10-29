@@ -446,22 +446,36 @@ func LegacyRootExtension(value []byte) (ext, hash []byte, err error) {
 	return ext, hash, nil
 }
 
-func (c *LegacyConverter) EmitRootExtension(stateValue []byte, emit LegacyEmitFunc) error {
+func (c *LegacyConverter) RootExtensionRecord(stateValue []byte) (key, record []byte, err error) {
+	c.rootKey = nodeKey(planeAccount, nil, nil, c.rootKey[:0])
+	if len(stateValue) == 0 {
+		return c.rootKey, nil, nil
+	}
 	ext, hash, err := LegacyRootExtension(stateValue)
 	if err != nil || len(ext) == 0 {
-		return err
+		return c.rootKey, nil, err
 	}
 	if err := checkNibbles(ext); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if len(ext) > 63 {
-		return fmt.Errorf("%w: root extension of %d nibbles", errLegacyState, len(ext))
+		return nil, nil, fmt.Errorf("%w: root extension of %d nibbles", errLegacyState, len(ext))
 	}
 	resetNode(&c.root, ext, planeAccount)
 	appendStoredChild(&c.root, int(ext[0]), hash, nil)
-	c.rootKey = nodeKey(planeAccount, nil, nil, c.rootKey[:0])
 	c.rootOut = encodeRecord(&c.root, 0, c.rootOut[:0])
-	return emit(c.rootKey, c.rootOut, LegacySynthesized)
+	return c.rootKey, c.rootOut, nil
+}
+
+func (c *LegacyConverter) EmitRootExtension(stateValue []byte, emit LegacyEmitFunc) error {
+	key, record, err := c.RootExtensionRecord(stateValue)
+	if err != nil {
+		return err
+	}
+	if len(record) != 0 {
+		return emit(key, record, LegacySynthesized)
+	}
+	return nil
 }
 
 func ConvertLegacyState(value []byte) ([]byte, error) {

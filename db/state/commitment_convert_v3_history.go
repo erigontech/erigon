@@ -774,7 +774,25 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 							if err != nil {
 								return fmt.Errorf("state after txNum %d: %w", txNum, err)
 							}
-							if stateRootsDiffer(before, afterState) {
+							rootKey, beforeExt, err := conv.RootExtensionRecord(value(i))
+							if err != nil {
+								return err
+							}
+							beforeExt = bytes.Clone(beforeExt)
+							_, afterExt, err := conv.RootExtensionRecord(next)
+							if err != nil {
+								return err
+							}
+							if !bytes.Equal(beforeExt, afterExt) {
+								kind := v3.LegacySynthesized
+								if len(beforeExt) == 0 {
+									kind = v3.LegacyTombstone
+								}
+								if emitErr := emit(rootKey, txNum, beforeExt, kind); emitErr != nil {
+									return emitErr
+								}
+							}
+							if len(beforeExt) == 0 && len(afterExt) == 0 && stateRootsDiffer(before, afterState) {
 								if err := childChanged(rootLegacyKey, txNum, true); err != nil {
 									return err
 								}
