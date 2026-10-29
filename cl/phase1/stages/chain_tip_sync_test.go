@@ -143,8 +143,11 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	epochsBehindAtTipPublished.headUnpublished = false
 	epochsBehindAtTipNoPeers := epochsBehindAtTip
 	epochsBehindAtTipNoPeers.peers = 0
+	epochsBehindAtTipNoPeers.hasHTTPFallback = true
 	epochsBehindAtTipNoPeersPublished := epochsBehindAtTipNoPeers
 	epochsBehindAtTipNoPeersPublished.headUnpublished = false
+	epochsBehindAtTipNoPeersPublishedNoHTTP := epochsBehindAtTipNoPeersPublished
+	epochsBehindAtTipNoPeersPublishedNoHTTP.hasHTTPFallback = false
 
 	tests := []struct {
 		name              string
@@ -170,6 +173,7 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
 		{name: "fork choice, epochs behind at forward sync tip", stage: ForkChoice, args: epochsBehindAtTip, want: ChainTipSync},
 		{name: "fork choice, epochs behind at forward sync tip, no peers, head published", stage: ForkChoice, args: epochsBehindAtTipNoPeersPublished, want: ForwardSync},
+		{name: "fork choice, epochs behind at forward sync tip, no peers, no HTTP fallback, head published", stage: ForkChoice, args: epochsBehindAtTipNoPeersPublishedNoHTTP, want: CleanupAndPruning},
 		// CleanupAndPruning reruns ForkChoice for a block that gossip imported during either stage.
 		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: CleanupAndPruning},
 		{name: "cleanup and pruning at tip, head unpublished", stage: CleanupAndPruning, args: atTip, want: ForkChoice},
