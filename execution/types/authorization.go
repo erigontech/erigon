@@ -81,14 +81,14 @@ func (ath *Authorization) RecoverSigner() (common.Address, error) {
 
 const authsPerRecoverWorker = 32
 
-// RecoverSigners is RecoverSigner for each auth of chainID or chain 0, on several goroutines for a long list;
-// other auths are left zero.
+// RecoverSigners is RecoverSigner for each auth of chainID or chain 0 (a nil chainID is chain 0), on several
+// goroutines for a long list; other auths are left zero.
 func RecoverSigners(auths []Authorization, chainID *uint256.Int) ([]common.Address, []error) {
 	signers, errs := make([]common.Address, len(auths)), make([]error, len(auths))
 	var next atomic.Int64
 	recoverNext := func() {
 		for i := int(next.Add(1) - 1); i < len(auths); i = int(next.Add(1) - 1) {
-			if auth := &auths[i]; auth.ChainID.IsZero() || auth.ChainID.Eq(chainID) {
+			if auth := &auths[i]; auth.ChainID.IsZero() || chainID != nil && auth.ChainID.Eq(chainID) {
 				signers[i], errs[i] = auth.RecoverSigner()
 			}
 		}
