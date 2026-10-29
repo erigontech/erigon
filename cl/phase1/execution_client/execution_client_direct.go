@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -81,6 +82,9 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	body := payload.Body()
+	if slices.ContainsFunc(body.Transactions, types.TypedTransactionMarshalledAsRlpString) {
+		return PayloadStatusInvalidated, errors.New("typed txn marshalled as RLP string")
+	}
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
 		// invalid block
