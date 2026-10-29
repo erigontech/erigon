@@ -248,6 +248,18 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 				touched[string(addr)] = struct{}{}
 				delete(live, string(addr))
 				entries = append(entries, Op{Key: addr, Delete: true})
+			case rng.Intn(24) == 0:
+				touched[string(addr)] = struct{}{}
+				if rng.Intn(2) == 0 {
+					entries = append(entries, Op{Key: addr, Delete: true})
+				}
+				wipe := accountOp(addr, RandomAccount(rng))
+				wipe.DeleteStorageSubtree = true
+				entries = append(entries, wipe)
+				for range 1 + rng.Intn(3) {
+					key := append(bytes.Clone(addr), Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots))...)
+					entries = append(entries, Op{Key: key, Storage: randomStorage(rng)})
+				}
 			default:
 				touched[string(addr)] = struct{}{}
 				if rng.Intn(4) == 0 {
