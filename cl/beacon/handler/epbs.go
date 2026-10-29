@@ -969,9 +969,6 @@ func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockR
 		rebuildCtx, cancel := context.WithTimeout(ctx, handlers.StreamDeadline)
 		defer cancel()
 		envelope, err = a.envelopeRebuilder.Rebuild(rebuildCtx, prepared)
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, slot, false, nil
-		}
 	}
 	return envelope, slot, false, err
 }

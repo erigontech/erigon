@@ -193,7 +193,7 @@ func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
 
 	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
 	assert.Nil(t, response)
-	assert.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
+	assert.Equal(t, http.StatusInternalServerError, beaconhttp.WrapEndpointError(err).Code)
 	assert.True(t, hasDeadline)
 	assert.True(t, deadlineWithinLimit)
 	assert.Zero(t, openDuringRebuild)
