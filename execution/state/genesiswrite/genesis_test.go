@@ -654,13 +654,14 @@ func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	for _, g := range []*types.Genesis{stale, genSpec} {
-		head, _ := genesiswrite.GenesisWithoutStateToBlock(g)
-		root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, g, tx, sd, head)
-		require.NoError(t, err)
-		ibs.Close()
-		if g == genSpec {
-			require.Equal(t, want.Root(), common.BytesToHash(root))
-		}
-	}
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(stale)
+	_, ibs, err = genesiswrite.ComputeGenesisCommitment(ctx, stale, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(genSpec)
+	root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genSpec, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+	require.Equal(t, want.Root(), common.BytesToHash(root))
 }
