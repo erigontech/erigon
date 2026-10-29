@@ -84,6 +84,23 @@ func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bo
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
+func TestMapFrameDiscardReasonToProto(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		want   txpoolproto.ImportResult
+	}{
+		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.FrameValidationUnavailable, txpoolproto.ImportResult_INTERNAL_ERROR},
+		{txpoolcfg.FrameStateChanged, txpoolproto.ImportResult_INTERNAL_ERROR},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			require.Equal(t, tc.want, mapDiscardReasonToProto(tc.reason))
+		})
+	}
+}
+
 func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	t.Parallel()
 
