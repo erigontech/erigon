@@ -90,7 +90,11 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
+	Exec3Parallel = EnvBool("EXEC3_PARALLEL", true)
+	// Exec3SerialMinTxs > 0 runs a lone non-BAL block of at least this many txs, averaging at most
+	// Exec3SerialMaxAvgGas each, on the serial executor.
+	Exec3SerialMinTxs    = EnvInt("EXEC3_SERIAL_MIN_TXS", 0)
+	Exec3SerialMaxAvgGas = EnvInt("EXEC3_SERIAL_MAX_AVG_GAS", 100_000)
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
