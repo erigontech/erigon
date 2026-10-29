@@ -882,7 +882,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		// 2. authority recover
 		var signer common.Address
 		var err error
-		// The pre-pass may publish mid-list: each auth checks again, so recovery stops once it lands.
+		// The pre-pass may start this list mid-loop: each auth checks again and waits for it from then on.
 		if r := st.msg.RecoveredAuthorities(); r != nil {
 			signer, err = r.Signers[i], r.Errs[i]
 		} else {
