@@ -57,6 +57,7 @@ type ForwardBeaconDownloader struct {
 	minSlot               uint64 // earliest requestable slot (e.g. checkpoint anchor)
 	rpc                   *rpc.BeaconRpcP2P
 	requestBlocksByRange  func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error)
+	peerCount             func() (uint64, error)
 	banPeer               func(string)
 	process               ProcessFn
 	currentSlot           func() uint64
@@ -89,6 +90,7 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, beac
 	}
 	if rpc != nil {
 		f.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
+		f.peerCount = rpc.Peers
 		f.banPeer = rpc.BanPeer
 	}
 	return f
@@ -480,7 +482,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						}
 						if hadGloasPending && completedReqCount == reqCount {
 							lastSlot := lastSlotInRange(reqSlot, reqCount)
-							if f.confirmEmptyRange(peerId, lastSlot) != nil {
+							singlePeer := false
+							if f.peerCount != nil {
+								peerCount, err := f.peerCount()
+								singlePeer = err == nil && peerCount < 2
+							}
+							if singlePeer || f.confirmEmptyRange(peerId, lastSlot) != nil {
 								emptyResponse = &emptyRangeResult{
 									lastSlot: lastSlot,
 									apply:    func() { f.advanceGloasScanPast(lastSlot) },
