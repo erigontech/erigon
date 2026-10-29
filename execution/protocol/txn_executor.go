@@ -126,7 +126,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
-	RecoveredAuthorities() *types.RecoveredAuthorities
+	RecoverAuthorities(chainID *uint256.Int) *types.RecoveredAuthorities
 	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -870,7 +870,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
-	recovered := st.msg.RecoveredAuthorities()
+	recovered := st.msg.RecoverAuthorities(chainID)
 	for i := range auths {
 		auth := &auths[i]
 

@@ -906,7 +906,7 @@ func (m callMsg) DynamicFeeArgs() bool                  { return false }
 func (m callMsg) IsFree() bool                          { return false }
 func (m callMsg) SetIsFree(_ bool)                      {}
 
-func (m callMsg) RecoveredAuthorities() *types.RecoveredAuthorities { return nil }
+func (m callMsg) RecoverAuthorities(*uint256.Int) *types.RecoveredAuthorities { return nil }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }
