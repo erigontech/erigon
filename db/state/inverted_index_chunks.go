@@ -32,14 +32,14 @@ import (
 )
 
 // The values table of an inverted index is DupSort: key -> chunks of ascending txNums.
-// A chunk is BE8(max txNum) followed by native-endian uint16 offsets (txNum - min) of every txNum but min,
-// so min = max - last offset, the dups of a key sort by their max and SeekBothRange(key, BE8(t))
+// A chunk is BE8(max txNum) followed by native-endian uint16 deltas (txNum - min) of every txNum but min,
+// so min = max - last delta, the dups of a key sort by their max and SeekBothRange(key, BE8(t))
 // finds the chunk with the first txNum >= t. A one-txNum chunk is the 8-byte value of the format
-// before chunking. Offsets use the native byte order because chaindata is not portable across
+// before chunking. Deltas use the native byte order because chaindata is not portable across
 // byte orders anyway, so readers can use them as []uint16.
 
-// iiChunkOffsetsLimit keeps a chunk far below the inline value limit of a 4 KB page.
-const iiChunkOffsetsLimit = 512
+// iiChunkDeltasLimit keeps a chunk far below the inline value limit of a 4 KB page.
+const iiChunkDeltasLimit = 512
 
 func appendIIChunk(dst []byte, txNums []uint64) []byte {
 	dst = binary.BigEndian.AppendUint64(dst, txNums[len(txNums)-1])
@@ -51,17 +51,17 @@ func appendIIChunk(dst []byte, txNums []uint64) []byte {
 
 // iiChunk reads the txNums of a chunk in place.
 type iiChunk struct {
-	min  uint64
-	offs []byte
+	min    uint64
+	deltas []byte
 }
 
 func parseIIChunk(v []byte) (iiChunk, error) {
 	if len(v) < 8 || len(v)%2 != 0 {
 		return iiChunk{}, fmt.Errorf("inverted index chunk has bad length: %x", v)
 	}
-	c := iiChunk{min: binary.BigEndian.Uint64(v), offs: v[8:]}
-	if len(c.offs) > 0 {
-		last := uint64(binary.NativeEndian.Uint16(c.offs[len(c.offs)-2:]))
+	c := iiChunk{min: binary.BigEndian.Uint64(v), deltas: v[8:]}
+	if len(c.deltas) > 0 {
+		last := uint64(binary.NativeEndian.Uint16(c.deltas[len(c.deltas)-2:]))
 		if last > c.min {
 			return iiChunk{}, fmt.Errorf("inverted index chunk corrupted: %x", v)
 		}
@@ -70,13 +70,13 @@ func parseIIChunk(v []byte) (iiChunk, error) {
 	return c, nil
 }
 
-func (c iiChunk) len() int { return 1 + len(c.offs)/2 }
+func (c iiChunk) len() int { return 1 + len(c.deltas)/2 }
 
 func (c iiChunk) at(i int) uint64 {
 	if i == 0 {
 		return c.min
 	}
-	return c.min + uint64(binary.NativeEndian.Uint16(c.offs[2*i-2:]))
+	return c.min + uint64(binary.NativeEndian.Uint16(c.deltas[2*i-2:]))
 }
 
 // search returns the index of the first txNum >= t, or len() if there is none.
@@ -101,7 +101,7 @@ func decodeIIChunk(dst []uint64, v []byte) ([]uint64, error) {
 
 // iiChunkFit returns how many leading txNums fit into one chunk.
 func iiChunkFit(txNums []uint64) int {
-	n := min(len(txNums), 1+iiChunkOffsetsLimit/2)
+	n := min(len(txNums), 1+iiChunkDeltasLimit/2)
 	for i := 1; i < n; i++ {
 		if txNums[i]-txNums[0] > math.MaxUint16 {
 			return i

@@ -1744,7 +1744,7 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 	var prevKey []byte
 	var prevMax uint64
 	require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
-		require.LessOrEqual(t, len(v), 8+iiChunkOffsetsLimit)
+		require.LessOrEqual(t, len(v), 8+iiChunkDeltasLimit)
 		txNums, err := decodeIIChunk(nil, v)
 		require.NoError(t, err)
 		require.Equal(t, binary.BigEndian.Uint64(v), txNums[len(txNums)-1], "chunk prefix is its max")
@@ -1981,10 +1981,10 @@ func TestInvertedIndexPrefetchOncePerKey(t *testing.T) {
 func TestInvertedIndexChunkLayout(t *testing.T) {
 	v := appendIIChunk(nil, []uint64{1000, 1003, 1010, 1500})
 	want := binary.BigEndian.AppendUint64(nil, 1500)
-	for _, off := range []uint16{3, 10, 500} {
-		want = binary.NativeEndian.AppendUint16(want, off)
+	for _, d := range []uint16{3, 10, 500} {
+		want = binary.NativeEndian.AppendUint16(want, d)
 	}
-	require.Equal(t, want, v, "BE8(max) || native-endian uint16 offsets from min, min implicit")
+	require.Equal(t, want, v, "BE8(max) || native-endian uint16 deltas from min, min implicit")
 	txNums, err := decodeIIChunk(nil, v)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{1000, 1003, 1010, 1500}, txNums)
@@ -1996,10 +1996,10 @@ func TestInvertedIndexChunkLayout(t *testing.T) {
 	for i := range dense {
 		dense[i] = uint64(i)
 	}
-	require.Equal(t, 1+iiChunkOffsetsLimit/2, iiChunkFit(dense))
+	require.Equal(t, 1+iiChunkDeltasLimit/2, iiChunkFit(dense))
 
 	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 1, 2, 0})
-	require.Error(t, err, "offset above max")
+	require.Error(t, err, "delta above max")
 	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 9, 2})
-	require.Error(t, err, "odd offsets length")
+	require.Error(t, err, "odd deltas length")
 }
