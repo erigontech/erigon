@@ -27,8 +27,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
+	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -93,6 +95,12 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 		return newEngine(ctx, chainConfig, logger)
 	}
 	switch consensusCfg := config.(type) {
+	case *chain.CliqueConfig:
+		db, err := node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "clique", readonly, logger)
+		if err != nil {
+			panic(err)
+		}
+		eng = clique.New(chainConfig, chainspec.CliqueSnapshot, db, logger)
 	case *ethashcfg.Config:
 		switch consensusCfg.PowMode {
 		case ethashcfg.ModeFake:
@@ -147,6 +155,8 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 	var consensusConfig any
 
 	switch {
+	case chainConfig.Clique != nil:
+		consensusConfig = chainConfig.Clique
 	case chainConfig.Aura != nil:
 		consensusConfig = chainConfig.Aura
 	case chainConfig.L2 != nil:
