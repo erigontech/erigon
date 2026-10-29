@@ -179,19 +179,29 @@ func TestBuildFilesRetriesStepWithoutBatchWhenBatchedBuildFails(t *testing.T) {
 			obstacle := filepath.Join(agg.dirs.Tmp, filepath.Base(d.History.vNewFilePath(0, 1))+".idt")
 			require.NoError(t, os.Mkdir(obstacle, 0o755))
 			staged := filepath.Join(agg.dirs.Tmp, filepath.Base(d.kvNewFilePath(1, 2))+".idt")
+			stagedLater := filepath.Join(agg.dirs.Tmp, filepath.Base(d.kvNewFilePath(2, 3))+".idt")
 			var attempts atomic.Int32
-			var stagedAtRetry atomic.Bool
+			var stagedAtRetry, stagedAfterRetry atomic.Bool
 			agg.SetMaintenanceObserver(func(_ context.Context, event MaintenanceEvent) {
-				if event.Point == MaintenanceBuildStarted && attempts.Add(1) == 2 {
+				if event.Point != MaintenanceBuildStarted {
+					return
+				}
+				switch attempts.Add(1) {
+				case 2:
 					_, err := os.Stat(staged)
 					stagedAtRetry.Store(err == nil)
 					_ = dir.RemoveAll(obstacle)
+				case 3:
+					_, err := os.Stat(stagedLater)
+					stagedAfterRetry.Store(err == nil)
 				}
 			})
 
 			build(t, agg, asTemporalRoDB(db))
 			require.GreaterOrEqual(t, agg.EndTxNumMinimax(), uint64(16))
 			require.False(t, stagedAtRetry.Load(), "batch must be closed before the single-step retry")
+			require.GreaterOrEqual(t, attempts.Load(), int32(3))
+			require.False(t, stagedAfterRetry.Load(), "batching must stay off after a batched build failure")
 		})
 	}
 }

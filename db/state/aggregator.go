@@ -1325,7 +1325,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 			}
 			err := a.buildFiles(ctx, db, step, finalityCtx, nil, batch)
 			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
 				batch.Close()
 				batch, batching = nil, false
 				err = a.buildFiles(ctx, db, step, finalityCtx, nil, nil)
@@ -2462,7 +2462,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}
 			err := a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch)
 			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
 				batch.Close()
 				batch, batching = nil, false
 				err = a.buildFiles(a.ctx, db, step, finalityCtx, fin, nil)
