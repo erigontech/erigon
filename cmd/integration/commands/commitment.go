@@ -433,7 +433,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		if err := rwTx.Commit(); err != nil {
 			return err
 		}
-		if !withHistory {
+		if !withHistory && !clearCommitment {
 			if err := rawdbreset.ResetExec(ctx, db); err != nil {
 				return err
 			}
