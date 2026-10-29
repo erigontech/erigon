@@ -1,17 +1,18 @@
 package state
 
 import (
-	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -319,20 +320,18 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 // seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
 // list is validated, so its accounts, slots and changes are in increasing order.
 func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
-	address := addr.Value()
-	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
-	if i == len(vm.bal) || vm.bal[i].Address != address {
+	i, ok := slices.BinarySearchFunc(vm.bal, addr.Value(), func(a types.AccountChanges, t common.Address) int { return a.Address.Cmp(t) })
+	if !ok {
 		return uint256.Int{}, false
 	}
 	slots := vm.bal[i].StorageChanges
-	j := sort.Search(len(slots), func(j int) bool { return slots[j].Slot.Cmp(key) >= 0 })
-	if j == len(slots) || slots[j].Slot.Cmp(key) != 0 {
+	j, ok := slices.BinarySearchFunc(slots, key, func(s types.SlotChanges, k accounts.StorageKey) int { return s.Slot.Cmp(k) })
+	if !ok {
 		return uint256.Int{}, false
 	}
 	changes := slots[j].Changes
-	index := uint32(txIdx + 1)
-	k := sort.Search(len(changes), func(k int) bool { return changes[k].Index >= index })
-	if k == len(changes) || changes[k].Index != index {
+	k, ok := slices.BinarySearchFunc(changes, uint32(txIdx+1), func(c *types.StorageChange, t uint32) int { return cmp.Compare(c.Index, t) })
+	if !ok {
 		return uint256.Int{}, false
 	}
 	return changes[k].Value, true
