@@ -550,6 +550,51 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 	}))
 }
 
+func TestForkChoiceWaitsForHeadIndicesBeforePublishing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, _, block, _ := newForwardSyncPersistenceFixture(t)
+		cfg.syncedData = cfg.syncedData.(*pausingHeadView).SyncedData
+		cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+		cfg.attestationDataProducer = noOpAttestationDataProducer{}
+		cfg.dirs = datadir.New(t.TempDir())
+		parentRoot := cfg.syncedData.HeadRoot()
+		require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), block, false, true, false))
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		head, _, err := cfg.forkChoice.GetHeadNode()
+		require.NoError(t, err)
+		require.Equal(t, common.Hash(root), head.Root)
+		require.Less(t, block.Version(), clparams.GloasVersion)
+		events := make(chan *beaconevents.EventStream, 16)
+		subscription := cfg.emitter.State().Subscribe(events)
+		defer subscription.Unsubscribe()
+		args := Args{hasDownloaded: true, peers: 1, seenSlot: block.Block.Slot, targetSlot: block.Block.Slot, headUnpublished: true}
+
+		require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, args), "missing indices are an expected wait")
+		require.Equal(t, parentRoot, cfg.syncedData.HeadRoot())
+		require.Empty(t, events, "do not publish the head before its indices exist")
+
+		stages := ConsensusClStages().Stages
+		cfg.forkChoiceRerunAt = time.Now()
+		require.Equal(t, CleanupAndPruning, stages[ForkChoice].TransitionFunc(cfg, args, nil))
+		require.Equal(t, SleepForSlot, stages[CleanupAndPruning].TransitionFunc(cfg, args, nil))
+		require.NoError(t, persistAcceptedBlock(t.Context(), cfg, block))
+		ctx, cancel := context.WithTimeout(t.Context(), 2*sleepForSlotRewakeInterval)
+		defer cancel()
+		require.NoError(t, stages[SleepForSlot].ActionFunc(ctx, log.New(), cfg, args), "retry before the next slot, including before Gloas")
+		require.Equal(t, ForkChoice, stages[SleepForSlot].TransitionFunc(cfg, args, nil))
+		require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, args))
+		require.Equal(t, common.Hash(root), cfg.syncedData.HeadRoot())
+		require.NotEmpty(t, events)
+		require.NoError(t, cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {
+			canonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, block.Block.Slot)
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(root), canonical)
+			return nil
+		}))
+	})
+}
+
 func TestPayloadAttributesStageOwnershipAtGloas(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	config.AltairForkEpoch = 0
@@ -774,7 +819,7 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 			err := db.Update(t.Context(), func(tx kv.RwTx) error {
 				return updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
 			})
-			require.Error(t, err, "canonical publication must wait for the pending block write")
+			require.ErrorIs(t, err, errBlockIndicesPending, "canonical publication must wait for the pending block write")
 			requireCanonical(root101a, root102a)
 
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {

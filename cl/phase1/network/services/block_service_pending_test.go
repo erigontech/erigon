@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -161,27 +163,15 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 			}
 
 			now := time.Now()
-			for _, delay := range []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second} {
-				viewsBefore := db.views
-				started := time.Now()
+			service.processScheduledBlock(t.Context(), root, job, now)
+			require.ErrorIs(t, job.lastAttempt.err, failure)
+			require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
+			if tc.interveningError != nil {
+				db.viewErr = nil
+				processing.err = tc.interveningError
 				service.processScheduledBlock(t.Context(), root, job, now)
-				require.ErrorIs(t, job.lastAttempt.err, failure)
-				require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
-				require.Equal(t, viewsBefore+1, db.views)
-				require.Equal(t, delay, job.retryDelay)
-				require.False(t, job.retryAfter.Before(started.Add(delay)), "backoff must start after the failed attempt")
-				require.False(t, job.retryAfter.After(time.Now().Add(delay)))
-				service.processScheduledBlock(t.Context(), root, job, job.retryAfter.Add(-time.Nanosecond))
-				require.Equal(t, viewsBefore+1, db.views, "storage retries must respect the backoff")
-				now = job.retryAfter
-				if tc.interveningError != nil {
-					db.viewErr = nil
-					processing.err = tc.interveningError
-					service.processScheduledBlock(t.Context(), root, job, now)
-					require.ErrorIs(t, job.lastAttempt.err, tc.interveningError)
-					db.viewErr = failure
-					processing.err = nil
-				}
+				require.ErrorIs(t, job.lastAttempt.err, tc.interveningError)
+				processing.err = nil
 			}
 			db.viewErr, db.updateErr = nil, nil
 			callsBefore := processing.calls.Load()
@@ -358,7 +348,6 @@ func TestPublishedBlockRetainsAcceptedWriteAfterExpiry(t *testing.T) {
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
 	require.ErrorIs(t, job.lastAttempt.err, failure)
 	require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
-	require.Equal(t, blockRetryInitialDelay, job.retryDelay)
 	_, accepted := processing.GetHeader(root)
 	require.True(t, accepted)
 
@@ -381,6 +370,79 @@ func TestPublishedBlockRetainsAcceptedWriteAfterExpiry(t *testing.T) {
 	require.Equal(t, int32(1), processing.calls.Load())
 	_, queued := service.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, queued)
+}
+
+type blockWriteOutageDB struct {
+	kv.RwDB
+	failing  atomic.Bool
+	attempts atomic.Int32
+}
+
+func (db *blockWriteOutageDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	db.attempts.Add(1)
+	if db.failing.Load() {
+		return errors.New("database unavailable")
+	}
+	return db.RwDB.Update(ctx, f)
+}
+
+func TestBlockServiceSharesStorageBackoffAcrossPendingWrites(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		db := &blockWriteOutageDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB)}
+		db.failing.Store(true)
+		service := &blockService{db: db, forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
+		var roots [][32]byte
+		for slot := uint64(1); slot <= 8; slot++ {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			roots = append(roots, root)
+			service.scheduleBlockForLaterProcessing(block, nil, false, true)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+		require.Equal(t, int32(1), db.attempts.Load(), "one failed write must delay all queued storage retries")
+
+		outageEnd := time.Now().Add(2 * blockJobExpiry)
+		for _, delay := range []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second} {
+			attempts := db.attempts.Load()
+			time.Sleep(delay - blockJobsIntervalTick)
+			synctest.Wait()
+			require.Equal(t, attempts, db.attempts.Load(), "all jobs must share the retry deadline")
+			time.Sleep(blockJobsIntervalTick)
+			synctest.Wait()
+			require.Equal(t, attempts+1, db.attempts.Load())
+		}
+		time.Sleep(time.Until(outageEnd))
+		synctest.Wait()
+		require.LessOrEqual(t, db.attempts.Load(), int32(35), "retry work must not grow with the number of retained blocks")
+		for _, root := range roots {
+			job := serviceJob(t, service, root)
+			job.mu.Lock()
+			pending := job.pendingBlockWrite
+			job.mu.Unlock()
+			require.NotNil(t, pending)
+		}
+
+		db.failing.Store(false)
+		time.Sleep(blockRetryMaxDelay + blockJobsIntervalTick)
+		synctest.Wait()
+		for _, root := range roots {
+			_, queued := service.blocksScheduledForLaterExecution.Load(root)
+			require.False(t, queued)
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+				require.NoError(t, err)
+				require.NotNil(t, slot)
+				return nil
+			}))
+		}
+	})
 }
 
 func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {
