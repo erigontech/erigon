@@ -3069,20 +3069,20 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		addr accounts.Address
 		path state.AccountPath
 	}
-	written := map[cell][]state.WriteHeader{}
+	written := map[cell]state.WriteHeader{}
 	for h := range ws.AllHeaders() {
 		c := cell{h.Address, h.Path}
-		if h.Path != state.StoragePath || len(written[c]) == 0 {
-			written[c] = append(written[c], h)
+		if _, ok := written[c]; !ok {
+			written[c] = h
 		}
 	}
-	for c, headers := range written {
-		for _, tx := range readersAbove(be.readersOf(headers[0]), writerTx) {
+	for c, h := range written {
+		for _, tx := range readersAbove(be.readersOf(h), writerTx) {
 			if be.revalidate[tx] {
 				continue
 			}
 			rs := be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex)
-			if c.path == state.StoragePath && rs.ReadsStorageWrittenBy(ws, c.addr) || c.path != state.StoragePath && rs.DependsOnAny(headers) {
+			if c.path == state.StoragePath && rs.ReadsStorageWrittenBy(ws, c.addr) || c.path != state.StoragePath && rs.DependsOn(h) {
 				be.revalidate[tx] = true
 			}
 		}

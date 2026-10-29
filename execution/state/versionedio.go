@@ -3272,11 +3272,6 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	return false
 }
 
-// DependsOnAny reports whether a write of any of headers can invalidate a read in s.
-func (s ReadSet) DependsOnAny(headers []WriteHeader) bool {
-	return slices.ContainsFunc(headers, s.DependsOn)
-}
-
 // ReadsStorageWrittenBy reports whether s read a slot of addr that ws writes.
 func (s ReadSet) ReadsStorageWrittenBy(ws *WriteSet, addr accounts.Address) bool {
 	return anyCommonKey(ws.storage[addr], s.storage[addr])
