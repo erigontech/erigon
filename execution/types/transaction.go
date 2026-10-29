@@ -413,6 +413,7 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	authorities      *atomic.Pointer[RecoveredAuthorities]
 	dynamicFeeArgs   bool
 
 	skipExecutionGasCap bool
@@ -461,6 +462,14 @@ func (m *Message) Nonce() uint64                   { return m.nonce }
 func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
+
+// RecoveredAuthorities is the tx's authorization list recovered ahead of execution, or nil.
+func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
+	if m.authorities == nil {
+		return nil
+	}
+	return m.authorities.Load()
+}
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }

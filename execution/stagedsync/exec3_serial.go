@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/holiman/uint256"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -51,9 +52,12 @@ type serialExecutor struct {
 	accumulator *shards.Accumulator
 }
 
-func warmTxsHashes(block *types.Block) {
+func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
 	for _, t := range block.Transactions() {
 		_ = t.Hash()
+		if sc, ok := t.(*types.SetCodeTransaction); ok {
+			sc.RecoverAuthorities(chainID)
+		}
 	}
 	_ = block.Hash()
 }
@@ -118,7 +122,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
-		go warmTxsHashes(b)
+		go warmTxsHashes(b, se.cfg.chainConfig.ChainID)
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()

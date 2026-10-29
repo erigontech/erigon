@@ -157,3 +157,30 @@ func TestRecoverSignersMatchesRecoverSigner(t *testing.T) {
 		}
 	}
 }
+
+func TestSetCodeTxRecoverAuthoritiesCaches(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := SignAuthorization(key, *uint256.NewInt(1), common.Address{1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := &SetCodeTransaction{Authorizations: []Authorization{auth}}
+	if tx.RecoveredAuthorities() != nil {
+		t.Fatal("authorities recovered before RecoverAuthorities")
+	}
+
+	tx.RecoverAuthorities(uint256.NewInt(1))
+	got := tx.RecoveredAuthorities()
+	if got == nil || got.Signers[0] != crypto.PubkeyToAddress(key.PublicKey) || got.Errs[0] != nil {
+		t.Fatalf("recovered %+v, want %v", got, crypto.PubkeyToAddress(key.PublicKey))
+	}
+	tx.RecoverAuthorities(uint256.NewInt(1))
+	if tx.RecoveredAuthorities() != got {
+		t.Error("second RecoverAuthorities replaced the cached result")
+	}
+}

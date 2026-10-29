@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -37,6 +38,27 @@ const DelegateDesignationCodeSize = 23
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
+	// authorities is filled ahead of execution while the block runs, so it is read and written atomically.
+	authorities atomic.Pointer[RecoveredAuthorities]
+}
+
+// RecoveredAuthorities is RecoverSigners of a tx's authorization list.
+type RecoveredAuthorities struct {
+	Signers []common.Address
+	Errs    []error
+}
+
+// RecoverAuthorities recovers the authorization list once, for the executor to read from the tx's Message.
+func (tx *SetCodeTransaction) RecoverAuthorities(chainID *uint256.Int) {
+	if tx.authorities.Load() == nil {
+		signers, errs := RecoverSigners(tx.Authorizations, chainID)
+		tx.authorities.CompareAndSwap(nil, &RecoveredAuthorities{Signers: signers, Errs: errs})
+	}
+}
+
+// RecoveredAuthorities is the result of RecoverAuthorities, or nil before it finished.
+func (tx *SetCodeTransaction) RecoveredAuthorities() *RecoveredAuthorities {
+	return tx.authorities.Load()
 }
 
 func (tx *SetCodeTransaction) Unwrap() Transaction {
@@ -151,6 +173,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
+	msg.authorities = &tx.authorities
 
 	var err error
 	if msg.from, err = tx.Sender(s); err != nil {
