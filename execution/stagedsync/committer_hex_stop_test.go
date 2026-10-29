@@ -29,8 +29,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -234,6 +236,64 @@ func TestCommittedHexStopUpdatesLiveAggregator(t *testing.T) {
 	require.False(t, live.CommitmentDomainStopped(kv.CommitmentDomain))
 	require.NoError(t, doms.Commit(t.Context(), tx))
 	require.True(t, live.CommitmentDomainStopped(kv.CommitmentDomain), "a committed stop must update the live aggregator")
+}
+
+func TestForkMergeSeeksCommitmentAfterForkLocalHexStop(t *testing.T) {
+	db, tx, canonical := dualCalculatorTest(t)
+	const head = uint64(5)
+	for blockNum := uint64(0); blockNum <= head+1; blockNum++ {
+		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
+	}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		_, err := canonical.GetCommitmentCtxForDomain(domain).ComputeCommitment(t.Context(), tx, true, head, head, "", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, canonical.Flush(t.Context(), tx))
+
+	fork, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(fork.Close)
+	forkRoTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(forkRoTx.Rollback)
+	require.NoError(t, fork.InitBlockOverlay(forkRoTx))
+	_, _, err = fork.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+
+	activationTime := uint64(10)
+	cc := &commitmentCalculator{
+		doms:              fork,
+		roTx:              tx,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		hexStopWindow:     0,
+		finalizedBlockNum: 4,
+	}
+	cc.recordBlockTarget(commitTarget{blockNum: 3, blockTime: activationTime - 1})
+	cc.recordBlockTarget(commitTarget{blockNum: 4, blockTime: activationTime})
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: head + 1, blockTime: activationTime})
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
+	_, err = fork.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).ComputeCommitment(t.Context(), tx, true, head+1, head+1, "", nil)
+	require.NoError(t, err)
+	require.NoError(t, recordStoppedCommitmentDomains(fork.BlockOverlay(), cc.shadowStopped))
+
+	current, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(current.Close)
+	require.NoError(t, current.InitBlockOverlay(tx))
+	forkRoTx.Rollback()
+	require.NoError(t, fork.FlushPendingUpdates(tx))
+	currentTxNum, _, err := current.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+	forkTxNum, forkBlockNum, err := fork.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err, "merging a fork whose hex shadow stopped must not see a torn commitment datadir")
+	require.Equal(t, head+1, forkBlockNum, "the fork must seek to its bin commitment")
+
+	agg, ok := tx.AggTx().(interface{ Agg() *dbstate.Aggregator })
+	require.True(t, ok)
+	live := agg.Agg()
+	require.NoError(t, current.Merge(t.Context(), currentTxNum, fork, forkTxNum))
+	require.NoError(t, current.Commit(t.Context(), tx))
+	require.True(t, live.CommitmentDomainStopped(kv.CommitmentDomain), "the merged fork's hex stop must reach the live aggregator on commit")
 }
 
 func TestStoppedHexShadowUnwindRefusesAcrossActivation(t *testing.T) {
