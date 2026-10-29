@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -1582,13 +1583,16 @@ func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
 	return ok && p.CommitmentDomainStopped(domain)
 }
 
-func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local map[kv.Domain]bool) error {
+func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local map[kv.Domain]bool, blockNum, txNum uint64) error {
 	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		if !local[domain] && (!ok || !stopped.CommitmentDomainStopped(domain)) {
 			continue
 		}
 		if err := rawdb.WriteCommitmentDomainStopped(tx, domain); err != nil {
+			return err
+		}
+		if err := dbstate.WriteCommitmentStopPoint(tx.Debug().Dirs(), domain, blockNum, txNum); err != nil {
 			return err
 		}
 	}

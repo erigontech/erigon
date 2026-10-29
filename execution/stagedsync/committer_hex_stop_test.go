@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -221,10 +223,22 @@ func TestAutomaticHexStopRecordsMarkerInCommitmentTransaction(t *testing.T) {
 	cc.recordBlockTarget(commitTarget{blockNum: 5, blockTime: activationTime})
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 5, blockTime: activationTime})
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
-	require.NoError(t, recordStoppedCommitmentDomains(tx, cc.shadowStopped))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, cc.shadowStopped, 0, 0))
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.True(t, stopped, "the automatic stop marker must share the commitment transaction")
+}
+
+func TestRecordedHexStopWritesStopFileOnce(t *testing.T) {
+	_, tx, _ := dualCalculatorTest(t)
+	path := filepath.Join(tx.Debug().Dirs().DataDir, dbstate.COMMITMENT_STOP_FILE)
+	require.NoFileExists(t, path)
+	stopped := map[kv.Domain]bool{kv.CommitmentDomain: true}
+	require.NoError(t, recordStoppedCommitmentDomains(tx, stopped, 7, 31))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, stopped, 8, 40))
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "[commitment]\nblock = 7\ntxnum = 31\n", string(data), "the stop point of the block that recorded the stop must be kept")
 }
 
 func TestCommittedHexStopUpdatesLiveAggregator(t *testing.T) {
@@ -274,7 +288,7 @@ func TestForkMergeSeeksCommitmentAfterForkLocalHexStop(t *testing.T) {
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
 	_, err = fork.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).ComputeCommitment(t.Context(), tx, true, head+1, head+1, "", nil)
 	require.NoError(t, err)
-	require.NoError(t, recordStoppedCommitmentDomains(fork.BlockOverlay(), cc.shadowStopped))
+	require.NoError(t, recordStoppedCommitmentDomains(fork.BlockOverlay(), cc.shadowStopped, 0, 0))
 
 	current, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)

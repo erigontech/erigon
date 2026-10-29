@@ -715,7 +715,10 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 		if err := a.openFolder(); err != nil {
 			return fmt.Errorf("OpenFolder: %w", err)
 		}
-		return nil
+		if db == nil {
+			return nil
+		}
+		return a.restoreCommitmentStopFile()
 	}(); err != nil {
 		return err
 	}
