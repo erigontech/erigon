@@ -5,9 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,17 +20,31 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
 )
 
 type stepRebasePlan struct {
-	renames   []string // flattened from/to pairs
-	deletions []string
-	resetExec bool
-	settings  state.ErigonDBSettings
+	renames      []string // flattened from/to pairs
+	deletions    []string
+	resetExec    bool
+	fromStepSize uint64
+	alignFactor  uint64
+	alignEnd     uint64
+	stoppedEnds  map[kv.Domain]uint64
+	settings     state.ErigonDBSettings
+}
+
+var stepFileRe = regexp.MustCompile(`^v(\d+(?:\.\d+)?)-(.+)\.(\d+)-(\d+)\.([^.]+)$`)
+
+func stateSnapDirs(dirs datadir.Dirs) []string {
+	return []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapAccessors, dirs.SnapIdx}
 }
 
 func stepRebase(ctx context.Context, cliCtx *cli.Command) error {
@@ -52,7 +69,7 @@ func stepRebase(ctx context.Context, cliCtx *cli.Command) error {
 		logger.Info("Step size is already at the desired value; exiting", "new-step-size", newStepSize)
 		return nil
 	}
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, keepBlocks, logger)
+	plan, err := planStepRebase(ctx, dirs, settings, newStepSize, keepBlocks, logger)
 	if err != nil {
 		return err
 	}
@@ -67,13 +84,37 @@ func stepRebase(ctx context.Context, cliCtx *cli.Command) error {
 	return applyStepRebasePlan(ctx, dirs, plan, logger)
 }
 
-func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, logger log.Logger) (stepRebasePlan, error) {
+func planStepRebase(ctx context.Context, dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, logger log.Logger) (stepRebasePlan, error) {
+	var alignEnd uint64
+	var stoppedEnds map[kv.Domain]uint64
+	var merged []string
+	if err := withStepRebaseAgg(ctx, dirs, keepBlocks, logger, func(agg *state.Aggregator) error {
+		var stoppedEnd uint64
+		if newStepSize > settings.StepSize {
+			var err error
+			if alignEnd, stoppedEnd, err = agg.StepAlignedEnd(newStepSize); err != nil {
+				return err
+			}
+			merged = agg.StepAlignedNames()
+		}
+		stoppedEnds = stoppedCommitmentEnds(agg, stoppedEnd)
+		return nil
+	}); err != nil {
+		return stepRebasePlan{}, err
+	}
+	return buildStepRebasePlan(dirs, settings, newStepSize, keepBlocks, alignEnd, stoppedEnds, merged, logger)
+}
+
+func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, alignEnd uint64, stoppedEnds map[kv.Domain]uint64, merged []string, logger log.Logger) (stepRebasePlan, error) {
 	currentStepSize := settings.StepSize
 	if newStepSize > currentStepSize && newStepSize%currentStepSize != 0 {
 		return stepRebasePlan{}, fmt.Errorf("new step size must be a multiple of %d", currentStepSize)
 	}
 	if currentStepSize > newStepSize && currentStepSize%newStepSize != 0 {
 		return stepRebasePlan{}, fmt.Errorf("new step size must be divisible from %d", currentStepSize)
+	}
+	if len(stoppedEnds) > 0 && !keepBlocks {
+		return stepRebasePlan{}, fmt.Errorf("a stopped commitment domain needs --keep-blocks: its stop marker is kept in chaindata")
 	}
 	factor := newStepSize / currentStepSize
 	decr := newStepSize < currentStepSize
@@ -83,18 +124,47 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 	} else {
 		logger.Info("Increasing step size", "factor", factor)
 	}
-	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-(.+)\.(\d+)-(\d+)\.([^.]+)$`)
-	stateSnapDirs := []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapAccessors, dirs.SnapIdx}
 	rens := make([]string, 0, 100)
-	for _, p := range stateSnapDirs {
-		list, err := collectRenameList(p, re, decr, factor)
+	dels := make([]string, 0, 100)
+	var alignFactor uint64
+	if decr {
+		for _, p := range stateSnapDirs(dirs) {
+			list, err := collectRenameList(p, decr, factor, math.MaxUint64, nil)
+			if err != nil {
+				return stepRebasePlan{}, err
+			}
+			rens = append(rens, list...)
+		}
+	} else {
+		if settings.RefsInCommitmentBranches() {
+			return stepRebasePlan{}, fmt.Errorf("references_in_commitment_branches is on: merged commitment files would be referenced, and read as plain at step size %d", newStepSize)
+		}
+		alignFactor = factor
+		keep := stoppedEndSteps(stoppedEnds, currentStepSize)
+		tail, err := collectFilesPast(stateSnapDirs(dirs), alignEnd/currentStepSize, keep)
 		if err != nil {
 			return stepRebasePlan{}, err
 		}
-		rens = append(rens, list...)
+		if err := refuseUnmergedMisaligned(stateSnapDirs(dirs), factor, alignEnd/currentStepSize, keep, merged); err != nil {
+			return stepRebasePlan{}, err
+		}
+		keptEnd := alignEnd
+		for _, end := range stoppedEnds {
+			keptEnd = min(keptEnd, end)
+		}
+		if keptEnd == 0 && len(tail) > 0 {
+			return stepRebasePlan{}, fmt.Errorf("no file boundary common to all state files is a multiple of %d txs, nothing would be kept", newStepSize)
+		}
+		_, conversionTxNum, converted, err := settings.ConversionPoint()
+		if err != nil {
+			return stepRebasePlan{}, err
+		}
+		if converted && keptEnd <= conversionTxNum {
+			return stepRebasePlan{}, fmt.Errorf("the last file boundary at a multiple of %d txs is txNum %d, not past the PBT conversion point txNum %d", newStepSize, keptEnd, conversionTxNum)
+		}
+		dels = append(dels, tail...)
 	}
-	dels := make([]string, 0, 100)
-	for _, p := range stateSnapDirs {
+	for _, p := range stateSnapDirs(dirs) {
 		list, err := collectTorrentFiles(p)
 		if err != nil {
 			return stepRebasePlan{}, err
@@ -110,11 +180,37 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 	if decr {
 		newFrozenSteps = settings.StepsInFrozenFile * factor
 	}
-	newSettings := state.ErigonDBSettings{StepSize: newStepSize, StepsInFrozenFile: newFrozenSteps}
-	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, settings: newSettings}, nil
+	newSettings := *settings
+	newSettings.StepSize = newStepSize
+	newSettings.StepsInFrozenFile = newFrozenSteps
+	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, fromStepSize: currentStepSize, alignFactor: alignFactor, alignEnd: alignEnd, stoppedEnds: stoppedEnds, settings: newSettings}, nil
+}
+
+func stoppedCommitmentEnds(agg *state.Aggregator, end uint64) map[kv.Domain]uint64 {
+	var ends map[kv.Domain]uint64
+	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if agg.CommitmentDomainStopped(d) {
+			if ends == nil {
+				ends = make(map[kv.Domain]uint64)
+			}
+			ends[d] = end
+		}
+	}
+	return ends
+}
+
+func stoppedEndSteps(ends map[kv.Domain]uint64, stepSize uint64) map[string]uint64 {
+	steps := make(map[string]uint64, len(ends))
+	for d, end := range ends {
+		steps[d.String()] = end / stepSize
+	}
+	return steps
 }
 
 func printStepRebasePlan(plan stepRebasePlan) {
+	if plan.alignFactor != 0 {
+		fmt.Printf("M: merge state files below txNum %d to multiples of %d txs, then rename every file to 1/%d of its steps\n", plan.alignEnd, plan.settings.StepSize, plan.alignFactor)
+	}
 	for i := 0; i < len(plan.renames); i += 2 {
 		fmt.Printf("R: %s => %s\n", plan.renames[i], plan.renames[i+1])
 	}
@@ -132,6 +228,53 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 		return err
 	}
 	defer unlock()
+	current, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	if current.StepSize != plan.fromStepSize {
+		return fmt.Errorf("step size is %d, the plan was made at %d", current.StepSize, plan.fromStepSize)
+	}
+	renames, deletions := plan.renames, slices.Clone(plan.deletions)
+	if plan.alignFactor != 0 {
+		if err := withStepRebaseAgg(ctx, dirs, plan.resetExec, logger, func(agg *state.Aggregator) error {
+			end, stoppedEnd, err := agg.AlignFilesToStepSize(ctx, plan.settings.StepSize)
+			if err != nil {
+				return err
+			}
+			if end != plan.alignEnd || !maps.Equal(stoppedCommitmentEnds(agg, stoppedEnd), plan.stoppedEnds) {
+				return fmt.Errorf("state files changed since the plan: aligned up to txNum %d (stopped commitment %d), planned %d %v", end, stoppedEnd, plan.alignEnd, plan.stoppedEnds)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		endStep := plan.alignEnd / plan.fromStepSize
+		keep := stoppedEndSteps(plan.stoppedEnds, plan.fromStepSize)
+		for _, p := range stateSnapDirs(dirs) {
+			list, err := collectRenameList(p, false, plan.alignFactor, endStep, keep)
+			if err != nil {
+				return err
+			}
+			renames = append(renames, list...)
+		}
+		tail, err := collectFilesPast(stateSnapDirs(dirs), endStep, keep)
+		if err != nil {
+			return err
+		}
+		for _, p := range stateSnapDirs(dirs) {
+			torrents, err := collectTorrentFiles(p)
+			if err != nil {
+				return err
+			}
+			tail = append(tail, torrents...)
+		}
+		for _, f := range tail {
+			if !slices.Contains(deletions, f) {
+				deletions = append(deletions, f)
+			}
+		}
+	}
 	// reset before renaming: a crash mid-apply then leaves old settings with old file
 	// names and cleared exec state, which is a consistent datadir and a re-runnable command
 	if plan.resetExec {
@@ -139,18 +282,18 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 			return err
 		}
 	}
-	for i := 0; i < len(plan.renames); i += 2 {
-		from, to := plan.renames[i], plan.renames[i+1]
-		if err := os.Rename(from, to); err != nil {
-			return fmt.Errorf("rename %s -> %s: %w", from, to, err)
-		}
-		fmt.Printf("Renamed: %s => %s\n", from, to)
-	}
-	for _, p := range plan.deletions {
+	for _, p := range deletions {
 		if err := dir.RemoveAll(p); err != nil {
 			return fmt.Errorf("delete %s: %w", p, err)
 		}
 		fmt.Printf("Deleted: %s\n", p)
+	}
+	for i := 0; i < len(renames); i += 2 {
+		from, to := renames[i], renames[i+1]
+		if err := os.Rename(from, to); err != nil {
+			return fmt.Errorf("rename %s -> %s: %w", from, to, err)
+		}
+		fmt.Printf("Renamed: %s => %s\n", from, to)
 	}
 	settingsBytes, err := toml.Marshal(plan.settings)
 	if err != nil {
@@ -179,22 +322,121 @@ func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err != nil {
 		return err
 	}
-	return rawdbreset.ResetExec(ctx, tdb)
+	return rawdbreset.ResetExecKeepStoppedCommitment(ctx, tdb)
+}
+
+func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, logger log.Logger, fn func(*state.Aggregator) error) error {
+	chaindata := dirs.Chaindata
+	exists, err := dir.FileExist(filepath.Join(chaindata, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if !exists && keepBlocks {
+		return fmt.Errorf("no chaindata database to keep at %s", dirs.Chaindata)
+	}
+	if !exists {
+		if err := os.MkdirAll(dirs.Tmp, 0o755); err != nil {
+			return err
+		}
+		if chaindata, err = os.MkdirTemp(dirs.Tmp, "step-rebase-chaindata-"); err != nil {
+			return err
+		}
+		defer func() { _ = dir.RemoveAll(chaindata) }()
+	}
+	chainDB, err := dbCfg(dbcfg.ChainDB, chaindata).Accede(false).Exclusive(true).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer chainDB.Close()
+	if _, err := features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
+		return err
+	}
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	return fn(agg)
+}
+
+func collectFilesPast(roots []string, endStep uint64, keepTo map[string]uint64) ([]string, error) {
+	var past []string
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, entry := range entries {
+			matches := stepFileRe.FindStringSubmatch(entry.Name())
+			if matches == nil {
+				continue
+			}
+			to, err := strconv.ParseUint(matches[4], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			limit, ok := keepTo[matches[2]]
+			if !ok {
+				limit = endStep
+			}
+			if to > limit {
+				past = append(past, filepath.Join(root, entry.Name()))
+			}
+		}
+	}
+	return past, nil
+}
+
+func refuseUnmergedMisaligned(roots []string, factor, endStep uint64, keepTo map[string]uint64, merged []string) error {
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		for _, entry := range entries {
+			matches := stepFileRe.FindStringSubmatch(entry.Name())
+			if len(matches) < 5 || slices.Contains(merged, matches[2]) {
+				continue
+			}
+			from, err := strconv.ParseUint(matches[3], 10, 64)
+			if err != nil {
+				return err
+			}
+			to, err := strconv.ParseUint(matches[4], 10, 64)
+			if err != nil {
+				return err
+			}
+			limit, ok := keepTo[matches[2]]
+			if !ok {
+				limit = endStep
+			}
+			if to <= limit && (from%factor != 0 || to%factor != 0) {
+				return fmt.Errorf("%s is not merged by the aggregator and does not start and end at a multiple of %d steps", filepath.Join(root, entry.Name()), factor)
+			}
+		}
+	}
+	return nil
 }
 
 // collectRenameList walks the snapshot domain directory and builds a list of
 // from/to file paths to be renamed according to the new step size rules.
-func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor uint64) ([]string, error) {
+func collectRenameList(domainPath string, decr bool, factor, keepToStep uint64, keepTo map[string]uint64) ([]string, error) {
 	renList := make([]string, 0, 100)
 
 	walkErr := fs.WalkDir(os.DirFS(domainPath), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !re.MatchString(path) {
+		if !stepFileRe.MatchString(path) {
 			return nil
 		}
-		matches := re.FindStringSubmatch(path)
+		matches := stepFileRe.FindStringSubmatch(path)
 		from, err := strconv.ParseUint(matches[3], 10, 64)
 		if err != nil {
 			return err
@@ -203,18 +445,33 @@ func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor u
 		if err != nil {
 			return err
 		}
-
-		// decreasing step size -> 1 step will contain more steps;
-		// increasing step size -> 1 step will be a fraction of new steps -> datadir may not contain a full step!
-		if decr {
-			from *= factor
-			to *= factor
-		} else {
-			from /= factor
-			to /= factor
+		limit, ok := keepTo[matches[2]]
+		if !ok {
+			limit = keepToStep
+		}
+		if to > limit {
+			return nil
+		}
+		if !decr && (from%factor != 0 || to%factor != 0) {
+			return fmt.Errorf("%s does not start and end at a multiple of %d steps", filepath.Join(domainPath, path), factor)
 		}
 
-		newPath := fmt.Sprintf("v%s-%s.%d-%d.%s", matches[1], matches[2], from, to, matches[5])
+		// decreasing step size -> 1 step will contain more steps;
+		newFrom, newTo := from/factor, to/factor
+		if decr {
+			newFrom, newTo = from*factor, to*factor
+		}
+		if matches[2] == kv.CommitmentDomain.String() && matches[5] == "kv" {
+			ver, err := version.ParseVersion(path)
+			if err != nil {
+				return err
+			}
+			if state.CommitmentBranchReferenced(ver, 1, from, to) && !state.CommitmentBranchReferenced(ver, 1, newFrom, newTo) {
+				return fmt.Errorf("%s: referenced commitment branches would be read as plain at the new step size", filepath.Join(domainPath, path))
+			}
+		}
+
+		newPath := fmt.Sprintf("v%s-%s.%d-%d.%s", matches[1], matches[2], newFrom, newTo, matches[5])
 		renList = append(renList, filepath.Join(domainPath, path), filepath.Join(domainPath, newPath))
 
 		return nil
