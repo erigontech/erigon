@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
@@ -581,6 +582,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer tdb.Close()
+	history := commitmentHistory(t, tdb, txNum)
 
 	clearTx, err := tdb.BeginRw(ctx)
 	require.NoError(t, err)
@@ -633,6 +635,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 		direct[0] = false
 	}
 	require.Equal(t, direct, rebuild(lastBlock), "steps with state files go straight to files, the rest and a resumed step through the DB")
+	require.Equal(t, history, commitmentHistory(t, tdb, txNum), "the rebuilt commitment history reads as the original")
 	if !v3 {
 		return
 	}
@@ -1176,4 +1179,32 @@ func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
 	useCommitmentSchema(t, true)
 	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
 	require.NoError(t, agg.MergeLoop(t.Context()))
+}
+
+func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	it, err := tx.HistoryRange(kv.CommitmentDomain, 0, int(toTxNum), order.Asc, -1)
+	require.NoError(t, err)
+	keys := map[string]struct{}{}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		if !commitment.IsCommitmentStateKey(k) {
+			keys[string(k)] = struct{}{}
+		}
+	}
+	it.Close()
+	require.NotEmpty(t, keys)
+	values := map[string][]byte{}
+	for k := range keys {
+		for ts := uint64(0); ts < toTxNum; ts += 3 {
+			v, _, err := tx.HistorySeek(kv.CommitmentDomain, []byte(k), ts)
+			require.NoError(t, err)
+			values[fmt.Sprintf("%x@%d", k, ts)] = bytes.Clone(v)
+		}
+	}
+	return values
 }
