@@ -1774,6 +1774,8 @@ type balTx struct {
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
 
+var valSkipCount atomic.Int64
+
 // dispatchRunSelfLoop runs one task on a worker context, looping until its result
 // is stable-valid: execute, flush its writes to the versionMap so downstream workers
 // read them speculatively, validate its own read-set, and — when valid but a
@@ -2006,6 +2008,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			prevWrites = result.TxOut
 			pe.releaseWorker(w)
 
+			result.ValStamp = be.versionMap.WriteSeq()
 			valid, target, blocker := be.selfLoopEvaluate(tv, result)
 			if !valid {
 				if blocker > be.frontier() && !waitTo(blocker) {
@@ -2024,6 +2027,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				if !waitTo(target) {
 					return
 				}
+				result.ValStamp = be.versionMap.WriteSeq()
 				valid, _, _ = be.selfLoopEvaluate(tv, result)
 			}
 			if valid {
@@ -3468,14 +3472,22 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// Re-validate against the CURRENT versionMap, not the worker's verdict: a
 			// predecessor may have changed or sealed since (including an in-flight
 			// Validated cell the reader early-broke on), so trusting the stale verdict
-			// would commit against a value that has moved.
-			valid := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(rv, wv state.Version) state.VersionValidity {
-					if rv != wv {
-						return state.VersionInvalid
-					}
-					return state.VersionValid
-				}, false, "") == state.VersionValid
+			// would commit against a value that has moved. The worker's verdict is
+			// trusted only when no tx below this one wrote since it was stamped.
+			skip := txVersion.TxIndex >= 0 && !be.tasks[tx].Task.IsBlockEnd() && txResult.ValStamp != 0 &&
+				be.versionMap.QuietBelow(txVersion.TxIndex, txResult.ValStamp)
+			valid := skip
+			if skip {
+				valSkipCount.Add(1)
+			} else {
+				valid = be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+					func(rv, wv state.Version) state.VersionValidity {
+						if rv != wv {
+							return state.VersionInvalid
+						}
+						return state.VersionValid
+					}, false, "") == state.VersionValid
+			}
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3911,6 +3923,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.slReexecFlag = make([]atomic.Bool, len(be.tasks))
 		be.slFin = make([]chan struct{}, len(be.tasks))
 		be.runInc = make([]atomic.Int64, len(be.tasks))
+		be.versionMap.InitStamps(be.tasks[len(be.tasks)-1].Version().TxIndex + 4)
 		for i := range be.slWake {
 			be.slWake[i] = make(chan struct{}, 1)
 			be.slReexec[i] = make(chan struct{}, 1)
