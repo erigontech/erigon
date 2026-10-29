@@ -3050,7 +3050,9 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	written := map[cell][]state.WriteHeader{}
 	for h := range ws.AllHeaders() {
 		c := cell{h.Address, h.Path}
-		written[c] = append(written[c], h)
+		if h.Path != state.StoragePath || len(written[c]) == 0 {
+			written[c] = append(written[c], h)
+		}
 	}
 	for c, headers := range written {
 		for _, tx := range readersAbove(be.readersOf(headers[0]), writerTx) {
