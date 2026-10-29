@@ -209,6 +209,31 @@ func WriteExecutionBlockHash(tx kv.RwTx, blockRoot, blockHash common.Hash) error
 	return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], blockHash[:])
 }
 
+func WriteExecutionPayloadEnvelopeSignature(tx kv.RwTx, slot uint64, blockRoot common.Hash, signature common.Bytes96) error {
+	return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, blockRoot), signature[:])
+}
+
+func WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx kv.RwTx, slot uint64, blockRoot common.Hash, signature common.Bytes96) error {
+	_, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, blockRoot)
+	if err != nil || found {
+		return err
+	}
+	return WriteExecutionPayloadEnvelopeSignature(tx, slot, blockRoot, signature)
+}
+
+func ReadExecutionPayloadEnvelopeSignature(tx kv.Tx, slot uint64, blockRoot common.Hash) (common.Bytes96, bool, error) {
+	value, err := tx.GetOne(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, blockRoot))
+	if err != nil {
+		return common.Bytes96{}, false, err
+	}
+	if len(value) != len(common.Bytes96{}) {
+		return common.Bytes96{}, false, nil
+	}
+	var signature common.Bytes96
+	copy(signature[:], value)
+	return signature, true, nil
+}
+
 // WriteExecutionPayloadEnvelopeIndicies writes execution block number and hash indices
 // for a GLOAS beacon block. In GLOAS (EIP-7732), the execution payload is delivered
 // separately via SignedExecutionPayloadEnvelope, so these indices cannot be written
@@ -388,11 +413,48 @@ func WriteBeaconBlockAndIndicies(tx kv.RwTx, block *cltypes.SignedBeaconBlock, c
 	return nil
 }
 
-// PruneBlocks deletes at most snaptype.CaplinMergeLimit blocks below to, so one call
-// never holds a long write transaction; periodic callers delete the rest later.
+// PruneBlocks deletes at most snaptype.CaplinMergeLimit rows below to from each of the block
+// and envelope signature tables, so one call never holds a long write transaction; periodic
+// callers delete the rest later.
 func PruneBlocks(tx kv.RwTx, to uint64) error {
-	_, _, err := PruneBlocksLimit(tx, to, snaptype.CaplinMergeLimit)
-	return err
+	if _, _, err := PruneBlocksLimit(tx, to, snaptype.CaplinMergeLimit); err != nil {
+		return err
+	}
+	return PruneExecutionPayloadEnvelopeSignatures(tx, to)
+}
+
+func PruneExecutionPayloadEnvelopeSignatures(tx kv.RwTx, to uint64) error {
+	cursor, err := tx.RwCursor(kv.ExecutionPayloadEnvelopeSignatures)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	deleted := 0
+	for key, _, err := cursor.First(); ; key, _, err = cursor.Next() {
+		if err != nil {
+			return err
+		}
+		if key == nil {
+			return nil
+		}
+		if len(key) != 40 {
+			continue
+		}
+		slot, err := dbutils.DecodeBlockNumber(key[:8])
+		if err != nil {
+			return err
+		}
+		if slot >= to {
+			return nil
+		}
+		if err := cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+		deleted++
+		if deleted >= snaptype.CaplinMergeLimit {
+			return nil
+		}
+	}
 }
 
 func PruneBlocksLimit(tx kv.RwTx, to uint64, limit int) (deleted int, hasMore bool, err error) {
