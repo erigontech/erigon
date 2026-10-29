@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -187,6 +189,9 @@ func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error
 	}
 	ok = true
 	p := &rollingPin{tx: tx, num: num, hash: hash}
+	if execctx.PickTrieVariant() != commitment.VariantCommitmentV3 {
+		return p, nil
+	}
 	for range headCaptureWarmTxs - 1 {
 		w, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {

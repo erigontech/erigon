@@ -361,6 +361,28 @@ func TestOpenRollingPin(t *testing.T) {
 	pin.close() // idempotent
 }
 
+func TestOpenRollingPinWarmTxsOnlyForV3(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+
+	statecfg.ExperimentalCommitmentV3 = false
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.Empty(t, pin.warm)
+
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.ExperimentalCommitmentV3 = true
+	pin, err = openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.NotEmpty(t, pin.warm)
+}
+
 // TestBuildAndCacheHeadCaptureStalePin drives the head-capture build with no held pin.
 // The parent-commitment gate rejects it, so nothing is cached and the pin is
 // re-established at the committed head for the next block.
