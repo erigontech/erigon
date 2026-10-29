@@ -119,3 +119,17 @@ func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.
 
 	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "commitment convert --v3")
 }
+
+func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {
+	prev := statecfg.Schema.CommitmentDomain.CommitmentV3Records
+	statecfg.Schema.CommitmentDomain.CommitmentV3Records = true
+	t.Cleanup(func() { statecfg.Schema.CommitmentDomain.CommitmentV3Records = prev })
+
+	dirs := datadir.New(t.TempDir())
+	backup := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.NoError(t, CheckSnapshotsCompatibility(dirs))
+}

@@ -240,8 +240,8 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			currentFileVersion := fileInfo.Version
 
-			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
-				(fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major < 3 {
+			if dir := filepath.Dir(path); statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
+				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major < 3 {
 				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
 					"convert the datadir with `integration commitment convert --v3`", fileInfo.Name(), currentFileVersion.Major)
 			}
