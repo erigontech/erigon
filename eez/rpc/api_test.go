@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	"github.com/erigontech/erigon/eez/systemtx"
+	"github.com/erigontech/erigon/execution/types"
 	erigonrpc "github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -65,6 +66,51 @@ func TestRender(t *testing.T) {
 	require.Equal(t, "0x0", fields["gasPrice"])
 	require.Equal(t, "0x1892", fields["chainId"])
 	require.Equal(t, protocol.SystemAddress, common.HexToAddress(fields["from"].(string)))
+}
+
+func renderedKeys(t *testing.T, tx types.Transaction) (map[string]any, []string) {
+	t.Helper()
+	b, err := json.Marshal(ethapi.NewRPCTransaction(tx, common.Hash{1}, 10, 5, 0, uint256.NewInt(7)))
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(b, &fields))
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return fields, keys
+}
+
+// TestRenderV01 checks the field sets of types 0x45 and 0x46: those of the
+// rollupX v0.1 serializers but sourceHash, blobVersionedHashes and
+// authorizationList, and version and blocks.
+func TestRenderV01(t *testing.T) {
+	eez.Register()
+	native, err := systemtx.NewNative(protocol.NativeTx{ChainID: 699169, GasLimit: 1_000, To: protocol.RollupXEEZL2Address, Input: []byte{1}})
+	require.NoError(t, err)
+	fields, keys := renderedKeys(t, native)
+	require.Equal(t, []string{
+		"accessList", "blockHash", "blockNumber", "blockTimestamp", "chainId", "from", "gas", "gasPrice", "hash", "input",
+		"nonce", "r", "s", "to", "transactionIndex", "type", "v", "value", "yParity",
+	}, keys)
+	require.Equal(t, "0x45", fields["type"])
+	require.Equal(t, "0x3e8", fields["gas"])
+	require.Equal(t, "0x0", fields["gasPrice"])
+	require.Equal(t, "0x0", fields["yParity"])
+	require.Equal(t, protocol.NativeSystemAddress, common.HexToAddress(fields["from"].(string)))
+
+	history, err := systemtx.NewHistory(protocol.HistoryTx{ChainID: 699169, Blocks: []protocol.HistoryBlock{{Number: 1, Hash: common.Hash{1}}}})
+	require.NoError(t, err)
+	fields, keys = renderedKeys(t, history)
+	require.Equal(t, []string{
+		"blockHash", "blockNumber", "blockTimestamp", "chainId", "from", "gas", "gasPrice", "hash", "input",
+		"nonce", "r", "s", "to", "transactionIndex", "type", "v", "value", "yParity",
+	}, keys)
+	require.Equal(t, "0x46", fields["type"])
+	require.Equal(t, "0x1e8480", fields["gas"])
+	require.Equal(t, "0x", fields["input"])
+	require.Equal(t, protocol.HistoryAddress, common.HexToAddress(fields["to"].(string)))
 }
 
 // TestDecodeBatch decodes the window-84 batch and the span it carries.

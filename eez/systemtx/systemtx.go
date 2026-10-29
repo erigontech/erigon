@@ -13,8 +13,9 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-// Package systemtx registers the EEZ system transaction, type 0x76, with the
-// transaction pipeline of execution/types.
+// Package systemtx registers the EEZ system transactions with the
+// transaction pipeline of execution/types: type 0x76, and types 0x45 and
+// 0x46 of the rollupX v0.1 rule set.
 package systemtx
 
 import (
@@ -46,7 +47,7 @@ var (
 
 var registerOnce sync.Once
 
-// Register adds type 0x76 to the transaction pipeline.
+// Register adds types 0x76, 0x45 and 0x46 to the transaction pipeline.
 func Register() {
 	registerOnce.Do(func() {
 		types.RegisterTxType(protocol.SystemTxType, types.TxTypeSpec{
@@ -63,6 +64,37 @@ func Register() {
 			},
 			StandardReceiptPayload: true,
 			MintsValue:             true,
+		})
+		types.RegisterTxType(protocol.NativeTxType, types.TxTypeSpec{
+			New: func() types.Transaction { return new(NativeTransaction) },
+			UnmarshalJSON: func(input []byte) (types.Transaction, error) {
+				tx := new(NativeTransaction)
+				if err := tx.UnmarshalJSON(input); err != nil {
+					return nil, err
+				}
+				return tx, nil
+			},
+			Sender: func(txn types.Transaction, sg types.Signer) (accounts.Address, error) {
+				return txn.Sender(sg)
+			},
+			StandardReceiptPayload: true,
+			MintsValue:             true,
+			Nonceless:              true,
+		})
+		types.RegisterTxType(protocol.HistoryTxType, types.TxTypeSpec{
+			New: func() types.Transaction { return new(HistoryTransaction) },
+			UnmarshalJSON: func(input []byte) (types.Transaction, error) {
+				tx := new(HistoryTransaction)
+				if err := tx.UnmarshalJSON(input); err != nil {
+					return nil, err
+				}
+				return tx, nil
+			},
+			Sender: func(txn types.Transaction, sg types.Signer) (accounts.Address, error) {
+				return txn.Sender(sg)
+			},
+			StandardReceiptPayload: true,
+			Nonceless:              true,
 		})
 	})
 }

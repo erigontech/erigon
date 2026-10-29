@@ -14,7 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package rpc serves the eez JSON-RPC namespace and renders type 0x76.
+// Package rpc serves the eez JSON-RPC namespace and renders the EEZ system
+// transaction types.
 package rpc
 
 import (
@@ -41,14 +42,24 @@ var ErrNoFollower = errors.New("no EEZ follower runs in this node")
 
 var registerOnce sync.Once
 
-// Register renders type 0x76 as the reference client does: the transaction
-// body, the fixed gas, and zero gas price and signature. Transaction type
-// 0x76 must be registered first.
+// Register renders the system transaction types as the reference clients
+// do: the transaction body, the gas, and zero gas price and signature. Type
+// 0x45 keeps yParity and an empty access list, type 0x46 yParity. Their
+// sourceHash, version and blocks fields are not rendered. The types must be
+// registered first.
 func Register() {
 	registerOnce.Do(func() {
 		ethapi.RegisterTxRenderer(protocol.SystemTxType, func(_ types.Transaction, r *ethapi.RPCTransaction) {
 			r.GasPrice = hexutil.U256{}
 			r.MaxFeePerGas, r.MaxPriorityFeePerGas, r.YParity, r.Accesses = nil, nil, nil, nil
+		})
+		ethapi.RegisterTxRenderer(protocol.NativeTxType, func(_ types.Transaction, r *ethapi.RPCTransaction) {
+			r.GasPrice = hexutil.U256{}
+			r.MaxFeePerGas, r.MaxPriorityFeePerGas = nil, nil
+		})
+		ethapi.RegisterTxRenderer(protocol.HistoryTxType, func(_ types.Transaction, r *ethapi.RPCTransaction) {
+			r.GasPrice = hexutil.U256{}
+			r.MaxFeePerGas, r.MaxPriorityFeePerGas, r.Accesses = nil, nil, nil
 		})
 	})
 }

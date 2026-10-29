@@ -17,6 +17,8 @@
 package testfixtures
 
 import (
+	"bufio"
+	"compress/gzip"
 	"fmt"
 	"os"
 
@@ -95,4 +97,56 @@ func LoadEEZDevReplay() (*EEZDevReplay, error) {
 		}
 	}
 	return &r, nil
+}
+
+// RollupXBlocks are the first L2 blocks of a rollupX v0.1 network from
+// genesis, in consensus RLP, and the hash its node served for the last.
+type RollupXBlocks struct {
+	ChainID uint64
+	Raw     [][]byte
+	Head    common.Hash
+}
+
+var rollupXBlocks = map[uint64]struct {
+	dir, file string
+	last      uint64
+	head      common.Hash
+}{
+	699169: {"chiado-699169", "blocks-0-2600.hex.gz", 2600, common.HexToHash("0x2e4b3f30a9c03fad6d12252b940803a090b26ba24d17447c3651c4a19d4b54f1")},
+	916969: {"chiado-916969", "blocks-0-770.hex.gz", 770, common.HexToHash("0x78f2c1113228ca31132d09dd13104526a0d388da347cb705a2869e41bb978617")},
+}
+
+// LoadRollupXBlocks reads the blocks of network chainID under rollupx/: one
+// 0x-prefixed hex block per line, block 0 first.
+func LoadRollupXBlocks(chainID uint64) (*RollupXBlocks, error) {
+	src, ok := rollupXBlocks[chainID]
+	if !ok {
+		return nil, fmt.Errorf("no rollupX blocks of chain %d", chainID)
+	}
+	f, err := os.Open(Path("rollupx", src.dir, src.file))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	z, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", src.file, err)
+	}
+	b := &RollupXBlocks{ChainID: chainID, Head: src.head}
+	sc := bufio.NewScanner(z)
+	sc.Buffer(make([]byte, 1<<20), 1<<24)
+	for sc.Scan() {
+		raw, err := hexutil.Decode(sc.Text())
+		if err != nil {
+			return nil, fmt.Errorf("%s: block %d: %w", src.file, len(b.Raw), err)
+		}
+		b.Raw = append(b.Raw, raw)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("%s: %w", src.file, err)
+	}
+	if uint64(len(b.Raw)) != src.last+1 {
+		return nil, fmt.Errorf("%s: %d blocks, want %d", src.file, len(b.Raw), src.last+1)
+	}
+	return b, nil
 }
