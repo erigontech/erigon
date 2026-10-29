@@ -223,6 +223,35 @@ func TestStatusDuringCatchUp(t *testing.T) {
 	require.Equal(t, uint64(1), during.Cursor)
 	require.Equal(t, l1Second, f.Status().L1Scanned)
 	require.Equal(t, uint64(2), f.Status().Cursor)
+
+	// One range holding both batches: the status follows each L1 block.
+	_, l2 := derivertest.NewL2(t)
+	watched := &observingChain{Chain: l2}
+	cfg = testConfig
+	cfg.Dir = t.TempDir()
+	f, err = follower.New(c.L1, watched, derivertest.Config(), cfg, logger)
+	require.NoError(t, err)
+	watched.follower = f
+	require.NoError(t, f.Boot(t.Context()))
+	require.GreaterOrEqual(t, len(watched.seen), 2)
+	during = watched.seen[len(watched.seen)-1]
+	require.Equal(t, uint64(1), during.Cursor)
+	require.Less(t, during.L1Scanned, l1Second-1)
+	require.Equal(t, uint64(2), f.Status().Cursor)
+}
+
+// observingChain records the follower's status on every block it builds.
+type observingChain struct {
+	deriver.Chain
+	follower *follower.Follower
+	seen     []follower.Status
+}
+
+func (o *observingChain) Extend(ctx context.Context, parent *types.Header, in deriver.HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
+	if o.follower != nil {
+		o.seen = append(o.seen, o.follower.Status())
+	}
+	return o.Chain.Extend(ctx, parent, in, txs, safe, finalized)
 }
 
 // tampered composes a block whose settlement the DA payload contradicts.
@@ -494,6 +523,7 @@ func TestMetricsAndEvents(t *testing.T) {
 	_, chain := derivertest.NewL2(t)
 	cfg := testConfig
 	cfg.Dir = t.TempDir()
+	cfg.Progress = time.Nanosecond
 	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, logger)
 	require.NoError(t, err)
 	// Counters are process-wide: other tests move them too.
@@ -514,6 +544,8 @@ func TestMetricsAndEvents(t *testing.T) {
 		require.Contains(t, out.String(), "event="+event)
 	}
 	require.NotContains(t, out.String(), "event=eez.deriver.state.diverged_post")
+	require.Regexp(t, `msg="\[eez\] following" l1Scanned=\d+ l1Head=\d+ l1Finalized=\d+ safe=2 finalized=\d+ batches=[1-9]\d* blocks=[1-9]\d*`, out.String())
+	require.Regexp(t, `msg="\[eez\] batch derived" event=eez.deriver.batch.derived l1Block=\d+ tx=[0-9a-f]{6}…[0-9a-f]{6} from=1 to=\d+ settled=\d+ resumed=false`, out.String())
 
 	c.Post(derivertest.Posting{Batch: tampered(c)})
 	_, done := (&node{follower: f}).run(t)

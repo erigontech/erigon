@@ -68,6 +68,9 @@ type Config struct {
 	// Blobs serves the blobs of blob-backed batches; without it the
 	// follower cannot derive them.
 	Blobs l1.BlobSource
+	// Progress is the interval between info-level progress lines; zero logs
+	// none.
+	Progress time.Duration
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -78,6 +81,7 @@ var DefaultConfig = Config{
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
 	SequencerPoll: time.Second,
+	Progress:      30 * time.Second,
 }
 
 // overlayLimit bounds the sequencer blocks one overlay step inserts.
@@ -98,6 +102,8 @@ type Follower struct {
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
 	resumed                      bool
+	// progress is the state at the last progress line.
+	progress progress
 
 	statusMu sync.Mutex
 	status   Status
@@ -138,6 +144,8 @@ func (f *Follower) publish() {
 	f.status = s
 	f.statusMu.Unlock()
 
+	f.logProgress(s)
+
 	m := loadMetrics()
 	m.l1Head.SetUint64(f.target)
 	m.l1Scanned.SetUint64(s.L1Scanned)
@@ -146,6 +154,24 @@ func (f *Follower) publish() {
 	m.l2Cursor.SetUint64(s.Cursor)
 	m.l2Safe.SetUint64(s.Safe)
 	m.l2Finalized.SetUint64(s.Finalized)
+}
+
+type progress struct {
+	at              time.Time
+	batches, blocks uint64
+}
+
+// logProgress logs s at most every cfg.Progress, with the batches derived
+// since the last line and the blocks they carry.
+func (f *Follower) logProgress(s Status) {
+	now := time.Now()
+	if f.cfg.Progress <= 0 || now.Sub(f.progress.at) < f.cfg.Progress {
+		return
+	}
+	batches, blocks := f.deriver.Derived()
+	f.logger.Info("[eez] following", "l1Scanned", s.L1Scanned, "l1Head", f.target, "l1Finalized", s.L1Finalized,
+		"safe", s.Safe, "finalized", s.Finalized, "batches", batches-f.progress.batches, "blocks", blocks-f.progress.blocks)
+	f.progress = progress{at: now, batches: batches, blocks: blocks}
 }
 
 // New returns a follower of the EEZ chain cfg, local in chain, settled on
@@ -424,8 +450,18 @@ func (f *Follower) Sync(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := f.deriver.Reconcile(ctx, batches); err != nil {
-			return err
+		// One L1 block at a time keeps the status, the metrics and the
+		// progress line current through a long range.
+		for len(batches) > 0 {
+			n := 1
+			for n < len(batches) && batches[n].L1Block == batches[0].L1Block {
+				n++
+			}
+			if err := f.deriver.Reconcile(ctx, batches[:n]); err != nil {
+				return err
+			}
+			batches = batches[n:]
+			f.publish()
 		}
 		f.scanned = reached
 		f.publish()

@@ -57,7 +57,12 @@ type Deriver struct {
 	sched *Schedule
 	// l1 serves the L1 headers rollupX v0.1 history updates import.
 	l1 L1HeaderProvider
+	// derived counts what d derived since it was created.
+	derived derivedTotals
 }
+
+// derivedTotals counts the batches derived and the blocks they carry.
+type derivedTotals struct{ batches, blocks uint64 }
 
 // L1HeaderProvider reads canonical L1 headers.
 type L1HeaderProvider interface {
@@ -101,6 +106,19 @@ func (d *Deriver) Last() (Record, bool) { return d.index.Last() }
 
 // Cursor is the L2 block the latest derived settlement ended at.
 func (d *Deriver) Cursor() uint64 { return d.index.Cursor() }
+
+// Derived returns the number of batches derived since d was created and of
+// the blocks they carry.
+func (d *Deriver) Derived() (batches, blocks uint64) { return d.derived.batches, d.derived.blocks }
+
+// handleBatchDerived counts and logs the batch b derived over r, settled at
+// block settled.
+func (d *Deriver) handleBatchDerived(b *l1.ScannedBatch, r Range, settled uint64) {
+	d.derived.batches++
+	d.derived.blocks += r.To + 1 - r.From
+	d.logger.Info("[eez] batch derived", "event", "eez.deriver.batch.derived", "l1Block", b.L1Block, "tx", b.TxHash.TerminalString(),
+		"from", r.From, "to", r.To, "settled", settled, "resumed", r.Resumed)
+}
 
 // Safe is the safe L2 block.
 func (d *Deriver) Safe() uint64 { return d.safe }
@@ -259,7 +277,7 @@ func (d *Deriver) reconcileBatch(ctx context.Context, b *l1.ScannedBatch, p *Pay
 	if err != nil {
 		return Record{}, err
 	}
-	d.logger.Debug("[eez] batch derived", "l1Block", b.L1Block, "tx", b.TxHash, "from", r.From, "to", r.To, "settled", end, "resumed", r.Resumed)
+	d.handleBatchDerived(b, r, end)
 	return Record{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, L1Time: b.L1Time, L1MixDigest: b.L1MixDigest, TxHash: b.TxHash, LastL2Block: end}, nil
 }
 

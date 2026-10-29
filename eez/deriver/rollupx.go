@@ -359,7 +359,7 @@ func (d *Deriver) reconcileRollupX(ctx context.Context, b *l1.ScannedBatch, p *r
 	if err != nil {
 		return Record{}, err
 	}
-	d.logger.Debug("[eez] batch derived", "l1Block", b.L1Block, "tx", b.TxHash, "from", r.From, "to", r.To, "settled", settled, "resumed", r.Resumed)
+	d.handleBatchDerived(b, r, settled)
 	return Record{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, L1Time: b.L1Time, L1MixDigest: b.L1MixDigest, TxHash: b.TxHash, LastL2Block: settled}, nil
 }
 
