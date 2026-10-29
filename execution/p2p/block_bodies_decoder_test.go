@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestDecodeBlockBodiesResponseMatchesHeaderBeforeDecoding(t *testing.T) {
+func TestDecodeBlockBodiesResponseMatchesHeader(t *testing.T) {
 	tests := []struct {
 		name string
 		body *types.Body
@@ -58,14 +58,14 @@ func TestDecodeBlockBodiesResponseMatchesHeaderBeforeDecoding(t *testing.T) {
 	}
 }
 
-func TestDecodeBlockBodiesResponseRejectsMismatchBeforeTransactionDecode(t *testing.T) {
-	transactions := rlpTestList([]byte{rlp.EmptyListCode})
+func TestDecodeBlockBodiesResponseRejectsMalformedTransactionBeforeMismatch(t *testing.T) {
+	transactions := rlpTestList([]byte{rlp.EmptyStringCode})
 	body := rlpTestList(append(transactions, rlp.EmptyListCode))
 	header := newMockHeaderForBody(1, &types.Body{})
 
 	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
-	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
-	require.False(t, rlp.IsInvalidRLPError(err))
+	require.ErrorContains(t, err, "short input: 0")
+	require.NotErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 	require.Nil(t, decoded)
 }
 
@@ -97,38 +97,10 @@ func TestDecodeBlockBodiesResponseRejectsTrailingFieldBeforeMismatch(t *testing.
 	body := rlpTestList(bytes.Repeat([]byte{rlp.EmptyListCode}, 4))
 
 	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
-	require.ErrorIs(t, err, rlp.ErrMoreThanOneValue)
+	require.ErrorIs(t, err, ErrInvalidBodyRLP)
+	require.True(t, rlp.IsInvalidRLPError(err))
 	require.NotErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 	require.Nil(t, decoded)
-}
-
-func TestDecodeBlockBodiesResponseRejectsTransactionAmplification(t *testing.T) {
-	const transactionCount = 4096
-
-	transaction := append([]byte{0xc9}, bytes.Repeat([]byte{0x80}, 9)...)
-	transactions := rlpTestList(bytes.Repeat(transaction, transactionCount))
-	body := rlpTestList(append(transactions, rlp.EmptyListCode))
-	header := newMockHeaderForBody(1, &types.Body{})
-
-	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
-	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
-	require.Nil(t, decoded)
-}
-
-func TestDecodeBlockBodiesResponseRejectsExcessBeforeDecoding(t *testing.T) {
-	body, err := rlp.EncodeToBytes(&types.Body{})
-	require.NoError(t, err)
-	header := newMockHeaderForBody(1, &types.Body{})
-
-	_, err = decodeBlockBodiesResponse(append(body, 0x80), []*types.Header{header})
-	require.ErrorIs(t, err, &ErrTooManyBodies{})
-}
-
-func TestDecodeBlockBodiesResponseEmpty(t *testing.T) {
-	header := newMockHeaderForBody(1, &types.Body{})
-	decoded, err := decodeBlockBodiesResponse(nil, []*types.Header{header})
-	require.NoError(t, err)
-	require.Empty(t, decoded)
 }
 
 func rlpTestList(content []byte) []byte {

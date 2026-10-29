@@ -24,23 +24,24 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func BenchmarkDecodeBlockBodiesResponseRejectsTransactionAmplification(b *testing.B) {
-	transaction := append([]byte{0xc9}, bytes.Repeat([]byte{0x80}, 9)...)
-	header := newMockHeaderForBody(1, &types.Body{})
+func BenchmarkDecodeBlockBodiesResponseMalformedTransactions(b *testing.B) {
+	headers := []*types.Header{newMockHeaderForBody(1, &types.Body{})}
 
 	for _, test := range []struct {
 		name  string
 		count int
 	}{
 		{name: "one", count: 1},
-		{name: "4096", count: 4096},
+		{name: "10M", count: 10_000_000},
 	} {
 		b.Run(test.name, func(b *testing.B) {
-			transactions := rlpTestList(bytes.Repeat(transaction, test.count))
+			transactions := rlpTestList(bytes.Repeat([]byte{rlp.EmptyStringCode}, test.count))
 			body := rlpTestList(append(transactions, rlp.EmptyListCode))
 			b.ReportAllocs()
 			for b.Loop() {
-				_, _ = decodeBlockBodiesResponse(body, []*types.Header{header})
+				if _, err := decodeBlockBodiesResponse(body, headers); err == nil {
+					b.Fatal("expected a transaction decoding error")
+				}
 			}
 		})
 	}

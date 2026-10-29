@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"time"
@@ -412,10 +411,6 @@ func (f *FetcherBase) fetchBodies(
 
 	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, headers)
 	if err != nil {
-		// The full response is buffered, so an unexpected EOF means malformed body RLP.
-		if rlp.IsInvalidRLPError(err) || errors.Is(err, io.ErrUnexpectedEOF) {
-			err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
-		}
 		return nil, err
 	}
 
@@ -445,6 +440,41 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	}
 
 	return data, nil
+}
+
+func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([]*types.Body, error) {
+	if len(encodedBodies) == 0 {
+		return nil, nil
+	}
+
+	stream := rlp.NewBytesStream(encodedBodies)
+	defer rlp.PutStream(stream)
+
+	maxBodies := len(headers)
+	bodies := make([]*types.Body, 0, maxBodies)
+	for stream.Remaining() > 0 {
+		if len(bodies) == maxBodies {
+			return nil, &ErrTooManyBodies{
+				requested: maxBodies,
+				received:  maxBodies + 1,
+			}
+		}
+
+		body := new(types.Body)
+		if err := stream.Decode(body); err != nil {
+			if rlp.IsInvalidRLPError(err) {
+				err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
+			}
+			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
+		}
+		header := headers[len(bodies)]
+		if err := body.MatchesHeader(header); err != nil {
+			return nil, fmt.Errorf("%w: blockNum=%d, blockHash=%s: %w", ErrBodyDoesNotMatchHeader, header.Number.Uint64(), header.Hash(), err)
+		}
+		bodies = append(bodies, body)
+	}
+
+	return bodies, nil
 }
 
 func awaitResponse[TPacket any](

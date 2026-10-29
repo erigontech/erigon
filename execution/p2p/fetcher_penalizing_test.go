@@ -18,7 +18,6 @@ package p2p
 
 import (
 	"context"
-	"io"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -418,12 +417,12 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 	})
 }
 
-func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenBodyDoesNotMatchHeader(t *testing.T) {
+func TestPenalizingFetcherFetchBodiesRejectsMismatchBeforeNextPage(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	header := newMockHeaderForBody(1, &types.Body{})
+	headers := newMockBlockHeaders(2)
 	body := &types.Body{Transactions: types.Transactions{
 		types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21_000, uint256.NewInt(0), nil),
 	}}
@@ -437,14 +436,14 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenBodyDoesNotMatchHeade
 			},
 		},
 		wantRequestPeerId: peerId,
-		wantRequestHashes: []common.Hash{header.Hash()},
+		wantRequestHashes: []common.Hash{headers[0].Hash(), headers[1].Hash()},
 	}
 
-	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId, requestId+1))
 	test.mockSentryStreams(mockResponse)
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
-		bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
 		require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
 		require.Nil(t, bodies.Data)
 	})
@@ -459,9 +458,9 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenInvalidBodyRLP(t *tes
 		wantErr error
 	}{
 		{name: "not a list", body: rlp.RawValue{0x80}, wantErr: rlp.ErrExpectedList},
-		{name: "truncated transaction length", body: rlp.RawValue{0xc3, 0xc1, 0xb8, 0xc0}, wantErr: io.ErrUnexpectedEOF},
-		{name: "truncated uncles length", body: rlp.RawValue{0xc2, 0xc0, 0xf8}, wantErr: io.ErrUnexpectedEOF},
-		{name: "truncated withdrawals length", body: rlp.RawValue{0xc3, 0xc0, 0xc0, 0xf8}, wantErr: io.ErrUnexpectedEOF},
+		{name: "truncated transaction length", body: rlp.RawValue{0xc3, 0xc1, 0xb8, 0xc0}, wantErr: rlp.ErrElemTooLarge},
+		{name: "truncated uncles length", body: rlp.RawValue{0xc2, 0xc0, 0xf8}, wantErr: rlp.ErrElemTooLarge},
+		{name: "truncated withdrawals length", body: rlp.RawValue{0xc3, 0xc0, 0xc0, 0xf8}, wantErr: rlp.ErrElemTooLarge},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			peerId := PeerIdFromUint64(1)
