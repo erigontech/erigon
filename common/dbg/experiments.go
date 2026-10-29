@@ -90,13 +90,15 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
-	numWorkers           = runtime.NumCPU()
-	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
-	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
-	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
-	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
-	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
+	Exec3Parallel = EnvBool("EXEC3_PARALLEL", true)
+	numWorkers    = runtime.NumCPU()
+	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+	// ExecSkipFinalValidation: a self-loop task that ran with every lower task committed skips its read-set validation.
+	ExecSkipFinalValidation = EnvBool("EXEC_SKIP_FINAL_VALIDATION", false)
+	ExecTerseLoggerLevel    = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
+	CompressWorkers         = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
+	MergeWorkers            = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers          = EnvInt("COLLATE_WORKERS", 2)
 
 	AggregationDelayMs = EnvInt("AGGREGATION_DELAY_MS", 0)
 

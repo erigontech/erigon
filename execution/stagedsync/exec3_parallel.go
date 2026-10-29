@@ -2004,6 +2004,10 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			prevWrites = result.TxOut
 			pe.releaseWorker(w)
 
+			if dbg.ExecSkipFinalValidation && finalExec {
+				send(result)
+				return
+			}
 			valid, target, blocker := be.selfLoopEvaluate(tv, result)
 			if !valid {
 				if blocker > be.frontier() && !waitTo(blocker) {
