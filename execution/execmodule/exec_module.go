@@ -591,7 +591,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
-	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
+	if payloadExecuted || (!canonical && e.forkValidator.touchValidated(blockHash)) {
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusSuccess,
 			LatestValidHash:  blockHash,

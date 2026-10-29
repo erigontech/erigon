@@ -118,6 +118,11 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 
 // IsValidated reports whether a payload with this hash already passed validation.
 func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
+	_, ok := fv.validHashes.Get(hash)
+	return ok
+}
+
+func (fv *ForkValidator) touchValidated(hash common.Hash) bool {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	return fv.isValidated(hash)
