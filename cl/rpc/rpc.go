@@ -387,6 +387,12 @@ func (b *BeaconRpcP2P) BanPeer(pid string) {
 	}
 }
 
+func (b *BeaconRpcP2P) BanPeerForInvalidData(pid string) {
+	if _, err := b.sentinel.BanPeerForInvalidData(b.ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
+		log.Debug("failed to ban peer for invalid data", "pid", pid, "err", err)
+	}
+}
+
 // responseData stores decoded response metadata and raw container bytes.
 type responseData struct {
 	version    clparams.StateVersion

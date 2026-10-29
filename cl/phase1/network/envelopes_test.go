@@ -301,6 +301,10 @@ func (s *envelopeResponseSentinel) BanPeer(_ context.Context, peer *sentinelprot
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
+func (s *envelopeResponseSentinel) BanPeerForInvalidData(ctx context.Context, peer *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return s.BanPeer(ctx, peer, opts...)
+}
+
 type backfillEnvelopeSentinel struct {
 	envelopeResponseSentinel
 	invalidResponse []byte
@@ -328,24 +332,36 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 		requestEnvelopeRetryInterval = previousRetryInterval
 	})
 
-	for _, protocol := range []string{
-		communication.ExecutionPayloadEnvelopesByRootProtocolV1,
-		communication.ExecutionPayloadEnvelopesByRangeProtocolV1,
+	for _, tc := range []struct {
+		name             string
+		protocol         string
+		invalidSignature bool
+	}{
+		{name: "by-root commitment", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
+		{name: "by-range commitment", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
+		{name: "by-root signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidSignature: true},
+		{name: "by-range signature", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidSignature: true},
 	} {
-		t.Run(protocol, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
 			cfg.InitializeForkSchedule()
 			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
 			digest, err := clock.ComputeForkDigest(0)
 			require.NoError(t, err)
-			_, block, valid := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+			anchorState, block, valid := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
 			validBytes, err := valid.EncodeSSZ(nil)
 			require.NoError(t, err)
 			invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
 			require.NoError(t, invalid.DecodeSSZ(validBytes, int(clparams.GloasVersion)))
-			invalid.Message.BuilderIndex++
+			if tc.invalidSignature {
+				signBackfilledGloasEnvelope(t, cfg, anchorState, invalid, backfillOtherKey)
+				require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid))
+				require.ErrorContains(t, validateBackfilledGloasEnvelopeSignature(anchorState, block, invalid), "invalid signature")
+			} else {
+				invalid.Message.BuilderIndex++
+				require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid), "builder index mismatch")
+			}
 			require.NoError(t, invalid.ValidateForConfig(cfg))
-			require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid), "builder index mismatch")
 
 			var validWire, invalidWire bytes.Buffer
 			require.NoError(t, ssz_snappy.EncodeAndWrite(&validWire, valid, digest[:]...))
@@ -353,11 +369,12 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 			sentinel := &backfillEnvelopeSentinel{
 				envelopeResponseSentinel: envelopeResponseSentinel{response: validWire.Bytes()},
 				invalidResponse:          invalidWire.Bytes(),
-				invalidProtocol:          protocol,
+				invalidProtocol:          tc.protocol,
 			}
 			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 			downloader := NewBackwardBeaconDownloader(t.Context(), client, nil, nil, nil, cfg)
 			t.Cleanup(downloader.reqInterval.Stop)
+			downloader.SetGloasEnvelopeSignatureValidator(anchorState)
 			downloader.SetExpectedRoot(valid.Message.BeaconBlockRoot)
 			downloader.SetSlotToDownload(block.Block.Slot)
 			child := makeGloasBlock(11, hash(2), valid.Message.Payload.BlockHash)
@@ -365,7 +382,7 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 			downloader.prevBatchTopBlock = child
 			downloader.SetOnNewBlock(func(got *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
 				require.Same(t, block, got)
-				require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, got, envelope))
+				require.NoError(t, downloader.validateGloasEnvelope(got, envelope))
 				return true, nil
 			})
 

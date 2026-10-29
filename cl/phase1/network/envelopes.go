@@ -22,7 +22,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/common"
@@ -286,7 +285,7 @@ func envelopeRequestSlotRanges(blocks []*cltypes.SignedBeaconBlock, requestedRoo
 	return append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
 }
 
-func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, blocks []*cltypes.SignedBeaconBlock) envelopeCandidateValidator {
+func newEnvelopeValidator(blocks []*cltypes.SignedBeaconBlock, validate func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error) envelopeCandidateValidator {
 	blocksByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
 	for _, block := range blocks {
 		if block == nil || block.Block == nil {
@@ -298,6 +297,6 @@ func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, block
 		}
 	}
 	return func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-		return ValidateDownloadedGloasEnvelope(beaconCfg, blocksByRoot[envelope.Message.BeaconBlockRoot], envelope)
+		return validate(blocksByRoot[envelope.Message.BeaconBlockRoot], envelope)
 	}
 }
