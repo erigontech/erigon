@@ -794,5 +794,5 @@ func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
 		return false
 	}
 	h := rawdb.ReadHeaderByNumber(tx, blockNum)
-	return h != nil && h.BlockAccessListHash == nil && h.GasUsed/txNums <= uint64(dbg.Exec3SerialMaxAvgGas)
+	return h != nil && (h.BlockAccessListHash == nil || dbg.Exec3SerialBAL) && h.GasUsed/txNums <= uint64(dbg.Exec3SerialMaxAvgGas)
 }

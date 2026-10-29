@@ -95,6 +95,7 @@ var (
 	// Exec3SerialMaxAvgGas each, on the serial executor.
 	Exec3SerialMinTxs    = EnvInt("EXEC3_SERIAL_MIN_TXS", 0)
 	Exec3SerialMaxAvgGas = EnvInt("EXEC3_SERIAL_MAX_AVG_GAS", 100_000)
+	Exec3SerialBAL       = EnvBool("EXEC3_SERIAL_BAL", false)
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
