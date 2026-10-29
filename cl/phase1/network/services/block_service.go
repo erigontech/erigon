@@ -147,13 +147,20 @@ func newBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Context) e
 
 func newFailedBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Context) error, err error) *blockJob {
 	job := newBlockJob(block, store)
+	job.terminateLocked(err)
+	return job
+}
+
+func (job *blockJob) terminateLocked(err error) {
+	if job.terminal {
+		return
+	}
 	job.attempt.err = err
 	job.attempt.generation = job.storeGeneration
 	job.lastAttempt = job.attempt
 	job.completedGeneration = job.storeGeneration
 	job.terminal = true
 	close(job.attempt.done)
-	return job
 }
 
 func (job *blockJob) logStorageErrorOnce(err error) {
@@ -1188,14 +1195,7 @@ func (b *blockService) stopPublishedBlockJobs() {
 		job.mu.Lock()
 		current, ok := b.blocksScheduledForLaterExecution.Load(key)
 		if ok && current == job {
-			if !job.terminal {
-				job.attempt.err = ErrPublishedBlockJobStopped
-				job.attempt.generation = job.storeGeneration
-				job.lastAttempt = job.attempt
-				job.completedGeneration = job.storeGeneration
-				job.terminal = true
-				close(job.attempt.done)
-			}
+			job.terminateLocked(ErrPublishedBlockJobStopped)
 			b.removeScheduledBlock(key.([32]byte), job)
 		}
 		job.mu.Unlock()
@@ -1209,14 +1209,7 @@ func (b *blockService) expireScheduledBlockLocked(key [32]byte, job *blockJob, n
 	if job.running || job.pendingBlockWrite != nil || now.Sub(job.creationTime) <= blockJobExpiry {
 		return
 	}
-	if !job.terminal {
-		job.attempt.err = ErrPublishedBlockJobExpired
-		job.attempt.generation = job.storeGeneration
-		job.lastAttempt = job.attempt
-		job.completedGeneration = job.storeGeneration
-		job.terminal = true
-		close(job.attempt.done)
-	}
+	job.terminateLocked(ErrPublishedBlockJobExpired)
 	b.removeScheduledBlock(key, job)
 }
 

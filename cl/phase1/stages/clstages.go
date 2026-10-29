@@ -521,12 +521,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					if cfg.forkChoiceWaitingForIndices {
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-time.After(sleepForSlotRewakeInterval):
-							return nil
-						}
+						return common.Sleep(ctx, sleepForSlotRewakeInterval)
 					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
