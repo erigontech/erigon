@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
@@ -57,8 +56,7 @@ type serialExecutor struct {
 func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
 	for _, t := range block.Transactions() {
 		_ = t.Hash()
-		// A gas limit below the intrinsic cost of the list fails preCheck: nothing to recover ahead.
-		if sc, ok := t.(*types.SetCodeTransaction); ok && sc.GetGasLimit() >= uint64(len(sc.Authorizations))*params.PerAuthBaseCost {
+		if sc, ok := t.(*types.SetCodeTransaction); ok {
 			sc.WarmAuthorities(chainID)
 		}
 	}
