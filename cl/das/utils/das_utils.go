@@ -10,6 +10,7 @@ import (
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -92,36 +93,42 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 // rowRecoverySlots bounds the blob rows recovered or extended at once across all callers.
 var rowRecoverySlots = make(chan struct{}, runtime.GOMAXPROCS(0))
 
-// ComputeBlobsCells returns the cells of each blob, computed in parallel. An error names the
-// lowest blob whose cells cannot be computed.
+// ComputeCells returns the cells of the extended blob.
+func ComputeCells(blob *cltypes.Blob) ([]cltypes.Cell, error) {
+	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blob), 0 /* numGoRoutines */)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]cltypes.Cell, len(cells))
+	for i, cell := range &cells {
+		ret[i] = cltypes.Cell(*cell)
+	}
+	return ret, nil
+}
+
+// ComputeBlobsCells returns the cells of each blob, computed in parallel.
 func ComputeBlobsCells(blobs [][]byte) ([][]cltypes.Cell, error) {
-	cells := make([][]cltypes.Cell, len(blobs))
-	errs := make([]error, len(blobs))
-	var wg sync.WaitGroup
 	for i, blob := range blobs {
-		if len(blob) != len(goethkzg.Blob{}) {
-			errs[i] = fmt.Errorf("blob %d: got %d bytes", i, len(blob))
-			continue
+		if len(blob) != len(cltypes.Blob{}) {
+			return nil, fmt.Errorf("blob %d: got %d bytes", i, len(blob))
 		}
+	}
+	cells := make([][]cltypes.Cell, len(blobs))
+	var g errgroup.Group
+	for i, blob := range blobs {
 		rowRecoverySlots <- struct{}{}
-		wg.Go(func() {
+		g.Go(func() error {
 			defer func() { <-rowRecoverySlots }()
-			blobCells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blob), 0 /* numGoRoutines */)
+			blobCells, err := ComputeCells((*cltypes.Blob)(blob))
 			if err != nil {
-				errs[i] = fmt.Errorf("blob %d: %w", i, err)
-				return
+				return fmt.Errorf("blob %d: %w", i, err)
 			}
-			cells[i] = make([]cltypes.Cell, len(blobCells))
-			for j, cell := range &blobCells {
-				cells[i][j] = cltypes.Cell(*cell)
-			}
+			cells[i] = blobCells
+			return nil
 		})
 	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return cells, nil
 }
