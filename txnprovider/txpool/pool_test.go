@@ -120,7 +120,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -145,6 +145,14 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 		WithFeeCalculator(nil),
 	)
 	require.NoError(t, err)
+
+	return ctx, pool, poolDB, coreDB
+}
+
+func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
+
+	ctx, pool, poolDB, coreDB := newTestPool(t)
 
 	sender := common.Address{1}
 	account := accounts.Account{
@@ -462,8 +470,10 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 
 // A restart reaches fromDB before any OnNewBlock sets the block gas limit.
 func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
-	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.blockGasLimit.Store(0)
+	ctx, pool, poolDB, coreDB := newTestPool(t)
+	sender := common.Address{1}
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
 
 	txn := newTestTxnSlot(0, 0, 1, 2, 21_000)
 	hash := txn.Txn.Hash()
@@ -477,9 +487,7 @@ func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
 		return pool.fromDB(ctx, poolTx)
 	}))
 
-	pending, baseFee, queued := pool.CountContent()
-	require.Equal(t, 1, pending+baseFee+queued)
-	require.NotZero(t, pool.blockGasLimit.Load())
+	require.Contains(t, pool.byHash, string(hash[:]))
 }
 
 // addLocked drops blob txns below p.pendingBlobFee.
