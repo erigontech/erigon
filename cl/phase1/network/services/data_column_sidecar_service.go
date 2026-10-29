@@ -285,8 +285,25 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 // for its (slot, proposer, index) was seen already. The sidecars must be ones this node stores, so
 // it publishes exactly on the subnets it subscribes to.
 func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+	if len(sidecars) == 0 {
+		return
+	}
+	header := sidecars[0].SignedBlockHeader.Header
+	// The block may have waited for its parent or the EL while finality moved on; peers would ignore
+	// or reject its columns then.
+	if !s.afterFinalizedCheckpoint(header) {
+		log.Debug("[dataColumnSidecarService] not publishing columns built from EL blobs below finality", "slot", header.Slot)
+		return
+	}
+	var forkDigest common.Bytes4
+	if s.gossipManager != nil {
+		var err error
+		if forkDigest, err = s.ethClock.ComputeForkDigest(header.Slot / s.cfg.SlotsPerEpoch); err != nil {
+			log.Warn("[dataColumnSidecarService] failed to compute the fork digest of columns built from EL blobs", "slot", header.Slot, "err", err)
+			return
+		}
+	}
 	for _, sidecar := range sidecars {
-		header := sidecar.SignedBlockHeader.Header
 		key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
 		if seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{}); seen || s.gossipManager == nil {
 			continue
@@ -296,10 +313,21 @@ func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sid
 			log.Warn("[dataColumnSidecarService] failed to encode a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
 			continue
 		}
-		if err := s.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded); err != nil {
+		if err := s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded); err != nil {
 			log.Debug("[dataColumnSidecarService] failed to publish a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
 		}
 	}
+}
+
+// afterFinalizedCheckpoint applies the gossip finality rules for a Fulu sidecar: its slot is after the
+// finalized epoch start and the finalized checkpoint is an ancestor of its block.
+func (s *dataColumnSidecarService) afterFinalizedCheckpoint(header *cltypes.BeaconBlockHeader) bool {
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok || header.Slot <= finalizedStartSlot {
+		return false
+	}
+	return s.forkChoice.Ancestor(header.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root == finalizedCheckpoint.Root
 }
 
 // processGloasMessage handles GLOAS data column sidecar validation

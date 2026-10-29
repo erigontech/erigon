@@ -70,14 +70,15 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		return nil, err
 	}
 
-	archive := d.IsArchivedMode()
+	// Like the gossip path, keep every column the node subscribes to, not only its custody columns.
+	storeAll := d.IsArchivedMode() || d.caplinConfig.SubscribeAllTopics
 	custody, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return nil, err
 	}
 	stored := make([]*cltypes.DataColumnSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
-		if !archive && len(custody) > 0 && !custody[sidecar.Index] {
+		if !storeAll && len(custody) > 0 && !custody[sidecar.Index] {
 			continue
 		}
 		if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {

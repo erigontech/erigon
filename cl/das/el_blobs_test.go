@@ -163,3 +163,18 @@ func TestImportColumnsFromBlobsSupernodeSchedulesRecovery(t *testing.T) {
 		t.Fatal("blob recovery was not scheduled")
 	}
 }
+
+func TestImportColumnsFromBlobsStoresAllColumnsWhenSubscribedToAllTopics(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{SubscribeAllTopics: true})
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	require.Len(t, stored, int(cfg.NumberOfColumns))
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
+}
