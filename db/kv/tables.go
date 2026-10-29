@@ -176,6 +176,8 @@ const (
 
 	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+	// [slot + block root] => [execution payload envelope signature]
+	ExecutionPayloadEnvelopeSignatures = "ExecutionPayloadEnvelopeSignature"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
 	BalancesDump          = "BalancesDump"
@@ -245,15 +247,16 @@ const (
 
 	// GLOAS (EIP-7732)
 	BuildersDump                      = "BuildersDump"                   // slot => dump
-	Builders                          = "Builders"                       // slot => queue_diffs
+	Builders                          = "Builders"                       // slot => per-index builders diff
 	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
 	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
 	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
 	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
 	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
 	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
-	PtcWindowTable                    = "PtcWindow"                      // slot => ptc window SSZ
+	PtcWindowTable                    = "PtcWindow"                      // legacy table; no longer written
 	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	PtcWindowEpochTable               = "PtcWindowEpoch"                 // epoch-start slot => compressed ptc window SSZ
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
@@ -366,6 +369,7 @@ var ChaindataTables = []string{
 
 	// Beacon stuff
 	BeaconBlocks,
+	ExecutionPayloadEnvelopeSignatures,
 	CanonicalBlockRoots,
 	BlockRootToSlot,
 	BlockRootToStateRoot,
@@ -420,6 +424,7 @@ var ChaindataTables = []string{
 	BuilderPendingPaymentsTable,
 	PtcWindowTable,
 	LatestExecutionPayloadBidTable,
+	PtcWindowEpochTable,
 }
 
 const (

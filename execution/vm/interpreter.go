@@ -173,7 +173,7 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 // peekAddress, to keep the two peek functions inside the inlining budget.
 // Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
-	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
+	ctx.cachedKey = evm.intraBlockState.InternStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
@@ -188,7 +188,7 @@ func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 }
 
 func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
-	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
+	ctx.cachedAddr = evm.intraBlockState.InternAddress(ctx.Stack.peek())
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }

@@ -275,7 +275,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			topicsMap[crit.Topics[i][j]] = struct{}{}
 		}
 	}
-	topicMap := types.BuildTopicMap(crit.Topics)
+	filter := types.NewLogFilter(crit.Addresses, crit.Topics)
 
 	// latest logs that match the filter crit
 	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Desc)
@@ -296,7 +296,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -325,6 +325,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			timestamp = header.Time
 			blockCount++
 		}
+		if isSystemTxn {
+			continue
+		}
 		var logIndex uint
 		var blockLogs types.Logs
 
@@ -333,7 +336,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, err
 		}
 		if !ok {
-			continue
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 		}
 
 		if rangeErr != nil && logOptions.LogCount != 0 {
@@ -360,7 +363,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if logOptions.IgnoreTopicsOrder {
 			filtered = blockLogs.ContainingTopics(addrMap, topicsMap, maxLogCount)
 		} else {
-			filtered = blockLogs.FilterWithTopicMap(addrMap, topicMap, maxLogCount)
+			filtered = blockLogs.FilterWith(filter, maxLogCount)
 		}
 		if len(filtered) == 0 {
 			continue

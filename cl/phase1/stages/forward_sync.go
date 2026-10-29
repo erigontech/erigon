@@ -62,8 +62,13 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
+		if err = processBlock(ctx, cfg, block, false); err != nil {
+			// Forward sync skips NewPayload, so a pending write must also retain the
+			// collector insertion that would otherwise be lost on a stage transition.
+			if collectExecution && cfg.pendingBlockWrite != nil && cfg.pendingBlockWrite.block == block {
+				cfg.pendingBlockWrite.collectExecution = true
+			}
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
 				if newHighestBlockProcessed == 0 {
@@ -125,7 +130,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			// Dump state periodically for restart checkpoints.
 			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 				var st *state.CachingBeaconState
-				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot)
 				if err == nil && st != nil {
 					if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 						err = fmt.Errorf("failed to dump state: %w", err)
@@ -143,7 +148,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// Pre-GLOAS: dump state periodically for restart checkpoints.
 		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 			var st *state.CachingBeaconState
-			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot)
 			if err == nil && st != nil {
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 					err = fmt.Errorf("failed to dump state: %w", err)
@@ -156,8 +161,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			}
 		}
 
-		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
-		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
+		if !collectExecution {
 			continue
 		}
 		// Add the block to the block collector (pre-GLOAS only)
@@ -318,6 +322,8 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Before handing off to ChainTipSync, try to set the head state so that
 			// gossip beacon_block messages won't be ignored (Syncing() becomes false).
 			setHeadStateFromForkChoice(cfg, logger)
+			// A failing batch does not advance currentSlot, but its earlier blocks were imported.
+			requestCustodyBackfill(cfg, startSlot, max(currentSlot.Load(), cfg.forkChoice.HighestSeen()))
 			return ErrForwardSyncStale
 		}
 
@@ -347,7 +353,16 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
 		}
 	}
+	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil
+}
+
+// requestCustodyBackfill asks for the custody columns of the blocks forward sync imported: it
+// imports them without checking their data.
+func requestCustodyBackfill(cfg *Cfg, fromSlot, toSlot uint64) {
+	if cfg.peerDas != nil && toSlot > fromSlot {
+		cfg.peerDas.BackfillCustodyColumns(fromSlot, toSlot)
+	}
 }
 
 // setHeadStateFromForkChoice retrieves the current head state from the fork choice store
@@ -358,7 +373,7 @@ func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
 	if err != nil {
 		return
 	}
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot)
 	if err != nil || headState == nil {
 		return
 	}
@@ -406,7 +421,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	// won't exist on the network and the timeout will expire harmlessly.
 	// We use the state's LatestExecutionPayloadBid (not the block) since the anchor
 	// block is not stored in the fork graph under the single-state model.
-	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor state not available, skipping", "err", err)
 		return nil

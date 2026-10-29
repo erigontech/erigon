@@ -34,7 +34,7 @@ func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, b
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceBlockByNumber"}, resultsCh)
+		go writePattern(true, []string{"debug_traceBlockByNumber"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -67,7 +67,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceBlockByHash"}, resultsCh)
+		go writePattern(true, []string{"debug_traceBlockByHash"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -116,7 +116,7 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceTransaction"}, resultsCh)
+		go writePattern(true, []string{"debug_traceTransaction"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -171,7 +171,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_traceCall"}, resultsCh)
+		go writePattern(true, []string{"debug_traceCall"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}

@@ -347,11 +347,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 	}
 
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	topicMap := types.BuildTopicMap(crit.Topics)
+	filter := types.NewLogFilter(crit.Addresses, crit.Topics)
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -372,7 +368,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, _, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -387,12 +383,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 		}
 
-		if isFinalTxn {
+		if isSystemTxn {
 			continue
 		}
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
+			logs, err = appendRPCLogs(logs, r.Logs, filter, header.Time, maxResults)
 			if err != nil {
 				return nil, err
 			}
@@ -409,17 +405,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			if !ok {
-				continue
+				return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 			}
 			if r, err = api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil); err != nil {
 				return nil, err
 			}
 		}
-		if r == nil {
-			return nil, err
-		}
 
-		logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
+		logs, err = appendRPCLogs(logs, r.Logs, filter, header.Time, maxResults)
 		if err != nil {
 			return nil, err
 		}
@@ -428,14 +421,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.Logs, error) {
+func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, filter *types.LogFilter, blockTime uint64, maxResults int) (types.Logs, error) {
 	// One entry past the cap is enough to detect the overflow without converting the rest.
 	// At math.MaxInt there is no such entry, so the append stays unlimited.
 	var limit int
 	if maxResults != 0 && maxResults != math.MaxInt {
 		limit = maxResults + 1
 	}
-	logs = receiptLogs.AppendFilteredLogs(logs, addrMap, topicMap, blockTime, limit)
+	logs = receiptLogs.AppendFilteredLogs(logs, filter, blockTime, limit)
 	if maxResults != 0 && len(logs) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
