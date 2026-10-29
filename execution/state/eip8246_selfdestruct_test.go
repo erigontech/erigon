@@ -34,7 +34,6 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx0.SetTxContext(0, 0)
 	tx0.SetVersion(0)
 	tx0.SetVersionMap(vm)
-	tx0.eip8246 = true
 	require.NoError(t, tx0.CreateAccount(addr, true))
 	require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 	require.NoError(t, tx0.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
@@ -47,7 +46,6 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx1.SetTxContext(0, 1)
 	tx1.SetVersion(0)
 	tx1.SetVersionMap(vm)
-	tx1.eip8246 = true
 	ch, err := tx1.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, ch, "EXTCODEHASH of a preserved account must read empty, not the pre-destruct deployed hash")
@@ -72,9 +70,7 @@ func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
 
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
-	ibs.eip8246 = true
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -122,7 +118,6 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(newAccountStateReader(), vm)
 	defer ibs.Close()
-	ibs.eip8246 = true
 
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -130,7 +125,7 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)
@@ -162,7 +157,6 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	ibs.eip8246 = true
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -170,6 +164,58 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(2), bal, "reader must see the latest funded balance of the preserved account")
+}
+
+// EIP-8246: the whole-account versionedStateReader — used by calcFees to read the
+// coinbase / burnt fee recipient on the state-root composition path — must not drop
+// a self-destruct-preserved balance. IsNetAbsent is fork-agnostic and reports a
+// preserve as absent; a fork-aware reader must reconstruct the preserved value from
+// the versionMap cells, or calcFees credits the tip onto 0 and burns the preserved
+// balance (a parallel-only wrong-state-root divergence vs serial).
+func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246CB"))
+	preserved := *uint256.NewInt(500)
+
+	vm := NewVersionMap(nil)
+	sdVer := Version{TxIndex: 5}
+	vm.WriteSelfDestruct(addr, sdVer, true, true)
+	vm.WriteBalance(addr, sdVer, preserved, true)
+	vm.WriteIncarnation(addr, sdVer, 0, true)
+
+	// The versionedStateReader (the calcFees path) must surface the preserve as a
+	// balance-only EOA. Branch-agnostic: it keys on the balance's non-deleted stamp
+	// (a burn would stamp it ValueDeleted), not a fork flag.
+	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
+	acc, err := vsr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, acc, "a balance-preserving self-destruct must not read as absent (calcFees would burn the balance)")
+	require.Equal(t, preserved, acc.Balance)
+}
+
+// The burn counterpart to TestEIP8246_VersionedStateReader_PreserveNotBurned, and
+// the case Alexey's revert flagged: a non-preserving SELFDESTRUCT must read as
+// absent even though it had a non-zero balance before destruct. The burn stamps
+// its balance write ValueDeleted, so the whole-account reader keys on the stamp
+// — not the cell value — and cannot mistake the burn for a preserve.
+func TestEIP8246_VersionedStateReader_BurnReadsAbsent(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246CC"))
+
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(0, 5)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
+	_, err := ibs.Selfdestruct(addr, false /* burn */)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, &chain.Rules{IsAmsterdam: true}), true)
+
+	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
+	acc, err := vsr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, acc, "a burn stamps its balance ValueDeleted; the account must read absent, not as a preserved EOA")
 }
 
 // The persisted balance-only record has incarnation 0, so a later CREATE2 over
@@ -192,7 +238,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		tx0.SetTxContext(0, 0)
 		tx0.SetVersion(0)
 		tx0.SetVersionMap(vm)
-		tx0.eip8246 = true
 		require.NoError(t, tx0.CreateAccount(addr, true))
 		require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		_, err := tx0.Selfdestruct(addr, true)
@@ -204,7 +249,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		tx1.SetTxContext(0, 1)
 		tx1.SetVersion(0)
 		tx1.SetVersionMap(vm)
-		tx1.eip8246 = true
 		bal, err := tx1.GetBalance(addr)
 		require.NoError(t, err)
 		require.Equal(t, preserved, bal, "concurrent reader must see the preserved balance before re-creation")
@@ -221,7 +265,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		reader := newAccountStateReader()
 		ibs := New(reader)
 		defer ibs.Close()
-		ibs.eip8246 = true
 		ibs.SetTxContext(1, 0)
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		require.NoError(t, ibs.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
@@ -262,7 +305,6 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	ibs.eip8246 = true
 	fieldNonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	fieldCodeHash, err := ibs.GetCodeHash(addr)

@@ -144,7 +144,7 @@ var snapshotCommand = cli.Command{
 			Name: "ls",
 			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
-				return doLS(ctx, c, dirs)
+				return doLS(ctx, dirs)
 			},
 			Usage: "List all files with their words count",
 			Flags: joinFlags([]cli.Flag{
@@ -159,7 +159,7 @@ var snapshotCommand = cli.Command{
 				if _, err := os.Stat(dirs.DataDir); os.IsNotExist(err) {
 					return fmt.Errorf("datadir does not exist: %s", dirs.DataDir)
 				}
-				return doDU(ctx, c, dirs)
+				return doDU(c, dirs)
 			},
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -229,7 +229,7 @@ var snapshotCommand = cli.Command{
 				}
 				defer unlockDatadir(log.Root(), l)
 
-				return doRemoveOverlap(ctx, c, dirs)
+				return doRemoveOverlap(ctx, dirs)
 			},
 			Usage: "remove overlaps from e3 files",
 			Flags: joinFlags([]cli.Flag{
@@ -439,7 +439,7 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
-				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
 			}),
 		},
@@ -1694,7 +1694,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 				return nil
 			}
 			scCopy := sc
-			scCopy.SampleRatio /= 100 // it's very slow check
+			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
@@ -1706,7 +1706,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 				return err
 			}
 			scCopy := sc
-			scCopy.SampleRatio /= 100 // it's very slow check
+			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
@@ -3041,7 +3041,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	return nil
 }
 
-func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doLS(ctx context.Context, dirs datadir.Dirs) error {
 	return lsDatadir(ctx, dirs, log.Root())
 }
 
@@ -3329,7 +3329,7 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	return nil
 }
 
-func doRemoveOverlap(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doRemoveOverlap(ctx context.Context, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
 
@@ -4323,7 +4323,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
-func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doDU(cliCtx *cli.Command, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
 	// (e.g., DB locked by running node, corrupted/empty chaindata).

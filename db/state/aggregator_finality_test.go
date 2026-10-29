@@ -117,7 +117,7 @@ func TestBuildFilesClosesBatchValuesWhenCollationTxFails(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.Error(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, batch))
+	require.Error(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil, batch))
 	batch.Close()
 	leftover, err := filepath.Glob(filepath.Join(agg.dirs.Tmp, "*.idt"))
 	require.NoError(t, err)
