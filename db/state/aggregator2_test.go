@@ -17,9 +17,14 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // A background build and merge can overlap; editing must stay disabled until
@@ -102,4 +107,15 @@ func TestWorkersCfgKeepsOnlyTheNewestRequest(t *testing.T) {
 	w.lockEditing()
 	w.unlockEditing()
 	require.Equal(t, 6, w.getCollateAndBuild())
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.T) {
+	prev := statecfg.Schema.CommitmentDomain.CommitmentV3Records
+	statecfg.Schema.CommitmentDomain.CommitmentV3Records = true
+	t.Cleanup(func() { statecfg.Schema.CommitmentDomain.CommitmentV3Records = prev })
+
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "commitment convert --v3")
 }
