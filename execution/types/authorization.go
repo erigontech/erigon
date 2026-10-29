@@ -81,11 +81,8 @@ func (ath *Authorization) RecoverSigner() (common.Address, error) {
 
 const authsPerRecoverWorker = 32
 
-// recoverHelpers bounds the helper goroutines of all RecoverSigners calls together, so concurrent callers
-// never fan out past the CPUs: a call that finds no free slot recovers on its own goroutine.
-var recoverHelpers = make(chan struct{}, max(runtime.GOMAXPROCS(0)-1, 1))
-
-// RecoverSigners is RecoverSigner for each auth of chainID or chain 0; other auths are left zero.
+// RecoverSigners is RecoverSigner for each auth of chainID or chain 0, on several goroutines for a long list;
+// other auths are left zero.
 func RecoverSigners(auths []Authorization, chainID *uint256.Int) ([]common.Address, []error) {
 	signers, errs := make([]common.Address, len(auths)), make([]error, len(auths))
 	var next atomic.Int64
@@ -97,17 +94,8 @@ func RecoverSigners(auths []Authorization, chainID *uint256.Int) ([]common.Addre
 		}
 	}
 	var wg sync.WaitGroup
-helpers:
-	for range len(auths)/authsPerRecoverWorker - 1 {
-		select {
-		case recoverHelpers <- struct{}{}:
-			wg.Go(func() {
-				defer func() { <-recoverHelpers }()
-				recoverNext()
-			})
-		default:
-			break helpers
-		}
+	for range min(runtime.GOMAXPROCS(0), len(auths)/authsPerRecoverWorker) - 1 {
+		wg.Go(recoverNext)
 	}
 	recoverNext()
 	wg.Wait()
