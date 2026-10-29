@@ -127,6 +127,7 @@ func TestDifferential(t *testing.T) {
 			{recreate(1001), commitmenttest.StorageAt(incrSlot(wiped, 3), 7), commitmenttest.StorageAt(incrSlot(wiped, 500), 8)},
 			{recreate(1002)},
 			{commitmenttest.StorageAt(incrSlot(wiped, 9), 9)},
+			{recreate(1003), commitmenttest.DeleteAt(incrSlot(wiped, 9))},
 		}
 		want, _, _ := differential(t, commitmenttest.Case{ID: "delete_storage_subtree", Rounds: rounds}, parityEngines)
 		for _, deferred := range []bool{false, true} {
