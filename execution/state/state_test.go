@@ -371,7 +371,7 @@ func TestCodeResolve(t *testing.T) {
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state1.Close()
-	state1.SetVersionMap(NewVersionMap(nil))
+	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
 
 	_, ok, err := state1.GetDelegatedDesignation(stateobjaddr0)
