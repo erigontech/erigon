@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	stateContracts "github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
@@ -1320,15 +1321,24 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 		require.NotNil(t, status.ValidationError)
 		require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
 
+		// The transaction passes the count bound but not the gas limit, and its INVALID wins over the too large access list.
+		gasLimit := mdgas.MinTxBlockGas(true, true, true)
+		overBudget := make(types.BlockAccessList, gasLimit/types.BalItemCost+1)
+		for i := range overBudget {
+			overBudget[i].Address = common.Address{byte(i + 1)}
+		}
+		overBudgetEncoded, err := types.EncodeBlockAccessListBytes(overBudget)
+		require.NoError(t, err)
+		overBudgetBytes := hexutil.Bytes(overBudgetEncoded)
 		elPayload = *payload.ExecutionPayload
-		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
-		elPayload.BlockAccessList = &oversizedBytes
+		elPayload.GasLimit = hexutil.Uint64(gasLimit)
+		elPayload.BlockAccessList = &overBudgetBytes
 		setBlockHash(&elPayload)
 		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
 		require.NotNil(t, status.ValidationError)
-		require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
+		require.EqualError(t, status.ValidationError.Error(), "gas limit reached")
 
 		balWithNonceChangeAt := func(index uint32) hexutil.Bytes {
 			encoded, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{

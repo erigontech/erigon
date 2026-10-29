@@ -23,6 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -74,7 +75,7 @@ func TestGetChainNameFromChainData_OldSchema(t *testing.T) {
 	writeChainMetadata(t, ctx, db, "mainnet", 1)
 	db.Close()
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err, "should not fail on a DB with only metadata tables")
 	require.True(t, result.Ok, "chain name should be detected")
 	require.Equal(t, "mainnet", result.Value)
@@ -97,7 +98,7 @@ func TestGetChainNameFromChainData_CurrentSchema(t *testing.T) {
 	writeChainMetadata(t, ctx, db, "mainnet", 1)
 	db.Close()
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err, "should not fail on a current-schema DB")
 	require.True(t, result.Ok)
 	require.Equal(t, "mainnet", result.Value)
@@ -119,7 +120,7 @@ func TestGetChainNameFromChainData_NonMainnet(t *testing.T) {
 	writeChainMetadata(t, ctx, db, "sepolia", 11155111)
 	db.Close()
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err)
 	require.True(t, result.Ok)
 	require.Equal(t, "sepolia", result.Value)
@@ -141,7 +142,7 @@ func TestGetChainNameFromChainData_EmptyDB(t *testing.T) {
 	db.Close()
 
 	// No chain metadata written — the function should return Ok=false with no error.
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err)
 	require.False(t, result.Ok, "empty DB should not yield a chain name")
 }
@@ -153,7 +154,41 @@ func TestGetChainNameFromChainData_NonExistentDir(t *testing.T) {
 	logger := log.New()
 	chainDataDir := filepath.Join(t.TempDir(), "nonexistent", "chaindata")
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.Error(t, err)
 	require.False(t, result.Ok)
+}
+
+func TestResetKeepLocalSnapshotsFlag(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		keep    bool
+		wantErr bool
+	}{
+		{args: nil, keep: false},
+		{args: []string{"--keep-local-snapshots"}, keep: true},
+		{args: []string{"--local=false"}, keep: true},
+		{args: []string{"--local"}, keep: false},
+		{args: []string{"-l=false"}, keep: true},
+		{args: []string{"--local=false", "--keep-local-snapshots"}, wantErr: true},
+	} {
+		local, keepFlag := removeLocalFlag, keepLocalSnapshotsFlag
+		var keep bool
+		var err error
+		cmd := &cli.Command{
+			Name:  "reset",
+			Flags: []cli.Flag{&local, &keepFlag},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				keep, err = keepLocalSnapshots(cmd)
+				return nil
+			},
+		}
+		require.NoError(t, cmd.Run(context.Background(), append([]string{"reset"}, tc.args...)), "%v", tc.args)
+		if tc.wantErr {
+			require.Error(t, err, "%v", tc.args)
+			continue
+		}
+		require.NoError(t, err, "%v", tc.args)
+		require.Equal(t, tc.keep, keep, "%v", tc.args)
+	}
 }

@@ -20,6 +20,7 @@ func RegisterGossipServices(
 	gm *gossip.GossipManager,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
+	beaconCfg *clparams.BeaconChainConfig,
 	activeValidatorCount func() uint64,
 	// services
 	blockService services.BlockService,
@@ -49,7 +50,7 @@ func RegisterGossipServices(
 	// register services
 	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2)))
 	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withAggregateAndProofRateLimiter(beaconCfg)))
 	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16)))
 	add(gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
 	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8)))
@@ -65,7 +66,7 @@ func RegisterGossipServices(
 	// gloas
 	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withPayloadAttestationRateLimiter()))
-	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withRateLimiterByPeer(2, 4)))
+	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withProposerPreferencesRateLimiter(beaconCfg)))
 	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
 
 	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
@@ -104,6 +105,22 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests func() i
 // peer, because gossipsub has already marked it as seen.
 func withPayloadAttestationRateLimiter() gossip.ConditionFunc {
 	return withRateLimiterByPeer(float64(clparams.MaxPtcSize), int(clparams.MaxPtcSize))
+}
+
+// withAggregateAndProofRateLimiter lets one peer forward every aggregate expected in a slot at once
+// (TARGET_AGGREGATORS_PER_COMMITTEE for each committee), refilled over the slot. Aggregates are
+// published at the same point in the slot, and one ignored here is also dropped from every other
+// peer, because gossipsub has already marked it as seen.
+func withAggregateAndProofRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
+	perSlot := beaconCfg.MaxCommitteesPerSlot * beaconCfg.TargetAggregatorsPerCommittee
+	return withRateLimiterByPeer(float64(perSlot)/float64(beaconCfg.SecondsPerSlot), int(perSlot))
+}
+
+// withProposerPreferencesRateLimiter lets one peer relay one preference for every slot of the
+// accepted lookahead epochs at once: as with payload attestations, an ignored preference cannot be
+// redelivered by another peer.
+func withProposerPreferencesRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
+	return withRateLimiterByPeer(2, int((beaconCfg.MinSeedLookahead+1)*beaconCfg.SlotsPerEpoch))
 }
 
 // withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter

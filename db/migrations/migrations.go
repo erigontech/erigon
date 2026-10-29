@@ -57,6 +57,8 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion6,
 		dbSchemaVersion7,
 		dropLegacyE2Tables,
+		createPtcWindowEpochTable,
+		createExecutionPayloadEnvelopeSignaturesTable,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

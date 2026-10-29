@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -381,7 +382,7 @@ func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound
 	}
 	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, rpc.BlockNumberOrHashWithNumber(bound))
 	if err != nil {
-		return 0, err
+		return 0, unknownBlockAsResourceNotFound(err)
 	}
 	if blockNum > latest {
 		return 0, errBlockRangeIntoFuture
@@ -408,7 +409,8 @@ func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, h
 }
 
 func unknownBlockAsResourceNotFound(err error) error {
-	if errors.As(err, &rpc.BlockNotFoundErr{}) {
+	var unresolvedTag *rpc.CustomError
+	if errors.As(err, &rpc.BlockNotFoundErr{}) || (errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
 		return &rpc.ResourceNotFoundError{Message: err.Error()}
 	}
 	return err
@@ -500,14 +502,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastRules *chain.Rules
 	var lastBaseFee uint256.Int
 
-	noop := state.NewNoopWriter()
 	isPos := false
 
 	traceFilterTxn := func(blockNum, txNum uint64, txIndex int, txn types.Transaction, msg *types.Message) (*TraceCallResult, error) {
-		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
-		cachedWriter := state.NewCachedWriter(noop, stateCache)
-
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
 		oeConfig, err := parseOeTracerConfig(traceConfig)
@@ -517,7 +514,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.config = oeConfig
 		ot.compat = api.compatibility
 		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Tracer = ot.Tracer().Hooks
 
@@ -525,8 +521,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.New(cachedReader)
+		ibs := state.New(state.NewHistoryReaderV3(dbtx, txNum))
 		defer ibs.Close()
+		transactions.VersionedCallState(ibs)
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
@@ -565,10 +562,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
-		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			return nil, err
-		}
-		if err := ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+		if err := ethapi.FinalizeCallTx(ibs, evm.ChainRules()); err != nil {
 			return nil, err
 		}
 		return traceResult, nil
@@ -578,7 +572,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFnalTxn, _, blockNumChanged, err := it.Next()
 		if err != nil {
 			return err
 		}
@@ -774,6 +768,9 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedBlockState(ibs)
+	// The block-start system calls come before tx 0, as block execution runs them.
+	ibs.SetTxContext(block.NumberU64(), -1)
 
 	logger := log.New("trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
@@ -781,7 +778,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -839,6 +836,8 @@ func (api *TraceAPIImpl) callBlock(
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
+	// Withdrawals and the block-end system calls see every tx.
+	ibs.SetTxContext(block.NumberU64(), len(txs))
 
 	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
 	wdiffs := make([]withdrawalBalanceDiff, 0, len(block.Withdrawals()))
@@ -968,7 +967,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			if err != nil {
 				return err
 			}
-			noop := state.NewNoopWriter()
 
 			// traceTxnJob traces one job's transaction, closing its state on every
 			// exit path. A non-nil error aborts this worker and cancels the rest.
@@ -978,6 +976,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
 				workerIbs := state.New(workerReader)
 				defer workerIbs.Close()
+				transactions.VersionedCallState(workerIbs)
 
 				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
 
@@ -985,7 +984,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.config = oeConfig
 				ot.compat = api.compatibility
 				ot.r = traceResult
-				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
 				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
@@ -1013,7 +1011,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 				}
 
-				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+				if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
 					return err
 				}
 
@@ -1086,6 +1084,7 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	logger := log.New("trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
@@ -1093,7 +1092,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 

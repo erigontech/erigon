@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -113,6 +114,19 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 		blockMetricsCache: blockMetricsCache,
 		maxReorgDepth:     maxReorgDepth,
 	}
+}
+
+// IsValidated reports whether a payload with this hash already passed validation.
+func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.isValidated(hash)
+}
+
+func (fv *ForkValidator) isValidated(hash common.Hash) bool {
+	_, known := fv.validHashes.Get(hash)
+	_, retained := fv.candidates.Get(hash)
+	return known || retained
 }
 
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
@@ -203,8 +217,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	_, known := fv.validHashes.Get(hash)
-	if _, ok := fv.candidates.Get(hash); known || ok {
+	if fv.isValidated(hash) {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
@@ -322,9 +335,13 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
 	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
-		if errors.Is(err, rules.ErrInvalidBlock) {
+		switch {
+		case errors.Is(err, rules.ErrInvalidBlock):
 			validationError = err
-		} else {
+		case errors.Is(err, stageloop.ErrStateStepHasMoreWork):
+			status = engine_types.AcceptedStatus
+			return
+		default:
 			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
 			return
 		}

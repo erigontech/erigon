@@ -16,7 +16,7 @@
 
 // vmgen writes run in vm_run_gen.go from runTraced in interpreter.go: the
 // same loop with anyTrace false and the fast-path switch, whose cases inline
-// the fastOps' execute funcs from instructions.go. It also writes
+// the fastOps' and coldOps' execute funcs from instructions.go and eips.go. It also writes
 // fast_path_gen_test.go. With -check it reports stale files instead of writing them.
 package main
 
@@ -54,6 +54,9 @@ type fastOp struct {
 	allocated  string // a memory op's condition that memory need not grow
 	copyLen    string // the stack item a copy charges params.CopyGas per word of
 	jump       bool   // a taken jump also charges the JUMPDEST it lands on and steps over it
+	fork       bool   // the op is not in every fork, so the case checks that jt has it
+	index      string // for a DUP or SWAP that shares its case with its neighbours: the op's distance from DUP1 or SWAP1
+	minStack   string // the stack height such a shared case needs, in terms of index
 }
 
 func fastOps() []fastOp {
@@ -76,6 +79,7 @@ func fastOps() []fastOp {
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
 		op("AND", "opAnd", "GasFastestStep", 2, 1),
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
+		op("CALLVALUE", "opCallValue", "GasQuickStep", 0, 1),
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		// MCOPY is in the jump table only from Cancun on.
@@ -93,7 +97,77 @@ func fastOps() []fastOp {
 	return ops
 }
 
+// coldOps are cheap constant-gas ops that run inline in a second switch after
+// the fastOps one. A separate switch keeps the hot ops' compare tree as shallow
+// as it was; the DUPs and SWAPs share a case each, or Go compiles it to a jump table.
+func coldOps() []fastOp {
+	op := func(name, execute string) fastOp {
+		return fastOp{name: name, execute: execute, gas: "GasQuickStep", push: 1}
+	}
+	forked := func(o fastOp) fastOp {
+		o.fork = true
+		return o
+	}
+	alu := func(name, execute string, pop int) fastOp {
+		return fastOp{name: name, execute: execute, gas: "GasFastestStep", pop: pop, push: 1}
+	}
+	ops := []fastOp{
+		alu("SLT", "opSlt", 2),
+		alu("SGT", "opSgt", 2),
+		alu("OR", "opOr", 2),
+		alu("XOR", "opXor", 2),
+		alu("NOT", "opNot", 1),
+		alu("BYTE", "opByte", 2),
+		forked(alu("SHL", "opSHL", 2)),
+		forked(alu("SHR", "opSHR", 2)),
+		forked(alu("SAR", "opSAR", 2)),
+		op("ADDRESS", "opAddress"),
+		op("ORIGIN", "opOrigin"),
+		op("CALLER", "opCaller"),
+		op("CALLDATASIZE", "opCallDataSize"),
+		op("CODESIZE", "opCodeSize"),
+		op("GASPRICE", "opGasprice"),
+		forked(op("RETURNDATASIZE", "opReturnDataSize")),
+		op("COINBASE", "opCoinbase"),
+		op("TIMESTAMP", "opTimestamp"),
+		op("NUMBER", "opNumber"),
+		op("DIFFICULTY", "opDifficulty"),
+		op("GASLIMIT", "opGasLimit"),
+		forked(op("CHAINID", "opChainID")),
+		forked(op("BASEFEE", "opBaseFee")),
+		forked(op("BLOBBASEFEE", "opBlobBaseFee")),
+		forked(op("PUSH0", "opPush0")),
+		op("PC", "opPc"),
+		op("MSIZE", "opMsize"),
+		op("GAS", "opGas"),
+		copyOp("CALLDATACOPY", "opCallDataCopy", "memoryCallDataCopy", "gasCallDataCopy"),
+		copyOp("CODECOPY", "opCodeCopy", "memoryCodeCopy", "gasCodeCopy"),
+		copyOp("RETURNDATACOPY", "opReturnDataCopy", "memoryReturnDataCopy", "gasReturnDataCopy"),
+		forked(alu("BLOBHASH", "opBlobHash", 1)),
+		forked(fastOp{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1}),
+		forked(fastOp{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep"}),
+		forked(fastOp{name: "EXCHANGE", execute: "opExchange", gas: "GasFastestStep"}),
+	}
+	for n := 9; n <= 16; n++ {
+		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)", minStack: "int(op-DUP1)+1"})
+	}
+	for n := 5; n <= 16; n++ {
+		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, index: "int(op-SWAP1)", minStack: "int(op-SWAP1)+2"})
+	}
+	return ops
+}
+
 const allocated32 = "callContext.Memory.allocated32(stack.peek())"
+
+// copyOp is a copy into memory from outside it, which writes length bytes at the stack top.
+func copyOp(name, execute, memorySize, dynamicGas string) fastOp {
+	allocated := "callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))"
+	if name == "RETURNDATACOPY" {
+		// RETURNDATACOPY is in the jump table only from Byzantium on.
+		allocated = "jt[RETURNDATACOPY].memorySize != nil && " + allocated
+	}
+	return fastOp{name: name, execute: execute, gas: "GasFastestStep", pop: 3, memorySize: memorySize, dynamicGas: dynamicGas, allocated: allocated, copyLen: "stack.back(2)"}
+}
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
 
@@ -103,16 +177,20 @@ var runLocals = []string{"pc", "evm", "callContext", "res", "err", "gasLeft", "s
 // inlineBody returns o's execute func body as statements of run's loop: its
 // parameters renamed to run's pc, evm and callContext, and each return turned
 // into a step to the next op or a break out of the loop.
-func inlineBody(instructions []byte, o fastOp) string {
+func inlineBody(srcs map[string][]byte, o fastOp) string {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "instructions.go", instructions, parser.SkipObjectResolution)
-	if err != nil {
-		log.Fatal(err)
+	var decls []ast.Decl
+	for name, src := range srcs {
+		f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
+		if err != nil {
+			log.Fatal(err)
+		}
+		decls = append(decls, f.Decls...)
 	}
 	var typ *ast.FuncType
 	var body *ast.BlockStmt
 	rename := map[string]string{}
-	for _, d := range f.Decls {
+	for _, d := range decls {
 		fn, ok := d.(*ast.FuncDecl)
 		switch {
 		case !ok:
@@ -121,7 +199,7 @@ func inlineBody(instructions []byte, o fastOp) string {
 		case o.execute == "" && strings.HasPrefix(o.name, "DUP") && fn.Name.Name == "makeDup":
 			// The DUP closure reads depth, which makeDup derives from the DUP number.
 			n, _ := strconv.Atoi(strings.TrimPrefix(o.name, "DUP"))
-			rename["depth"] = strconv.Itoa(n - 1)
+			rename["depth"] = cmp.Or(o.index, strconv.Itoa(n-1))
 			typ, body = closure(fn)
 		case o.execute == "" && strings.HasPrefix(o.name, "PUSH") && fn.Name.Name == "makePush":
 			// One body serves every PUSH size, so all of them share one case.
@@ -130,7 +208,7 @@ func inlineBody(instructions []byte, o fastOp) string {
 		}
 	}
 	if body == nil {
-		log.Fatalf("%s: execute func %q not found in instructions.go", o.name, o.execute)
+		log.Fatalf("%s: execute func %q not found", o.name, o.execute)
 	}
 	i := 0
 	for _, field := range typ.Params.List {
@@ -146,9 +224,6 @@ func inlineBody(instructions []byte, o fastOp) string {
 			log.Fatalf("%s: a closure in the body would take the inlined returns", o.name)
 		case *ast.SelectorExpr:
 			fields[n.Sel] = true
-			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
-				log.Fatalf("%s: the body reads gas, which run keeps in gasLeft", o.name)
-			}
 		case *ast.AssignStmt:
 			for _, l := range n.Lhs {
 				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && slices.Contains(runLocals, id.Name) {
@@ -162,12 +237,27 @@ func inlineBody(instructions []byte, o fastOp) string {
 			id.Name = rename[id.Name]
 		}
 	}
+	astutil.Apply(body, nil, func(c *astutil.Cursor) bool {
+		switch n := c.Node().(type) {
+		case *ast.SelectorExpr:
+			// run keeps the gas in gasLeft.
+			if x, ok := n.X.(*ast.Ident); ok && x.Name == "callContext" && n.Sel.Name == "gas" {
+				c.Replace(ast.NewIdent("gasLeft"))
+			}
+		case *ast.BasicLit:
+			// A shared SWAP case swaps by the op's distance from SWAP1, not by its own constant.
+			if o.index != "" && strings.HasPrefix(o.name, "SWAP") && n.Value == strings.TrimPrefix(o.name, "SWAP") {
+				c.Replace(ast.NewIdent(o.index + "+1"))
+			}
+		}
+		return true
+	})
 	saveAroundCalls(body)
 	return inlineReturns(text(fset, body), o)
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh", "SetFromData"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
@@ -182,9 +272,15 @@ func saveAroundCalls(body *ast.BlockStmt) {
 		}
 		var list []ast.Stmt
 		for _, s := range block.List {
-			switch s.(type) {
+			switch st := s.(type) {
 			case *ast.ExprStmt, *ast.AssignStmt:
 				if callsOutOfLine(s) {
+					list = append(list, save, s, load)
+					continue
+				}
+			case *ast.IfStmt:
+				// A call in the condition: the branches must reach the load after the if.
+				if st.Init == nil && callsOutOfLine(st.Cond) && !returns(st) {
 					list = append(list, save, s, load)
 					continue
 				}
@@ -196,16 +292,32 @@ func saveAroundCalls(body *ast.BlockStmt) {
 	})
 }
 
-func callsOutOfLine(s ast.Stmt) (found bool) {
+func returns(n ast.Node) (found bool) {
+	ast.Inspect(n, func(n ast.Node) bool {
+		if _, ok := n.(*ast.ReturnStmt); ok {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+func callsOutOfLine(s ast.Node) (found bool) {
 	ast.Inspect(s, func(n ast.Node) bool {
 		if c, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
+			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && (slices.Contains(outOfLine, sel.Sel.Name) || sel.Sel.Name == "Set" && isMemory(sel.X)) {
 				found = true
 			}
 		}
 		return !found
 	})
 	return found
+}
+
+// isMemory reports whether x is a Memory field: uint256's inlined Set has the same name as Memory.Set.
+func isMemory(x ast.Expr) bool {
+	sel, ok := x.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == "Memory"
 }
 
 // mustStmt parses src as a statement without positions, so the printer lays it
@@ -288,12 +400,18 @@ func text(fset *token.FileSet, n any) string {
 	return b.String()
 }
 
-func fastSwitch(instructions []byte, ops []fastOp) string {
+func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 	var names, codes []string
 	for i := range ops {
 		o := &ops[i]
 		var cond []string
-		if o.pop > 0 {
+		if o.fork {
+			cond = append(cond, "jt["+o.name+"].constantGas != 0")
+		}
+		switch {
+		case o.minStack != "":
+			cond = append(cond, "sLen >= "+o.minStack)
+		case o.pop > 0:
 			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop))
 		}
 		switch o.push - o.pop {
@@ -311,7 +429,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 			gas += " + params.CopyGas*ToWordSize(" + o.copyLen + ".Uint64())"
 		}
 		cond = append(cond, "gasLeft >= "+gas)
-		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), gas, inlineBody(instructions, *o))
+		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), gas, inlineBody(srcs, *o))
 		// Ops with the same code share a case: each case deepens run's compare tree.
 		if n := len(codes); n > 0 && codes[n-1] == code {
 			names[n-1] += ", " + o.name
@@ -320,7 +438,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		names, codes = append(names, o.name), append(codes, code)
 	}
 	var b strings.Builder
-	b.WriteString("sLen := stack.len()\nswitch op {\n")
+	b.WriteString("switch op {\n")
 	for i := range names {
 		fmt.Fprintf(&b, "case %s:\n%s", names[i], codes[i])
 	}
@@ -328,10 +446,27 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 	return b.String()
 }
 
+// coldSwitch is fastSwitch behind a lookup in isColdOp, so a generic op skips
+// its compare tree with one branch.
+func coldSwitch(srcs map[string][]byte, ops []fastOp) string {
+	return "if isColdOp[op] {\n" + fastSwitch(srcs, ops) + "}\n"
+}
+
+// coldTable declares isColdOp, which is true for the ops of coldSwitch.
+func coldTable(ops []fastOp) string {
+	var b strings.Builder
+	b.WriteString("\n// isColdOp marks the ops of run's second fast-path switch.\nvar isColdOp = [256]bool{\n")
+	for i := range ops {
+		b.WriteString(ops[i].name + ": true,\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
 // untraced returns runTraced as run in a file of its own, with anyTrace set
-// to false, without the code this makes dead, and with fast in place of the
-// switchHere comment.
-func untraced(traced []byte, fast string) []byte {
+// to false, without the code this makes dead, with fast in place of the
+// switchHere comment, and with decls after it.
+func untraced(traced []byte, fast, decls string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
@@ -371,6 +506,7 @@ func untraced(traced []byte, fast string) []byte {
 			b.WriteString("// run is runTraced without the tracing code and with the fast path.\n" + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
 		}
 	}
+	b.WriteString(decls)
 	out, err := format.Source(b.Bytes())
 	if err != nil {
 		log.Fatal(err)
@@ -468,12 +604,14 @@ func read(name string) []byte {
 
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
-	ops := fastOps()
+	srcs := map[string][]byte{"instructions.go": read("instructions.go"), "eips.go": read("eips.go")}
+	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps())
+	ops := append(fastOps(), coldOps()...)
 	files := []struct {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops))},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), switches, coldTable(coldOps()))},
 		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string

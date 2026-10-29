@@ -43,17 +43,6 @@ func (r *staticAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 	return nil, nil
 }
 
-// anyAccountReader answers every address with the same account, so a benchmark
-// can touch an arbitrary number of distinct accounts.
-type anyAccountReader struct {
-	emptyReader
-	acc *accounts.Account
-}
-
-func (r *anyAccountReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
-	return r.acc, nil
-}
-
 func newNoMaterializeIBS(reader StateReader) (*IntraBlockState, *VersionMap) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
@@ -63,7 +52,6 @@ func newNoMaterializeIBS(reader StateReader) (*IntraBlockState, *VersionMap) {
 func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.Reset()
 	ibs.SetVersionMap(vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, txIndex)
 }
 
@@ -75,7 +63,6 @@ func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 
 	first := ibs.allocStateObject()
 	require.True(t, first.arena)
@@ -100,9 +87,9 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 	slabsAfterFirstTx := 0
 	for txIndex := range 200 {
 		startNoMaterializeTx(ibs, vm, txIndex)
-		balance, err := ibs.GetBalance(addr)
+		so, err := ibs.getStateObject(addr, true)
 		require.NoError(t, err)
-		require.EqualValues(t, 77, balance.Uint64())
+		require.EqualValues(t, 77, so.data.Balance.Uint64())
 		require.Empty(t, ibs.stateObjects, "parallel read must not cache a stateObject")
 		if txIndex == 0 {
 			slabsAfterFirstTx = len(ibs.stateObjectArena.slabs)
@@ -117,15 +104,15 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 // TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path
 // takes arena slots, the materializing path takes pooled objects.
 func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
-	ibs, _ := newNoMaterializeIBS(&emptyReader{})
-	defer ibs.Close()
-
-	pooled := ibs.allocStateObject()
+	materializing := New(&emptyReader{})
+	defer materializing.Close()
+	pooled := materializing.allocStateObject()
 	assert.False(t, pooled.arena, "materializing path must use the pool")
 	pooled.release()
 
-	ibs.SetNoMaterialize(true)
-	assert.True(t, ibs.allocStateObject().arena, "parallel path must use the arena")
+	versioned, _ := newNoMaterializeIBS(&emptyReader{})
+	defer versioned.Close()
+	assert.True(t, versioned.allocStateObject().arena, "parallel path must use the arena")
 }
 
 // TestNoMaterializeOverflowSkipsPool pins that once the arena is full the
@@ -134,7 +121,6 @@ func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 
 	for range arenaMaxObjects {
 		require.True(t, ibs.allocStateObject().arena)
@@ -179,7 +165,7 @@ func TestNoMaterializeAccountReadAllocs(t *testing.T) {
 
 	allocs := testing.AllocsPerRun(200, func() {
 		startNoMaterializeTx(ibs, vm, 0)
-		if _, err := ibs.GetBalance(addr); err != nil {
+		if _, err := ibs.getStateObject(addr, true); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -236,13 +222,11 @@ func TestNoMaterializeIsStableWhileSlotsOutstanding(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
 
-	ibs.SetNoMaterialize(true)
 	require.True(t, ibs.allocStateObject().arena)
 	require.NotPanics(t, ibs.clearJournalAndRefund, "drawn under noMaterialize, rewinds cleanly")
 
-	ibs.SetNoMaterialize(true)
 	require.True(t, ibs.allocStateObject().arena)
-	require.Panics(t, func() { ibs.SetNoMaterialize(false) }, "flipping with slots outstanding")
+	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "flipping with slots outstanding")
 }
 
 // TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its
@@ -316,4 +300,32 @@ func TestStateObjectArenaResetCoversVaryingHighWater(t *testing.T) {
 		require.False(t, so.selfdestructed, "slot %d handed out dirty", i)
 		require.Empty(t, so.dirtyStorage, "slot %d handed out dirty", i)
 	}
+}
+
+type countingAccountReader struct {
+	staticAccountReader
+	reads int
+}
+
+func (r *countingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	r.reads++
+	return r.staticAccountReader.ReadAccountData(addr)
+}
+
+// seedOrigin and versionedAccountBase share one committed read per tx, also for
+// an account that does not exist.
+func TestNoMaterializeReadsCommittedAccountOncePerTx(t *testing.T) {
+	absent := accounts.InternAddress([20]byte{0xCD})
+	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: accounts.InternAddress([20]byte{0xAB})}}
+	ibs, vm := newNoMaterializeIBS(reader)
+	defer ibs.Close()
+	startNoMaterializeTx(ibs, vm, 0)
+
+	_, _, _, seeded, err := seedOrigin(ibs, absent)
+	require.NoError(t, err)
+	require.False(t, seeded)
+	acc, _, _, err := ibs.versionedAccountBase(absent, true)
+	require.NoError(t, err)
+	require.Nil(t, acc)
+	require.Equal(t, 1, reader.reads)
 }
