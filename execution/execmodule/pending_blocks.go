@@ -66,9 +66,14 @@ func (e *ExecModule) copyPendingChain(tx kv.Tx, dst kv.RwTx, head common.Hash) (
 	return chain, raiseTxSequence(src, dst)
 }
 
-func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash, finalized uint64) error {
+func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, commit kv.RwTx, committed []common.Hash, finalized, head uint64) error {
 	side := sideBlocksToRetain(e.pendingBlocks, committed, finalized)
 	src := e.pendingBlocksView(tx)
+	if src != nil && commit != nil {
+		if err := persistDeepSideBlocks(src, commit, side, head, e.syncCfg.MaxReorgDepth); err != nil {
+			return err
+		}
+	}
 	if len(side) == 0 || src == nil {
 		e.dropPendingBlocks()
 		return nil
@@ -100,6 +105,24 @@ func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common
 	}
 	maps.DeleteFunc(side, func(_ common.Hash, b pendingBlock) bool { return b.number <= finalized })
 	return side
+}
+
+func persistDeepSideBlocks(src kv.Tx, dst kv.RwTx, side map[common.Hash]pendingBlock, head, maxReorgDepth uint64) error {
+	persisted := false
+	for hash, block := range side {
+		if block.number+maxReorgDepth >= head {
+			continue
+		}
+		if err := copyBlockRows(src, dst, hash, block.number); err != nil {
+			return err
+		}
+		delete(side, hash)
+		persisted = true
+	}
+	if !persisted {
+		return nil
+	}
+	return raiseTxSequence(src, dst)
 }
 
 func (e *ExecModule) initSeededOverlay(tx kv.TemporalTx, sd *execctx.SharedDomains) error {

@@ -242,6 +242,77 @@ func TestDeepSideChainSurvivesForkChoice(t *testing.T) {
 	requireCanonicalWithTransactions(t, m, side[len(side)-1])
 }
 
+func TestForkChoiceToSideForkBelowFinalityIsInvalid(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	alt := generateTransferBlocks(t, m, key, 3, 0x0b)
+	canon := generateTransferBlocks(t, m, key, 3, 0x0a)
+	_, err := m.InsertBlocks(t.Context(), alt)
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), canon)
+	require.NoError(t, err)
+	finality := []execmoduletester.UFCOpt{
+		execmoduletester.WithSafeHash(canon[1].Hash()),
+		execmoduletester.WithFinalisedHash(canon[0].Hash()),
+	}
+	result, err := m.UpdateForkChoice(t.Context(), canon[2].Header(), finality...)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	result, err = m.UpdateForkChoice(t.Context(), alt[2].Header(), finality...)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+}
+
+func TestForkChoicePersistsSideBlockBeyondReorgDepth(t *testing.T) {
+	const maxReorgDepth = 2
+	m, key, _ := newMetricsTester(t, execmoduletester.WithMaxReorgDepth(maxReorgDepth))
+	side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+	canonical := generateTransferBlocks(t, m, key, maxReorgDepth+2, 0x0a)
+	insertAndValidateBlocks(t, m, side, canonical[0])
+	updateForkChoiceTo(t, m, canonical[0])
+	for _, block := range canonical[1:] {
+		insertAndValidateBlocks(t, m, block)
+		updateForkChoiceTo(t, m, block)
+	}
+
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.NotNil(t, rawdb.ReadHeaderNumber(tx, side.Hash()))
+		requireStoredTransactions(t, tx, side)
+		return nil
+	}))
+	require.False(t, m.ExecModule.IsRetainedSideBlock(side.Hash()))
+
+	result, err := m.UpdateForkChoice(t.Context(), side.Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusMissingSegment, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+}
+
+func TestFinalizedForkChoiceDropsRetainedSideBlock(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+	canonical := generateTransferBlocks(t, m, key, 2, 0x0a)
+	insertAndValidateBlocks(t, m, side, canonical[0])
+	updateForkChoiceTo(t, m, canonical[0])
+	hash := side.Hash()
+	has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	insertAndValidateBlocks(t, m, canonical[1])
+	result, err := m.UpdateForkChoice(t.Context(), canonical[1].Header(),
+		execmoduletester.WithSafeHash(canonical[0].Hash()),
+		execmoduletester.WithFinalisedHash(canonical[0].Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	has, err = m.ExecModule.HasBlock(t.Context(), &hash, nil)
+	require.NoError(t, err)
+	require.False(t, has)
+}
+
 func generateTransferBlocks(t *testing.T, m *execmoduletester.ExecModuleTester, key *ecdsa.PrivateKey, n int, to byte) []*types.Block {
 	t.Helper()
 	chain, err := m.GenerateChain(n, sendTo(t, m, key, common.Address{to}, 1))

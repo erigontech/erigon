@@ -253,7 +253,7 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, err
 		}
 		for !isCanonicalHash {
-			if currentParentNumber < finalisedBlockNum {
+			if currentParentNumber <= finalisedBlockNum {
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusInvalidForkchoice,
@@ -762,7 +762,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		if err := e.retainSideBlocks(roTx, headPath, common.Deref(finalizedNumber)); err != nil {
+		if err := e.retainSideBlocks(roTx, tx, headPath, common.Deref(finalizedNumber), *headNumber); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if hasOverlay {

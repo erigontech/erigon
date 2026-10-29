@@ -35,8 +35,6 @@ import (
 
 var errNotFound = errors.New("notfound")
 
-// beginOverlayOrRo returns a tx that reads from the block overlay (if a
-// persistent SharedDomains with an active overlay exists) or a plain DB RO tx.
 // When an overlay is active, the returned tx is an OverlayReadView backed by a
 // fresh RO tx — each caller gets its own independent DB snapshot, so concurrent
 // getters never share MDBX internal state.
@@ -53,7 +51,6 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 	return tx, func() { tx.Rollback() }, nil
 }
 
-// beginOverlayView returns a nil cleanup when no overlay is active.
 func (e *ExecModule) beginOverlayView(ctx context.Context) (kv.TemporalTx, func(), error) {
 	e.lock.RLock()
 	defer e.lock.RUnlock()

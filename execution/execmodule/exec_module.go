@@ -534,7 +534,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	// Read header/body from the block overlay on currentContext if available
 	// (block data written by InsertBlocks hasn't been flushed to DB yet),
-	// falling back to a plain DB read otherwise.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)
@@ -700,7 +699,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		validationStatus = ExecutionStatusBadBlock
 		e.dropBadChain(blockHash, lvh)
 		if e.retainedBlocks != nil {
-			if err := e.retainSideBlocks(roTx, nil, 0); err != nil {
+			if err := e.retainSideBlocks(roTx, nil, nil, 0, 0); err != nil {
 				return ValidationResult{}, err
 			}
 		}

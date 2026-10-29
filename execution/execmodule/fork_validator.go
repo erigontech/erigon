@@ -125,10 +125,10 @@ func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
 func (fv *ForkValidator) touchValidated(hash common.Hash) bool {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	return fv.isValidated(hash)
+	return fv.isKnownOrRetained(hash)
 }
 
-func (fv *ForkValidator) isValidated(hash common.Hash) bool {
+func (fv *ForkValidator) isKnownOrRetained(hash common.Hash) bool {
 	_, known := fv.validHashes.Get(hash)
 	_, retained := fv.candidates.Get(hash)
 	return known || retained
@@ -222,7 +222,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if fv.isValidated(hash) {
+	if fv.isKnownOrRetained(hash) {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
