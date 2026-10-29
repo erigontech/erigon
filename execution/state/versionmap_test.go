@@ -1511,21 +1511,6 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 	}
 }
 
-// A writer that finds an existing entry must latch too. Otherwise a creator
-// descheduled between publishing the entry and latching lets a second writer
-// complete a cell while load still takes the empty fast path.
-func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
-	m := NewVersionMap(nil)
-	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
-
-	// The entry is published, as a creator does, but the latch is not yet set.
-	m.s.LoadOrStore(addr, &AddressEntry{})
-	require.Nil(t, m.load(addr), "the latch is what load keys on")
-
-	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
-	require.NotNil(t, m.load(addr), "a completed write must be visible")
-}
-
 // storageWriteSet is the write set of a run of the tx at index 1 that writes val to addr's slot.
 func storageWriteSet(addr accounts.Address, slot accounts.StorageKey, incarnation Incarnation, val uint64, status valueStatus) *WriteSet {
 	ws := &WriteSet{}

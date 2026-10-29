@@ -229,19 +229,17 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 }
 
 type VersionMap struct {
-	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
-	s sync.Map // accounts.Address -> *AddressEntry
-	// nonEmpty latches before the first entry is taken: nothing removes entries.
-	nonEmpty atomic.Bool
-	HasBAL   bool // When true, all significant writes are pre-populated from BAL
-	bal      types.BlockAccessList
+	// address -> *AddressEntry; lock-free lookup. Each entry's RWMutex guards only its own cells.
+	s      atomic.Pointer[xsync.Map[accounts.Address, *AddressEntry]]
+	HasBAL bool // When true, all significant writes are pre-populated from BAL
+	bal    types.BlockAccessList
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
 	// write-once, so it lives in lock-free sync.Maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
-	originAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = committed-absent)
+	originAccounts atomic.Pointer[xsync.Map[accounts.Address, *accounts.Account]] // nil ptr = committed-absent
 	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
@@ -263,28 +261,33 @@ type originStorageKey struct {
 
 // StoreOriginAccount records the committed base account write-once (idempotent across txs).
 func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Account) {
-	vm.originAccounts.LoadOrStore(addr, acc)
+	lazyMap(&vm.originAccounts).LoadOrStore(addr, acc)
 }
 
 // LoadOriginAccount returns the committed base account and whether it was seeded.
 func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Account, bool) {
-	if v, ok := vm.originAccounts.Load(addr); ok {
-		acc, _ := v.(*accounts.Account)
-		return acc, true
+	m := vm.originAccounts.Load()
+	if m == nil {
+		return nil, false
 	}
-	return nil, false
+	return m.Load(addr)
 }
 
 // StoreOriginStorage records the committed base slot value write-once.
 func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	m := vm.originStorage.Load()
-	if m == nil {
-		m = xsync.NewMap[originStorageKey, uint256.Int]()
-		if !vm.originStorage.CompareAndSwap(nil, m) {
-			m = vm.originStorage.Load()
-		}
+	lazyMap(&vm.originStorage).LoadOrStore(originStorageKey{addr, key}, val)
+}
+
+// lazyMap returns the map p points to, creating it on first use so a VersionMap that is never written allocates none.
+func lazyMap[K comparable, V any](p *atomic.Pointer[xsync.Map[K, V]]) *xsync.Map[K, V] {
+	if m := p.Load(); m != nil {
+		return m
 	}
-	m.LoadOrStore(originStorageKey{addr, key}, val)
+	m := xsync.NewMap[K, V]()
+	if !p.CompareAndSwap(nil, m) {
+		return p.Load()
+	}
+	return m
 }
 
 // LoadOriginStorage returns the committed base slot value and whether it was seeded.
@@ -349,13 +352,12 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
-	if !vm.nonEmpty.Load() {
+	m := vm.s.Load()
+	if m == nil {
 		return nil
 	}
-	if e, ok := vm.s.Load(addr); ok {
-		return e.(*AddressEntry)
-	}
-	return nil
+	e, _ := m.Load(addr)
+	return e
 }
 
 // StorageKeys returns every storage slot key recorded for addr.
@@ -524,17 +526,12 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 // entryOrCreate returns the AddressEntry for addr, creating it if absent. The returned
 // pointer is stable for the map's lifetime; the caller locks e.mu for the cell mutation.
 func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
-	// Latch before taking the entry, not after publishing it: a creator
-	// descheduled in between would otherwise let this writer finish a cell
-	// while load still answers from the empty fast path.
-	if !vm.nonEmpty.Load() {
-		vm.nonEmpty.Store(true)
+	m := lazyMap(&vm.s)
+	if e, ok := m.Load(addr); ok {
+		return e
 	}
-	if e, ok := vm.s.Load(addr); ok {
-		return e.(*AddressEntry)
-	}
-	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
-	return e.(*AddressEntry)
+	e, _ := m.LoadOrStore(addr, &AddressEntry{})
+	return e
 }
 
 func flagFor(complete bool) statusFlag {
