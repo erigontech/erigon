@@ -119,8 +119,132 @@ func stSdiv(_ uint64, scope *CallContext) string {
 
 func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	y.Mod(x, y)
+	if !y.IsZero() {
+		mod(y, x, y)
+	}
 	return pc, nil, nil
+}
+
+// mod sets z = x % y (0 if y == 0). It keeps the Knuth division in registers;
+// uint256.Mod normalizes through slices and is ~2x slower on EVM operands.
+func mod(z, x, y *uint256.Int) {
+	switch {
+	case y[3] != 0:
+		if x.Lt(y) {
+			z.Set(x)
+			return
+		}
+		if y[3]>>63 != 0 {
+			z.Sub(x, y)
+			return
+		}
+		s := uint(bits.LeadingZeros64(y[3]))
+		r3, r2, r1, r0 := rem5by4(x[3]>>(64-s), x[3]<<s|x[2]>>(64-s), x[2]<<s|x[1]>>(64-s), x[1]<<s|x[0]>>(64-s), x[0]<<s,
+			y[3]<<s|y[2]>>(64-s), y[2]<<s|y[1]>>(64-s), y[1]<<s|y[0]>>(64-s), y[0]<<s)
+		z[0], z[1], z[2], z[3] = r0>>s|r1<<(64-s), r1>>s|r2<<(64-s), r2>>s|r3<<(64-s), r3>>s
+	case y[2] != 0:
+		s := uint(bits.LeadingZeros64(y[2]))
+		v2, v1, v0 := y[2]<<s|y[1]>>(64-s), y[1]<<s|y[0]>>(64-s), y[0]<<s
+		r2, r1, r0 := rem4by3(x[3]>>(64-s), x[3]<<s|x[2]>>(64-s), x[2]<<s|x[1]>>(64-s), x[1]<<s|x[0]>>(64-s), v2, v1, v0)
+		r2, r1, r0 = rem4by3(r2, r1, r0, x[0]<<s, v2, v1, v0)
+		z[0], z[1], z[2], z[3] = r0>>s|r1<<(64-s), r1>>s|r2<<(64-s), r2>>s, 0
+	case y[1] != 0:
+		s := uint(bits.LeadingZeros64(y[1]))
+		v1, v0 := y[1]<<s|y[0]>>(64-s), y[0]<<s
+		r1, r0 := rem3by2(x[3]>>(64-s), x[3]<<s|x[2]>>(64-s), x[2]<<s|x[1]>>(64-s), v1, v0)
+		r1, r0 = rem3by2(r1, r0, x[1]<<s|x[0]>>(64-s), v1, v0)
+		r1, r0 = rem3by2(r1, r0, x[0]<<s, v1, v0)
+		z[0], z[1], z[2], z[3] = r0>>s|r1<<(64-s), r1>>s, 0, 0
+	case y[0] != 0:
+		d, r := y[0], uint64(0)
+		if x[3] != 0 {
+			r = x[3] % d
+		}
+		if r|x[2] != 0 {
+			_, r = bits.Div64(r, x[2], d)
+		}
+		if r|x[1] != 0 {
+			_, r = bits.Div64(r, x[1], d)
+		}
+		_, r = bits.Div64(r, x[0], d)
+		z.SetUint64(r)
+	default:
+		z.Clear()
+	}
+}
+
+// The remN steps below are one Knuth D step: they reduce an N-limb window u by
+// a normalized (N-1)-limb v, where the top N-1 limbs of u are below v. Then
+// q <= qhat <= q+2, so the remainder u - qhat*v lies in [-2v, v): its top limb
+// is non-zero exactly while it is negative, and at most two add-backs fix it.
+
+func rem5by4(u4, u3, u2, u1, u0, v3, v2, v1, v0 uint64) (uint64, uint64, uint64, uint64) {
+	q, _ := bits.Div64(u4, u3, v3) // the only caller has u4 < 2^63 <= v3
+	h0, l0 := bits.Mul64(q, v0)
+	h1, l1 := bits.Mul64(q, v1)
+	h2, l2 := bits.Mul64(q, v2)
+	h3, l3 := bits.Mul64(q, v3)
+	p1, c := bits.Add64(l1, h0, 0)
+	p2, c := bits.Add64(l2, h1, c)
+	p3, c := bits.Add64(l3, h2, c)
+	var b uint64
+	u0, b = bits.Sub64(u0, l0, 0)
+	u1, b = bits.Sub64(u1, p1, b)
+	u2, b = bits.Sub64(u2, p2, b)
+	u3, b = bits.Sub64(u3, p3, b)
+	u4 -= h3 + c + b
+	for u4 != 0 {
+		u0, c = bits.Add64(u0, v0, 0)
+		u1, c = bits.Add64(u1, v1, c)
+		u2, c = bits.Add64(u2, v2, c)
+		u3, c = bits.Add64(u3, v3, c)
+		u4 += c
+	}
+	return u3, u2, u1, u0
+}
+
+func rem4by3(u3, u2, u1, u0, v2, v1, v0 uint64) (uint64, uint64, uint64) {
+	q := ^uint64(0)
+	if u3 < v2 {
+		q, _ = bits.Div64(u3, u2, v2)
+	}
+	h0, l0 := bits.Mul64(q, v0)
+	h1, l1 := bits.Mul64(q, v1)
+	h2, l2 := bits.Mul64(q, v2)
+	p1, c := bits.Add64(l1, h0, 0)
+	p2, c := bits.Add64(l2, h1, c)
+	var b uint64
+	u0, b = bits.Sub64(u0, l0, 0)
+	u1, b = bits.Sub64(u1, p1, b)
+	u2, b = bits.Sub64(u2, p2, b)
+	u3 -= h2 + c + b
+	for u3 != 0 {
+		u0, c = bits.Add64(u0, v0, 0)
+		u1, c = bits.Add64(u1, v1, c)
+		u2, c = bits.Add64(u2, v2, c)
+		u3 += c
+	}
+	return u2, u1, u0
+}
+
+func rem3by2(u2, u1, u0, v1, v0 uint64) (uint64, uint64) {
+	q := ^uint64(0)
+	if u2 < v1 {
+		q, _ = bits.Div64(u2, u1, v1)
+	}
+	h0, l0 := bits.Mul64(q, v0)
+	h1, l1 := bits.Mul64(q, v1)
+	p1, c := bits.Add64(l1, h0, 0)
+	var b uint64
+	u0, b = bits.Sub64(u0, l0, 0)
+	u1, b = bits.Sub64(u1, p1, b)
+	u2 -= h1 + c + b
+	for u2 != 0 {
+		u0, c = bits.Add64(u0, v0, 0)
+		u1, c = bits.Add64(u1, v1, c)
+		u2 += c
+	}
+	return u1, u0
 }
 
 func stMod(_ uint64, scope *CallContext) string {
@@ -130,7 +254,17 @@ func stMod(_ uint64, scope *CallContext) string {
 
 func opSmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	y.SMod(x, y)
+	if y.IsZero() {
+		return pc, nil, nil
+	}
+	var ax, ay uint256.Int
+	ax.Abs(x)
+	ay.Abs(y)
+	xNeg := x.Sign() < 0
+	mod(y, &ax, &ay)
+	if xNeg {
+		y.Neg(y)
+	}
 	return pc, nil, nil
 }
 
