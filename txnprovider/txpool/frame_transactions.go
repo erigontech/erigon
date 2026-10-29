@@ -256,7 +256,6 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 			if err != nil {
 				return nil, err
 			}
-			v.Dependencies = append(v.Dependencies, types.FrameRecentRootVerifier)
 			break
 		}
 	}

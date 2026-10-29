@@ -120,6 +120,8 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.dependencies = [][]byte{types.FrameRecentRootVerifier[:]}
 			slot := recentRootPoolSlot(t, sender, 10, 1)
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)
@@ -153,7 +155,6 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 			if tc.unwind {
 				head.Direction = remoteproto.Direction_UNWIND
 			}
-			backend := pool.ethBackend.(*frameValidationBackend)
 			backend.valid, backend.calls = false, nil
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.revalidate {
