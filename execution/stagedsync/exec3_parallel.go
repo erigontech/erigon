@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -3375,6 +3376,12 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 	if target > tx {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
+	}
+	for deadline := time.Now().Add(dbg.ExecDepSpin); dbg.ExecDepSpin > 0 && time.Now().Before(deadline); {
+		if int(be.committedFrontier.Load()) >= target {
+			return true
+		}
+		runtime.Gosched()
 	}
 	for {
 		be.wakeMu.Lock()
