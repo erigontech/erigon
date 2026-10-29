@@ -3,7 +3,9 @@ package blob_storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -911,4 +913,63 @@ func TestConcurrentAccess(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, exists)
 	}
+}
+
+func TestColumnWriteRemovesItsFileWhenTheBitFails(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	impl := storage.(*dataColumnStorageImpl)
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1000, 0)))
+	impl.db.Close()
+
+	require.Error(t, storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1)))
+
+	_, file := impl.path(1000, root, 1)
+	_, err := fs.Stat(file)
+	require.True(t, errors.Is(err, os.ErrNotExist), "a file whose bit was never set is hidden from every reader of the row: %v", err)
+}
+
+type dirSyncFs struct {
+	afero.Fs
+	onSync func(name string)
+}
+
+func (f *dirSyncFs) Open(name string) (afero.File, error) {
+	fh, err := f.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &dirSyncFile{File: fh, onSync: func() { f.onSync(name) }}, nil
+}
+
+type dirSyncFile struct {
+	afero.File
+	onSync func()
+}
+
+func (f *dirSyncFile) Sync() error {
+	f.onSync()
+	return f.File.Sync()
+}
+
+func TestColumnWriteSyncsTheBucketBeforeSettingTheBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory fsync is skipped on windows")
+	}
+	root := common.Hash{1}
+	fs := &dirSyncFs{Fs: afero.NewMemMapFs()}
+	storage := NewDataColumnStore(setupTestDB(t), fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	var synced []string
+	var rowAtSync [][]byte
+	fs.onSync = func(name string) {
+		synced = append(synced, name)
+		rowAtSync = append(rowAtSync, columnRow(t, storage, root))
+	}
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 2, createTestDataColumnSidecar(1000, 2)))
+
+	dir, _ := storage.(*dataColumnStorageImpl).path(1000, root, 2)
+	require.Equal(t, []string{dir}, synced, "the rename must be durable before the bit that claims it")
+	require.Equal(t, [][]byte{nil}, rowAtSync)
+	require.Equal(t, []byte{1 << 2}, columnRow(t, storage, root))
 }

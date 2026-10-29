@@ -445,7 +445,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	columnDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(columnDBPath).
-		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Durable().MustOpen()
 	go func() {
 		<-ctx.Done()
 		columnDB.Close()

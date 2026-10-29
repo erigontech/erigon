@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -140,6 +141,22 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 		return false, nil
 	}
 	return created, nil
+}
+
+func (b *bucketStore) syncBucket(slot uint64) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, _ := b.path(slot, common.Hash{}, 0)
+	d, err := b.fs.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // removeTemp best-effort deletes the temp file; the caller already holds the
