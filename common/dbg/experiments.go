@@ -90,9 +90,11 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
-	numWorkers           = runtime.NumCPU()
-	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
+	Exec3Parallel = EnvBool("EXEC3_PARALLEL", true)
+	numWorkers    = runtime.NumCPU()
+	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+	// ExecPregrowStack > 0: a self-loop worker grows its stack to this many bytes first, while it is still shallow.
+	ExecPregrowStack     = EnvInt("EXEC_PREGROW_STACK", 0)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
 	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)

@@ -1777,6 +1777,9 @@ const elasticWorkerCap = 4096
 // in order. The context is released while parked so dependencies can run.
 func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
 	pe.runWG.Go(func() {
+		if n := dbg.ExecPregrowStack; n > 0 {
+			pregrowStack(n)
+		}
 		// The roTx is bound to the execution slot, not the goroutine: opened on slot
 		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
 		// count rather than the far larger parked-goroutine count, so idle parked
@@ -4058,4 +4061,15 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 
 	dispatch()
+}
+
+var pregrowSink byte
+
+// pregrowStack grows the goroutine stack once while it is shallow, so a deep call later does not copy a deep stack.
+//
+//go:noinline
+func pregrowStack(n int) {
+	var buf [64 << 10]byte
+	buf[n%len(buf)] = 1
+	pregrowSink = buf[(n+1)%len(buf)]
 }
