@@ -733,7 +733,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
-			if sd.unwindToTxNum < other.unwindToTxNum {
+			if other.unwindToTxNum < sd.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
 		}
