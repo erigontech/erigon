@@ -992,38 +992,29 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return nil, fullRootSet
 	}
 
-	// When HTTP has been working, skip the slow P2P envelope fetch entirely.
-	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
-		envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
-		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
-		b.discardInvalidGloasEnvelopes(responses, envelopes)
-		if result.fetched > 0 {
-			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
-		}
-		b.recordRequiredEnvelopeAttempt(fullRootSet, envelopes)
-		return envelopes, fullRootSet
-	}
-
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	var err error
-	if b.requestEnvelopes != nil {
-		envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
-	} else {
-		err = errors.New("no P2P envelope source configured")
-	}
-	if err != nil {
-		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+	if !b.httpPreferred.Load() || b.httpFallbackURL == "" {
+		var err error
+		if b.requestEnvelopes != nil {
+			envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
+		} else {
+			err = errors.New("no P2P envelope source configured")
+		}
+		if err != nil {
+			log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+		}
 	}
 	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
 	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
-		if envelopes == nil {
-			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
-		}
 		missingRoots := filterReceived(fullRoots, envelopes)
 		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(missingRoots))
 		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, missingRoots, httpEnvelopes, b.beaconCfg)
 		b.discardInvalidGloasEnvelopes(responses, httpEnvelopes)
-		maps.Copy(envelopes, httpEnvelopes)
+		if envelopes == nil {
+			envelopes = httpEnvelopes
+		} else {
+			maps.Copy(envelopes, httpEnvelopes)
+		}
 		if result.fetched > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
 		}

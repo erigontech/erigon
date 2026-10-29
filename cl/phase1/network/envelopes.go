@@ -152,9 +152,8 @@ func requestEnvelopesByRoot(
 	if maxRoots <= 0 {
 		return false, errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	for start := 0; start < len(roots); start += maxRoots {
-		end := min(start+maxRoots, len(roots))
-		responses, pid, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, roots[start:end])
+	for chunk := range slices.Chunk(roots, maxRoots) {
+		responses, pid, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, chunk)
 		rejected := acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, validate, pid, banPeer)
 		if rejected || err != nil {
 			return rejected, err
