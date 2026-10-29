@@ -5101,6 +5101,8 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 					return nil, nil, nil, nil, context.Canceled
 				})
 
+			// The caller may cancel because production is already failing. Reporting only the
+			// cancellation would hide the earlier failure.
 			require.ErrorIs(t, ctx.Err(), context.Canceled)
 			require.Equal(t, 2, calls)
 			require.ErrorIs(t, err, tc.err)
@@ -5418,7 +5420,9 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	err := produceBlockWithFailingCollection(t, ctx, context.Canceled, nil)
 	require.Error(t, err)
 
-	// Caller cancellation is routine. An unrelated fee-recipient warning may still be emitted.
+	// Caller cancellation is logged at Debug. During node shutdown, the API drains
+	// active requests even if the builder has stopped, so builder cancellation can
+	// still log at Error. The fee-recipient warning is unrelated to this check.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
 }
 
