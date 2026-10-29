@@ -333,9 +333,9 @@ var commonWitnessShapes = []witnessShape{
 }
 
 func TestWitnessMatchesHPH(t *testing.T) {
-	shapes := append(commonWitnessShapes, []witnessShape{
+	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
 		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
-	}...)
+	})
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
 			for seed := range int64(25) {
@@ -460,7 +460,7 @@ func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceO
 }
 
 func TestCollapseTracerMatchesHPH(t *testing.T) {
-	shapes := append(commonWitnessShapes, []witnessShape{
+	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
 		{name: "propagate", accounts: 3, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
 		{name: "propagate-deep", accounts: 5, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8, 0x1}, {0x8, 0x5}, {0xc}}},
 		{name: "storage-propagate", accounts: 1, slots: 3, slotPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
@@ -482,7 +482,7 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 				}
 			},
 		},
-	}...)
+	})
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
 			for seed := range int64(40) {

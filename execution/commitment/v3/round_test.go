@@ -167,7 +167,7 @@ func TestPartition(t *testing.T) {
 func TestStorageTransitions(t *testing.T) {
 	path := func(first, fill byte) []byte { return commitmenttest.Path([]byte{first}, fill) }
 	put := func(p []byte, value byte) commitmenttest.Op { return commitmenttest.Op{Key: p, Storage: []byte{value}} }
-	del := func(p []byte) commitmenttest.Op { return commitmenttest.DeleteAt(p) }
+	del := commitmenttest.DeleteAt
 	for _, tc := range []struct {
 		name     string
 		addr     byte

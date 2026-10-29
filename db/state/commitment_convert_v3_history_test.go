@@ -266,13 +266,15 @@ func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
 			runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 			agg.CloseFilesNoReopen()
 			if resume {
-				converted, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
+				var converted []string
+				converted, err = filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
 				require.NoError(t, err)
 				for _, p := range converted {
 					require.NoError(t, dir.RemoveFile(p))
 				}
 				domainBackup := filepath.Join(dirs.Snap, "backup", "domains")
-				backups, err := os.ReadDir(domainBackup)
+				var backups []os.DirEntry
+				backups, err = os.ReadDir(domainBackup)
 				require.NoError(t, err)
 				for _, e := range backups {
 					require.NoError(t, os.Rename(filepath.Join(domainBackup, e.Name()), filepath.Join(dirs.SnapDomain, e.Name())))
