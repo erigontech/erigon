@@ -560,7 +560,6 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					return nil
 				}
 
-				bodyBatch := bodiesResponse.Data
 				if bbd.balFetcher != nil {
 					if want := len(balReqs); len(balsResponse) < want {
 						bbd.logger.Debug(
@@ -574,7 +573,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						)
 					}
 				}
-				bodyBatches[batchIndex] = bodyBatch
+				bodyBatches[batchIndex] = bodiesResponse.Data
 				if len(balsResponse) > 0 {
 					balBatches[batchIndex] = balsResponse
 					bbd.logger.Trace(

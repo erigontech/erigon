@@ -91,7 +91,7 @@ func TestDecodeBlockBodiesResponseRejectsWithdrawalPresenceMismatch(t *testing.T
 }
 
 func rlpTestList(content []byte) []byte {
-	encoded := make([]byte, rlp.ListPrefixLen(len(content))+len(content))
+	encoded := make([]byte, rlp.ListLen(len(content)))
 	prefixLen := rlp.EncodeListPrefixToBuf(len(content), encoded)
 	copy(encoded[prefixLen:], content)
 	return encoded
