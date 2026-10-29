@@ -20,22 +20,25 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
-// elBlobsFixture returns a Fulu block with two blob commitments and the
-// engine_getBlobsV2 style response (blobs and per-cell proofs) for it.
-func elBlobsFixture(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, common.Hash, [][]byte, [][][]byte) {
+// elBlobsFixture returns a Fulu block with n distinct dense blobs and the engine_getBlobsV2
+// style response (blobs and per-cell proofs) for it.
+func elBlobsFixture(t testing.TB, cfg *clparams.BeaconChainConfig, n int) (*cltypes.SignedBeaconBlock, common.Hash, [][]byte, [][][]byte) {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
 	block.Block.Slot = 100
-	rawBlobs := []goethkzg.Blob{{1}, {2}}
-	blobs := make([][]byte, len(rawBlobs))
-	proofs := make([][][]byte, len(rawBlobs))
-	for i := range rawBlobs {
-		commitment, err := kzg.Ctx().BlobToKZGCommitment(&rawBlobs[i], 0)
+	blobs := make([][]byte, n)
+	proofs := make([][][]byte, n)
+	for i := range blobs {
+		blob := &goethkzg.Blob{}
+		for j := 0; j < len(blob); j += 32 {
+			blob[j+31], blob[j+30] = byte(i+1), byte(j/32)
+		}
+		commitment, err := kzg.Ctx().BlobToKZGCommitment(blob, 0)
 		require.NoError(t, err)
 		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
-		_, cellProofs, err := peerdasutils.ComputeCellsAndKZGProofs(rawBlobs[i][:])
+		_, cellProofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
 		require.NoError(t, err)
-		blobs[i] = rawBlobs[i][:]
+		blobs[i] = blob[:]
 		for j := range cellProofs {
 			proofs[i] = append(proofs[i], cellProofs[j][:])
 		}
@@ -62,7 +65,7 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
 	available, err := d.IsDataAvailable(block.Block.Slot, root)
 	require.NoError(t, err)
@@ -94,7 +97,7 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{ArchiveBlobs: true})
 	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
-	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
 	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
 
@@ -122,7 +125,7 @@ func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
 	for name, corrupt := range tests {
 		t.Run(name, func(t *testing.T) {
 			d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-			block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+			block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 			blobs, proofs = corrupt(blobs, proofs)
 
 			require.Error(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
@@ -142,7 +145,7 @@ func TestImportColumnsFromBlobsTrustsELCellProofs(t *testing.T) {
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{ArchiveBlobs: true})
 	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
-	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 	proofs[0][5] = proofs[1][5]
 
 	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
