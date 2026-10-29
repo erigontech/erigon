@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	g "github.com/anacrolix/generics"
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
@@ -84,15 +85,11 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
 		type addrState struct {
-			balance        uint256.Int
-			nonce          uint64
-			incarnation    uint64
-			codeHash       accounts.CodeHash
-			hasBalance     bool
+			balance        g.Option[uint256.Int]
 			balanceDeleted bool
-			hasNonce       bool
-			hasIncarnation bool
-			hasCodeHash    bool
+			nonce          g.Option[uint64]
+			incarnation    g.Option[uint64]
+			codeHash       g.Option[accounts.CodeHash]
 			code           []byte
 			codeWritten    bool
 			selfDestruct   bool
@@ -111,22 +108,19 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		}
 		for a, vw := range writes.Balances() {
 			d := ensure(a)
-			d.balance, d.hasBalance = vw.Val, true
+			d.balance = g.Some(vw.Val)
 			d.balanceDeleted = vw.Deletes()
 		}
 		for a, vw := range writes.Nonces() {
-			d := ensure(a)
-			d.nonce, d.hasNonce = vw.Val, true
+			ensure(a).nonce = g.Some(vw.Val)
 		}
 		for a, vw := range writes.Incarnations() {
-			d := ensure(a)
-			d.incarnation, d.hasIncarnation = vw.Val, true
+			ensure(a).incarnation = g.Some(vw.Val)
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
 		for a, vw := range writes.CodeHashes() {
-			d := ensure(a)
-			d.codeHash, d.hasCodeHash = vw.Val, true
+			ensure(a).codeHash = g.Some(vw.Val)
 		}
 		for a, vw := range writes.Codes() {
 			d := ensure(a)
@@ -153,11 +147,11 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for _, d := range perAddr {
 			if d.selfDestruct {
 				if d.balanceDeleted {
-					d.hasBalance = false
+					d.balance.SetNone()
 				}
-				d.hasNonce = false
-				d.hasIncarnation = false
-				d.hasCodeHash = false
+				d.nonce.SetNone()
+				d.incarnation.SetNone()
+				d.codeHash.SetNone()
 				d.code = nil
 				d.codeWritten = false
 				d.storage = nil
@@ -185,8 +179,8 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 				// An EIP-8246 self-destruct keeps its balance write; the record
 				// survives only when a non-zero balance is left to preserve.
-				sdPreservedBalance := d.hasBalance && !d.balance.IsZero()
-				pureDelete := !sdPreservedBalance && !d.hasNonce && !d.hasIncarnation && !d.hasCodeHash
+				sdPreservedBalance := d.balance.Ok && !d.balance.Value.IsZero()
+				pureDelete := !sdPreservedBalance && !d.nonce.Ok && !d.incarnation.Ok && !d.codeHash.Ok
 				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 					return err
 				}
@@ -221,7 +215,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
-			if d.hasBalance || d.hasNonce || d.hasIncarnation || d.hasCodeHash || d.codeWritten {
+			if d.balance.Ok || d.nonce.Ok || d.incarnation.Ok || d.codeHash.Ok || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
@@ -237,17 +231,17 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						}
 					}
 				}
-				if d.hasBalance {
-					acc.Balance = d.balance
+				if d.balance.Ok {
+					acc.Balance = d.balance.Value
 				}
-				if d.hasNonce {
-					acc.Nonce = d.nonce
+				if d.nonce.Ok {
+					acc.Nonce = d.nonce.Value
 				}
-				if d.hasIncarnation {
-					acc.Incarnation = d.incarnation
+				if d.incarnation.Ok {
+					acc.Incarnation = d.incarnation.Value
 				}
-				if d.hasCodeHash {
-					acc.CodeHash = d.codeHash
+				if d.codeHash.Ok {
+					acc.CodeHash = d.codeHash.Value
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
