@@ -2540,6 +2540,9 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	for range 2 {
 		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
 		require.ErrorContains(t, err, "database unavailable")
+		var writeErr *clservices.AcceptedBlockWriteError
+		require.ErrorAs(t, err, &writeErr)
+		require.Same(t, block, writeErr.Block)
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
 }

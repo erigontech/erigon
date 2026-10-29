@@ -3153,6 +3153,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		if blockErr != nil {
 			return blockErr
 		}
+		_, knownBlock = a.forkchoiceStore.GetHeader(blockRoot)
 	}
 
 	// Cache the execution payload body before writing to DB so the beacon API
@@ -3165,6 +3166,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
+		if knownBlock {
+			return &clservices.AcceptedBlockWriteError{Block: block, Err: err}
+		}
 		return err
 	}
 
