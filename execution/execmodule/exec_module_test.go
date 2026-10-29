@@ -4170,3 +4170,24 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateChainAnswersTooFarAwayWhenStateIsAheadOfTxNums(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(11, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:10]))
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := rawdbv3.TxNums.Truncate(tx, 6); err != nil {
+			return err
+		}
+		return rawdb.TruncateCanonicalHash(tx, 6, false)
+	}))
+	next := chainPack.Blocks[10]
+	_, err = m.InsertBlocks(ctx, []*types.Block{next})
+	require.NoError(t, err)
+
+	validation, err := m.ValidateChain(ctx, next.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, validation.ValidationStatus)
+}

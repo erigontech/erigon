@@ -179,6 +179,8 @@ const (
 
 	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+	// [slot + block root] => [execution payload envelope signature]
+	ExecutionPayloadEnvelopeSignatures = "ExecutionPayloadEnvelopeSignature"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
 	BalancesDump          = "BalancesDump"
@@ -370,6 +372,7 @@ var ChaindataTables = []string{
 
 	// Beacon stuff
 	BeaconBlocks,
+	ExecutionPayloadEnvelopeSignatures,
 	CanonicalBlockRoots,
 	BlockRootToSlot,
 	BlockRootToStateRoot,

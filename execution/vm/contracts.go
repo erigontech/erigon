@@ -245,6 +245,9 @@ func init() {
 		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
 		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
 	} {
+		for address, p := range tierSet.contracts {
+			tierSet.contracts[address] = cachePrecompile(p, forkTier(tier), address.Value())
+		}
 		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
 		*tierSet.addresses = forkSets[tier].addresses
 	}
