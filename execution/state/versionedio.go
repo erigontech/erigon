@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 
+	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
@@ -2900,8 +2901,8 @@ type accountState struct {
 	balance             fieldTracker[uint256.Int]
 	nonce               fieldTracker[uint64]
 	code                fieldTracker[accounts.Code]
-	balanceValue        *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
+	balanceValue        g.Option[uint256.Int]               // tracks latest seen balance
+	initialBalanceValue g.Option[uint256.Int]               // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
@@ -2930,7 +2931,7 @@ func (ft *fieldTracker[T]) recordWrite(idx uint32, value T) {
 	ft.changes.recordWrite(idx, value)
 }
 
-func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance g.Option[uint256.Int]) {
 	// Get the sorted indices to identify the first (lowest-index) entry.
 	// If the first entry equals the pre-block balance, it's a net-zero
 	// change from a reverted tx (e.g. CALL with value then revert) and
@@ -2940,7 +2941,7 @@ func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, ini
 	bt.changes.apply(func(idx uint32, value uint256.Int) {
 		if !firstFiltered {
 			firstFiltered = true
-			if initialBalance != nil && value.Eq(initialBalance) {
+			if initialBalance.Ok && value.Eq(&initialBalance.Value) {
 				return
 			}
 		}
@@ -3009,13 +3010,6 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
-func (account *accountState) setBalanceValue(v uint256.Int) {
-	if account.balanceValue == nil {
-		account.balanceValue = &uint256.Int{}
-	}
-	*account.balanceValue = v
-}
-
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
@@ -3055,29 +3049,28 @@ func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint
 		// A first zero write is a no-op touch only when the pre-block balance is
 		// (or is implicitly) zero. A zero write over a non-zero pre-block balance
 		// is a genuine depletion and must be recorded.
-		if account.balanceValue == nil && val.IsZero() &&
-			(account.initialBalanceValue == nil || account.initialBalanceValue.IsZero()) {
-			if account.initialBalanceValue == nil {
-				v := val
-				account.initialBalanceValue = &v
+		if !account.balanceValue.Ok && val.IsZero() &&
+			(!account.initialBalanceValue.Ok || account.initialBalanceValue.Value.IsZero()) {
+			if !account.initialBalanceValue.Ok {
+				account.initialBalanceValue.Set(val)
 			}
-			account.setBalanceValue(val)
+			account.balanceValue.Set(val)
 			return
 		}
 		// Skip no-op writes.
-		if account.balanceValue != nil && val.Eq(account.balanceValue) {
-			account.setBalanceValue(val)
+		if account.balanceValue.Ok && val.Eq(&account.balanceValue.Value) {
+			account.balanceValue.Set(val)
 			return
 		}
 		// Skip balance writes that match the pre-block (initial) balance,
 		// but ONLY when no intermediate balance changes have been recorded.
 		// If intermediate changes exist, a write restoring the initial value
 		// MUST still be recorded so parallel executors see the correct value.
-		if account.initialBalanceValue != nil && val.Eq(account.initialBalanceValue) && len(account.balance.changes.entries) == 0 {
-			account.setBalanceValue(val)
+		if account.initialBalanceValue.Ok && val.Eq(&account.initialBalanceValue.Value) && len(account.balance.changes.entries) == 0 {
+			account.balanceValue.Set(val)
 			return
 		}
-		account.setBalanceValue(val)
+		account.balanceValue.Set(val)
 		account.balance.recordWrite(accessIndex, val)
 	}
 }
@@ -3107,14 +3100,13 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	// Record the pre-block balance for net-zero detection from the first read
 	// only, and only before any write: a read arriving after a write reflects
 	// post-write state, not the pre-block balance.
-	if account.initialBalanceValue == nil && account.balanceValue == nil {
-		v := val
-		account.initialBalanceValue = &v
+	if !account.initialBalanceValue.Ok && !account.balanceValue.Ok {
+		account.initialBalanceValue.Set(val)
 	}
 	// After a write, balanceValue tracks the written state; a stale DB read must
 	// not override it or the no-op check would skip a real write.
 	if len(account.balance.changes.entries) == 0 {
-		account.setBalanceValue(val)
+		account.balanceValue.Set(val)
 	}
 }
 
