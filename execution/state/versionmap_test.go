@@ -1610,6 +1610,46 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 	}
 }
 
+// Origin storage is written once per cold slot by every tx that reads it, so seeding a
+// slot must not box its key and value.
+func TestVersionMapStoreOriginStorageAllocations(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	keys := make([]accounts.StorageKey, 2000)
+	for i := range keys {
+		keys[i] = accounts.InternKey(uint256.NewInt(uint64(i + 1)).Bytes32())
+	}
+	i := 0
+	perNewSlot := testing.AllocsPerRun(1000, func() {
+		vm.StoreOriginStorage(addr, keys[i], *uint256.NewInt(uint64(i)))
+		i++
+	})
+	require.Less(t, perNewSlot, 1.5, "seeding a new slot allocates %v times", perNewSlot)
+
+	perSeededSlot := testing.AllocsPerRun(1000, func() {
+		vm.StoreOriginStorage(addr, keys[0], *uint256.NewInt(7))
+	})
+	require.Zero(t, perSeededSlot, "re-seeding a slot allocates %v times", perSeededSlot)
+
+	v, ok := vm.LoadOriginStorage(addr, keys[0])
+	require.True(t, ok)
+	require.Equal(t, uint64(0), v.Uint64(), "origin storage is write-once")
+}
+
+var newVersionMapSink *VersionMap
+
+// One VersionMap is built per RPC call and most never seed an origin slot, so the
+// origin storage table must not be allocated up front.
+func TestNewVersionMapAllocations(t *testing.T) {
+	allocs := testing.AllocsPerRun(1000, func() {
+		newVersionMapSink = NewVersionMap(nil)
+	})
+	require.LessOrEqual(t, allocs, 1.0, "NewVersionMap allocates %v times", allocs)
+
+	_, ok := newVersionMapSink.LoadOriginStorage(getAddress(1), accounts.InternKey(uint256.NewInt(1).Bytes32()))
+	require.False(t, ok)
+}
+
 // A net-zero re-run that resets a cell to the access list's value must not leave the version under
 // which an earlier run published another value there: a reader of that value would stay valid.
 func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
