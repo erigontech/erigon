@@ -395,6 +395,46 @@ func TestCachedTemporalTxStateGetterForeignCacheStateReadsTx(t *testing.T) {
 	}
 }
 
+func TestCachedTemporalTxStateGetterRetriesAfterCachePublication(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sourceVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	roTx.Rollback()
+
+	key, value := bytes.Repeat([]byte{0xdd}, 20), encAccount(2)
+	commitAccount(t, db, nil, key, value, 10)
+	roTx, err = db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	committedVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	got, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, 1, tx.reads, "the cache has not published this transaction's state yet")
+
+	stateCache.Applier().Publish(sourceVersion, committedVersion, []cache.StateUpdate{
+		{Domain: kv.AccountsDomain, Key: key, Value: value, TxNum: 10},
+	})
+	got, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, 1, tx.reads, "the existing getter must use the cache once publication catches up")
+
+	missing := make([]byte, 20)
+	for range 2 {
+		got, _, err = getter.GetLatest(kv.AccountsDomain, missing, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
+	require.Equal(t, 2, tx.reads, "the rebound view must also admit fills")
+}
+
 func TestCachedTemporalTxStateGetterWithoutCacheReadsEveryTime(t *testing.T) {
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(t.Context())

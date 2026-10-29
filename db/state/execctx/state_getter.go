@@ -113,6 +113,7 @@ type TemporalTxStateGetter struct {
 	kv.TemporalTx
 	stateCache *cache.StateCache
 	view       cache.ReadView
+	frontier   cache.Frontier
 	stepSize   uint64
 }
 
@@ -141,9 +142,18 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 		return g
 	}
 	g.stateCache = stateCache
-	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	g.frontier = cache.FrontierWithStateVersion(tx.Debug(), stateVersion)
+	g.view = stateCache.View(g.frontier)
 	g.stepSize = tx.Debug().StepSize()
 	return g
+}
+
+func (g *TemporalTxStateGetter) cacheReadView() cache.ReadView {
+	if g.view.NeedsFrontier() {
+		// Retry a publication gap without changing the snapshot or its unwind epoch.
+		return g.view.WithFrontier(g.frontier)
+	}
+	return g.view
 }
 
 func writableTx(tx kv.TemporalTx) bool {
@@ -156,7 +166,8 @@ func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetL
 	if g.stateCache == nil || opts.MaxStep() != kv.NoStepBound {
 		return g.TemporalTx.GetLatest(name, k, opts)
 	}
-	if v, txNum, ok := g.view.GetVisible(name, k); ok {
+	view := g.cacheReadView()
+	if v, txNum, ok := view.GetVisible(name, k); ok {
 		return v, kv.Step(txNum / g.stepSize), nil
 	}
 	v, step, err := g.TemporalTx.GetLatest(name, k, opts)
@@ -166,7 +177,7 @@ func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetL
 		if end, ok := g.Debug().DomainVisibleEnd(name); ok && end > 0 {
 			readTxNum = min(readTxNum, end-1)
 		}
-		g.view.Fill(name, k, v, readTxNum)
+		view.Fill(name, k, v, readTxNum)
 	}
 	return v, step, err
 }
@@ -177,7 +188,7 @@ func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, er
 }
 
 func (g *TemporalTxStateGetter) GetCodeSize(addr []byte, _ uint64) (int, bool, error) {
-	if code, _, ok := g.view.GetVisible(kv.CodeDomain, addr); ok {
+	if code, _, ok := g.cacheReadView().GetVisible(kv.CodeDomain, addr); ok {
 		return len(code), len(code) > 0, nil
 	}
 	size, found, err := g.GetLatestValSize(kv.CodeDomain, addr)

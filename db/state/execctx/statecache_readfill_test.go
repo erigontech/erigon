@@ -269,6 +269,81 @@ func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
 	require.False(t, ok, "the merged unwind must invalidate entries from the discarded range")
 }
 
+func TestReadFill_CurrentStepIsVisibleToSnapshotGetter(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	addr := make([]byte, 20)
+	addr[0] = 1
+	storageKey := make([]byte, 52)
+	copy(storageKey, addr)
+	code := []byte{0x60, 0x01}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+	cases := []struct {
+		name       string
+		domain     kv.Domain
+		key, value []byte
+	}{
+		{"account", kv.AccountsDomain, addr, account},
+		{"storage", kv.StorageDomain, storageKey, []byte{1}},
+		{"code", kv.CodeDomain, addr, code},
+	}
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	written, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer written.Close()
+	written.BindStateCache(stateCache)
+	written.SetTxNum(10)
+	for _, tc := range cases {
+		require.NoError(t, written.DomainPut(tc.domain, rwTx, tc.key, tc.value, 10, nil))
+	}
+	require.NoError(t, written.Commit(t.Context(), rwTx))
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.BindStateCache(stateCache)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateCache.Applier().Clear()
+			tx := &countingLatestTx{TemporalTx: roTx}
+			reader := domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+			if tc.domain == kv.CodeDomain {
+				_, _, err = reader.GetCode(tc.key, 10)
+			} else {
+				_, _, err = reader.GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+			}
+			require.NoError(t, err)
+			reads := tx.reads
+			getter := domains.AsSnapshotGetter(tx)
+			for range 2 {
+				got, _, err := getter.GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, tc.value, got)
+			}
+			require.Equal(t, reads, tx.reads, "an SD read-fill must be visible to a getter on the same snapshot")
+
+			end, ok := roTx.Debug().DomainVisibleEnd(tc.domain)
+			require.True(t, ok)
+			stateCache.Applier().Unwind(end)
+			_, hit := stateCache.View(nil).Get(tc.domain, tc.key)
+			require.True(t, hit, "an unwind after the snapshot must preserve the fill")
+			stateCache.Applier().Unwind(end - 1)
+			_, hit = stateCache.View(nil).Get(tc.domain, tc.key)
+			require.False(t, hit, "an unwind into the snapshot must invalidate the fill")
+		})
+	}
+}
+
 func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	t.Parallel()
 
