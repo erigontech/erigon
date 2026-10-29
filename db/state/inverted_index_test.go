@@ -1743,7 +1743,7 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 	var prevKey []byte
 	var prevMax uint64
 	require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
-		require.LessOrEqual(t, len(v), 8+iiChunkGapsLimit)
+		require.LessOrEqual(t, len(v), 8+iiChunkDeltasLimit)
 		txNums, err := decodeIIChunk(nil, v)
 		require.NoError(t, err)
 		require.Equal(t, binary.BigEndian.Uint64(v), txNums[len(txNums)-1], "chunk prefix is its max")

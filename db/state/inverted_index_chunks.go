@@ -31,12 +31,12 @@ import (
 )
 
 // The values table of an inverted index is DupSort: key -> chunks of ascending txNums.
-// A chunk is BE8(max txNum) followed by uvarint gaps going down from it, so the dups of a key
+// A chunk is BE8(max txNum) followed by uvarint deltas going down from it, so the dups of a key
 // sort by their max and SeekBothRange(key, BE8(t)) finds the chunk with the first txNum >= t.
-// A chunk without gaps is the 8-byte value of the format before chunking.
+// A chunk without deltas is the 8-byte value of the format before chunking.
 
-// iiChunkGapsLimit keeps a chunk far below the inline value limit of a 4 KB page.
-const iiChunkGapsLimit = 512
+// iiChunkDeltasLimit keeps a chunk far below the inline value limit of a 4 KB page.
+const iiChunkDeltasLimit = 512
 
 func appendIIChunk(dst []byte, txNums []uint64) []byte {
 	prev := txNums[len(txNums)-1]
@@ -56,12 +56,12 @@ func decodeIIChunk(dst []uint64, v []byte) ([]uint64, error) {
 	prev := binary.BigEndian.Uint64(v)
 	dst = append(dst, prev)
 	for b := v[8:]; len(b) > 0; {
-		gap, n := binary.Uvarint(b)
-		if n <= 0 || gap == 0 || gap > prev {
+		delta, n := binary.Uvarint(b)
+		if n <= 0 || delta == 0 || delta > prev {
 			return dst, fmt.Errorf("inverted index chunk corrupted: %x", v)
 		}
 		b = b[n:]
-		prev -= gap
+		prev -= delta
 		dst = append(dst, prev)
 	}
 	slices.Reverse(dst[start:])
@@ -74,7 +74,7 @@ func iiChunkFit(txNums []uint64) int {
 	size := 0
 	for i := 1; i < len(txNums); i++ {
 		size += binary.PutUvarint(buf[:], txNums[i]-txNums[i-1])
-		if size > iiChunkGapsLimit {
+		if size > iiChunkDeltasLimit {
 			return i
 		}
 	}
