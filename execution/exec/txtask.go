@@ -123,6 +123,8 @@ type TxResult struct {
 	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
 	// means every read was settled.
 	Dep int
+
+	ValStamp uint64
 }
 
 func (r *TxResult) compare(other *TxResult) int {

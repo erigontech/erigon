@@ -248,12 +248,121 @@ type VersionMap struct {
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
 
+	writeSeq atomic.Uint64
+	stamps   *writeStamps
+
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
 	// absentAccountHook runs after an account read found no account, before the
 	// self-destruct and revival probes. Tests set it to land a flush there.
 	absentAccountHook func()
+}
+
+type writeStamps struct {
+	n        int
+	inflight []atomic.Int32
+	last     []atomic.Uint64
+}
+
+func (vm *VersionMap) InitStamps(n int) {
+	vm.stamps = &writeStamps{n: n, inflight: make([]atomic.Int32, n+1), last: make([]atomic.Uint64, n+1)}
+	vm.writeSeq.Store(1)
+}
+
+func (vm *VersionMap) WriteSeq() uint64 { return vm.writeSeq.Load() }
+
+func (st *writeStamps) slot(txIdx int) int {
+	return min(max(txIdx+1, 0), st.n-1)
+}
+
+func (vm *VersionMap) mutBegin(txIdx int) {
+	if st := vm.stamps; st != nil {
+		for k := st.slot(txIdx) + 1; k <= st.n; k += k & -k {
+			st.inflight[k].Add(1)
+		}
+	}
+}
+
+func (vm *VersionMap) mutEnd(txIdx int) {
+	st := vm.stamps
+	if st == nil {
+		return
+	}
+	seq := vm.writeSeq.Add(1)
+	slot := st.slot(txIdx)
+	for k := slot + 1; k <= st.n; k += k & -k {
+		for {
+			old := st.last[k].Load()
+			if old >= seq || st.last[k].CompareAndSwap(old, seq) {
+				break
+			}
+		}
+	}
+	for k := slot + 1; k <= st.n; k += k & -k {
+		st.inflight[k].Add(-1)
+	}
+}
+
+func (vm *VersionMap) mutCancel(txIdx int) {
+	if st := vm.stamps; st != nil {
+		for k := st.slot(txIdx) + 1; k <= st.n; k += k & -k {
+			st.inflight[k].Add(-1)
+		}
+	}
+}
+
+func hasLifecycleCells(e *AddressEntry) bool {
+	return e.SelfDestruct != nil && e.SelfDestruct.Len() > 0 ||
+		e.Incarnation != nil && e.Incarnation.Len() > 0 ||
+		e.CreateContract != nil && e.CreateContract.Len() > 0
+}
+
+func (vm *VersionMap) QuietBelow(txIdx int, stamp uint64) bool {
+	st := vm.stamps
+	if st == nil || stamp == 0 {
+		return false
+	}
+	for k := min(max(txIdx+1, 0), st.n-1); k > 0; k -= k & -k {
+		if st.inflight[k].Load() != 0 || st.last[k].Load() > stamp {
+			return false
+		}
+	}
+	return true
+}
+
+func writeTxIdx(ws *WriteSet, addr accounts.Address) int {
+	if vw, ok := ws.balance[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.address[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.nonce[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.incarnation[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.selfDestruct[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.createContract[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.code[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.codeHash[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	if vw, ok := ws.codeSize[addr]; ok {
+		return vw.Version.TxIndex
+	}
+	for _, vw := range ws.storage[addr] {
+		return vw.Version.TxIndex
+	}
+	return -1
 }
 
 type originStorageKey struct {
@@ -1248,6 +1357,9 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				}
 			}
 		}
+		wtx := writeTxIdx(writes, addr)
+		vm.mutBegin(wtx)
+		defer vm.mutEnd(wtx)
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
@@ -1335,8 +1447,19 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		if e == nil {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
+		wtx := writeTxIdx(writes, addr)
+		vm.mutBegin(wtx)
+		life := false
+		defer func() {
+			if life {
+				vm.mutEnd(wtx)
+			} else {
+				vm.mutCancel(wtx)
+			}
+		}()
 		e.mu.Lock()
 		defer e.mu.Unlock()
+		life = hasLifecycleCells(e)
 		if vw, ok := writes.address[addr]; ok {
 			markCellComplete(e.Address, addr, AddressPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 		}
@@ -1396,8 +1519,19 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(
 		if e == nil {
 			panic(fmt.Sprintf("markValidated: no entry addr=%x", addr.Value()))
 		}
+		wtx := writeTxIdx(writes, addr)
+		vm.mutBegin(wtx)
+		life := false
+		defer func() {
+			if life {
+				vm.mutEnd(wtx)
+			} else {
+				vm.mutCancel(wtx)
+			}
+		}()
 		e.mu.Lock()
 		defer e.mu.Unlock()
+		life = hasLifecycleCells(e)
 		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
 			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
 		}
@@ -1474,6 +1608,8 @@ func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key acco
 
 func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
 	vm.assertUnsealed(txIdx, addr, path, key)
+	vm.mutBegin(txIdx)
+	defer vm.mutEnd(txIdx)
 	e := vm.load(addr)
 	if e == nil {
 		if !checkExists {
@@ -1565,6 +1701,8 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
+	vm.mutBegin(txIdx)
+	defer vm.mutEnd(txIdx)
 	e := vm.load(addr)
 	if e == nil {
 		return
