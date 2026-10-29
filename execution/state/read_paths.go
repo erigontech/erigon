@@ -517,7 +517,7 @@ reread:
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        true,
+						Val:        r.life.state == LifecycleAbsent,
 					})
 					recordWipedCodeRead(s, addr, path, Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc})
 				}
@@ -538,7 +538,7 @@ reread:
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        true,
+						Val:        r.life.state == LifecycleAbsent,
 					})
 					// Record the wiped slot read anchored on the destruct version, matching
 					// liveStorage: a later store above the destruct resolves there and
@@ -669,7 +669,7 @@ reread:
 			if !commited {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-					Val:        true,
+					Val:        r.life.state == LifecycleAbsent,
 				})
 				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}},

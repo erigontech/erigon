@@ -985,7 +985,8 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 // (pre-seal) destruct as authoritative, matching accountLifecycleLocked. wipedCommitted
 // uses it so a code / code-size read is invalidated by an in-flight destruct that wiped
 // it before this tx — a Done-only scan misses the pre-seal destruct and the stale read
-// commits. Only the validator's wiped-code check needs this wider authority.
+// commits. The validator's wiped-code check and the BAL cold-storage exemption both rely
+// on this wider authority.
 func (vm *VersionMap) selfDestructInRange(addr accounts.Address, lo, hi int, target bool) (Version, bool) {
 	if vm == nil || hi <= lo {
 		return Version{}, false
@@ -1084,14 +1085,18 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 // flushCell routes a value-path Estimate flush through the no-bump rule: a re-execution
 // that recomputed the same value must not re-version the cell — a fresh incarnation would
 // spuriously invalidate readers that bound to the prior one, cascading into wasted
-// re-execution. When the cell already holds an equal value at this txIndex, the account
-// takes no lifecycle transition this tx, and this is an Estimate flush (Done commits always
-// record), keep the existing incarnation and only promote the flag. All other cases fall
-// through to putCell unchanged. Structural/lifecycle paths (SelfDestruct/CreateContract/
-// Incarnation/Code/CodeSize) never route here — for them an equal value does not imply an
-// unchanged state (a self-destruct or reincarnation can leave a field coincidentally equal).
-func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, getCell func() *WriteCell[T], eq func(a, b T) bool, complete, hasLifecycle bool) *btree.Map[int, *WriteCell[T]] {
-	if !complete && !hasLifecycle && cells != nil {
+// re-execution. When the cell already holds an equal value at this txIndex, the account was
+// not self-destructed this tx, and this is an Estimate flush (Done commits always record),
+// keep the existing incarnation and only promote the flag. All other cases fall through to
+// putCell unchanged. Structural paths (SelfDestruct/CreateContract/Incarnation/Code/CodeSize)
+// never route here — for them an equal value does not imply an unchanged state. A self-destruct
+// this tx disqualifies the value no-bump too: a reincarnation (SELFDESTRUCT then CREATE2) can
+// leave a field coincidentally equal across the removal, and keeping the prior version would
+// hold a reader valid against the wrong incarnation. A fresh create or incarnation-set alone is
+// a deterministic re-execution, so its equal value keeps its version; identity-sensitive readers
+// re-validate via the always-bumped IncarnationPath.
+func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, getCell func() *WriteCell[T], eq func(a, b T) bool, complete, destructed bool) *btree.Map[int, *WriteCell[T]] {
+	if !complete && !destructed && cells != nil {
 		if ci, ok := cells.Get(version.TxIndex); ok && eq(ci.Value, value) {
 			if !(ci.flag == FlagDone && flag == FlagEstimate) { // never downgrade Done->Estimate
 				ci.flag = flag
@@ -1215,24 +1220,21 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
-		// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
-		// disqualifies the no-bump skip for its value writes: an equal value there does not
-		// mean an unchanged state, so every cell must record normally.
-		_, hasSD := writes.selfDestruct[addr]
-		_, hasCC := writes.createContract[addr]
-		_, hasInc := writes.incarnation[addr]
-		hasLifecycle := hasSD || hasCC || hasInc
+		// A self-destruct on this account this tx disqualifies the no-bump skip for its value
+		// writes: across a reincarnation an equal value does not mean an unchanged state. A fresh
+		// create or incarnation-set alone is a deterministic re-execution and keeps the no-bump.
+		_, destructed := writes.selfDestruct[addr]
 		if vw, ok := writes.address[addr]; ok {
-			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, complete, hasLifecycle)
+			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, complete, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
 			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, complete, hasLifecycle)
+			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, complete, destructed)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
-			e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, complete, hasLifecycle)
+			e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, complete, destructed)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
 			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
@@ -1241,7 +1243,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
-			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, complete, hasLifecycle)
+			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, complete, destructed)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
 			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
@@ -1268,7 +1270,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 					}
 					continue
 				}
-				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, hasLifecycle)
+				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, destructed)
 			}
 		}
 		e.mu.Unlock()

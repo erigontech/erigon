@@ -511,8 +511,7 @@ func TestValidateRead_StoragePath_RemovalUnderBALSubsumed(t *testing.T) {
 // value. Completing a published version with a different value is therefore a
 // one-value-per-version violation and panics under assert. Because a version-
 // consistent read is thus always value-consistent, no read-side re-check of the
-// value is required for correctness; the value tiebreaker only admits the reverse
-// case, a version mismatch whose value did not move.
+// value is required for correctness.
 func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
 	// Not parallel: this test toggles the process-global dbg.AssertEnabled, which
 	// markCellComplete reads from other tests' MarkWritesComplete calls.
@@ -560,6 +559,55 @@ func TestOneValuePerVersion_StorageCellForbidsValueChange(t *testing.T) {
 	)
 	require.Panics(t, func() { vm.MarkWritesComplete(diverged) },
 		"a changed storage value at a published version must panic — one value per version")
+}
+
+// A fresh CREATE tx (CreateContract + Incarnation, no self-destruct) that re-executes with the
+// same field value must not re-version its value cells: the structural paths bump, but Balance
+// keeps its incarnation (no-bump), so later readers that bound to it stay valid instead of
+// cascading into re-execution. A self-destruct this tx is the one case that disqualifies the
+// no-bump — a reincarnation can leave a field coincidentally equal across the removal.
+func TestNoBump_ValuePathKeepsVersionUnlessSelfDestructed(t *testing.T) {
+	t.Parallel()
+	// A tx that creates a contract (CreateContract + Incarnation) and, when withSD, also
+	// self-destructs it — writing balance 100 each time.
+	flush := func(vm *VersionMap, addr accounts.Address, inc Incarnation, withSD bool) {
+		v := Version{TxIndex: 5, Incarnation: inc}
+		ws := &WriteSet{}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: v}, Val: *uint256.NewInt(100)})
+		ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: v}, Val: true})
+		ws.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: v}, Val: 1})
+		if withSD {
+			ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: v}, Val: true})
+		}
+		vm.FlushVersionedWrites(ws, false, "")
+	}
+	balCellInc := func(vm *VersionMap, addr accounts.Address) Incarnation {
+		e := vm.load(addr)
+		require.NotNil(t, e)
+		c, ok := e.Balance.Get(5)
+		require.True(t, ok, "a balance cell exists at txIndex 5")
+		return c.incarnation
+	}
+
+	t.Run("fresh create equal-value re-exec keeps the balance cell version", func(t *testing.T) {
+		t.Parallel()
+		addr := getAddress(80)
+		vm := NewVersionMap(nil)
+		flush(vm, addr, 0, false)
+		flush(vm, addr, 1, false) // re-exec with the same balance at a fresh incarnation
+		require.Equal(t, Incarnation(0), balCellInc(vm, addr),
+			"a fresh create's equal-value re-exec no-bumps the balance, keeping incarnation 0 so readers stay valid")
+	})
+
+	t.Run("self-destruct this tx bumps the balance cell despite an equal value", func(t *testing.T) {
+		t.Parallel()
+		addr := getAddress(81)
+		vm := NewVersionMap(nil)
+		flush(vm, addr, 0, true)
+		flush(vm, addr, 1, true) // re-exec with a coincidentally equal balance
+		require.Equal(t, Incarnation(1), balCellInc(vm, addr),
+			"a self-destruct this tx disqualifies the no-bump, so the balance cell re-versions")
+	})
 }
 
 // TestOriginStorageIsWriteOnce pins the other half of the structural guarantee: the

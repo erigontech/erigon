@@ -157,6 +157,7 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 	victim := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
 	reader := common.HexToAddress("0xbbbb")
 	readerCode := program.New().
+		Push(0x32).Push(0x200).Op(vm.MSTORE).
 		StaticCall(nil, victim, 0x200, 32, 0x300, 32).Op(vm.POP).
 		Push(0x300).Op(vm.MLOAD).Push(0).Op(vm.SSTORE).
 		Op(vm.STOP).Bytes()

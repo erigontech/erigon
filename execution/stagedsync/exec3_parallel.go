@@ -462,12 +462,26 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			// Any non-clean exit (panic or an error return before the channel-close
 			// drain) can leave the exec loop blocked on a mustDeliver send into a full
 			// applyResults; mustDeliver ignores ctx, so the cancel alone cannot release
-			// it. Cancel and drain to EOF so it winds down and closes the channel, else
-			// pe.wait() hangs. A clean exit already drained to the close.
+			// it. The exec loop can equally be blocked sending into commitResults while
+			// the calculator is blocked sending into a full rootResults (which this loop
+			// stopped consuming), so draining only applyResults leaves both producers
+			// stuck and neither channel closes. Drain both to EOF concurrently so the
+			// calculator and exec loop wind down and close their channels, else pe.wait()
+			// hangs. A clean exit already drained to the close.
 			if rec != nil || err != nil {
 				pe.cancelExecLoop(&stopCause{kind: stopOperational, err: err})
-				for range applyResults {
+				var drainWG sync.WaitGroup
+				drainWG.Go(func() {
+					for range applyResults {
+					}
+				})
+				if rootResults != nil {
+					drainWG.Go(func() {
+						for range rootResults {
+						}
+					})
 				}
+				drainWG.Wait()
 			}
 		}()
 
@@ -2115,10 +2129,10 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				// A same-writer re-publication names no blocker: the value tiebreaker
-				// may forgive it, and parking would wait on a writer that did not
-				// invalidate this read. If the value did change, re-executing at once is
-				// right — the new value is already published.
+				// A same-writer re-publication (same TxIndex, new incarnation) names no
+				// blocker: parking would wait on a writer that will just re-publish, so
+				// re-execute at once — the new value is already published. Only a different
+				// writer that moved the version is a blocker to wait for.
 				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
 					// Invariant: a read can only be invalidated by a PREDECESSOR write.
 					// A blocker >= this task is a forward dependency (a future write
