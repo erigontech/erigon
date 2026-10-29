@@ -126,7 +126,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
-	RecoverAuthorities(chainID *uint256.Int) *types.RecoveredAuthorities
+	RecoveredAuthorities() *types.RecoveredAuthorities
 	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -870,7 +870,6 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
-	recovered := st.msg.RecoverAuthorities(chainID)
 	for i := range auths {
 		auth := &auths[i]
 
@@ -883,8 +882,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		// 2. authority recover
 		var signer common.Address
 		var err error
-		if recovered != nil {
-			signer, err = recovered.Signers[i], recovered.Errs[i]
+		// The pre-pass may publish mid-list: each auth checks again, so recovery stops once it lands.
+		if r := st.msg.RecoveredAuthorities(); r != nil {
+			signer, err = r.Signers[i], r.Errs[i]
 		} else {
 			signer, err = auth.RecoverSigner()
 		}

@@ -413,7 +413,7 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
-	authTx           *SetCodeTransaction
+	authorities      *atomic.Pointer[RecoveredAuthorities]
 	dynamicFeeArgs   bool
 
 	skipExecutionGasCap bool
@@ -463,12 +463,12 @@ func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
 
-// RecoverAuthorities is the recovered authorization list of the message's tx, or nil for a message without one.
-func (m *Message) RecoverAuthorities(chainID *uint256.Int) *RecoveredAuthorities {
-	if m.authTx == nil {
+// RecoveredAuthorities is the authorization list the block pre-pass recovered for the message's tx, or nil.
+func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
+	if m.authorities == nil {
 		return nil
 	}
-	return m.authTx.RecoverAuthorities(chainID)
+	return m.authorities.Load()
 }
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
@@ -476,7 +476,6 @@ func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
-	m.authTx = nil
 }
 func (m *Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {

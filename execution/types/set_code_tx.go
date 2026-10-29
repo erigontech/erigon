@@ -38,46 +38,22 @@ const DelegateDesignationCodeSize = 23
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
-	// authorities is claimed by the first of the block pre-pass and the executor; the other waits for it.
+	// authorities is published by the block pre-pass while the block runs, so it is read and written atomically.
 	authorities atomic.Pointer[RecoveredAuthorities]
 }
 
-// RecoveredAuthorities is RecoverSigners of a tx's authorization list; Signers and Errs are set once done is closed.
+// RecoveredAuthorities is RecoverSigners of a tx's authorization list.
 type RecoveredAuthorities struct {
-	done    chan struct{}
 	Signers []common.Address
 	Errs    []error
 }
 
-// claimAuthorities returns the tx's recovery and whether this caller claimed it and must run it.
-func (tx *SetCodeTransaction) claimAuthorities() (*RecoveredAuthorities, bool) {
-	if r := tx.authorities.Load(); r != nil {
-		return r, false
-	}
-	r := &RecoveredAuthorities{done: make(chan struct{})}
-	if tx.authorities.CompareAndSwap(nil, r) {
-		return r, true
-	}
-	return tx.authorities.Load(), false
-}
-
-// WarmAuthorities recovers the authorization list on several goroutines unless a recovery is already claimed.
+// WarmAuthorities recovers the authorization list on several goroutines and publishes it to the tx's Message.
 func (tx *SetCodeTransaction) WarmAuthorities(chainID *uint256.Int) {
-	if r, claimed := tx.claimAuthorities(); claimed {
-		r.Signers, r.Errs = RecoverSigners(tx.Authorizations, chainID)
-		close(r.done)
+	if tx.authorities.Load() == nil {
+		signers, errs := RecoverSigners(tx.Authorizations, chainID)
+		tx.authorities.CompareAndSwap(nil, &RecoveredAuthorities{Signers: signers, Errs: errs})
 	}
-}
-
-// RecoverAuthorities returns the recovered authorization list, recovering it serially if nobody claimed it yet.
-func (tx *SetCodeTransaction) RecoverAuthorities(chainID *uint256.Int) *RecoveredAuthorities {
-	r, claimed := tx.claimAuthorities()
-	if claimed {
-		r.Signers, r.Errs = recoverSigners(tx.Authorizations, chainID, 1)
-		close(r.done)
-	}
-	<-r.done
-	return r
 }
 
 func (tx *SetCodeTransaction) Unwrap() Transaction {
@@ -192,7 +168,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
-	msg.authTx = tx
+	msg.authorities = &tx.authorities
 
 	var err error
 	if msg.from, err = tx.Sender(s); err != nil {

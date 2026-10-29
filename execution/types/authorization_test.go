@@ -158,7 +158,7 @@ func TestRecoverSignersMatchesRecoverSigner(t *testing.T) {
 	}
 }
 
-func TestSetCodeTxRecoverAuthoritiesCaches(t *testing.T) {
+func TestSetCodeTxWarmAuthoritiesCaches(t *testing.T) {
 	t.Parallel()
 
 	key, err := crypto.GenerateKey()
@@ -169,30 +169,18 @@ func TestSetCodeTxRecoverAuthoritiesCaches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := crypto.PubkeyToAddress(key.PublicKey)
-
-	warmed := &SetCodeTransaction{Authorizations: []Authorization{auth}}
-	warmed.WarmAuthorities(uint256.NewInt(1))
-	got := warmed.RecoverAuthorities(uint256.NewInt(1))
-	if got.Signers[0] != want || got.Errs[0] != nil {
-		t.Fatalf("warmed: recovered %v, %v; want %v", got.Signers[0], got.Errs[0], want)
-	}
-	if warmed.RecoverAuthorities(uint256.NewInt(1)) != got {
-		t.Error("a second RecoverAuthorities recovered again")
+	tx := &SetCodeTransaction{Authorizations: []Authorization{auth}}
+	if tx.authorities.Load() != nil {
+		t.Fatal("authorities recovered before WarmAuthorities")
 	}
 
-	cold := &SetCodeTransaction{Authorizations: []Authorization{auth}}
-	if got := cold.RecoverAuthorities(uint256.NewInt(1)); got.Signers[0] != want || got.Errs[0] != nil {
-		t.Fatalf("cold: recovered %v, %v; want %v", got.Signers[0], got.Errs[0], want)
+	tx.WarmAuthorities(uint256.NewInt(1))
+	got := tx.authorities.Load()
+	if got == nil || got.Signers[0] != crypto.PubkeyToAddress(key.PublicKey) || got.Errs[0] != nil {
+		t.Fatalf("recovered %+v, want %v", got, crypto.PubkeyToAddress(key.PublicKey))
 	}
-}
-
-func TestMessageSetAuthorizationsDropsRecoveredAuthorities(t *testing.T) {
-	t.Parallel()
-
-	msg := &Message{authTx: &SetCodeTransaction{}}
-	msg.SetAuthorizations(nil)
-	if msg.RecoverAuthorities(uint256.NewInt(1)) != nil {
-		t.Error("replaced authorizations still read the transaction's recovered authorities")
+	tx.WarmAuthorities(uint256.NewInt(1))
+	if tx.authorities.Load() != got {
+		t.Error("a second WarmAuthorities replaced the published result")
 	}
 }
