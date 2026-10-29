@@ -1103,7 +1103,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
 			// The envelope passed every consensus check; only the EL verdict is pending.
 			validationInterrupted = true
-		case canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+		case !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		case canonical && validation != BlockPublishingValidationGossip:
