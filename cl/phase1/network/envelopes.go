@@ -51,11 +51,16 @@ func requestEnvelopesFranticallyWithValidator(
 	r *rpc.BeaconRpcP2P,
 	roots [][32]byte,
 	validate envelopeCandidateValidator,
-	banPeer func(string),
+	banPeer func(context.Context, string),
 	fullBlocks ...*cltypes.SignedBeaconBlock,
 ) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
 	requestCtx, cancelRequests := context.WithTimeout(ctx, requestEnvelopeBatchExpiration)
 	defer cancelRequests()
+
+	var ban func(string)
+	if banPeer != nil {
+		ban = func(pid string) { banPeer(requestCtx, pid) }
+	}
 
 	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	needed := make([][32]byte, len(roots))
@@ -89,7 +94,7 @@ func requestEnvelopesFranticallyWithValidator(
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
 			rangeCtx, cancelRange := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
-			rejected := requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate, banPeer)
+			rejected := requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate, ban)
 			cancelRange()
 			if rejected && banPeer == nil {
 				return received, errors.New("invalid execution payload envelope response")
@@ -101,7 +106,7 @@ func requestEnvelopesFranticallyWithValidator(
 		}
 
 		attemptCtx, cancelAttempt := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
-		rejected, err := requestEnvelopesByRoot(attemptCtx, r, needed, requestedRoots, received, validate, banPeer)
+		rejected, err := requestEnvelopesByRoot(attemptCtx, r, needed, requestedRoots, received, validate, ban)
 		attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && requestCtx.Err() == nil
 		cancelAttempt()
 		if rejected && banPeer == nil {

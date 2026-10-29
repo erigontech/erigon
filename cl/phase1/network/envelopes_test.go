@@ -188,7 +188,7 @@ func TestRequestEnvelopesFranticallyInterruptsRetryDelay(t *testing.T) {
 			var bans atomic.Int32
 			done := make(chan error, 1)
 			go func() {
-				_, err := requestEnvelopesFranticallyWithValidator(ctx, rpcClient, [][32]byte{{1}}, nil, func(string) { bans.Add(1) })
+				_, err := requestEnvelopesFranticallyWithValidator(ctx, rpcClient, [][32]byte{{1}}, nil, func(context.Context, string) { bans.Add(1) })
 				done <- err
 			}()
 			select {
@@ -320,6 +320,98 @@ func (s *backfillEnvelopeSentinel) SendRequest(ctx context.Context, req *sentine
 		response.Data = s.invalidResponse
 	}
 	return response, nil
+}
+
+type blockedEnvelopeBanSentinel struct {
+	backfillEnvelopeSentinel
+	banStarted chan struct{}
+	banOnce    sync.Once
+}
+
+func (s *blockedEnvelopeBanSentinel) BanPeerForInvalidData(ctx context.Context, _ *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.banOnce.Do(func() { close(s.banStarted) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestBackwardBeaconDownloaderCancelsBlockedEnvelopeBan(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeRetryInterval = time.Millisecond
+	t.Cleanup(func() {
+		requestEnvelopeBatchExpiration = previousExpiration
+		requestEnvelopeRetryInterval = previousRetryInterval
+	})
+
+	for _, tc := range []struct {
+		name         string
+		protocol     string
+		cancelCaller bool
+	}{
+		{name: "by-root batch expiration", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
+		{name: "by-range batch expiration", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
+		{name: "by-root caller cancellation", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, cancelCaller: true},
+		{name: "by-range caller cancellation", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, cancelCaller: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requestEnvelopeBatchExpiration = 100 * time.Millisecond
+			if tc.cancelCaller {
+				requestEnvelopeBatchExpiration = time.Minute
+			}
+			cfg := gloasFromGenesisConfig()
+			cfg.InitializeForkSchedule()
+			_, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+			envelope.Message.BuilderIndex++
+			require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope), "builder index mismatch")
+			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+			digest, err := clock.ComputeForkDigest(0)
+			require.NoError(t, err)
+			var wire bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+			sentinel := &blockedEnvelopeBanSentinel{
+				backfillEnvelopeSentinel: backfillEnvelopeSentinel{
+					invalidResponse: wire.Bytes(),
+					invalidProtocol: tc.protocol,
+				},
+				banStarted: make(chan struct{}),
+			}
+			clientCtx, cancelClient := context.WithCancel(t.Context())
+			fetchCtx, cancelFetch := context.WithCancel(clientCtx)
+			client := rpc.NewBeaconRpcP2P(clientCtx, sentinel, cfg, clock)
+			downloader := NewBackwardBeaconDownloader(clientCtx, client, nil, nil, nil, cfg)
+			t.Cleanup(downloader.reqInterval.Stop)
+			done := make(chan struct{})
+			var fetchErr error
+			go func() {
+				_, fetchErr = downloader.requestEnvelopes(fetchCtx, [][32]byte{envelope.Message.BeaconBlockRoot}, block)
+				close(done)
+			}()
+			defer func() {
+				cancelFetch()
+				cancelClient()
+				<-done
+			}()
+			select {
+			case <-sentinel.banStarted:
+			case <-time.After(time.Second):
+				t.Fatal("envelope fetch did not reach the ban RPC")
+			}
+			if tc.cancelCaller {
+				cancelFetch()
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("envelope fetch remained blocked in the ban RPC")
+			}
+			if tc.cancelCaller {
+				require.ErrorIs(t, fetchErr, context.Canceled)
+			} else {
+				require.NoError(t, fetchErr)
+			}
+			require.NoError(t, clientCtx.Err())
+		})
+	}
 }
 
 func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T) {
