@@ -151,6 +151,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	blockHeader := msg.SignedBlockHeader.Header
+	if msg.Version() != s.cfg.GetCurrentStateVersion(blockHeader.Slot/s.cfg.SlotsPerEpoch) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	seenKey := seenSidecarKey{
 		slot:          blockHeader.Slot,
 		proposerIndex: blockHeader.ProposerIndex,
@@ -175,7 +178,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %w", err)
+			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -203,8 +206,17 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 
-	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot
-	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
+	// One finalized checkpoint for both finality checks below, so that a checkpoint update between
+	// them cannot turn an ignored sidecar into a rejected one.
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that
+	// block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch).
+	// FinalizedSlot() is the last slot of the finalized epoch, so it is not this bound.
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok {
+		return errors.New("finalized checkpoint slot is not representable")
+	}
+	if blockHeader.Slot <= finalizedStartSlot {
 		return ErrIgnore
 	}
 
@@ -226,10 +238,8 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("data column sidecar should be from a higher slot than the parent block, but got %d <= %d", blockHeader.Slot, parentHeader.Slot)
 	}
 
-	// [REJECT] The finalized checkpoint is an ancestor
-	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
-	finalizedSlot := finalizedCheckpoint.Epoch * s.cfg.SlotsPerEpoch
-	if s.forkChoice.Ancestor(blockHeader.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
+	// [REJECT] The finalized checkpoint is an ancestor, clamped to the anchor slot.
+	if s.forkChoice.Ancestor(blockHeader.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
@@ -244,7 +254,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %w", err)
+		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
 	s.seenSidecar.Add(seenKey, struct{}{})
 
@@ -259,6 +269,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 // Reference: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md
 func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	slot := msg.Slot
+	if msg.Version() != s.cfg.GetCurrentStateVersion(slot/s.cfg.SlotsPerEpoch) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	blockRoot := msg.BeaconBlockRoot
 
 	seenKey := seenGloasSidecarKey{
@@ -290,7 +303,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %w", err)
+			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -340,7 +353,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	}
 
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %w", err)
+		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
 	s.seenGloasSidecar.Add(seenKey, struct{}{})
 

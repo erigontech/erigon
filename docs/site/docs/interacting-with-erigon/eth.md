@@ -27,14 +27,36 @@ deviation that has not yet been documented may still exist.
 `execution-apis` is a living specification rather than a frozen standard — methods are
 still being added, and some long-standing `eth` behaviour was never specified at all — so
 parts of what follows are differences from a moving target rather than defects. Erigon
-runs the specification's own conformance vectors in CI (Hive's `rpc-compat` suite against
-a pinned `execution-apis` revision) and works with the other client teams on closing
+runs the specification's own conformance vectors in continuous integration (CI), using Hive's `rpc-compat` suite against
+a pinned `execution-apis` revision, and works with the other client teams on closing
 these gaps, so this page will change as the two converge.
 :::
 
 ### Pending state
 
 Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+
+### Fork-gated call fields
+
+Methods that execute a call object — among them `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1`, `eth_callMany`, `debug_traceCall` and the `trace_call` family — validate it against the fork active at the effective execution block, as a transaction would be. For `eth_simulateV1` that is each simulated block, which runs after the selected parent, and block overrides can move it to a different fork than the parent's:
+
+| Call carries | Rejected when | Error |
+|---|---|---|
+| `accessList` | the block is before Berlin | `eip-2930 transactions require Berlin` |
+| `blobVersionedHashes` | the block is before Cancun | `BlobTx transactions require Cancun` |
+| `blobVersionedHashes` and no `to` | from Cancun on | `txn: field 'To' can not be 'nil'` |
+| an empty `blobVersionedHashes` list | from Cancun on | `blob txn must contain at least one blob versioned hash` |
+| a blob versioned hash with the wrong version byte | from Cancun on | `blob txn versioned hash has invalid version byte` |
+
+On 3.7 the `trace_call` family takes no `blobVersionedHashes`, so the blob rows do not apply to it.
+
+`eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
+
+### eth\_syncing and eth\_subscribe("syncing")
+
+`eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction, unless snapshots are downloading or handing off to execution; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach; during the handoff to execution it stays at the snapshots' commitment block. In both phases `stages` is empty, as it is while the highest block is not yet known. A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
+
+`eth_subscribe("syncing")` (WebSocket or inter-process communication (IPC)) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth\_getProof
 
@@ -217,7 +239,7 @@ Besides the fee-field rules above, a fill fails outright when:
 
 An object with `raw`, the unsigned transaction in its canonical binary encoding, and
 `tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare
-RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
+Recursive Length Prefix (RLP) only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
 encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
 result carries only `tx`; the extra `raw` field is the geth-compatible shape.
 
@@ -337,6 +359,9 @@ on a quiet chain as long as the client keeps calling it. `eth_getFilterLogs` doe
 without touching the deadline — so a client that only ever calls `eth_getFilterLogs`
 loses its filter after five idle minutes. A call against an evicted filter returns
 `filter not found`.
+
+Logs returned by `eth_getFilterChanges` for a log filter, and logs pushed by
+`eth_subscribe("logs")`, carry the block time as `blockTimestamp`, as `eth_getLogs` does.
 
 Change the window, or turn eviction off entirely, with:
 

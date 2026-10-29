@@ -155,10 +155,14 @@ func (s onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	testCfg := *cfg
+	testCfg.AltairForkEpoch = 0
+	testCfg.BellatrixForkEpoch = 0
+	testCfg.CapellaForkEpoch = testCfg.FarFutureEpoch
+	syncedDataManager := synced_data.NewSyncedDataManager(&testCfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := NewBlockService(t.Context(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
+	blockService := NewBlockService(t.Context(), db, forkchoiceMock, syncedDataManager, ethClock, &testCfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 
@@ -370,6 +374,45 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	}))
 }
 
+func TestBlockServiceIgnoresLocalOnBlockFailureOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		ignore bool
+	}{
+		{name: "local failure", err: forkchoice.ErrMissingSegment, ignore: true},
+		{name: "invalid block", err: fmt.Errorf("%w: invalid block", forkchoice.ErrBlockInvalid)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blocks, pre, post := tests.GetBellatrixRandom()
+			parentState, err := pre.Copy()
+			require.NoError(t, err)
+			require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+
+			svc, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+			require.NoError(t, syncedData.OnHeadState(post))
+			ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+			fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+			fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+			finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+			fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+			fcu.OnBlockErr = tc.err
+
+			err = svc.ProcessMessage(context.Background(), nil, blocks[1])
+			require.ErrorIs(t, err, tc.err)
+			if tc.ignore {
+				require.ErrorIs(t, err, ErrIgnore)
+			} else {
+				require.NotErrorIs(t, err, ErrIgnore)
+				require.NotContains(t, err.Error(), "ignore")
+			}
+		})
+	}
+}
+
 const sentinelSlot = 0xbadbad
 
 func TestBlockServiceYoungerThanParent(t *testing.T) {
@@ -540,10 +583,13 @@ func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
 	var stateReads atomic.Int32
 	var stateCopyMu sync.Mutex
 	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-		if root != blocks[1].Block.ParentRoot || !alwaysCopy {
+		if root != blocks[1].Block.ParentRoot {
 			return nil, fmt.Errorf("unexpected parent state request")
 		}
 		stateReads.Add(1)
+		if !alwaysCopy {
+			return parentState, nil
+		}
 		stateCopyMu.Lock()
 		defer stateCopyMu.Unlock()
 		return parentState.Copy()
@@ -785,6 +831,65 @@ func TestBlockServiceBoundsConcurrentParentStateReplays(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
+}
+
+func newBellatrixValidationContextFixture(t *testing.T) (*blockService, *mock_services.ForkChoiceStorageMock, *cltypes.SignedBeaconBlock, *state.CachingBeaconState) {
+	ctrl := gomock.NewController(t)
+	blocks, pre, _ := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	service, _, _, fcu := setupBlockService(t, ctrl)
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	return service.(*blockService), fcu, blocks[1], parentState
+}
+
+func TestBlockValidationContextReadsSameEpochParentStateWithoutCopy(t *testing.T) {
+	service, fcu, child, parentState := newBellatrixValidationContextFixture(t)
+	require.Equal(t, state.Epoch(parentState), child.Block.Slot/parentState.BeaconConfig().SlotsPerEpoch)
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		if root != child.Block.ParentRoot || alwaysCopy {
+			return nil, fmt.Errorf("unexpected parent state request: root=%x alwaysCopy=%v", root, alwaysCopy)
+		}
+		return parentState, nil
+	}
+	parentSlot := parentState.Slot()
+
+	validationContext, err := service.blockValidationContext(t.Context(), child.Block.ParentRoot, child.Block.Slot)
+	require.NoError(t, err)
+	require.Equal(t, child.Block.ProposerIndex, validationContext.expectedProposer)
+	require.Equal(t, parentSlot, parentState.Slot())
+}
+
+func TestBlockValidationContextAdvancesCopiedParentStateAcrossEpoch(t *testing.T) {
+	service, fcu, child, parentState := newBellatrixValidationContextFixture(t)
+	slotsPerEpoch := parentState.BeaconConfig().SlotsPerEpoch
+	nextEpochSlot := (state.Epoch(parentState) + 1) * slotsPerEpoch
+	expected, err := parentState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expected, nextEpochSlot))
+	expectedProposer, err := expected.GetBeaconProposerIndexForSlot(nextEpochSlot)
+	require.NoError(t, err)
+	var stateFetches, copies atomic.Int32
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		if root != child.Block.ParentRoot {
+			return nil, fmt.Errorf("unexpected parent state request: root=%x", root)
+		}
+		stateFetches.Add(1)
+		if !alwaysCopy {
+			return parentState, nil
+		}
+		copies.Add(1)
+		return parentState.Copy()
+	}
+	parentSlot := parentState.Slot()
+
+	validationContext, err := service.blockValidationContext(t.Context(), child.Block.ParentRoot, nextEpochSlot)
+	require.NoError(t, err)
+	require.Equal(t, expectedProposer, validationContext.expectedProposer)
+	require.Equal(t, int32(1), copies.Load())
+	require.Equal(t, int32(1), stateFetches.Load(), "a non-head parent state is rebuilt on every fetch")
+	require.Equal(t, parentSlot, parentState.Slot())
 }
 
 func TestBlockServiceGossipWaitsForFullParentPayloadVerification(t *testing.T) {
@@ -1213,11 +1318,13 @@ func TestBlockServiceUnrelatedReservationDoesNotRevalidateP2P(t *testing.T) {
 	validationCalls := 0
 	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 		require.Equal(t, parentRoot, root)
-		require.True(t, alwaysCopy)
 		validationCalls++
 		if validationCalls == 1 {
 			close(validationEntered)
 			<-finishValidation
+		}
+		if !alwaysCopy {
+			return parentState, nil
 		}
 		return parentState.Copy()
 	}
@@ -1306,6 +1413,61 @@ func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
 		return parentExecutionHead
 	})
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceProcessMessageIgnoresForkSchemaMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	require.False(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	assertBlockServiceProcessMessageIgnoredBeforeStorage(t, service, child, fcu, "fork schema mismatch reached fork choice")
+}
+
+func TestBlockServiceProcessMessageIgnoresExactForkVersionMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	child.Block.Body.Version = clparams.ElectraVersion
+	require.Equal(t, clparams.FuluVersion, cfg.GetCurrentStateVersion(child.Block.Slot/cfg.SlotsPerEpoch))
+	require.True(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	assertBlockServiceProcessMessageIgnoredBeforeStorage(t, service, child, fcu, "fork version mismatch reached fork choice")
+}
+
+func assertBlockServiceProcessMessageIgnoredBeforeStorage(
+	t *testing.T,
+	service BlockService,
+	child *cltypes.SignedBeaconBlock,
+	fcu *mock_services.ForkChoiceStorageMock,
+	forkChoiceErr string,
+) {
+	t.Helper()
+	impl := service.(*blockService)
+	var ready atomic.Bool
+	ready.Store(true)
+	var calls atomic.Int32
+	impl.forkchoiceStore = onBlockErrorStore{
+		ForkChoiceStorage: fcu,
+		ready:             &ready,
+		calls:             &calls,
+	}
+	blockRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	err = service.ProcessMessage(t.Context(), nil, child)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, calls.Load(), forkChoiceErr)
+	require.NoError(t, impl.db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		require.NoError(t, err)
+		require.Nil(t, slot)
+		return nil
+	}))
 }
 
 func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T) {
