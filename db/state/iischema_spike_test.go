@@ -735,7 +735,7 @@ type dupMaxSchema struct {
 	// -1 = per-chunk width 1/2/4 stored as a trailing byte (none for a one-txNum chunk).
 	width      int
 	widths     []int // width -1: candidate widths, default 1/2/4
-	rangeSplit bool // uvarint deltas, but split a chunk when max-min > 65535 (isolates the u16 split cost)
+	rangeSplit bool  // uvarint deltas, but split a chunk when max-min > 65535 (isolates the u16 split cost)
 	vbuf       []uint64
 	ebuf       []byte
 }
@@ -1410,7 +1410,9 @@ func TestIISchemaSpike(t *testing.T) {
 		s := mk()
 		dir := t.TempDir()
 		db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dir).MapSize(64 * datasize.GB).DirtySpace(uint64(256 * datasize.MB)).
-			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: s.flags()}, spikeTbl + "C": kv.TableCfgItem{Flags: s.flags()}} }).MustOpen()
+			WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+				return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: s.flags()}, spikeTbl + "C": kv.TableCfgItem{Flags: s.flags()}}
+			}).MustOpen()
 		spikeDB = db
 		ctx := t.Context()
 
