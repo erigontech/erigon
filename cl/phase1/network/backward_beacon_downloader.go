@@ -417,10 +417,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
 		if err == nil && len(blocks) > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
-			for _, r := range b.prefetched {
-				r.cancel()
-			}
-			b.prefetched = nil
+			b.cancelPrefetched()
 			return blocks, nil
 		}
 		// HTTP failed — fall back to P2P probing.
@@ -440,6 +437,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 	var prefetched chan []*cltypes.SignedBeaconBlock
 	if len(b.prefetched) > 0 && (slot <= b.prefetched[0].hi || (b.lastRangeLo <= b.prefetched[0].hi+1 && slot < b.lastRangeLowestSlot)) {
 		prefetched, bottom = b.prefetched[0].blocks, b.prefetched[0].lo
+		defer b.prefetched[0].cancel()
 		b.prefetched = b.prefetched[1:]
 		requestSent.Store(true)
 	}
@@ -482,6 +480,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 			if err == nil && len(blocks) > 0 {
 				log.Debug("[BackwardBeaconDownloader] P2P failed, fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
 				b.httpPreferred.Store(true)
+				b.cancelPrefetched()
 				return blocks, nil
 			}
 			if err != nil {
@@ -497,6 +496,13 @@ func (b *BackwardBeaconDownloader) recordLastRange(lo uint64, blocks []*cltypes.
 	for _, blk := range blocks {
 		b.lastRangeLowestSlot = min(b.lastRangeLowestSlot, blk.Block.Slot)
 	}
+}
+
+func (b *BackwardBeaconDownloader) cancelPrefetched() {
+	for _, r := range b.prefetched {
+		r.cancel()
+	}
+	b.prefetched = nil
 }
 
 func (b *BackwardBeaconDownloader) prefetchRange(ctx context.Context, bottom uint64) {
@@ -580,6 +586,9 @@ func (b *BackwardBeaconDownloader) blockByRoot(ctx context.Context, root common.
 	}
 	if blk := blockWithRoot(blocks, root); blk != nil {
 		return []*cltypes.SignedBeaconBlock{blk}
+	}
+	if len(blocks) > 0 && peerId != "" && b.rpc != nil {
+		b.rpc.BanPeer(peerId)
 	}
 	return nil
 }
