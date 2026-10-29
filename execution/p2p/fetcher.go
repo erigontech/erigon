@@ -43,7 +43,8 @@ type Fetcher interface {
 		opts ...FetcherOption,
 	) (FetcherResponse[[]*types.Header], error)
 
-	// FetchBodies returns one matching body per header in the same order. It blocks until data is received.
+	// FetchBodies returns one body per header, in the same order, on success.
+	// Each body's transaction, uncle, and withdrawal commitments match its header.
 	FetchBodies(
 		ctx context.Context,
 		headers []*types.Header,

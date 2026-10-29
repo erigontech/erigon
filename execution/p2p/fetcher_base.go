@@ -126,10 +126,9 @@ func (f *FetcherBase) FetchBodies(
 	totalBodiesSize := 0
 
 	for len(headers) > 0 {
-		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
-		// In most cases the response will contain incomplete bodies list (ie < MaxBodiesServe) so we just
-		// continue asking it for more starting from the first hash in the sequence after the last received one.
-		// This is akin to how a paging API is consumed.
+		// Request up to MaxBodiesServe to make use of the peer's response size limit.
+		// Non-empty partial responses must match a prefix of the requested headers;
+		// continue with the remaining headers.
 		var headersChunk []*types.Header
 		if len(headers) > eth.MaxBodiesServe {
 			headersChunk = headers[:eth.MaxBodiesServe]
@@ -468,6 +467,7 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
 		}
 		header := headers[len(bodies)]
+		// Check commitments before retaining bodies so incorrect data cannot accumulate across pages.
 		if err := body.MatchesHeader(header); err != nil {
 			return nil, fmt.Errorf("%w: blockNum=%d, blockHash=%s: %w", ErrBodyDoesNotMatchHeader, header.Number.Uint64(), header.Hash(), err)
 		}
