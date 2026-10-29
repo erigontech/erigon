@@ -466,11 +466,16 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 			}
 			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
 		}
+
 		header := headers[len(bodies)]
 		// Check commitments before retaining bodies so incorrect data cannot accumulate across pages.
 		if err := body.MatchesHeader(header); err != nil {
-			return nil, fmt.Errorf("%w: blockNum=%d, blockHash=%s: %w", ErrBodyDoesNotMatchHeader, header.Number.Uint64(), header.Hash(), err)
+			return nil, fmt.Errorf(
+				"%w: blockNum=%d, blockHash=%s: %w",
+				ErrBodyDoesNotMatchHeader, header.Number.Uint64(), header.Hash(), err,
+			)
 		}
+
 		bodies = append(bodies, body)
 	}
 
