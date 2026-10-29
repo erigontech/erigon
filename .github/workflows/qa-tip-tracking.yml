@@ -194,6 +194,14 @@ jobs:
         name: fd-leak-analysis
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
+    - name: Upload goroutine stacks
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: goroutine-stacks-${{ steps.pre_test_step.outcome == 'failure' && 'reference' || 'testbed' }}
+        path: ${{ github.workspace }}/goroutine-stacks.txt
+        if-no-files-found: ignore
+
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() && steps.save_chaindata_step.outputs.chaindata_saved == 'true' }}
       run: |
