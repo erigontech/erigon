@@ -924,3 +924,35 @@ func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
 	dbg.Exec3Parallel = false
 	require.False(t, bra.ExecRecoversSenders(header), "serial exec has no workers, so the Senders stage recovers")
 }
+
+// Validation suspends warmup before an unwind and then executes; waiting for a running warmup must not wait for that suspension.
+func TestBlockReadAheaderWaitForRunningWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+	}))
+	<-warmupStarted
+	waited := make(chan struct{})
+	go func() {
+		bra.WaitForRunningWarmup(t.Context())
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("returned while a warmup was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(finishWarmup)
+	<-waited
+
+	resume, err := bra.SuspendWarmup(t.Context())
+	require.NoError(t, err)
+	defer resume()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	bra.WaitForRunningWarmup(ctx)
+	require.NoError(t, ctx.Err(), "waited for the suspension")
+}
