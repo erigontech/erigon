@@ -1142,16 +1142,24 @@ func (b *blockService) loop(ctx context.Context) {
 			continue
 		}
 		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			attempt := b.processScheduledBlock(ctx, key.([32]byte), value.(*blockJob), time.Now())
+			root := key.([32]byte)
+			job := value.(*blockJob)
+			now := time.Now()
+			if now.Before(storageRetryAfter) {
+				job.mu.Lock()
+				b.expireScheduledBlockLocked(root, job, now)
+				job.mu.Unlock()
+				return true
+			}
+			attempt := b.processScheduledBlock(ctx, root, job, now)
 			if attempt == nil {
 				return true
 			}
 			if errors.Is(attempt.err, errBlockStorage) {
-				// Storage is shared by all jobs. Stop the scan after one failure instead
-				// of retrying every retained block against the same unavailable database.
+				// Storage failures delay all write attempts, but expiry checks must
+				// still run for the remaining jobs in this scan.
 				storageRetryDelay = min(max(2*storageRetryDelay, blockRetryInitialDelay), blockRetryMaxDelay)
 				storageRetryAfter = time.Now().Add(storageRetryDelay)
-				return false
 			}
 			if attempt.err == nil {
 				storageRetryDelay = 0
@@ -1195,28 +1203,27 @@ func (b *blockService) stopPublishedBlockJobs() {
 	})
 }
 
-func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, job *blockJob, now time.Time) *blockJobAttempt {
-	job.mu.Lock()
-	if job.running {
-		job.mu.Unlock()
-		return nil
-	}
+func (b *blockService) expireScheduledBlockLocked(key [32]byte, job *blockJob, now time.Time) {
 	// A pending write for an accepted block must survive job expiry until storage succeeds,
 	// even if fork choice has since pruned the block's header.
-	if job.pendingBlockWrite == nil && now.Sub(job.creationTime) > blockJobExpiry {
-		if !job.terminal {
-			job.attempt.err = ErrPublishedBlockJobExpired
-			job.attempt.generation = job.storeGeneration
-			job.lastAttempt = job.attempt
-			job.completedGeneration = job.storeGeneration
-			job.terminal = true
-			close(job.attempt.done)
-		}
-		b.removeScheduledBlock(key, job)
-		job.mu.Unlock()
-		return nil
+	if job.running || job.pendingBlockWrite != nil || now.Sub(job.creationTime) <= blockJobExpiry {
+		return
 	}
-	if job.terminal || now.Before(job.retryAfter) {
+	if !job.terminal {
+		job.attempt.err = ErrPublishedBlockJobExpired
+		job.attempt.generation = job.storeGeneration
+		job.lastAttempt = job.attempt
+		job.completedGeneration = job.storeGeneration
+		job.terminal = true
+		close(job.attempt.done)
+	}
+	b.removeScheduledBlock(key, job)
+}
+
+func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, job *blockJob, now time.Time) *blockJobAttempt {
+	job.mu.Lock()
+	b.expireScheduledBlockLocked(key, job, now)
+	if job.running || job.terminal || now.Before(job.retryAfter) {
 		job.mu.Unlock()
 		return nil
 	}

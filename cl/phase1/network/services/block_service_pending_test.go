@@ -445,6 +445,51 @@ func TestBlockServiceSharesStorageBackoffAcrossPendingWrites(t *testing.T) {
 	})
 }
 
+func TestBlockServiceExpiresJobsDuringStorageFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		db := &blockWriteOutageDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB)}
+		db.failing.Store(true)
+		service := &blockService{db: db, forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
+		handles := make(map[[32]byte]PublishedBlockJob)
+		for slot := uint64(1); slot <= 8; slot++ {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			handles[root] = service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+				return forkchoice.ErrNewPayloadNoStatus
+			})
+		}
+		var pendingRoot [32]byte
+		// Expiry must not depend on a job's position in the scan.
+		service.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+			pendingRoot = key.([32]byte)
+			job := value.(*blockJob)
+			job.pendingBlockWrite = job.block
+			return false
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		time.Sleep(blockJobExpiry + blockRetryMaxDelay + blockJobsIntervalTick)
+		synctest.Wait()
+		waitCtx, stop := context.WithTimeout(t.Context(), blockJobsIntervalTick)
+		defer stop()
+		for root, handle := range handles {
+			if root == pendingRoot {
+				continue
+			}
+			require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobExpired,
+				"a pending write must not keep unrelated jobs past their expiry")
+			_, queued := service.blocksScheduledForLaterExecution.Load(root)
+			require.False(t, queued)
+		}
+		_, retained := service.blocksScheduledForLaterExecution.Load(pendingRoot)
+		require.True(t, retained, "the accepted block must still wait for storage recovery")
+	})
+}
+
 func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
