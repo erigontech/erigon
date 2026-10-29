@@ -61,6 +61,15 @@ func AllCPUs() int {
 	return max(1, runtime.GOMAXPROCS(-1))
 }
 
+// IOOverlapFactor sizes the Ps above the CPU count and the pools that mostly wait on
+// page faults of cold mmap'd state files: a faulting goroutine holds its P.
+const IOOverlapFactor = 4
+
+// IOWorkers is the default size of a pool that mostly blocks on page faults.
+func IOWorkers() int {
+	return IOOverlapFactor * AllCPUs()
+}
+
 func HalfCPUs() int {
 	return max(1, runtime.GOMAXPROCS(-1)/2)
 }
