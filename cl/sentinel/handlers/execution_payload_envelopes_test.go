@@ -37,6 +37,7 @@ import (
 
 type testEnvelopeRebuilder struct {
 	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	prepared  map[*envelope_history.PreparedRebuild]common.Hash
 	err       error
 	calls     int
 	called    []common.Hash
@@ -55,7 +56,17 @@ func (s *envelopeHandlerStream) Write(p []byte) (int, error) { return s.response
 func (s *envelopeHandlerStream) Conn() network.Conn          { return s.conn }
 func (s *envelopeHandlerStream) Protocol() protocol.ID       { return s.protocol }
 
-func (r *testEnvelopeRebuilder) Rebuild(_ context.Context, _ kv.Tx, _ uint64, blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+func (r *testEnvelopeRebuilder) Prepare(_ context.Context, _ kv.Tx, _ uint64, blockRoot common.Hash) (*envelope_history.PreparedRebuild, error) {
+	prepared := new(envelope_history.PreparedRebuild)
+	if r.prepared == nil {
+		r.prepared = make(map[*envelope_history.PreparedRebuild]common.Hash)
+	}
+	r.prepared[prepared] = blockRoot
+	return prepared, nil
+}
+
+func (r *testEnvelopeRebuilder) Rebuild(_ context.Context, prepared *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	blockRoot := r.prepared[prepared]
 	r.calls++
 	r.called = append(r.called, blockRoot)
 	return r.envelopes[blockRoot], r.err

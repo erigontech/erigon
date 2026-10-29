@@ -37,7 +37,7 @@ import (
 // executionPayloadEnvelopesByRangeHandler handles the ExecutionPayloadEnvelopesByRange v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.Stream) error {
-	requestCtx, cancel := context.WithTimeout(c.ctx, streamDeadline)
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
 	defer cancel()
 
 	curEpoch := c.ethClock.GetCurrentEpoch()
@@ -233,7 +233,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		}
 		if envelope == nil && err == nil && candidate.rebuildable && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
 			rebuilds++
-			envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, tx, candidate.slot, candidate.root)
+			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.root)
+			err = prepareErr
+			if err == nil && prepared != nil {
+				envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, prepared)
+			}
 		}
 		if err != nil || envelope == nil {
 			if wroteResponse {
@@ -266,7 +270,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 // executionPayloadEnvelopesByRootHandler handles the ExecutionPayloadEnvelopesByRoot v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Stream) error {
-	requestCtx, cancel := context.WithTimeout(c.ctx, streamDeadline)
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
 	defer cancel()
 
 	curEpoch := c.ethClock.GetCurrentEpoch()
@@ -338,7 +342,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		}
 		if envelope == nil && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
 			rebuilds++
-			envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, tx, *slot, blockRoot)
+			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, *slot, blockRoot)
+			err = prepareErr
+			if err == nil && prepared != nil {
+				envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, prepared)
+			}
 			if err != nil {
 				log.Debug("failed to rebuild execution payload envelope", "blockRoot", blockRoot, "error", err)
 				rebuilds = envelope_history.MaxRebuildsPerRequest

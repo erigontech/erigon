@@ -41,8 +41,10 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
+	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -939,23 +941,37 @@ func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockR
 	if envelope == nil && a.envelopeRebuilder == nil {
 		return nil, 0, false, nil
 	}
-	tx, err := a.indiciesDB.BeginRo(ctx)
+	var prepared *envelope_history.PreparedRebuild
+	var slot uint64
+	err = a.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		if !blockFromForkGraph {
+			block, err = a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
+			if err != nil {
+				return err
+			}
+		}
+		if block == nil || block.Block == nil {
+			return nil
+		}
+		slot = block.Block.Slot
+		if envelope == nil {
+			prepared, err = a.envelopeRebuilder.Prepare(ctx, tx, slot, blockRoot)
+		}
+		return err
+	})
 	if err != nil {
 		return nil, 0, false, err
-	}
-	defer tx.Rollback()
-	if !blockFromForkGraph {
-		block, err = a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
-		if err != nil {
-			return nil, 0, false, err
-		}
 	}
 	if block == nil || block.Block == nil {
 		return nil, 0, false, nil
 	}
-	slot := block.Block.Slot
-	if envelope == nil {
-		envelope, err = a.envelopeRebuilder.Rebuild(ctx, tx, slot, blockRoot)
+	if prepared != nil {
+		rebuildCtx, cancel := context.WithTimeout(ctx, handlers.StreamDeadline)
+		defer cancel()
+		envelope, err = a.envelopeRebuilder.Rebuild(rebuildCtx, prepared)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, slot, false, nil
+		}
 	}
 	return envelope, slot, false, err
 }

@@ -241,7 +241,11 @@ func TestRebuildReturnsContextErrorWhenSlotIsUnavailable(t *testing.T) {
 	var rebuilt *cltypes.SignedExecutionPayloadEnvelope
 	err := fixture.db.View(t.Context(), func(tx kv.Tx) error {
 		var err error
-		rebuilt, err = fixture.rebuilder.Rebuild(ctx, tx, fixture.block.Block.Slot, fixture.root)
+		prepared, err := fixture.rebuilder.Prepare(ctx, tx, fixture.block.Block.Slot, fixture.root)
+		if err != nil || prepared == nil {
+			return err
+		}
+		rebuilt, err = fixture.rebuilder.Rebuild(ctx, prepared)
 		return err
 	})
 	require.Nil(t, rebuilt)
@@ -258,7 +262,11 @@ func TestRebuildDoesNotAcquireSlotAfterContextEnds(t *testing.T) {
 		var rebuilt *cltypes.SignedExecutionPayloadEnvelope
 		err := fixture.db.View(t.Context(), func(tx kv.Tx) error {
 			var err error
-			rebuilt, err = fixture.rebuilder.Rebuild(ctx, tx, fixture.block.Block.Slot, fixture.root)
+			prepared, err := fixture.rebuilder.Prepare(ctx, tx, fixture.block.Block.Slot, fixture.root)
+			if err != nil || prepared == nil {
+				return err
+			}
+			rebuilt, err = fixture.rebuilder.Rebuild(ctx, prepared)
 			return err
 		})
 		require.Nil(t, rebuilt)
@@ -379,11 +387,14 @@ func newRebuildFixtureWithBAL(t *testing.T, bal []byte) *rebuildFixture {
 
 func (f *rebuildFixture) rebuild(t *testing.T, ctx context.Context) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	t.Helper()
-	var envelope *cltypes.SignedExecutionPayloadEnvelope
+	var prepared *PreparedRebuild
 	err := f.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		envelope, err = f.rebuilder.Rebuild(ctx, tx, f.block.Block.Slot, f.root)
+		prepared, err = f.rebuilder.Prepare(ctx, tx, f.block.Block.Slot, f.root)
 		return err
 	})
-	return envelope, err
+	if err != nil || prepared == nil {
+		return nil, err
+	}
+	return f.rebuilder.Rebuild(ctx, prepared)
 }

@@ -22,9 +22,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -33,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -42,17 +48,61 @@ import (
 
 type apiEnvelopeRebuilder struct {
 	envelope *cltypes.SignedExecutionPayloadEnvelope
+	rebuild  func(context.Context) error
 }
 
 type failingBeginRoDB struct {
 	kv.RwDB
 }
 
+type readTrackingDB struct {
+	kv.RwDB
+	open atomic.Int32
+}
+
+type readTrackingTx struct {
+	kv.Tx
+	open     *atomic.Int32
+	rollback sync.Once
+}
+
 func (failingBeginRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	return nil, errors.New("index database unavailable")
 }
 
-func (r *apiEnvelopeRebuilder) Rebuild(context.Context, kv.Tx, uint64, common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+func (db *readTrackingDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	db.open.Add(1)
+	return &readTrackingTx{Tx: tx, open: &db.open}, nil
+}
+
+func (db *readTrackingDB) View(ctx context.Context, f func(kv.Tx) error) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
+}
+
+func (tx *readTrackingTx) Rollback() {
+	tx.rollback.Do(func() {
+		tx.Tx.Rollback()
+		tx.open.Add(-1)
+	})
+}
+
+func (r *apiEnvelopeRebuilder) Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error) {
+	return new(envelope_history.PreparedRebuild), nil
+}
+
+func (r *apiEnvelopeRebuilder) Rebuild(ctx context.Context, _ *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if r.rebuild != nil {
+		return nil, r.rebuild(ctx)
+	}
 	return r.envelope, nil
 }
 
@@ -123,6 +173,30 @@ func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T)
 	require.Nil(t, response)
 	endpointErr := beaconhttp.WrapEndpointError(err)
 	require.Equal(t, http.StatusNotFound, endpointErr.Code)
+}
+
+func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
+	handler, root, _, _ := newHistoricalEnvelopeHandler(t, false)
+	trackedDB := &readTrackingDB{RwDB: handler.indiciesDB}
+	handler.indiciesDB = trackedDB
+
+	var hasDeadline bool
+	var deadlineWithinLimit bool
+	var openDuringRebuild int32
+	handler.envelopeRebuilder = &apiEnvelopeRebuilder{rebuild: func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		hasDeadline = ok
+		deadlineWithinLimit = ok && time.Until(deadline) <= handlers.StreamDeadline
+		openDuringRebuild = trackedDB.open.Load()
+		return context.DeadlineExceeded
+	}}
+
+	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+	assert.Nil(t, response)
+	assert.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
+	assert.True(t, hasDeadline)
+	assert.True(t, deadlineWithinLimit)
+	assert.Zero(t, openDuringRebuild)
 }
 
 func newHistoricalEnvelopeHandler(t *testing.T, anchor bool) (*ApiHandler, common.Hash, *cltypes.SignedExecutionPayloadEnvelope, *mock_services.ForkChoiceStorageMock) {

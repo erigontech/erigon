@@ -48,17 +48,26 @@ type Rebuilder struct {
 	rebuildSlot chan struct{}
 }
 
+type PreparedRebuild struct {
+	blockRoot         common.Hash
+	parentRoot        common.Hash
+	bid               *cltypes.ExecutionPayloadBid
+	signature         common.Bytes96
+	executionRequests *cltypes.ExecutionRequests
+}
+
 func NewRebuilder(beaconCfg *clparams.BeaconChainConfig, beaconDB freezeblocks.BeaconSnapshotReader, engine ExecutionEngine) *Rebuilder {
 	return &Rebuilder{beaconCfg: beaconCfg, beaconDB: beaconDB, engine: engine, rebuildSlot: make(chan struct{}, 1)}
 }
 
-func (r *Rebuilder) Rebuild(ctx context.Context, tx kv.Tx, slot uint64, blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoot common.Hash) (*PreparedRebuild, error) {
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return nil, err
 	}
 	if canonicalRoot != blockRoot {
-		return r.unavailable(blockRoot, "block is not canonical"), nil
+		r.unavailable(blockRoot, "block is not canonical")
+		return nil, nil
 	}
 
 	block, err := r.beaconDB.ReadBlockByRoot(ctx, tx, blockRoot)
@@ -66,11 +75,13 @@ func (r *Rebuilder) Rebuild(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 		return nil, err
 	}
 	if block == nil || block.Block == nil || block.Block.Body == nil || block.Block.Slot != slot || block.Version() < clparams.GloasVersion {
-		return r.unavailable(blockRoot, "block is unavailable or predates Gloas"), nil
+		r.unavailable(blockRoot, "block is unavailable or predates Gloas")
+		return nil, nil
 	}
 	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
 	if signedBid == nil || signedBid.Message == nil {
-		return r.unavailable(blockRoot, "execution payload bid is unavailable"), nil
+		r.unavailable(blockRoot, "execution payload bid is unavailable")
+		return nil, nil
 	}
 	bid := signedBid.Message
 
@@ -79,7 +90,8 @@ func (r *Rebuilder) Rebuild(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 		return nil, err
 	}
 	if !found {
-		return r.unavailable(blockRoot, "signature is unavailable"), nil
+		r.unavailable(blockRoot, "signature is unavailable")
+		return nil, nil
 	}
 	var childRoot common.Hash
 	var childSlot uint64
@@ -92,23 +104,36 @@ func (r *Rebuilder) Rebuild(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 		return nil, err
 	}
 	if childRoot == (common.Hash{}) {
-		return r.unavailable(blockRoot, "canonical child is unavailable"), nil
+		r.unavailable(blockRoot, "canonical child is unavailable")
+		return nil, nil
 	}
 	child, err := r.beaconDB.ReadBlockByRoot(ctx, tx, childRoot)
 	if err != nil {
 		return nil, err
 	}
 	if child == nil || child.Block == nil || child.Block.Body == nil || child.Block.Slot != childSlot || child.Block.ParentRoot != blockRoot {
-		return r.unavailable(blockRoot, "canonical child is invalid"), nil
+		r.unavailable(blockRoot, "canonical child is invalid")
+		return nil, nil
 	}
 	if forkchoice.ParentPayloadStatusFromBids(block, child.Block) != cltypes.PayloadStatusFull {
-		return r.unavailable(blockRoot, "payload status is not full"), nil
+		r.unavailable(blockRoot, "payload status is not full")
+		return nil, nil
 	}
 	executionRequests := child.Block.Body.GetParentExecutionRequests()
 	if executionRequests == nil {
-		return r.unavailable(blockRoot, "parent execution requests are unavailable"), nil
+		r.unavailable(blockRoot, "parent execution requests are unavailable")
+		return nil, nil
 	}
+	return &PreparedRebuild{
+		blockRoot:         blockRoot,
+		parentRoot:        block.Block.ParentRoot,
+		bid:               bid,
+		signature:         signature,
+		executionRequests: executionRequests,
+	}, nil
+}
 
+func (r *Rebuilder) Rebuild(ctx context.Context, prepared *PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	select {
 	case r.rebuildSlot <- struct{}{}:
 	case <-ctx.Done():
@@ -120,23 +145,26 @@ func (r *Rebuilder) Rebuild(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 	}
 	defer func() { <-r.rebuildSlot }()
 
-	header, err := r.engine.GetHeaderByHash(ctx, bid.BlockHash)
+	header, err := r.engine.GetHeaderByHash(ctx, prepared.bid.BlockHash)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil || header.BaseFee == nil || header.SlotNumber == nil {
-		return r.unavailable(blockRoot, "execution header is unavailable"), nil
+		r.unavailable(prepared.blockRoot, "execution header is unavailable")
+		return nil, nil
 	}
-	bodies, err := r.engine.GetPayloadBodiesByHash(ctx, []common.Hash{bid.BlockHash})
+	bodies, err := r.engine.GetPayloadBodiesByHash(ctx, []common.Hash{prepared.bid.BlockHash})
 	if err != nil {
 		return nil, err
 	}
 	if len(bodies) == 0 || bodies[0] == nil || bodies[0].BlockAccessList == nil || len(*bodies[0].BlockAccessList) == 0 {
-		return r.unavailable(blockRoot, "execution body is unavailable"), nil
+		r.unavailable(prepared.blockRoot, "execution body is unavailable")
+		return nil, nil
 	}
 	body := bodies[0]
 	if slices.Contains(body.Withdrawals, nil) {
-		return r.unavailable(blockRoot, "execution body is invalid"), nil
+		r.unavailable(prepared.blockRoot, "execution body is invalid")
+		return nil, nil
 	}
 	rawBody := &types.RawBody{Transactions: make([][]byte, len(body.Transactions)), Withdrawals: body.Withdrawals}
 	for i := range body.Transactions {
@@ -144,26 +172,26 @@ func (r *Rebuilder) Rebuild(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 	}
 	payload := cltypes.NewEth1BlockFromHeaderAndBody(header, rawBody, r.beaconCfg)
 	if payload.BlockAccessList == nil || payload.BlockAccessList.SetBytes(*body.BlockAccessList) != nil {
-		return r.unavailable(blockRoot, "block access list is invalid"), nil
+		r.unavailable(prepared.blockRoot, "block access list is invalid")
+		return nil, nil
 	}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			Payload:               payload,
-			ExecutionRequests:     executionRequests,
-			BuilderIndex:          bid.BuilderIndex,
-			BeaconBlockRoot:       blockRoot,
-			ParentBeaconBlockRoot: block.Block.ParentRoot,
+			ExecutionRequests:     prepared.executionRequests,
+			BuilderIndex:          prepared.bid.BuilderIndex,
+			BeaconBlockRoot:       prepared.blockRoot,
+			ParentBeaconBlockRoot: prepared.parentRoot,
 		},
-		Signature: signature,
+		Signature: prepared.signature,
 	}
-	if err := network.ValidateGloasEnvelopeAgainstBid(r.beaconCfg, blockRoot, bid, envelope); err != nil {
-		log.Warn("rebuilt execution payload envelope failed verification", "blockRoot", blockRoot, "err", err)
+	if err := network.ValidateGloasEnvelopeAgainstBid(r.beaconCfg, prepared.blockRoot, prepared.bid, envelope); err != nil {
+		log.Warn("rebuilt execution payload envelope failed verification", "blockRoot", prepared.blockRoot, "err", err)
 		return nil, nil
 	}
 	return envelope, nil
 }
 
-func (r *Rebuilder) unavailable(blockRoot common.Hash, reason string) *cltypes.SignedExecutionPayloadEnvelope {
+func (r *Rebuilder) unavailable(blockRoot common.Hash, reason string) {
 	log.Debug("execution payload envelope is unavailable", "blockRoot", blockRoot, "reason", reason)
-	return nil
 }

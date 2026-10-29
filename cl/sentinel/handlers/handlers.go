@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -66,7 +67,8 @@ type ConsensusHandlers struct {
 }
 
 type EnvelopeRebuilder interface {
-	Rebuild(context.Context, kv.Tx, uint64, common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	Rebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 const (
@@ -74,7 +76,7 @@ const (
 	InvalidRequestPrefix      = 0x01
 	ServerErrorPrefix         = 0x02
 	ResourceUnavailablePrefix = 0x03
-	streamDeadline            = 5 * time.Second
+	StreamDeadline            = 5 * time.Second
 )
 
 func NewConsensusHandlers(
@@ -198,7 +200,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		// SetDeadline covers both directions.
-		if err := s.SetDeadline(time.Now().Add(streamDeadline)); err != nil {
+		if err := s.SetDeadline(time.Now().Add(StreamDeadline)); err != nil {
 			log.Trace("failed to set stream deadline", "err", err)
 			_ = s.Reset()
 			_ = s.Close()
