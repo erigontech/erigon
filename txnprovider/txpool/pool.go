@@ -2820,11 +2820,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	}
 
 	if blockGasLimit == 0 {
-		if p.chainConfig.DefaultBlockGasLimit != nil {
-			blockGasLimit = *p.chainConfig.DefaultBlockGasLimit
-		} else {
-			blockGasLimit = ethconfig.DefaultBlockGasLimit
-		}
+		blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
 	}
 
 	// The validation and insertion below read these from p, so publish them first.
