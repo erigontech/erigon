@@ -44,7 +44,7 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 
 type envelopeCandidateValidator func(*cltypes.SignedExecutionPayloadEnvelope) error
 
-// A validation failure returns an error when banPeer is nil, allowing the caller to fall back.
+// An invalid response returns an error when banPeer is nil, allowing the caller to fall back.
 // Otherwise, ban the serving peer and retry missing envelopes within the batch deadline.
 func requestEnvelopesFranticallyWithValidator(
 	ctx context.Context,
