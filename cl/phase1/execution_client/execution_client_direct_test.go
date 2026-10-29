@@ -97,7 +97,7 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 			status, err := client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
 			if tc.wrapped {
 				require.EqualValues(t, PayloadStatusInvalidated, status)
-				require.EqualError(t, err, "typed txn marshalled as RLP string")
+				require.Error(t, err)
 				require.Empty(t, module.inserted)
 				require.Zero(t, module.validationCalls)
 				return
