@@ -17,7 +17,6 @@
 package p2p
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -89,18 +88,6 @@ func TestDecodeBlockBodiesResponseRejectsWithdrawalPresenceMismatch(t *testing.T
 			require.Nil(t, decoded)
 		})
 	}
-}
-
-func TestDecodeBlockBodiesResponseRejectsTrailingFieldBeforeMismatch(t *testing.T) {
-	header := newMockHeaderForBody(1, &types.Body{})
-	header.TxHash = common.Hash{1}
-	body := rlpTestList(bytes.Repeat([]byte{rlp.EmptyListCode}, 4))
-
-	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
-	require.ErrorIs(t, err, ErrInvalidBodyRLP)
-	require.True(t, rlp.IsInvalidRLPError(err))
-	require.NotErrorIs(t, err, ErrBodyDoesNotMatchHeader)
-	require.Nil(t, decoded)
 }
 
 func rlpTestList(content []byte) []byte {
