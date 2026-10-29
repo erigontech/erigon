@@ -1,3 +1,14 @@
+# Erigon v3.8.2 — Watery Whiskers — TBD
+
+### Important fixes and improvements
+
+- **Execution lag on `engine_newPayload`.** `engine_newPayload` now answers `ACCEPTED` instead of a
+  JSON-RPC error when execution lags the payload by more than one state step can run (the parallel
+  executor's `--batchSize` cut or `--sync.loop.block.limit`), and `latestValidHash` is null unless
+  the status is `VALID` or `INVALID` (#25382) — by @awskii
+
+---
+
 # Erigon v3.8.1 — Watery Whiskers — TBD
 
 Erigon 3.8.1 **unschedules Glamsterdam on Hoodi** and improves block validation, validator reliability,
@@ -60,10 +71,6 @@ match the postponed schedule. See the [Ethereum Foundation announcement](https:/
   `POST /eth/v1/beacon/pool/sync_committees` returns HTTP `400` with failing message indices for
   validators outside the slot's sync committee, instead of silently returning `200`
   (#25194, #25131) — by @domiwei, @lystopad
-- **Execution lag on `engine_newPayload`.** `engine_newPayload` now answers `ACCEPTED` instead of a
-  JSON-RPC error when execution lags the payload by more than one state step can run (the parallel
-  executor's `--batchSize` cut or `--sync.loop.block.limit`), and `latestValidHash` is null unless
-  the status is `VALID` or `INVALID` (#25382) — by @awskii
 
 ### Caplin archive upgrade notes
 
