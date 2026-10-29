@@ -468,7 +468,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
+	if !(dbg.Exec3Parallel || cfg.experimentalBAL) || serialSuitsBlock(rwTx, blockNum, to, maxTxNum-inputTxNum) {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
@@ -786,4 +786,13 @@ func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader dbs
 		return 0, nil
 	}
 	return blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
+}
+
+// serialSuitsBlock: a chain of many small txs pays the parallel executor's per-tx handoff without any overlap to gain.
+func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
+	if dbg.Exec3SerialMinTxs <= 0 || blockNum != to || txNums < uint64(dbg.Exec3SerialMinTxs) {
+		return false
+	}
+	h := rawdb.ReadHeaderByNumber(tx, blockNum)
+	return h != nil && h.BlockAccessListHash == nil && h.GasUsed/txNums <= uint64(dbg.Exec3SerialMaxAvgGas)
 }
