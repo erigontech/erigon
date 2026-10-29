@@ -123,3 +123,29 @@ func TestSignAuthorizationRejectsNilKeyBeforeMaxNonce(t *testing.T) {
 		t.Fatalf("expected nil private key to be rejected first, got %v", err)
 	}
 }
+
+func TestRecoverSignersMatchesRecoverSigner(t *testing.T) {
+	t.Parallel()
+
+	auths := make([]Authorization, 100)
+	for i := range auths {
+		key, err := crypto.GenerateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if auths[i], err = SignAuthorization(key, *uint256.NewInt(1), common.Address{byte(i)}, uint64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	auths[3].Nonce = math.MaxUint64
+	auths[50].YParity = 5
+	auths[99].S.Clear()
+
+	signers, errs := RecoverSigners(auths)
+	for i := range auths {
+		want, wantErr := auths[i].RecoverSigner()
+		if signers[i] != want || (errs[i] == nil) != (wantErr == nil) {
+			t.Errorf("auth %d: got %v, %v; want %v, %v", i, signers[i], errs[i], want, wantErr)
+		}
+	}
+}

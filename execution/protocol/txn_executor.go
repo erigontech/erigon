@@ -869,6 +869,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
+	signers, recoverErrs := types.RecoverSigners(auths)
 	for i := range auths {
 		auth := &auths[i]
 
@@ -879,12 +880,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		recovered, err := auth.RecoverSigner()
-		if err != nil {
+		if err := recoverErrs[i]; err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
-		authority := accounts.InternAddress(recovered)
+		authority := accounts.InternAddress(signers[i])
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)
