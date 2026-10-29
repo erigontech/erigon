@@ -1004,7 +1004,8 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 			log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
 		}
 	}
-	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
+	// P2P envelopes have already passed validateGloasEnvelope. Keep HTTP results
+	// separate to avoid repeating those expensive checks on P2P results.
 	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
 		missingRoots := filterReceived(fullRoots, envelopes)
 		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(missingRoots))

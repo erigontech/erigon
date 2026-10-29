@@ -133,6 +133,8 @@ func (s *SentinelServer) BanPeer(ctx context.Context, p *sentinelproto.Peer) (*s
 	return s.BanPeerForInvalidData(ctx, p)
 }
 
+// BanPeerForInvalidData bypasses the grace threshold: a peer serving invalid data
+// must be banned even when few peers are connected.
 func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.GetPid())); err != nil {
