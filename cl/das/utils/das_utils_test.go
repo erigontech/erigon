@@ -130,15 +130,15 @@ func TestComputeBlobsCellsMatchesPerBlobCells(t *testing.T) {
 	}
 }
 
-func TestComputeBlobsCellsNamesLowestInvalidBlob(t *testing.T) {
+func TestComputeBlobsCellsFailsOnInvalidBlob(t *testing.T) {
 	invalid := goethkzg.Blob{}
 	for i := range invalid {
 		invalid[i] = 0xff // not a canonical field element
 	}
 	valid := goethkzg.Blob{}
-	blobs := [][]byte{valid[:], invalid[:], valid[:], invalid[:]}
+	blobs := [][]byte{valid[:], valid[:], invalid[:], valid[:]}
 
 	_, err := ComputeBlobsCells(blobs)
 
-	require.ErrorContains(t, err, "blob 1")
+	require.ErrorContains(t, err, "blob 2")
 }
