@@ -89,8 +89,42 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	return columns, nil
 }
 
-// rowRecoverySlots bounds the blob rows recovered at once across all callers.
+// rowRecoverySlots bounds the blob rows recovered or extended at once across all callers.
 var rowRecoverySlots = make(chan struct{}, runtime.GOMAXPROCS(0))
+
+// ComputeBlobsCells returns the cells of each blob, computed in parallel. An error names the
+// lowest blob whose cells cannot be computed.
+func ComputeBlobsCells(blobs [][]byte) ([][]cltypes.Cell, error) {
+	cells := make([][]cltypes.Cell, len(blobs))
+	errs := make([]error, len(blobs))
+	var wg sync.WaitGroup
+	for i, blob := range blobs {
+		if len(blob) != len(goethkzg.Blob{}) {
+			errs[i] = fmt.Errorf("blob %d: got %d bytes", i, len(blob))
+			continue
+		}
+		rowRecoverySlots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-rowRecoverySlots }()
+			blobCells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blob), 0 /* numGoRoutines */)
+			if err != nil {
+				errs[i] = fmt.Errorf("blob %d: %w", i, err)
+				return
+			}
+			cells[i] = make([]cltypes.Cell, len(blobCells))
+			for j, cell := range &blobCells {
+				cells[i][j] = cltypes.Cell(*cell)
+			}
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return cells, nil
+}
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
 // Rows are recovered in parallel; an error names the lowest row that cannot be recovered.
