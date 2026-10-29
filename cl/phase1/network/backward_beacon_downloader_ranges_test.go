@@ -370,3 +370,14 @@ func TestBlockWithRootReturnsFirstMatch(t *testing.T) {
 
 	require.Same(t, first, blockWithRoot([]*cltypes.SignedBeaconBlock{first, second}, root))
 }
+
+func TestBackwardBeaconDownloaderRetriesFailedPrefetch(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, badPeer: "bad", badStart: 512, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	require.Len(t, downloader.prefetched, 1)
+	require.Equal(t, uint64(512), downloader.prefetched[0].lo)
+	require.Len(t, <-downloader.prefetched[0].blocks, 64)
+}
