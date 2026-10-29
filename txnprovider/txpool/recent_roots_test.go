@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -107,9 +108,14 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 		revalidate bool
 	}{
 		{"unrelated root", remoteproto.Action_STORAGE, false, false, false},
+		{"verifier balance changed", remoteproto.Action_UPSERT, false, false, false},
+		{"verifier balance unwound", remoteproto.Action_UPSERT, false, true, false},
 		{"referenced root changed", remoteproto.Action_STORAGE, true, false, true},
+		{"referenced root changed with balance", remoteproto.Action_UPSERT, true, false, true},
 		{"referenced root cleared by unwind", remoteproto.Action_STORAGE, true, true, true},
 		{"verifier code changed", remoteproto.Action_CODE, false, false, true},
+		{"verifier account and code changed", remoteproto.Action_UPSERT_CODE, false, false, true},
+		{"verifier removed", remoteproto.Action_REMOVE, false, false, true},
 		{"verifier deployment unwound", remoteproto.Action_REMOVE, false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,6 +139,17 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 				Address: gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier), Action: tc.action,
 				StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(key)}},
 			}}
+			if tc.action == remoteproto.Action_UPSERT || tc.action == remoteproto.Action_UPSERT_CODE {
+				account := accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.NewCode(protocol.RecentRootCode).Hash}
+				if tc.action == remoteproto.Action_UPSERT_CODE {
+					head.Changes[0].Code = []byte{0xfe}
+					account.CodeHash = accounts.NewCode(head.Changes[0].Code).Hash
+				}
+				head.Changes[0].Data = accounts.SerialiseV3(&account)
+				if !tc.selected {
+					head.Changes[0].StorageChanges = nil
+				}
+			}
 			if tc.unwind {
 				head.Direction = remoteproto.Direction_UNWIND
 			}

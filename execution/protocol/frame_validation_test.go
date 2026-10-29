@@ -17,12 +17,14 @@
 package protocol
 
 import (
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -160,4 +162,72 @@ func TestFrameValidationExpiryNeedsVerifyMode(t *testing.T) {
 	}
 	_, err := ValidateFrameTransaction(evm, tx)
 	require.ErrorContains(t, err, "TIMESTAMP")
+}
+
+func frameFactoryTestEnv(t *testing.T, creation vm.OpCode, endowment uint64) (*vm.EVM, *types.FrameTransaction, common.Address) {
+	t.Helper()
+	evm, tx := frameTestEnv(t)
+	factory := common.HexToAddress("0x2000")
+	runtime := program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()
+	initcode := program.New().ReturnData(runtime).Bytes()
+	if creation == vm.CREATE {
+		tx.SenderAddress = types.CreateAddress(factory, 1)
+	} else {
+		tx.SenderAddress = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
+	}
+	ibs := evm.IntraBlockState()
+	from := accounts.InternAddress(factory)
+	require.NoError(t, ibs.SetBalance(accounts.InternAddress(tx.SenderAddress), *uint256.NewInt(10_000_000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetNonce(from, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetBalance(from, *uint256.NewInt(endowment), tracing.BalanceChangeUnspecified))
+	code := program.New().Mstore(initcode, 0)
+	if creation == vm.CREATE2 {
+		code.Push0()
+	}
+	code.Push(len(initcode)).Push0().Push(endowment).Op(creation, vm.POP, vm.STOP)
+	require.NoError(t, ibs.SetCode(from, code.Bytes(), tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameDefault, Target: &factory, Limits: mdgas.MdGas{Execution: 80_000, State: 400_000}},
+		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+	}
+	return evm, tx, factory
+}
+
+func TestFrameValidationDeploymentEndowment(t *testing.T) {
+	for _, creation := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(creation.String(), func(t *testing.T) {
+			evm, tx, _ := frameFactoryTestEnv(t, creation, 1)
+			_, err := ValidateFrameTransaction(evm, tx)
+			require.ErrorContains(t, err, "value transfer")
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+		})
+	}
+}
+
+func TestFrameValidationCreationNonces(t *testing.T) {
+	for _, creation := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(creation.String(), func(t *testing.T) {
+			evm, tx, factory := frameFactoryTestEnv(t, creation, 0)
+			result, err := ValidateFrameTransaction(evm, tx)
+			require.NoError(t, err)
+			want := FrameCreationNonce{Address: factory, MinNonce: 1, MaxNonce: 1}
+			if creation == vm.CREATE2 {
+				want.MinNonce, want.MaxNonce = 0, math.MaxUint64-1
+			}
+			require.Equal(t, []FrameCreationNonce{want}, result.CreationNonces)
+		})
+	}
+}
+
+func TestFrameValidationCreationNonceOverflow(t *testing.T) {
+	evm, tx, factory := frameFactoryTestEnv(t, vm.CREATE2, 0)
+	ibs := evm.IntraBlockState()
+	require.NoError(t, ibs.SetNonce(accounts.InternAddress(factory), math.MaxUint64, tracing.NonceChangeUnspecified))
+	// A failed CREATE2 can be ignored when the sender code is already installed.
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	result, err := ValidateFrameTransaction(evm, tx)
+	require.NoError(t, err)
+	require.Equal(t, []FrameCreationNonce{{Address: factory, MinNonce: math.MaxUint64, MaxNonce: math.MaxUint64}}, result.CreationNonces)
 }

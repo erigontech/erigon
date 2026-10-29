@@ -1354,6 +1354,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
+	if evm.FrameContext != nil {
+		// APPROVE can debit the payer even inside a static call.
+		scope.Contract.selfBalanceCached = false
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }

@@ -125,6 +125,77 @@ func TestFrameTransactionContractApproval(t *testing.T) {
 	require.Equal(t, uint64(1), nonce)
 }
 
+func TestFrameTransactionStaticCallSelfBalance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		depth  int
+		revert bool
+	}{
+		{name: "direct", depth: 1},
+		{name: "nested", depth: 3},
+		{name: "reverted approval", depth: 2, revert: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			tx.Fees.FeeCap.SetUint64(1)
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 50_000}}}
+			// Calldata length selects the call depth and the initial approval.
+			code := program.New().Op(vm.CALLDATASIZE).Push(tc.depth).Op(vm.EQ)
+			approveJump := code.Size()
+			code.Push(0).Op(vm.JUMPI, vm.SELFBALANCE, vm.POP).
+				Push0().Push0().Op(vm.CALLDATASIZE).Push(1).Op(vm.ADD).Push0().Op(vm.ADDRESS, vm.GAS, vm.STATICCALL, vm.POP).
+				Op(vm.SELFBALANCE).Push0().Op(vm.MSTORE).
+				Op(vm.ADDRESS, vm.BALANCE).Push(32).Op(vm.MSTORE)
+			if tc.revert {
+				// Revert the inner approval, then approve again in the outermost call.
+				code.Op(vm.CALLDATASIZE)
+				revertJump := code.Size()
+				code.Push(0).Op(vm.JUMPI).Push(types.FrameApproveBoth).Push(64).Push0().Op(vm.APPROVE)
+				_, revertPC := code.Jumpdest()
+				require.Less(t, revertPC, uint64(256))
+				code.Bytes()[revertJump+1] = byte(revertPC)
+				code.Push(64).Push0().Op(vm.REVERT)
+			} else {
+				code.Return(0, 64)
+			}
+			_, approvePC := code.Jumpdest()
+			require.Less(t, approvePC, uint64(256))
+			code.Bytes()[approveJump+1] = byte(approvePC)
+			code.Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+			sender := accounts.InternAddress(tx.SenderAddress)
+			require.NoError(t, evm.IntraBlockState().SetCode(sender, code.Bytes(), tracing.CodeChangeUnspecified))
+			observations := 0
+			config := evm.Config()
+			config.Tracer = &tracing.Hooks{OnExitV2: func(depth int, output []byte, _ mdgas.MdGasUsage, err error, reverted bool) {
+				if len(output) != 64 {
+					return
+				}
+				observations++
+				want := uint64(10_000_000) - tx.GetGasLimit()
+				if tc.revert && depth == 1 {
+					want = 10_000_000
+				}
+				if tc.revert && depth == 2 {
+					require.ErrorIs(t, err, vm.ErrExecutionReverted)
+					require.True(t, reverted)
+				} else {
+					require.NoError(t, err)
+				}
+				require.Equal(t, uint256.NewInt(want), new(uint256.Int).SetBytes(output[32:]), "BALANCE at depth %d", depth)
+				require.Equal(t, uint256.NewInt(want), new(uint256.Int).SetBytes(output[:32]), "SELFBALANCE at depth %d", depth)
+			}}
+			evm.ResetBetweenBlocks(evm.Context, evm.TxContext, evm.IntraBlockState(), config, evm.ChainRules())
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			require.Equal(t, tc.depth, observations)
+			nonce, err := evm.IntraBlockState().GetNonce(sender)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1), nonce)
+		})
+	}
+}
+
 func TestFrameTransactionKeyedNonce(t *testing.T) {
 	evm, tx := frameTestEnv(t)
 	ibs := evm.IntraBlockState()

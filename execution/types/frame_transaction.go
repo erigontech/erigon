@@ -119,6 +119,10 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 	return *frame.Target
 }
 
+func (frame *Frame) IsExpiryVerifier() bool {
+	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameExpiryVerifier
+}
+
 func (sig *FrameSignature) VerificationGas() uint64 {
 	switch sig.Scheme {
 	case FrameSignatureArbitrary:
@@ -234,7 +238,7 @@ func (tx *FrameTransaction) Validate() error {
 		if (atomic || i > 0 && tx.Frames[i-1].Flags&FrameAtomicBatch != 0) && frame.Flags&FrameApproveBoth != 0 {
 			return fmt.Errorf("approval in atomic batch at frame %d", i)
 		}
-		if frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameExpiryVerifier {
+		if frame.IsExpiryVerifier() {
 			if expirySeen || frame.Flags != 0 || frame.Limits.State != 0 || len(frame.Data) != 8 {
 				return errors.New("invalid expiry verifier frame")
 			}

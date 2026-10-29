@@ -116,10 +116,9 @@ type receiptRLP struct {
 	Logs              []*Log
 }
 
-// receiptRLP69 is the post-eth/69 consensus encoding of a receipt.
-// ETH69 changed receipt encoding so all receipts (including typed) use the same
-// flat list format: [tx-type, post-state-or-status, cumulative-gas, logs].
-// This removes the type-byte envelope used in ETH68 and drops the bloom filter.
+// receiptRLP69 is the eth/69 wire encoding for legacy and standard typed receipts.
+// It includes the type in the list and omits the bloom filter. Frame receipts
+// use a different payload with the payer and per-frame results.
 type receiptRLP69 struct {
 	Type              uint8
 	PostStateOrStatus []byte
@@ -188,11 +187,9 @@ func (r *Receipt) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, buf.Bytes())
 }
 
-// EncodeRLP69 implements rlp.Encoder for post-eth/69 messages, and flattens the consensus fields of a receipt
-// into an RLP stream. If no post state is present, byzantium fork is assumed.
-// ETH69 uses a uniform list encoding for all receipt types:
-//
-//	receiptₙ = [tx-type, post-state-or-status, cumulative-gas, logs]
+// EncodeRLP69 writes the eth/69 receipt format without a bloom filter.
+// Legacy and standard typed receipts encode [type, post-state-or-status, cumulative-gas, logs].
+// Frame receipts encode [type, cumulative-gas, payer, frame-receipts].
 func (r *Receipt) EncodeRLP69(w io.Writer) error {
 	if r.Type == FrameTxType {
 		return rlp.Encode(w, []any{r.Type, r.CumulativeGasUsed, r.Payer, r.FrameReceipts})

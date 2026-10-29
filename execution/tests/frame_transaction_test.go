@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -208,6 +210,46 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 	server = privateapi.NewEthBackendServer(t.Context(), nil, db, m.Notifications, m.BlockReader, log.New(), nil, cfg)
 	check("commit during validation", true)
 	check("after commit", true)
+}
+
+func TestFrameValidationCreationNonces(t *testing.T) {
+	for _, creation := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(creation.String(), func(t *testing.T) {
+			cfg := chain.TestChainOsakaConfig.Copy()
+			cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+			factory := common.HexToAddress("0x2000")
+			initcode := program.New().ReturnData(program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()).Bytes()
+			sender := types.CreateAddress(factory, 1)
+			code := program.New().Mstore(initcode, 0)
+			want := &remoteproto.FrameCreationNonce{Address: factory[:], MinNonce: 1, MaxNonce: 1}
+			if creation == vm.CREATE2 {
+				sender = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
+				code.Push0()
+				want.MinNonce, want.MaxNonce = 0, math.MaxUint64-1
+			}
+			code.Push(len(initcode)).Push0().Push0().Op(creation, vm.POP, vm.STOP)
+			genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory: {Nonce: 1, Code: code.Bytes()},
+			}}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+				Frames: []types.Frame{
+					{Mode: types.FrameDefault, Target: &factory, Limits: mdgas.MdGas{Execution: 80_000, State: 400_000}},
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				},
+				Fees: types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+			result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+			require.NoError(t, err)
+			require.True(t, result.Valid)
+			require.Equal(t, []*remoteproto.FrameCreationNonce{want}, result.CreationNonces)
+		})
+	}
 }
 
 func TestFrameValidationPendingFees(t *testing.T) {

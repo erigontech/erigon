@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -104,6 +105,9 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 // captured head without holding the lock. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
 func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidationBatch {
+	if !slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
+		return frameValidationBatch{}
+	}
 	p.lock.Lock()
 	batch := frameValidationBatch{generation: p.stateGeneration, results: make(map[*TxnSlot]frameValidationResult)}
 	stateBlockHash := p.stateBlockHash
@@ -127,10 +131,14 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidati
 }
 
 // applyFrameValidation requires the pool lock. Stale results trigger another
-// simulation while time remains; after the batch deadline, only frame transactions
-// are rejected so unrelated transactions can still be admitted.
+// simulation while time remains; after the deadline, they cause retryable rejection
+// of frame transactions while ordinary transactions can proceed. Results for the
+// current state generation remain usable after the deadline.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason) ([]txpoolcfg.DiscardReason, error) {
-	stale := len(batch.results) > 0 && batch.generation != p.stateGeneration
+	if len(batch.results) == 0 {
+		return precheckReasons, nil
+	}
+	stale := batch.generation != p.stateGeneration
 	if stale && ctx.Err() == nil {
 		return nil, errFrameStateChanged
 	}
@@ -229,6 +237,16 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 			return nil, errors.New("invalid frame validation dependency")
 		}
 		v.Dependencies = append(v.Dependencies, common.BytesToAddress(dependency))
+	}
+	for _, dependency := range reply.CreationNonces {
+		if dependency == nil || len(dependency.Address) != 20 || dependency.MinNonce > dependency.MaxNonce {
+			return nil, errors.New("invalid frame creation nonce dependency")
+		}
+		address := common.BytesToAddress(dependency.Address)
+		v.Dependencies = append(v.Dependencies, address)
+		v.CreationNonces = append(v.CreationNonces, protocol.FrameCreationNonce{
+			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+		})
 	}
 	// Root dependencies are signed transaction data, so they do not need to be
 	// duplicated in the validation RPC reply.
@@ -359,22 +377,27 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
 	blockTime := head.BlockTime
 	touched := make(map[common.Address]struct{})
+	codeChanged := make(map[common.Address]struct{})
+	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
 	rootSlots := make(map[common.Hash]struct{})
-	var nonceManagerAccountChanged bool
-	var rootAccountChanged bool
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
 			touched[address] = struct{}{}
+			switch change.Action {
+			case remoteproto.Action_CODE, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
+				codeChanged[address] = struct{}{}
+			}
+			if change.Action == remoteproto.Action_UPSERT || change.Action == remoteproto.Action_UPSERT_CODE {
+				accountChanges[address] = change.Data
+			}
 			if address == types.FrameNonceManager {
-				nonceManagerAccountChanged = nonceManagerAccountChanged || change.Action != remoteproto.Action_STORAGE
 				for _, storage := range change.StorageChanges {
 					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 				}
 			}
 			if address == types.FrameRecentRootVerifier {
-				rootAccountChanged = rootAccountChanged || change.Action != remoteproto.Action_STORAGE
 				for _, storage := range change.StorageChanges {
 					rootSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 				}
@@ -401,10 +424,9 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 				continue
 			}
 		}
-		first := &frame.Frames[0]
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
-		if first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier && previous.Deadline < blockTime {
+		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < blockTime {
 			p.removeFromSubPool(mt, "frame expired")
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 			continue
@@ -413,18 +435,30 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
+		// Helper account changes matter only when code changes. Sender and payer
+		// state can also affect approval or funding. Storage slots and creation
+		// nonces are checked separately below.
 		for _, dependency := range previous.Dependencies {
-			// Protocol storage dependencies need only the selected slots checked below.
-			// If the contract is the sender, validation can read all its storage.
-			if dependency == types.FrameNonceManager && keyedNonce && frame.SenderAddress != types.FrameNonceManager && !nonceManagerAccountChanged {
-				continue
+			changed := codeChanged
+			if dependency == frame.SenderAddress || dependency == previous.Payer {
+				changed = touched
 			}
-			if dependency == types.FrameRecentRootVerifier && len(previous.RecentRoots) > 0 && frame.SenderAddress != types.FrameRecentRootVerifier && !rootAccountChanged {
-				continue
-			}
-			if _, ok := touched[dependency]; ok {
+			if _, ok := changed[dependency]; ok {
 				affected = true
 				break
+			}
+		}
+		if !affected {
+			for _, dependency := range previous.CreationNonces {
+				data, ok := accountChanges[dependency.Address]
+				if !ok {
+					continue
+				}
+				var account accounts.Account
+				if len(data) == 0 || accounts.DeserialiseV3(&account, data) != nil || account.Nonce < dependency.MinNonce || account.Nonce > dependency.MaxNonce {
+					affected = true
+					break
+				}
 			}
 		}
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
@@ -495,12 +529,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 			return err
 		}
 		p.pending.EnforceBestInvariants()
-		if announcements.Len() > 0 {
-			select {
-			case p.newPendingTxns <- announcements.Copy():
-			default:
-			}
-		}
+		p.notifyPendingTxns(announcements)
 		return nil
 	})
 }

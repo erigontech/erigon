@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -38,13 +39,22 @@ import (
 // It supplies payer reservations and dependencies for invalidating that result;
 // it does not guarantee that the transaction's execution frames will succeed.
 type FrameValidation struct {
-	Payer        common.Address
-	MaxCost      uint256.Int
-	PayerBalance uint256.Int
-	Paymaster    bool
-	Deadline     uint64
-	Dependencies []common.Address
-	RecentRoots  []RecentRootReference
+	Payer          common.Address
+	MaxCost        uint256.Int
+	PayerBalance   uint256.Int
+	Paymaster      bool
+	Deadline       uint64
+	Dependencies   []common.Address
+	CreationNonces []FrameCreationNonce
+	RecentRoots    []RecentRootReference
+}
+
+// FrameCreationNonce bounds the creator nonce that preserves validation. CREATE
+// uses an exact nonce; CREATE2 can use a range bounded by nonce overflow.
+type FrameCreationNonce struct {
+	Address  common.Address
+	MinNonce uint64
+	MaxNonce uint64
 }
 
 // frameValidationTracer enforces pool-only restrictions through EVM hooks, so
@@ -57,6 +67,12 @@ type frameValidationTracer struct {
 	recentRoot   int
 	err          error
 	dependencies map[common.Address]struct{}
+	creations    map[common.Address]frameCreationTrace
+}
+
+type frameCreationTrace struct {
+	count uint64
+	exact bool
 }
 
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
@@ -79,7 +95,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	if err != nil {
 		return nil, err
 	}
-	if first := &tx.Frames[0]; first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier && validation.Deadline < evm.Context.Time {
+	if tx.Frames[0].IsExpiryVerifier() && validation.Deadline < evm.Context.Time {
 		return nil, errors.New("expired frame transaction")
 	}
 	config, txContext := evm.Config(), evm.TxContext
@@ -98,6 +114,20 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	}
 	validation.Dependencies = make([]common.Address, 0, len(validation.dependencies))
 	validation.Dependencies = slices.AppendSeq(validation.Dependencies, maps.Keys(validation.dependencies))
+	// Simulation has reverted state, so these bounds use the pre-prefix nonce.
+	for address, creation := range validation.creations {
+		nonce, err := evm.IntraBlockState().GetNonce(accounts.InternAddress(address))
+		if err != nil {
+			return nil, err
+		}
+		// Counting reverted attempts too only narrows the safe CREATE2 range.
+		dependency := FrameCreationNonce{Address: address, MaxNonce: math.MaxUint64 - creation.count}
+		if creation.exact || nonce > dependency.MaxNonce {
+			// A prefix may ignore a failed creation. Preserve its overflow outcome too.
+			dependency.MinNonce, dependency.MaxNonce = nonce, nonce
+		}
+		validation.CreationNonces = append(validation.CreationNonces, dependency)
+	}
 	return &validation.FrameValidation, nil
 }
 
@@ -111,7 +141,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	}
 	v := &frameValidationTracer{deploy: -1, recentRoot: -1}
 	i := 0
-	if f := &tx.Frames[0]; f.Mode == types.FrameVerify && f.Target != nil && *f.Target == types.FrameExpiryVerifier {
+	if f := &tx.Frames[0]; f.IsExpiryVerifier() {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
 			return nil, invalid
 		}
@@ -287,7 +317,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		banned = ctx.Index != v.recentRoot || depth != 1
 	case vm.TIMESTAMP:
 		frame := &ctx.Transaction.Frames[ctx.Index]
-		banned = ctx.Index != 0 || frame.Mode != types.FrameVerify || frame.Target == nil || *frame.Target != types.FrameExpiryVerifier || scope.Address().Value() != types.FrameExpiryVerifier || !bytes.Equal(scope.Code(), frameExpiryCode)
+		banned = ctx.Index != 0 || !frame.IsExpiryVerifier() || scope.Address().Value() != types.FrameExpiryVerifier || !bytes.Equal(scope.Code(), frameExpiryCode)
 	case vm.GAS:
 		code := scope.Code()
 		banned = pc+1 >= uint64(len(code))
@@ -297,6 +327,22 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		}
 	case vm.CREATE, vm.CREATE2:
 		banned = !deploy
+		// Helper balances are not allowed dependencies under EIP-8141's pool policy:
+		// https://eips.ethereum.org/EIPS/eip-8141#policy-summary
+		if len(stack) > 0 && !stack[len(stack)-1].IsZero() {
+			v.fail(errors.New("value transfer during frame validation"))
+			return
+		}
+		if !banned {
+			if v.creations == nil {
+				v.creations = make(map[common.Address]frameCreationTrace)
+			}
+			address := scope.Address().Value()
+			creation := v.creations[address]
+			creation.count++
+			creation.exact = creation.exact || vm.OpCode(op) == vm.CREATE
+			v.creations[address] = creation
+		}
 	case vm.SSTORE:
 		banned = !deploy || scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.SLOAD:

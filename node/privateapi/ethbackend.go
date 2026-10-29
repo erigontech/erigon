@@ -618,9 +618,15 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	for i := range result.Dependencies {
 		dependencies[i] = result.Dependencies[i][:]
 	}
+	creationNonces := make([]*remoteproto.FrameCreationNonce, len(result.CreationNonces))
+	for i, dependency := range result.CreationNonces {
+		creationNonces[i] = &remoteproto.FrameCreationNonce{
+			Address: dependency.Address[:], MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+		}
+	}
 	return &remoteproto.FrameValidationReply{
 		Valid: true, Payer: result.Payer[:], MaxCost: result.MaxCost.Bytes(), PayerBalance: result.PayerBalance.Bytes(),
-		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies,
+		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies, CreationNonces: creationNonces,
 	}, nil
 }
 
