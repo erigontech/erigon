@@ -19,17 +19,21 @@ package das
 import (
 	"bytes"
 	"context"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	gossipmock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -161,6 +165,39 @@ func TestPeerDasReadsCustodyRaiseSlotAfterInstallingRaise(t *testing.T) {
 	require.True(t, raiseInstalledAtRead, "the slot must be read after the raise is installed")
 }
 
+func TestPeerDasCustodyRaiseAfterClockStepsBackIsAboveForkChoiceSlot(t *testing.T) {
+	clockSlot := uint64(1001)
+	peerDas, state := newCgcTestPeerDasWithClock(t, mdbxtest.NewTestDB(t, dbcfg.ChainDB), newCgcTestLocalNode(t), func() uint64 { return clockSlot })
+	peerDas.SetForkChoice(cgcTestForkChoice{slot: 1001})
+	oldColumns, err := state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	columnStorage := peerDas.(*peerdas).columnStorage.(*blob_storage_mock_services.MockDataColumnStorage)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1001), gomock.Any()).Return(slices.Collect(maps.Keys(oldColumns)), nil).AnyTimes()
+	available, err := peerDas.IsDataAvailable(1001, common.Hash{1})
+	require.NoError(t, err)
+	require.True(t, available)
+
+	clockSlot = 1000
+	peerDas.UpdateValidatorsCustody(clparams.MainnetBeaconConfig.SamplesPerSlot + 1)
+	available, err = peerDas.IsDataAvailable(1001, common.Hash{1})
+	require.NoError(t, err)
+	require.False(t, available)
+	require.Equal(t, uint64(1002), state.GetEarliestAvailableSlot(), "the block at 1001 lacks the added columns")
+}
+
+// At Start the fork choice is still at its anchor slot, behind the clock.
+func TestPeerDasStartRecordsRaiseSlotFromClockAheadOfForkChoice(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestCustodyGroupCount(tx, 96)
+	}))
+
+	peerDas, state := newCgcTestPeerDas(t, db, newCgcTestLocalNode(t), 5000)
+	peerDas.SetForkChoice(cgcTestForkChoice{slot: 4000})
+	peerDas.Start(t.Context())
+	require.Equal(t, uint64(5001), state.GetEarliestAvailableSlot())
+}
+
 func newCgcTestPeerDas(t *testing.T, db kv.RwDB, localNode *enode.LocalNode, currentSlot uint64) (PeerDas, *peerdasstate.PeerDasState) {
 	t.Helper()
 	return newCgcTestPeerDasWithClock(t, db, localNode, func() uint64 { return currentSlot })
@@ -183,6 +220,12 @@ func newCgcTestPeerDasWithClock(t *testing.T, db kv.RwDB, localNode *enode.Local
 	state.SetLocalNodeID(localNode)
 	return NewPeerDas(nil, &beaconConfig, &clparams.CaplinConfig{}, columnStorage, nil, nil, localNode.ID(), clock, state, gossipManager, nil, db), state
 }
+
+type cgcTestForkChoice struct{ slot uint64 }
+
+func (cgcTestForkChoice) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) { return nil, false }
+
+func (f cgcTestForkChoice) Slot() uint64 { return f.slot }
 
 type updateProbeDB struct {
 	kv.RwDB

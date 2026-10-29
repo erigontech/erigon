@@ -40,11 +40,12 @@ const (
 	deferredColumnSyncMaxTick = time.Second
 )
 
-// BlockGetter is an interface for getting blocks by root.
+// BlockGetter is an interface for getting blocks by root and the fork-choice slot.
 // Used to avoid import cycle with forkchoice package.
 // [New in Gloas:EIP7732]
 type BlockGetter interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	Slot() uint64
 }
 
 // gloasBlockData holds only the fields needed from a block for GLOAS sidecar verification.
@@ -473,10 +474,15 @@ func (d *peerdas) resubscribeGossip() {
 	}
 }
 
-// nextSlot is the custody raise slot of a raise made now: the current slot's block may already
-// be checked with the old custody columns.
+// nextSlot is the custody raise slot of a raise made now: a block up to the current slot may
+// already be checked with the old custody columns. Fork choice admits blocks up to its own slot,
+// which does not follow the wall clock back.
 func (d *peerdas) nextSlot() uint64 {
-	return d.ethClock.GetCurrentSlot() + 1
+	slot := d.ethClock.GetCurrentSlot()
+	if d.forkChoice != nil {
+		slot = max(slot, d.forkChoice.Slot())
+	}
+	return slot + 1
 }
 
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
