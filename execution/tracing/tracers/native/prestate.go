@@ -23,6 +23,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -37,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 func init() {
@@ -49,14 +53,70 @@ type account struct {
 	Balance *hexutil.U256 `json:"balance,omitempty"`
 	// Code is a pointer so omitempty can omit unchanged code (nil) while
 	// still emitting "0x" when code is cleared (e.g. EIP-7702 deauth).
-	Code     *hexutil.Bytes              `json:"code,omitempty"`
-	CodeHash *common.Hash                `json:"codeHash,omitempty"`
-	Nonce    uint64                      `json:"nonce,omitempty"`
-	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
+	Code     *hexutil.Bytes `json:"code,omitempty"`
+	CodeHash *common.Hash   `json:"codeHash,omitempty"`
+	Nonce    uint64         `json:"nonce,omitempty"`
+	Storage  storage        `json:"storage,omitempty"`
 	// empty records whether the account existed before the tx, decided at first
 	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
 	// its own storage during the tx don't retroactively make it look non-empty.
 	empty bool
+}
+
+type storage map[common.Hash]common.Hash
+
+// MarshalFastJSONTo writes the slots in key order, as encoding/json orders map keys.
+func (st storage) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	s.WriteObjectStart()
+	for _, k := range slices.SortedFunc(maps.Keys(st), common.Hash.Cmp) {
+		v := st[k]
+		jsonstream.HexKey(s, k[:])
+		s.WriteHex(v[:])
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+// MarshalFastJSONTo writes what encoding/json writes for account; the nonce is a JSON number.
+func (a *account) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if a == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	if a.Balance != nil {
+		ethjson.Quantity256(s, "balance", (*uint256.Int)(a.Balance))
+	}
+	if a.Code != nil {
+		ethjson.Data(s, "code", *a.Code)
+	}
+	if a.CodeHash != nil {
+		ethjson.Data(s, "codeHash", a.CodeHash[:])
+	}
+	if a.Nonce != 0 {
+		s.Field("nonce").Uint(a.Nonce)
+	}
+	if len(a.Storage) > 0 {
+		s.Field("storage")
+		if err := a.Storage.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+func writeState(s *jsonstream.Stream, st state) error {
+	s.WriteObjectStart()
+	for _, addr := range slices.SortedFunc(maps.Keys(st), func(a, b accounts.Address) int { return a.Value().Cmp(b.Value()) }) {
+		key := addr.Value()
+		jsonstream.HexKey(s, key[:])
+		if err := st[addr].MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteObjectEnd()
+	return nil
 }
 
 func (a *account) exists() bool {
@@ -112,8 +172,9 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnOpcodeV2:          t.OnOpcodeV2,
 			OnExitV2:            t.OnExitV2,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:         t.GetResult,
+		MarshalFastJSONTo: t.MarshalFastJSONTo,
+		Stop:              t.Stop,
 	}, nil
 }
 
@@ -269,7 +330,7 @@ func (t *prestateTracer) processDiffState() {
 		}
 		modified := false
 		postAccount := &account{
-			Storage: make(map[common.Hash]common.Hash),
+			Storage: make(storage),
 		}
 
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
@@ -358,6 +419,26 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 	return json.RawMessage(res), nil
 }
 
+func (t *prestateTracer) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if p := t.reason.Load(); p != nil {
+		return *p
+	}
+	if !t.config.DiffMode {
+		return writeState(s, t.pre)
+	}
+	s.WriteObjectStart()
+	s.Field("post")
+	if err := writeState(s, t.post); err != nil {
+		return err
+	}
+	s.Field("pre")
+	if err := writeState(s, t.pre); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *prestateTracer) Stop(err error) {
 	t.reason.Store(&err)
@@ -393,7 +474,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	}
 
 	if !t.config.DisableStorage {
-		acc.Storage = make(map[common.Hash]common.Hash)
+		acc.Storage = make(storage)
 	}
 
 	t.pre[addr] = acc
