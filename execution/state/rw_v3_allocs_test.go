@@ -307,3 +307,34 @@ func TestWriteSetApplyKeyDoesNotScalePerSlot(t *testing.T) {
 	require.Less(t, perSlot, 2.7,
 		"allocations per storage slot (%v) must not include a composite key", perSlot)
 }
+
+// ApplyWrites keeps the account fields it collects by value, so writing nonce, incarnation and
+// code hash next to a balance must not add an allocation per field.
+func TestApplyWritesAccountFieldsDoNotAllocatePerField(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	const n = 16
+	addrs := make([]accounts.Address, n)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	codeHash := accounts.InternCodeHash(common.HexToHash("0xc0de"))
+
+	applyAllocs := func(allFields bool) float64 {
+		writes := &WriteSet{}
+		for i, addr := range addrs {
+			writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(uint64(i + 1))})
+			if allFields {
+				writes.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(i + 1)})
+				writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: 1})
+				writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: codeHash})
+			}
+		}
+		return testing.AllocsPerRun(5, func() {
+			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, nil, &chain.Rules{}, false))
+		})
+	}
+
+	perAccount := (applyAllocs(true) - applyAllocs(false)) / n
+	require.Less(t, perAccount, 1.5,
+		"three more account fields cost %v allocations per account; holding them by value costs none", perAccount)
+}
