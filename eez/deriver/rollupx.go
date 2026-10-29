@@ -37,7 +37,7 @@ import (
 // transactions bound to its settlement.
 type rollupXPayload struct {
 	Payload
-	effects *protocol.RollupXEffects
+	rec *protocol.RollupXReconstruction
 	// actions reports cross-chain transactions, which a catch-up candidate
 	// cannot carry.
 	actions bool
@@ -93,14 +93,11 @@ func (d *Deriver) decodeRollupX(ctx context.Context, b *l1.ScannedBatch) (*rollu
 			next++
 		}
 	}
-	effects, err := protocol.NewRollupXEffects(native.Txs, d.l2.RollupID, d.config.ChainID.Uint64())
-	if errors.Is(err, protocol.ErrUnsupportedSemantics) {
-		return nil, fmt.Errorf("batch %x: %w", b.TxHash, err)
-	}
+	rec, err := protocol.NewRollupXReconstruction(native.Txs, d.l2.RollupID, d.config.ChainID.Uint64())
 	if err != nil {
 		return nil, d.diverged(b, at, "%w", err)
 	}
-	if err := effects.Bind(b.Batch); err != nil {
+	if err := rec.BindSettlement(b.Batch); err != nil {
 		return nil, d.diverged(b, at, "%w", err)
 	}
 	actions := len(native.Txs) > 0
@@ -109,7 +106,7 @@ func (d *Deriver) decodeRollupX(ctx context.Context, b *l1.ScannedBatch) (*rollu
 		e := b.Batch.Entries
 		actions = actions || len(e) != 1 || len(b.Batch.StaticEntries) > 0 || len(e[0].L2ToL1Calls) > 0 || len(e[0].ExpectedL1ToL2Calls) > 0
 	}
-	return &rollupXPayload{Payload: Payload{Span: span}, effects: effects, actions: actions, history: history}, nil
+	return &rollupXPayload{Payload: Payload{Span: span}, rec: rec, actions: actions, history: history}, nil
 }
 
 // checkPureTx checks a pure L2 transaction of a rollupX span: a canonical
@@ -267,6 +264,19 @@ func (d *Deriver) seedFor(ctx context.Context, n uint64) (common.Hash, error) {
 	return d.seedFor(ctx, r.LastL2Block)
 }
 
+// settlementEffects returns the settlement entries of b that produce L2
+// effects: the outbound hosts before the immediate count, and the inbound
+// entries after it but the lookups.
+func settlementEffects(b *protocol.ProofSystemBatch, rollupID uint64) (hosts, inbound []protocol.ExecutionEntry) {
+	immediate := int(b.ImmediateEntryCount.Uint64())
+	for i := immediate; i < len(b.Entries); i++ {
+		if !protocol.IsLookupOnly(&b.Entries[i], rollupID) {
+			inbound = append(inbound, b.Entries[i])
+		}
+	}
+	return b.Entries[1:immediate], inbound
+}
+
 // producing returns the effects s applied as (skip, take) over the batch's
 // effects, the nOut outbound ones first.
 func producing(s *protocol.Settlement, nOut int) (skip, take int) {
@@ -363,30 +373,52 @@ type v01Context struct {
 // reconcileRollupXBlocks rebuilds the range r and returns the hash of the
 // Sync block it built, zero when it built none.
 func (d *Deriver) reconcileRollupXBlocks(ctx context.Context, b *l1.ScannedBatch, p *rollupXPayload, r Range, sched *Schedule, v01 *v01Context) (common.Hash, error) {
-	nOut, nIn := len(p.effects.Outbound), len(p.effects.Inbound)
-	skip, take := producing(&b.Settlement, nOut)
-	if skip+take > nOut+nIn {
-		return common.Hash{}, d.diverged(b, r.To, "L1 applied effects %d to %d of %d", skip, skip+take, nOut+nIn)
+	hosts, inbound := settlementEffects(b.Batch, d.l2.RollupID)
+	hostRoots, err := protocol.OutboundRootCounts(hosts)
+	if err != nil {
+		return common.Hash{}, d.diverged(b, r.To, "%w", err)
 	}
-	outSkip := min(skip, nOut)
-	outTake := min(take, nOut-outSkip)
-	inSkip := min(skip-outSkip, nIn)
-	inTake := min(take-outTake, nIn-inSkip)
+	skip, take := producing(&b.Settlement, len(hosts))
+	out, in, err := protocol.SelectGroups(skip, take, hostRoots, p.rec.Sources(), len(p.rec.Inbound))
+	if err != nil {
+		return common.Hash{}, d.diverged(b, r.To, "%w", err)
+	}
+	if len(inbound) != len(p.rec.Inbound) {
+		return common.Hash{}, d.diverged(b, r.To, "%d inbound effects for %d deliveries", len(inbound), len(p.rec.Inbound))
+	}
+	// The gate expects every committed call the applied transactions make
+	// from the rollup to L1, as the settlement and L2 tables recompute it.
+	var expected []common.Hash
+	for i := out[0]; i < out[1]; i++ {
+		o := &p.rec.Outbound[i]
+		calls, err := protocol.VerifyOutbound(&hosts[i], o.Mutable, o.Static, d.l2.RollupID)
+		if err != nil {
+			return common.Hash{}, d.diverged(b, r.To, "outbound transaction %d: %w", i, err)
+		}
+		expected = append(expected, calls...)
+	}
+	for i := in[0]; i < in[1]; i++ {
+		calls, err := protocol.VerifyInbound(&inbound[i], &p.rec.Inbound[i].Entry, d.l2.RollupID)
+		if err != nil {
+			return common.Hash{}, d.diverged(b, r.To, "delivery %d: %w", i, err)
+		}
+		expected = append(expected, calls...)
+	}
+	outGroups, inGroups := span(out[0], out[1]-out[0]), span(in[0], in[1]-in[0])
 	var suffix [][]byte
 	if v01 != nil {
-		var err error
-		if suffix, err = p.effects.NativeSuffix(d.sync, span(outSkip, outTake), span(inSkip, inTake), v01.anchor.Hash); err != nil {
+		if suffix, err = p.rec.NativeSuffix(d.sync, outGroups, inGroups, v01.anchor.Hash); err != nil {
 			return common.Hash{}, d.diverged(b, r.To, "%w", err)
 		}
 	} else {
 		// User transactions cannot come from the system address, so its nonce
 		// before the range is its nonce before the Sync block. Each skipped
-		// effect took one system transaction.
+		// transaction and delivery took one system transaction.
 		nonce, err := d.chain.Nonce(ctx, r.From-1, protocol.SystemAddress)
 		if err != nil {
 			return common.Hash{}, err
 		}
-		if suffix, err = p.effects.SyncSuffix(d.sync, span(outSkip, outTake), span(inSkip, inTake), nonce+uint64(outSkip+inSkip)); err != nil {
+		if suffix, err = p.rec.SyncSuffix(d.sync, outGroups, inGroups, nonce+uint64(out[0]+in[0])); err != nil {
 			return common.Hash{}, d.diverged(b, r.To, "%w", err)
 		}
 	}
@@ -489,13 +521,7 @@ func (d *Deriver) reconcileRollupXBlocks(ctx context.Context, b *l1.ScannedBatch
 			}
 		}
 	}
-	if outTake+inTake > 0 {
-		var expected []common.Hash
-		for _, i := range span(outSkip, outTake) {
-			for j := range p.effects.Outbound[i].Sources {
-				expected = append(expected, p.effects.Outbound[i].Sources[j].ProxyEntryHash)
-			}
-		}
+	if len(outGroups)+len(inGroups) > 0 {
 		if err := d.gateRollupX(ctx, b, r, expected, syncBlock, gateFrom); err != nil {
 			return common.Hash{}, err
 		}

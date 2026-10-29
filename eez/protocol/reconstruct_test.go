@@ -47,11 +47,11 @@ func replayBatch(t *testing.T, i int) (*ProofSystemBatch, *da.NativePayload) {
 // client mined as 0x4fb4890f…2678.
 func TestRollupXDeposit(t *testing.T) {
 	batch, p := replayBatch(t, 11)
-	e, err := NewRollupXEffects(p.Txs, 1, 699069)
+	e, err := NewRollupXReconstruction(p.Txs, 1, 699069)
 	require.NoError(t, err)
 	require.Empty(t, e.Outbound)
 	require.Len(t, e.Inbound, 1)
-	require.NoError(t, e.Bind(batch))
+	require.NoError(t, e.BindSettlement(batch))
 
 	ctx := SyncTxContext{ChainID: 699069, RollupID: 1, EEZL2: RollupXEEZL2Address}
 	txs, err := e.SyncSuffix(ctx, nil, []int{0}, 0)
@@ -67,19 +67,23 @@ func TestRollupXDeposit(t *testing.T) {
 	tampered := *batch
 	tampered.Entries = append([]ExecutionEntry(nil), batch.Entries...)
 	tampered.Entries[1].ReturnData = []byte{1}
-	require.ErrorIs(t, e.Bind(&tampered), ErrBinding)
+	require.ErrorIs(t, e.BindSettlement(&tampered), ErrBinding)
 	tampered.Entries = batch.Entries[:1]
-	require.ErrorIs(t, e.Bind(&tampered), ErrBinding)
+	require.ErrorIs(t, e.BindSettlement(&tampered), ErrBinding)
 	tampered = *batch
 	tampered.ImmediateEntryCount = big.NewInt(2)
-	require.ErrorIs(t, e.Bind(&tampered), ErrBinding)
+	require.ErrorIs(t, e.BindSettlement(&tampered), ErrBinding)
+
+	calls, err := VerifyInbound(&batch.Entries[1], &e.Inbound[0].Entry, 1)
+	require.NoError(t, err)
+	require.Empty(t, calls, "the deposit makes no call back to L1")
 }
 
 func TestRollupXAnchorOnly(t *testing.T) {
 	batch, p := replayBatch(t, 12)
-	e, err := NewRollupXEffects(p.Txs, 1, 699069)
+	e, err := NewRollupXReconstruction(p.Txs, 1, 699069)
 	require.NoError(t, err)
-	require.NoError(t, e.Bind(batch))
+	require.NoError(t, e.BindSettlement(batch))
 	txs, err := e.SyncSuffix(SyncTxContext{ChainID: 699069, RollupID: 1, EEZL2: RollupXEEZL2Address}, nil, nil, 0)
 	require.NoError(t, err)
 	require.Empty(t, txs)
@@ -96,10 +100,11 @@ func TestRollupXSemanticsRejects(t *testing.T) {
 		"unsigned origin":  {{Origin: 1, Actions: []da.SemanticAction{call(1, 0)}}},
 		"outbound inbound": {{Origin: 0, Actions: []da.SemanticAction{call(0, 1)}}, {Origin: 1, Actions: []da.SemanticAction{call(1, 0)}}},
 	} {
-		_, err := NewRollupXEffects(txs, 1, 699069)
+		_, err := NewRollupXReconstruction(txs, 1, 699069)
 		require.ErrorIs(t, err, ErrSemantics, name)
 	}
-	nested := []da.SemanticTx{{Origin: 0, Actions: []da.SemanticAction{call(0, 1), {Parent: 0, SourceRollupID: 1}}}}
-	_, err := NewRollupXEffects(nested, 1, 699069)
-	require.ErrorIs(t, err, ErrUnsupportedSemantics)
+	// A failed call cannot have calls under it.
+	failed := []da.SemanticTx{{Origin: 0, Actions: []da.SemanticAction{{Parent: -1, SourceRollupID: 0, TargetRollupID: 1}, {Parent: 0, SourceRollupID: 1, Success: true}}}}
+	_, err := NewRollupXReconstruction(failed, 1, 699069)
+	require.ErrorIs(t, err, ErrMaterialize)
 }
