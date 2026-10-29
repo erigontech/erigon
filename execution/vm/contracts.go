@@ -589,10 +589,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modLen > 32 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
-		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
-		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
-		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings.
+	case modexpMathBigFaster(modLen, exp):
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
@@ -605,6 +602,25 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		evmone.ModExp(result, base, exp, mod)
 	}
 	return result, nil
+}
+
+// modexpMathBigFaster reports whether math/big beats evmone: for a modulus of
+// 2048 bits or more, and for one of 512 bits or more with an exponent of at most
+// 2 bits (evmone's Montgomery setup does not pay off) or above 64 bits (math/big
+// switches to a windowed method).
+func modexpMathBigFaster(modLen uint64, exp []byte) bool {
+	expBits := bitLenBytes(exp)
+	return modLen >= 256 || modLen >= 64 && (expBits <= 2 || expBits > 64)
+}
+
+// bitLenBytes returns the bit length of the big-endian number b.
+func bitLenBytes(b []byte) int {
+	for i, x := range b {
+		if x != 0 {
+			return 8*(len(b)-i) - bits.LeadingZeros8(x)
+		}
+	}
+	return 0
 }
 
 // modexpU256Applicable reports whether modexpU256 may be used for these operands,
