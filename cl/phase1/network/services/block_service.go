@@ -151,6 +151,7 @@ func newFailedBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Cont
 	return job
 }
 
+// The caller must hold job.mu once the job is shared with other goroutines.
 func (job *blockJob) terminateLocked(err error) {
 	if job.terminal {
 		return
@@ -1163,8 +1164,8 @@ func (b *blockService) loop(ctx context.Context) {
 				return true
 			}
 			if errors.Is(attempt.err, errBlockStorage) {
-				// Storage failures delay all write attempts, but expiry checks must
-				// still run for the remaining jobs in this scan.
+				// Storage failures delay further attempts for scheduled jobs, but expiry
+				// checks must still run for the remaining jobs in this scan.
 				storageRetryDelay = min(max(2*storageRetryDelay, blockRetryInitialDelay), blockRetryMaxDelay)
 				storageRetryAfter = time.Now().Add(storageRetryDelay)
 			}
