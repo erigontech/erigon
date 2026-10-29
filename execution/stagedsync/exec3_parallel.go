@@ -2902,7 +2902,7 @@ type blockExecutor struct {
 	// write re-checks only txs that read its path at the address, not every later task. A
 	// per-slot index costs several map operations per read on the serial execLoop; the exact
 	// cell is checked against the reader's read set instead.
-	readerByAddr map[accounts.Address]*pathReaders
+	readerByAddr map[accounts.Address]pathReaders
 
 	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
 	// published, so it must be re-validated at the finalize boundary. A clean tx is
@@ -2968,7 +2968,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
-		readerByAddr:        map[accounts.Address]*pathReaders{},
+		readerByAddr:        map[accounts.Address]pathReaders{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
 		slDone:              make(chan struct{}),
@@ -2996,13 +2996,10 @@ const _ = uint16(1 << state.CreateContractPath)
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
 		pr := be.readerByAddr[a]
-		if pr == nil {
-			pr = &pathReaders{}
-			be.readerByAddr[a] = pr
-		}
 		pr.all = insertSorted(pr.all, taskIdx)
 		if pr.byPath == nil && len(pr.all) == 1 {
 			pr.firstPaths |= 1 << p
+			be.readerByAddr[a] = pr
 			return true
 		}
 		if pr.byPath == nil {
@@ -3018,6 +3015,7 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 			}
 		}
 		pr.byPath[p] = insertSorted(pr.byPath[p], taskIdx)
+		be.readerByAddr[a] = pr
 		return true
 	})
 }
@@ -3033,9 +3031,6 @@ func insertSorted(l []int, v int) []int {
 // of h's path at its address, or of any path there when h changes the account lifecycle.
 func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
 	pr := be.readerByAddr[h.Address]
-	if pr == nil {
-		return nil
-	}
 	if h.Path.AffectsAccountLifecycle() || pr.byPath == nil {
 		return pr.all
 	}
@@ -3044,10 +3039,7 @@ func (be *blockExecutor) readersOf(h state.WriteHeader) []int {
 
 // readersAt returns, ascending, the tasks that read any path at addr.
 func (be *blockExecutor) readersAt(addr accounts.Address) []int {
-	if pr := be.readerByAddr[addr]; pr != nil {
-		return pr.all
-	}
-	return nil
+	return be.readerByAddr[addr].all
 }
 
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
