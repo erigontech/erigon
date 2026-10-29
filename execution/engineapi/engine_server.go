@@ -474,7 +474,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var sendersRecovery *exec.SendersRecovery
-	if invalidTransactionStatus == nil && len(transactions) > 0 {
+	// With a non-empty BAL the exec workers recover the senders themselves.
+	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
+	if invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))

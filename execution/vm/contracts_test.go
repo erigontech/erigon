@@ -21,13 +21,18 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/maphash"
 	"maps"
 	"math/big"
 	"os"
 	"reflect"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -428,6 +433,9 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 	}
 	for _, set := range precompiledContractSets {
 		for addr, p := range set {
+			if cached, ok := p.(*cachedPrecompile); ok {
+				p = cached.PrecompiledContract
+			}
 			typ := reflect.TypeOf(p)
 			if seenTypes[typ] {
 				continue
@@ -481,6 +489,146 @@ func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
 	}
 }
 
+var cacheTestID atomic.Uint64
+
+func wholeInputKey(input []byte) ([]byte, bool) { return input, true }
+
+type countingPrecompile struct {
+	calls  int
+	gas    uint64
+	output []byte
+	err    error
+}
+
+func (p *countingPrecompile) Run([]byte) ([]byte, error) { p.calls++; return p.output, p.err }
+func (p *countingPrecompile) RequiredGas([]byte) uint64 {
+	if p.gas != 0 {
+		return p.gas
+	}
+	return 3000
+}
+func (p *countingPrecompile) Name() string { return "counting" }
+
+func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
+	p := &countingPrecompile{output: []byte{1, 2, 3}}
+	c := newCachedPrecompile(p, wholeInputKey, [21]byte{201})
+	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
+	out, gas, err := RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil)
+	if err != nil || gas.Execution != 50 {
+		t.Fatalf("gas=%v err=%v", gas, err)
+	}
+	out[0] = 9
+	out, gas, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil)
+	if err != nil || gas.Execution != 50 || !bytes.Equal(out, []byte{1, 2, 3}) || p.calls != 1 {
+		t.Fatalf("output=%x gas=%v calls=%d err=%v", out, gas, p.calls, err)
+	}
+	out[1] = 9
+	out, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3000}, nil)
+	if err != nil || !bytes.Equal(out, []byte{1, 2, 3}) {
+		t.Fatal("cache output was mutated")
+	}
+	_, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 2999}, nil)
+	if !errors.Is(err, ErrOutOfGas) || p.calls != 1 {
+		t.Fatal("cache hit bypassed gas check")
+	}
+}
+
+// A cheap call is still cached; only a call whose gas is below its normalized key length is not.
+func TestCachedPrecompileAdmission(t *testing.T) {
+	runTwice := func(p *countingPrecompile, input []byte, normalize func([]byte) ([]byte, bool)) int {
+		c := newCachedPrecompile(p, normalize, [21]byte{209})
+		for range 2 {
+			_, err := c.Run(input)
+			require.NoError(t, err)
+		}
+		return p.calls
+	}
+	input := func(n int) []byte {
+		in := make([]byte, n)
+		copy(in, fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1)))
+		return in
+	}
+	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 200}, input(171), wholeInputKey), "cheap call not cached")
+	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 171}, input(171), wholeInputKey), "gas equal to key length not cached")
+	require.Equal(t, 2, runTwice(&countingPrecompile{output: []byte{1}, gas: 170}, input(171), wholeInputKey), "gas below key length cached")
+	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 200}, input(300), zeroPaddedKey(128)), "gas above the normalized key length not cached")
+	require.Equal(t, 1, runTwice(&countingPrecompile{output: make([]byte, 1024)}, input(64), wholeInputKey), "1024-byte output not cached")
+	require.Equal(t, 2, runTwice(&countingPrecompile{output: make([]byte, 1025)}, input(64), wholeInputKey), "1025-byte output cached")
+}
+
+func TestCachedPrecompileDomainAndErrors(t *testing.T) {
+	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
+	p := &countingPrecompile{output: []byte{7}}
+	a := newCachedPrecompile(p, wholeInputKey, [21]byte{202})
+	b := newCachedPrecompile(p, wholeInputKey, [21]byte{203})
+	for _, c := range []*cachedPrecompile{a, b, a, b} {
+		if _, err := c.Run(input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.calls != 2 {
+		t.Fatalf("different domains shared a result: %d calls", p.calls)
+	}
+	p = &countingPrecompile{err: errors.New("invalid")}
+	c := newCachedPrecompile(p, wholeInputKey, [21]byte{204})
+	for range 2 {
+		if _, err := c.Run(input); err == nil {
+			t.Fatal("lost error")
+		}
+	}
+	if p.calls != 2 {
+		t.Fatal("cached an error")
+	}
+	p = &countingPrecompile{output: []byte{7}, gas: 1 << 20}
+	c = newCachedPrecompile(p, wholeInputKey, [21]byte{205})
+	for range 2 {
+		if _, err := c.Run(make([]byte, 64*1024+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.calls != 2 {
+		t.Fatal("cached oversized input")
+	}
+	if cachePrecompile(p, forkOsaka, common.Address{}) != p {
+		t.Fatal("wrapped custom contract")
+	}
+	p = &countingPrecompile{output: []byte{7}}
+	c = newCachedPrecompile(p, wholeInputKey, [21]byte{207})
+	precompileResults.Add(maphash.Bytes(precompileSeed, input)^c.domainHash, precompileResult{domain: c.domain, check: maphash.Bytes(precompileCheckSeed, []byte("other")), output: []byte{9}})
+	if out, err := c.Run(input); err != nil || !bytes.Equal(out, []byte{7}) || p.calls != 1 {
+		t.Fatalf("hash collision returned another input's result: %x", out)
+	}
+	p = &countingPrecompile{output: []byte{7}}
+	c = newCachedPrecompile(p, wholeInputKey, [21]byte{208})
+	for range 2 {
+		if _, err := c.Run(make([]byte, 3001)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.calls != 2 {
+		t.Fatal("hashed an input longer than the call's gas")
+	}
+}
+
+func TestCachedPrecompileParallel(t *testing.T) {
+	c := newCachedPrecompile(&bn254PairingIstanbul{}, wholeInputKey, [21]byte{206})
+	input := make([]byte, 2*192)
+	want, _ := c.PrecompiledContract.Run(input)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			for range 100 {
+				output, err := c.Run(input)
+				if err != nil || !bytes.Equal(output, want) {
+					t.Error("concurrent cache output mismatch")
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
 func TestBLSRepeatedPointScalars(t *testing.T) {
 	_, _, g1, g2 := bls.Generators()
 	for _, tc := range []struct {
@@ -510,4 +658,146 @@ func TestBLSRepeatedPointScalars(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrecompileCacheKeyNormalizes(t *testing.T) {
+	key, ok := zeroPaddedKey(128)(append([]byte{1, 2}, make([]byte, 300)...))
+	require.True(t, ok)
+	require.Equal(t, []byte{1, 2}, key, "trailing zeros and bytes past the read prefix must not split entries")
+
+	header := make([]byte, 96)
+	header[31], header[63], header[95] = 1, 1, 1
+	declared := slices.Concat(header, []byte{2, 3, 5})
+	key, ok = modExpKey(append(bytes.Clone(declared), 7, 7, 7))
+	require.True(t, ok)
+	require.Equal(t, declared, key, "bytes past the declared operands must not split entries")
+}
+
+func TestCachedPrecompileMatchesNativeVectors(t *testing.T) {
+	for hexAddr, fixture := range precompileSuccessVectors {
+		addr := common.HexToAddress(hexAddr)
+		p := allPrecompiles[addr]
+		normalize := precompileCacheKey(p)
+		if normalize == nil {
+			continue
+		}
+		// A tier no fork uses, so these entries never serve a real fork's lookups.
+		c := newCachedPrecompile(p, normalize, [21]byte{byte(forkTierCount), byte(addr[19])})
+		tests, err := loadJson(fixture)
+		require.NoError(t, err)
+		hits := 0
+		for _, test := range tests {
+			in := common.Hex2Bytes(test.Input)
+			// The padded input is the same call for precompiles that ignore a suffix and a rejected length for the rest.
+			for _, input := range [][]byte{in, slices.Concat(in, make([]byte, 64))} {
+				want, wantErr := p.Run(input)
+				for i := range 2 { // miss, then hit
+					if i == 1 && cachedPrecompileHit(c, input) {
+						hits++
+					}
+					got, err := c.Run(input)
+					require.Equal(t, wantErr == nil, err == nil, "%s %s", p.Name(), test.Name)
+					if wantErr != nil {
+						require.Equal(t, wantErr.Error(), err.Error(), "%s %s", p.Name(), test.Name)
+					}
+					require.Equal(t, want, got, "%s %s", p.Name(), test.Name)
+				}
+			}
+		}
+		require.Positive(t, hits, "%s: no vector was served from the cache", p.Name())
+	}
+}
+
+func cachedPrecompileHit(c *cachedPrecompile, input []byte) bool {
+	in, _ := c.normalize(input)
+	r, ok := precompileResults.Get(maphash.Bytes(precompileSeed, in) ^ c.domainHash)
+	return ok && r.domain == c.domain && r.check == maphash.Bytes(precompileCheckSeed, in)
+}
+
+// Every byte a key drops must be one the native precompile ignores. Dropped bytes come in
+// contiguous runs (past a prefix, past the declared operands, trailing zeros), so three
+// samples per run are enough to catch a key that drops a byte the result depends on.
+func TestPrecompileCacheKeyKeepsEveryDecidingByte(t *testing.T) {
+	for hexAddr, fixture := range precompileSuccessVectors {
+		p := allPrecompiles[common.HexToAddress(hexAddr)]
+		normalize := precompileCacheKey(p)
+		if normalize == nil {
+			continue
+		}
+		tests, err := loadJson(fixture)
+		require.NoError(t, err)
+		for _, test := range tests {
+			in := common.Hex2Bytes(test.Input)
+			key, ok := normalize(in)
+			if !ok {
+				continue
+			}
+			key = bytes.Clone(key)
+			var runs [][2]int
+			for i := range in {
+				in[i] ^= 0xff
+				k, ok := normalize(in)
+				same := ok && len(k) == len(key) && (i >= len(k) || (k[i] == key[i] && bytes.Equal(k, key)))
+				in[i] ^= 0xff
+				if !same {
+					continue
+				}
+				if n := len(runs); n > 0 && runs[n-1][1] == i-1 {
+					runs[n-1][1] = i
+				} else {
+					runs = append(runs, [2]int{i, i})
+				}
+			}
+			if len(runs) == 0 {
+				continue
+			}
+			want, wantErr := p.Run(in)
+			for _, r := range runs {
+				for _, i := range []int{r[0], (r[0] + r[1]) / 2, r[1]} {
+					flipped := bytes.Clone(in)
+					flipped[i] ^= 0xff
+					got, err := p.Run(flipped)
+					require.Equal(t, wantErr == nil, err == nil, "%s %s byte %d", p.Name(), test.Name, i)
+					require.Equal(t, want, got, "%s %s: byte %d is dropped from the key but changes the result", p.Name(), test.Name, i)
+				}
+			}
+		}
+	}
+}
+
+// A result cached under one fork must not serve a fork whose rules differ for the same input.
+func TestPrecompileCacheSeparatesForks(t *testing.T) {
+	in := make([]byte, 96+1025+1+1)
+	binary.BigEndian.PutUint64(in[24:32], 1025)
+	in[63], in[95] = 1, 1
+	in[len(in)-1] = 3
+	addr := accounts.InternAddress(common.BytesToAddress([]byte{5}))
+	prague, osaka := forkSets[forkPrague].contracts[addr], forkSets[forkOsaka].contracts[addr]
+	require.GreaterOrEqual(t, prague.RequiredGas(in), uint64(len(in)))
+	for range 2 {
+		_, err := prague.Run(in)
+		require.NoError(t, err)
+		if cached, ok := prague.(*cachedPrecompile); ok {
+			require.True(t, cachedPrecompileHit(cached, in), "the Prague result was not cached")
+		}
+		_, err = osaka.Run(in)
+		require.ErrorIs(t, err, errModExpBaseLengthTooLarge)
+	}
+}
+
+// A zero modulus length answers from the header faster than a cache lookup, so it is never cached.
+func TestModExpKeySkipsZeroModulus(t *testing.T) {
+	header := func(baseLen, expLen, modLen uint64) []byte {
+		in := make([]byte, modExpHeaderLength)
+		binary.BigEndian.PutUint64(in[24:32], baseLen)
+		binary.BigEndian.PutUint64(in[56:64], expLen)
+		binary.BigEndian.PutUint64(in[88:96], modLen)
+		return in
+	}
+	for _, in := range [][]byte{header(32, 0, 0), header(0, 0, 0), append(header(32, 32, 0), make([]byte, 64)...), header(32, 0, 0)[:64]} {
+		_, ok := modExpKey(in)
+		require.False(t, ok, "%x", in)
+	}
+	_, ok := modExpKey(append(header(1, 1, 1), 2, 3, 5))
+	require.True(t, ok)
 }
