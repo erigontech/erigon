@@ -265,7 +265,8 @@ type writeStamps struct {
 	last     []atomic.Uint64
 }
 
-func (vm *VersionMap) InitStamps(n int) {
+func (vm *VersionMap) InitStamps(lastTxIndex int) {
+	n := lastTxIndex + 2
 	vm.stamps = &writeStamps{n: n, inflight: make([]atomic.Int32, n+1), last: make([]atomic.Uint64, n+1)}
 	vm.writeSeq.Store(1)
 }

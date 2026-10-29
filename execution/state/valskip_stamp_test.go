@@ -246,3 +246,22 @@ func TestQuietBelow_DeleteAllBumpsStamp(t *testing.T) {
 		require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "DeleteAll by j=%d against i=5", tc.j)
 	}
 }
+
+func TestQuietBelow_StampsSizedForLastIndex(t *testing.T) {
+	t.Parallel()
+	const last = 7
+	vm := newStampedMap(last)
+	stamp := vm.WriteSeq()
+	require.True(t, vm.QuietBelow(-1, stamp), "reader -1 has no writer below it")
+	require.True(t, vm.QuietBelow(last, stamp))
+	vm.mutBegin(last - 1)
+	vm.mutEnd(last - 1)
+	require.False(t, vm.QuietBelow(last, stamp), "a write by L-1 must block reader L")
+	require.True(t, vm.QuietBelow(-1, stamp), "reader -1 is never blocked")
+
+	vm = newStampedMap(last)
+	stamp = vm.WriteSeq()
+	vm.mutBegin(last)
+	vm.mutEnd(last)
+	require.True(t, vm.QuietBelow(last, stamp), "a write by L does not block reader L")
+}
