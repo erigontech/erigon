@@ -26,8 +26,10 @@ type envelopeIndexRepairEntry struct {
 	generation  uint64
 	notify      bool
 	valuesKnown bool
+	slot        uint64
 	blockNumber uint64
 	blockHash   common.Hash
+	signature   common.Bytes96
 }
 
 const envelopeIndexRepairCapacity = queueCacheSize * 2
@@ -37,8 +39,10 @@ type envelopeIndexRepairToken struct {
 	generation  uint64
 	notify      bool
 	valuesKnown bool
+	slot        uint64
 	blockNumber uint64
 	blockHash   common.Hash
+	signature   common.Bytes96
 }
 
 type envelopeIndexRepairTracker struct {
@@ -77,7 +81,7 @@ func (t *envelopeIndexRepairTracker) add(root common.Hash, capacity int) (envelo
 	return tokenForEnvelopeIndexRepair(root, t.entries[root]), true
 }
 
-func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, blockNumber uint64, blockHash common.Hash) envelopeIndexRepairToken {
+func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, slot, blockNumber uint64, blockHash common.Hash, signature common.Bytes96) envelopeIndexRepairToken {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	entry, ok := t.entries[token.root]
@@ -85,8 +89,10 @@ func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, b
 		return envelopeIndexRepairToken{}
 	}
 	entry.valuesKnown = true
+	entry.slot = slot
 	entry.blockNumber = blockNumber
 	entry.blockHash = blockHash
+	entry.signature = signature
 	t.entries[token.root] = entry
 	return tokenForEnvelopeIndexRepair(token.root, entry)
 }
@@ -132,8 +138,10 @@ func tokenForEnvelopeIndexRepair(root common.Hash, entry envelopeIndexRepairEntr
 		generation:  entry.generation,
 		notify:      entry.notify,
 		valuesKnown: entry.valuesKnown,
+		slot:        entry.slot,
 		blockNumber: entry.blockNumber,
 		blockHash:   entry.blockHash,
+		signature:   entry.signature,
 	}
 }
 
