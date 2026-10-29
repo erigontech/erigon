@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"os"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
@@ -39,6 +40,7 @@ type testEnvelopeRebuilder struct {
 	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	prepared  map[*envelope_history.PreparedRebuild]common.Hash
 	rejected  map[common.Hash]struct{}
+	onRebuild func()
 	err       error
 	calls     int
 	called    []common.Hash
@@ -50,12 +52,18 @@ type envelopeHandlerStream struct {
 	response bytes.Buffer
 	conn     network.Conn
 	protocol protocol.ID
+	expired  bool
 }
 
-func (s *envelopeHandlerStream) Read(p []byte) (int, error)  { return s.request.Read(p) }
-func (s *envelopeHandlerStream) Write(p []byte) (int, error) { return s.response.Write(p) }
-func (s *envelopeHandlerStream) Conn() network.Conn          { return s.conn }
-func (s *envelopeHandlerStream) Protocol() protocol.ID       { return s.protocol }
+func (s *envelopeHandlerStream) Read(p []byte) (int, error) { return s.request.Read(p) }
+func (s *envelopeHandlerStream) Write(p []byte) (int, error) {
+	if s.expired {
+		return 0, os.ErrDeadlineExceeded
+	}
+	return s.response.Write(p)
+}
+func (s *envelopeHandlerStream) Conn() network.Conn    { return s.conn }
+func (s *envelopeHandlerStream) Protocol() protocol.ID { return s.protocol }
 
 func (r *testEnvelopeRebuilder) Prepare(_ context.Context, _ kv.Tx, _ uint64, blockRoot common.Hash) (*envelope_history.PreparedRebuild, error) {
 	if _, rejected := r.rejected[blockRoot]; rejected {
@@ -73,6 +81,9 @@ func (r *testEnvelopeRebuilder) Rebuild(_ context.Context, prepared *envelope_hi
 	blockRoot := r.prepared[prepared]
 	r.calls++
 	r.called = append(r.called, blockRoot)
+	if r.onRebuild != nil {
+		r.onRebuild()
+	}
 	return r.envelopes[blockRoot], r.err
 }
 
@@ -671,6 +682,40 @@ func TestExecutionPayloadEnvelopesByRootRebuildsMissingCanonicalEnvelope(t *test
 	require.Equal(t, 1, rebuilder.calls)
 }
 
+func TestExecutionPayloadEnvelopesByRootServesStoredEnvelopesBeforeRebuilds(t *testing.T) {
+	ctx := t.Context()
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+	ethClock, cfg := getGloasEthClockAndConfig(t)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	blocks := populateDatabaseWithBlocks(t, store, tx, ethClock.GetCurrentSlot()-2, 1)
+	require.NoError(t, tx.Commit())
+
+	roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+	for _, block := range blocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		roots.Append(root)
+	}
+	storedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	storedEnvelope.Message.BuilderIndex = 99
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+	fc.SetEnvelope(roots.Get(1), storedEnvelope)
+	rebuilder := &testEnvelopeRebuilder{err: context.DeadlineExceeded}
+	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+	var request bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
+	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
+	rebuilder.onRebuild = func() { stream.expired = true }
+
+	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
+	require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
+	require.Equal(t, 1, rebuilder.calls)
+}
+
 func TestExecutionPayloadEnvelopesByRootCapsRebuilds(t *testing.T) {
 	ctx := t.Context()
 	_, indiciesDB := setupStore(t)
@@ -710,7 +755,7 @@ func TestExecutionPayloadEnvelopesByRootCapsRebuilds(t *testing.T) {
 	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
 	indices := readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg)
 	require.Len(t, indices, envelope_history.MaxRebuildsPerRequest+1)
-	require.Equal(t, uint64(999), indices[len(indices)-1])
+	require.Equal(t, uint64(999), indices[0])
 	require.Equal(t, envelope_history.MaxRebuildsPerRequest, rebuilder.calls)
 }
 

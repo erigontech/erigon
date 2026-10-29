@@ -307,56 +307,14 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 
 	minServeEpoch := minExecutionPayloadServeEpoch(c.beaconConfig, curEpoch, c.forkChoiceReader.FinalizedCheckpoint().Epoch)
 
+	type rebuildCandidate struct {
+		blockRoot common.Hash
+		slot      uint64
+		epoch     uint64
+	}
+
 	count := 0
-	rebuilds := 0
-	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
-		if count >= int(maxPayloads) {
-			return false
-		}
-
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
-		if err != nil {
-			log.Debug("failed to read block slot by root", "blockRoot", blockRoot, "error", err)
-			return true
-		}
-		if slot == nil {
-			return true
-		}
-
-		// Only serve envelopes within the serve range
-		epoch := *slot / c.beaconConfig.SlotsPerEpoch
-		if epoch < minServeEpoch || epoch > curEpoch {
-			return true
-		}
-		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			return true
-		}
-
-		var envelope *cltypes.SignedExecutionPayloadEnvelope
-		if c.forkChoiceReader.HasEnvelope(blockRoot) {
-			envelope, err = c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
-			if err != nil {
-				log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
-				return true
-			}
-		}
-		if envelope == nil && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
-			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, *slot, blockRoot)
-			err = prepareErr
-			if err == nil && prepared != nil {
-				rebuilds++
-				envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, prepared)
-			}
-			if err != nil {
-				log.Debug("failed to rebuild execution payload envelope", "blockRoot", blockRoot, "error", err)
-				rebuilds = envelope_history.MaxRebuildsPerRequest
-				return true
-			}
-		}
-		if envelope == nil {
-			return true
-		}
-
+	writeEnvelope := func(envelope *cltypes.SignedExecutionPayloadEnvelope, epoch uint64) bool {
 		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
 		if err != nil {
 			log.Debug("failed to compute fork digest", "error", err)
@@ -375,7 +333,84 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 
 		count++
 		return true
+	}
+
+	rebuildCandidates := make([]rebuildCandidate, 0, req.Length())
+	stopped := false
+	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
+		if count >= int(maxPayloads) {
+			return false
+		}
+
+		slot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		if readErr != nil {
+			log.Debug("failed to read block slot by root", "blockRoot", blockRoot, "error", readErr)
+			return true
+		}
+		if slot == nil {
+			return true
+		}
+
+		// Only serve envelopes within the serve range
+		epoch := *slot / c.beaconConfig.SlotsPerEpoch
+		if epoch < minServeEpoch || epoch > curEpoch {
+			return true
+		}
+		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+			return true
+		}
+
+		var envelope *cltypes.SignedExecutionPayloadEnvelope
+		if c.forkChoiceReader.HasEnvelope(blockRoot) {
+			envelope, readErr = c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
+			if readErr != nil {
+				log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", readErr)
+				return true
+			}
+		}
+		if envelope == nil {
+			if c.envelopeRebuilder != nil {
+				rebuildCandidates = append(rebuildCandidates, rebuildCandidate{blockRoot: blockRoot, slot: *slot, epoch: epoch})
+			}
+			return true
+		}
+
+		if !writeEnvelope(envelope, epoch) {
+			stopped = true
+			return false
+		}
+		return true
 	})
+
+	if stopped {
+		return nil
+	}
+
+	rebuilds := 0
+	for _, candidate := range rebuildCandidates {
+		if count >= int(maxPayloads) || rebuilds >= envelope_history.MaxRebuildsPerRequest {
+			break
+		}
+
+		prepared, err := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.blockRoot)
+		if err != nil {
+			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
+			break
+		}
+		if prepared == nil {
+			continue
+		}
+
+		rebuilds++
+		envelope, err := c.envelopeRebuilder.Rebuild(requestCtx, prepared)
+		if err != nil {
+			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
+			break
+		}
+		if envelope != nil && !writeEnvelope(envelope, candidate.epoch) {
+			break
+		}
+	}
 
 	return nil
 }
