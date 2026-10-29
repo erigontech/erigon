@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 type spikePair struct {
@@ -730,40 +731,140 @@ func (s *dupChunkSchema) unwind(tx kv.RwTx, keys [][]byte, txFrom uint64) error 
 type dupMaxSchema struct {
 	limit int
 	u16   bool // dup = BE8(max) || LE uint16 offsets from min, ascending, min implicit
-	vbuf  []uint64
-	ebuf  []byte
+	// width selects the offsets layout when set: 2 or 4 = fixed LE offsets from min;
+	// -1 = per-chunk width 1/2/4 stored as a trailing byte (none for a one-txNum chunk).
+	width      int
+	widths     []int // width -1: candidate widths, default 1/2/4
+	rangeSplit bool // uvarint deltas, but split a chunk when max-min > 65535 (isolates the u16 split cost)
+	vbuf       []uint64
+	ebuf       []byte
+}
+
+func (s *dupMaxSchema) w() int {
+	if s.u16 {
+		return 2
+	}
+	return s.width
 }
 
 func (s *dupMaxSchema) name() string {
-	if s.u16 {
+	switch {
+	case s.u16:
 		return "u16off"
+	case s.width == -1 && s.widths != nil:
+		return fmt.Sprintf("woff%v-%d", s.widths, s.limit)
+	case s.width == -1:
+		return fmt.Sprintf("woff-%d", s.limit)
+	case s.width == -2:
+		return fmt.Sprintf("h16-%d", s.limit)
+	case s.width > 0:
+		return fmt.Sprintf("u%doff-%d", 8*s.width, s.limit)
+	case s.rangeSplit:
+		return fmt.Sprintf("varint-rsplit-%d", s.limit)
 	}
 	return fmt.Sprintf("dupmax-varint-%d", s.limit)
 }
 
+func putOff(dst []byte, w int, v uint64) []byte {
+	switch w {
+	case 1:
+		return append(dst, byte(v))
+	case 2:
+		return binary.LittleEndian.AppendUint16(dst, uint16(v))
+	case 3:
+		return append(dst, byte(v), byte(v>>8), byte(v>>16))
+	}
+	return binary.LittleEndian.AppendUint32(dst, uint32(v))
+}
+
+func getOff(b []byte, w int) uint64 {
+	switch w {
+	case 1:
+		return uint64(b[0])
+	case 2:
+		return uint64(binary.LittleEndian.Uint16(b))
+	case 3:
+		return uint64(b[0]) | uint64(b[1])<<8 | uint64(b[2])<<16
+	}
+	return uint64(binary.LittleEndian.Uint32(b))
+}
+
+// chunkWidth is the width an adaptive chunk of vals uses.
+func (s *dupMaxSchema) cands() []int {
+	if s.widths != nil {
+		return s.widths
+	}
+	return []int{1, 2, 4}
+}
+
+func (s *dupMaxSchema) chunkWidth(vals []uint64) int {
+	r := vals[len(vals)-1] - vals[0]
+	for _, w := range s.cands() {
+		if r <= uint64(1)<<(8*w)-1 {
+			return w
+		}
+	}
+	panic("chunk range too wide")
+}
+
 func (s *dupMaxSchema) enc(dst []byte, vals []uint64) []byte {
-	if !s.u16 {
+	w := s.w()
+	if w == 0 {
 		return dupMaxEncode(dst, vals)
 	}
+	if w == -2 { // u16 offsets (even payload) when the range fits, else uvarint deltas padded to an odd payload
+		if len(vals) == 1 || vals[len(vals)-1]-vals[0] <= math.MaxUint16 {
+			w = 2
+		} else {
+			start := len(dst)
+			dst = dupMaxEncode(dst, vals)
+			if (len(dst)-start-8)%2 == 0 {
+				dst = append(dst, 0)
+			}
+			return dst
+		}
+	}
 	dst = binary.BigEndian.AppendUint64(dst, vals[len(vals)-1])
+	if w == -1 {
+		if len(vals) == 1 {
+			return dst
+		}
+		w = s.chunkWidth(vals)
+	}
 	for _, v := range vals[1:] {
-		dst = binary.LittleEndian.AppendUint16(dst, uint16(v-vals[0]))
+		dst = putOff(dst, w, v-vals[0])
+	}
+	if s.w() == -1 {
+		dst = append(dst, byte(w))
 	}
 	return dst
 }
 
 func (s *dupMaxSchema) dec(dst []uint64, v []byte) []uint64 {
-	if !s.u16 {
+	w := s.w()
+	if w == 0 {
 		return dupMaxDecode(dst, v)
 	}
+	if w == -2 {
+		if (len(v)-8)%2 == 1 {
+			if v[len(v)-1] == 0 {
+				v = v[:len(v)-1]
+			}
+			return dupMaxDecode(dst, v)
+		}
+		w = 2
+	}
 	max, offs := binary.BigEndian.Uint64(v), v[8:]
+	if w == -1 && len(offs) > 0 {
+		w, offs = int(offs[len(offs)-1]), offs[:len(offs)-1]
+	}
 	min := max
 	if len(offs) > 0 {
-		min -= uint64(binary.LittleEndian.Uint16(offs[len(offs)-2:]))
+		min -= getOff(offs[len(offs)-w:], w)
 	}
 	dst = append(dst, min)
-	for ; len(offs) > 0; offs = offs[2:] {
-		dst = append(dst, min+uint64(binary.LittleEndian.Uint16(offs)))
+	for ; len(offs) > 0; offs = offs[w:] {
+		dst = append(dst, min+getOff(offs, w))
 	}
 	return dst
 }
@@ -796,15 +897,24 @@ func dupMaxDecode(dst []uint64, v []byte) []uint64 {
 
 // fit returns the longest prefix of vals that encodes into the limit.
 func (s *dupMaxSchema) fit(vals []uint64) int {
-	if s.u16 {
+	switch w := s.w(); {
+	case w == -1:
+		return s.fitAdaptive(vals)
+	case w == -2:
+		return s.fitHybrid(vals)
+	case w > 0:
+		maxRange := uint64(1)<<(8*w) - 1
 		n := 1
-		for n < len(vals) && 2*n <= s.limit && vals[n]-vals[0] <= math.MaxUint16 {
+		for n < len(vals) && w*n <= s.limit && vals[n]-vals[0] <= maxRange {
 			n++
 		}
 		return n
 	}
 	size := 0
 	for i := 1; i < len(vals); i++ {
+		if s.rangeSplit && vals[i]-vals[0] > math.MaxUint16 {
+			return i
+		}
 		var tmp [binary.MaxVarintLen64]byte
 		size += binary.PutUvarint(tmp[:], vals[i]-vals[i-1])
 		if size > s.limit {
@@ -812,6 +922,50 @@ func (s *dupMaxSchema) fit(vals []uint64) int {
 		}
 	}
 	return len(vals)
+}
+
+// fitHybrid takes a u16 chunk when the next gap fits, else a uvarint chunk over the run of gaps > 65535.
+func (s *dupMaxSchema) fitHybrid(vals []uint64) int {
+	n := 1
+	if len(vals) > 1 && vals[1]-vals[0] <= math.MaxUint16 {
+		for n < len(vals) && 2*n <= s.limit && vals[n]-vals[0] <= math.MaxUint16 {
+			n++
+		}
+		return n
+	}
+	size := 0
+	for n < len(vals) {
+		if n+1 < len(vals) && vals[n+1]-vals[n] <= math.MaxUint16 && n > 1 {
+			break // vals[n] starts the next dense run
+		}
+		var tmp [binary.MaxVarintLen64]byte
+		size += binary.PutUvarint(tmp[:], vals[n]-vals[n-1])
+		if size+1 > s.limit {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// fitAdaptive picks, per chunk, the width 1/2/4 with the fewest bytes per txNum.
+func (s *dupMaxSchema) fitAdaptive(vals []uint64) int {
+	bestN, bestCost := 1, 9.0
+	for _, w := range s.cands() {
+		maxRange := uint64(1)<<(8*w) - 1
+		n := 1
+		for n < len(vals) && w*n <= s.limit && vals[n]-vals[0] <= maxRange {
+			n++
+		}
+		cost := float64(8+1+w*(n-1)) / float64(n)
+		if n == 1 {
+			cost = 8
+		}
+		if cost < bestCost {
+			bestN, bestCost = n, cost
+		}
+	}
+	return bestN
 }
 
 // write stores vals as chunks; when replace, the cursor is on the dup that vals[0:] extends.
@@ -1228,6 +1382,13 @@ func TestIISchemaSpike(t *testing.T) {
 		func() spikeSchema { return &dupChunkSchema{limit: 512} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512, u16: true} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, rangeSplit: true} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: 4} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -1} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -2} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: 3} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -1, widths: []int{2, 3}} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -1, widths: []int{1, 2, 3}} },
 		func() spikeSchema { return prodSchema{} },
 		func() spikeSchema { return prodPfSchema{} },
 		func() spikeSchema { return &chunkSchema{codec: varintCodec{}, limit: 1024} },
@@ -1249,7 +1410,7 @@ func TestIISchemaSpike(t *testing.T) {
 		s := mk()
 		dir := t.TempDir()
 		db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dir).MapSize(64 * datasize.GB).DirtySpace(uint64(256 * datasize.MB)).
-			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: s.flags()}} }).MustOpen()
+			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: s.flags()}, spikeTbl + "C": kv.TableCfgItem{Flags: s.flags()}} }).MustOpen()
 		spikeDB = db
 		ctx := t.Context()
 
@@ -1315,6 +1476,10 @@ func TestIISchemaSpike(t *testing.T) {
 		}
 		size, _ := ro.BucketSize(spikeTbl)
 		dups, _ := ro.Count(spikeTbl)
+		if os.Getenv("II_SPIKE_BREAKDOWN") != "" {
+			spikeBreakdown(t, ro, s.name())
+			spikeCompactSize(t, db, s.name())
+		}
 		q := func(keys [][]byte, from, to uint64, asc bool, limit int) (time.Duration, int) {
 			st := time.Now()
 			total := 0
@@ -1444,4 +1609,91 @@ func TestIISchemaSpikeKeysTable(t *testing.T) {
 		txNums[p.tx] = struct{}{}
 	}
 	fmt.Printf("%s keys table: %.1f MB, pairs=%d txNums=%d\n", filepath.Base(path), float64(size)/1e6, len(sd.pairs), len(txNums))
+}
+
+// spikeBreakdown prints where the bytes of the values table go.
+func spikeBreakdown(t *testing.T, ro kv.Tx, name string) {
+	st, err := ro.(interface {
+		BucketStat(string) (*mdbxgo.Stat, error)
+	}).BucketStat(spikeTbl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys, dups, keyBytes, valBytes, singleKeys, singleDups uint64
+	var perKey [5]uint64 // keys by total value bytes: <=64, <=512, <=2K, <=8K, more
+	var perKeyDups [5]uint64
+	var prevKey []byte
+	var cur, curDups uint64
+	flushKey := func() {
+		if prevKey == nil {
+			return
+		}
+		i := 4
+		switch {
+		case cur <= 64:
+			i = 0
+		case cur <= 512:
+			i = 1
+		case cur <= 2048:
+			i = 2
+		case cur <= 8192:
+			i = 3
+		}
+		perKey[i]++
+		perKeyDups[i] += curDups
+		if curDups == 1 {
+			singleKeys++
+		}
+	}
+	if err := ro.ForEach(spikeTbl, nil, func(k, v []byte) error {
+		if !bytes.Equal(k, prevKey) {
+			flushKey()
+			prevKey = bytes.Clone(k)
+			keys++
+			keyBytes += uint64(len(k))
+			cur, curDups = 0, 0
+		}
+		dups++
+		valBytes += uint64(len(v))
+		cur += uint64(len(v))
+		curDups++
+		if len(v) == 8 {
+			singleDups++
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	flushKey()
+	pages := st.LeafPages + st.BranchPages + st.OverflowPages
+	fmt.Printf("  %s: keys=%d dups=%d singleKeys=%d 8Bdups=%d keyMB=%.1f valMB=%.1f (prefix %.1f + payload %.1f) pages leaf=%d branch=%d ovf=%d depth=%d tableMB=%.1f fill=%.0f%%\n",
+		name, keys, dups, singleKeys, singleDups, float64(keyBytes)/1e6, float64(valBytes)/1e6, float64(8*dups)/1e6, float64(valBytes-8*dups)/1e6,
+		st.LeafPages, st.BranchPages, st.OverflowPages, st.Depth, float64(pages*4096)/1e6, 100*float64(keyBytes+valBytes)/float64(pages*4096))
+	fmt.Printf("  %s: keys by value bytes <=64/<=512/<=2K/<=8K/more: %v dups %v\n", name, perKey, perKeyDups)
+}
+
+// spikeCompactSize copies the values table in order with Append/AppendDup and prints its size: the fill-factor floor.
+func spikeCompactSize(t *testing.T, db kv.RwDB, name string) {
+	tx, err := db.BeginRw(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	c, err := tx.RwCursorDupSort(spikeTbl + "C")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var prev []byte
+	if err := tx.ForEach(spikeTbl, nil, func(k, v []byte) error {
+		if bytes.Equal(k, prev) {
+			return c.AppendDup(k, v)
+		}
+		prev = bytes.Clone(k)
+		return c.Append(k, v)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	size, _ := tx.BucketSize(spikeTbl + "C")
+	fmt.Printf("  %s: compact copy MB=%.1f\n", name, float64(size)/1e6)
 }
