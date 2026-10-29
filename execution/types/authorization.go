@@ -84,6 +84,10 @@ const authsPerRecoverWorker = 32
 // RecoverSigners is RecoverSigner for each auth of chainID or chain 0, on several goroutines for a long list;
 // other auths are left zero.
 func RecoverSigners(auths []Authorization, chainID *uint256.Int) ([]common.Address, []error) {
+	return recoverSigners(auths, chainID, runtime.GOMAXPROCS(0))
+}
+
+func recoverSigners(auths []Authorization, chainID *uint256.Int, maxWorkers int) ([]common.Address, []error) {
 	signers, errs := make([]common.Address, len(auths)), make([]error, len(auths))
 	var next atomic.Int64
 	recoverNext := func() {
@@ -94,7 +98,7 @@ func RecoverSigners(auths []Authorization, chainID *uint256.Int) ([]common.Addre
 		}
 	}
 	var wg sync.WaitGroup
-	for range min(runtime.GOMAXPROCS(0), len(auths)/authsPerRecoverWorker) - 1 {
+	for range min(maxWorkers, len(auths)/authsPerRecoverWorker) - 1 {
 		wg.Go(recoverNext)
 	}
 	recoverNext()
