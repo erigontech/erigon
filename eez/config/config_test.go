@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -180,6 +181,46 @@ func TestRollupX(t *testing.T) {
 	require.Equal(t, common.HexToAddress("0x4200000000000000000000000000000000000007"), devnet.EEZL2())
 }
 
+// eezDevV01L2 is the l2 section of eez.dev since 2026-10-28: rollupX is
+// config.rollupX of its genesis, as debug_chainConfig serves it.
+const eezDevV01L2 = `{"name":"eez","rollupId":2,"l1ChainId":10200,"eezRegistry":"0x6258189d3a04eb31a196a8931077dfe001a9f6fd","registryDeployBlock":23731532,"blockInterval":1,"l1BlockTime":5,"blockGasLimit":30000000,
+"rollupX":{"blockIntervalSeconds":1,"syncIntervalBlocks":5,"historyUpdateOffset":2,"feeCollector":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0078","l1Reference":{"chainId":10200,"number":23731489,"hash":"0x56e9172b298dcba6a05740ebb72bb1a196e28f1031624618b204d9780b97c5eb","timestamp":1793194380,"prevRandao":"0x304949d808d90d43c8362e4a81378482ce024fabfe2ea79ac0badab494e78508"}}}`
+
+func TestRollupXV01(t *testing.T) {
+	c, err := FromJSON([]byte(eezDevV01L2))
+	require.NoError(t, err)
+	require.Equal(t, RollupXV01, c.RuleSet())
+	require.True(t, IsRollupX(c.RuleSet()))
+	require.Equal(t, common.HexToAddress("0x4B2760F84B83d6b3829E30A7573B0172B6d6402C"), c.EEZL2())
+	require.Equal(t, common.HexToAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0078"), *c.RollupX.FeeCollector)
+	require.Equal(t, uint64(2), *c.RollupX.HistoryUpdateOffset)
+	enc, err := json.Marshal(c)
+	require.NoError(t, err)
+	require.JSONEq(t, eezDevV01L2, string(enc))
+
+	cfg := &chain.Config{ChainID: uint256.NewInt(699169), L2: c}
+	rules := (&evmtypes.BlockContext{BlockNumber: 7, Time: 14}).Rules(cfg)
+	require.Equal(t, RollupXV01, rules.L2Version)
+}
+
+// TestHistoryUpdate checks the blocks 699169 may update its L1 history in:
+// 3, 8, 13 and so on, never a Sync block.
+func TestHistoryUpdate(t *testing.T) {
+	c, err := FromJSON([]byte(eezDevV01L2))
+	require.NoError(t, err)
+	var updates []uint64
+	for n := range uint64(20) {
+		if c.RollupX.HistoryUpdate(n) {
+			updates = append(updates, n)
+		}
+	}
+	require.Equal(t, []uint64{3, 8, 13, 18}, updates)
+
+	legacy, err := FromJSON([]byte(eezDevL2))
+	require.NoError(t, err)
+	require.False(t, legacy.RollupX.HistoryUpdate(3))
+}
+
 func TestRollupXValidate(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -204,6 +245,25 @@ func TestRollupXValidate(t *testing.T) {
 	}
 	_, err := FromJSON([]byte(strings.Replace(eezDevL2, `"syncIntervalBlocks":5`, `"syncIntervalBlocks":5,"blockIntervalMillis":1000`, 1)))
 	require.ErrorIs(t, err, ErrInvalid)
+
+	for _, tc := range []struct {
+		name string
+		mod  func(*RollupXConfig)
+	}{
+		{"collector without offset", func(x *RollupXConfig) { x.HistoryUpdateOffset = nil }},
+		{"offset without collector", func(x *RollupXConfig) { x.FeeCollector = nil }},
+		{"offset at a Sync position", func(x *RollupXConfig) { x.HistoryUpdateOffset = new(uint64(5)) }},
+		{"zero collector", func(x *RollupXConfig) { x.FeeCollector = &common.Address{} }},
+		{"system address collector", func(x *RollupXConfig) { x.FeeCollector = new(protocol.NativeSystemAddress) }},
+		{"EEZL2 collector", func(x *RollupXConfig) { x.FeeCollector = new(protocol.RollupXEEZL2Address) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := FromJSON([]byte(eezDevV01L2))
+			require.NoError(t, err)
+			tc.mod(c.RollupX)
+			require.ErrorIs(t, c.Validate(), ErrInvalid)
+		})
+	}
 }
 
 func TestValidateChain(t *testing.T) {
@@ -234,6 +294,15 @@ func TestValidateChain(t *testing.T) {
 			require.ErrorIs(t, rollupX.ValidateChain(cfg), ErrInvalid)
 		})
 	}
+
+	v01, err := FromJSON([]byte(eezDevV01L2))
+	require.NoError(t, err)
+	cfg := valid()
+	require.ErrorIs(t, v01.ValidateChain(cfg), ErrInvalid)
+	cfg.FeeCollector = &common.Address{1}
+	require.ErrorIs(t, v01.ValidateChain(cfg), ErrInvalid)
+	cfg.FeeCollector = new(*v01.RollupX.FeeCollector)
+	require.NoError(t, v01.ValidateChain(cfg))
 }
 
 func TestCheckGenesis(t *testing.T) {
@@ -254,4 +323,11 @@ func TestCheckGenesis(t *testing.T) {
 		mod(h)
 		require.ErrorIs(t, c.RollupX.CheckGenesis(h), ErrInvalid)
 	}
+
+	// 699169 starts a slot after its L1 reference; v0.1 needs that slot.
+	v01, err := FromJSON([]byte(eezDevV01L2))
+	require.NoError(t, err)
+	ref := v01.RollupX.L1Reference
+	require.NoError(t, v01.RollupX.CheckGenesis(&types.Header{Time: 1793194385, MixDigest: ref.PrevRandao}))
+	require.ErrorIs(t, v01.RollupX.CheckGenesis(&types.Header{Time: ref.Timestamp, MixDigest: ref.PrevRandao}), ErrInvalid)
 }

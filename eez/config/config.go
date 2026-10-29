@@ -62,7 +62,8 @@ type L2Config struct {
 	RollupX *RollupXConfig `json:"rollupX,omitempty"`
 }
 
-// RollupXConfig is the derivation schedule of an eez-rollupX network.
+// RollupXConfig is the derivation schedule of an eez-rollupX network. A
+// fee collector and a history update offset select the v0.1 rule set.
 type RollupXConfig struct {
 	// BlockIntervalSeconds is the L2 block time.
 	BlockIntervalSeconds uint64 `json:"blockIntervalSeconds"`
@@ -71,6 +72,11 @@ type RollupXConfig struct {
 	SyncIntervalBlocks uint64 `json:"syncIntervalBlocks"`
 	// L1Reference is the finalized L1 block the genesis is anchored to.
 	L1Reference L1Reference `json:"l1Reference"`
+	// HistoryUpdateOffset places the L1 history updates: in the blocks
+	// HistoryUpdateOffset+1 after each Sync position.
+	HistoryUpdateOffset *uint64 `json:"historyUpdateOffset,omitempty"`
+	// FeeCollector receives the base fee of ordinary transactions.
+	FeeCollector *common.Address `json:"feeCollector,omitempty"`
 }
 
 // L1Reference is the L1 block an eez-rollupX genesis is anchored to. Its
@@ -90,10 +96,17 @@ type L1Reference struct {
 const (
 	// Rollup0 is the rule set of eez-rollup0, the reference client.
 	Rollup0 uint64 = 1
-	// RollupX is the rule set of eez-rollupX, which the Gnosis-hosted
-	// networks run.
+	// RollupX is the rule set of eez-rollupX v0.0.1, which the retired
+	// Chiado networks and the Ethereum network run.
 	RollupX uint64 = 2
+	// RollupXV01 is the rule set of eez-rollupX v0.1, which the Chiado
+	// networks run since 2026-10-28: types 0x45 and 0x46, base fee to a
+	// fee collector, L1 history updates.
+	RollupXV01 uint64 = 3
 )
+
+// IsRollupX reports whether ruleSet is a rule set of eez-rollupX.
+func IsRollupX(ruleSet uint64) bool { return ruleSet == RollupX || ruleSet == RollupXV01 }
 
 // RollupX constants.
 const (
@@ -112,13 +125,16 @@ func (c *L2Config) ResolveRules(l2Version, blockNum, blockTime uint64, rules *ch
 	rules.L2Version = c.RuleSet()
 }
 
-// RuleSet returns RollupX when the section has a rollupX schedule, Rollup0
-// otherwise.
+// RuleSet returns RollupXV01 or RollupX when the section has a rollupX
+// schedule, Rollup0 otherwise.
 func (c *L2Config) RuleSet() uint64 {
-	if c.RollupX != nil {
-		return RollupX
+	switch {
+	case c.RollupX == nil:
+		return Rollup0
+	case c.RollupX.FeeCollector != nil:
+		return RollupXV01
 	}
-	return Rollup0
+	return RollupX
 }
 
 // EEZL2 returns the address of the rule set's EEZL2.
@@ -126,7 +142,7 @@ func (c *L2Config) EEZL2() common.Address { return EEZL2(c.RuleSet()) }
 
 // EEZL2 returns the address of the EEZL2 of ruleSet.
 func EEZL2(ruleSet uint64) common.Address {
-	if ruleSet == RollupX {
+	if IsRollupX(ruleSet) {
 		return protocol.RollupXEEZL2Address
 	}
 	return protocol.EEZL2Address
@@ -179,13 +195,30 @@ func (x *RollupXConfig) validate(l2 *L2Config) error {
 		return fmt.Errorf("%w: blockInterval %d and l1BlockTime %d differ from the rollupX schedule", ErrInvalid, l2.BlockInterval, l2.L1BlockTime)
 	case l2.BlockGasLimit != RollupXBlockGasLimit:
 		return fmt.Errorf("%w: rollupX blockGasLimit %d, want %d", ErrInvalid, l2.BlockGasLimit, RollupXBlockGasLimit)
+	case (x.FeeCollector == nil) != (x.HistoryUpdateOffset == nil):
+		return fmt.Errorf("%w: rollupX feeCollector and historyUpdateOffset come together", ErrInvalid)
+	case x.HistoryUpdateOffset != nil && *x.HistoryUpdateOffset >= positions:
+		return fmt.Errorf("%w: rollupX historyUpdateOffset %d of %d positions", ErrInvalid, *x.HistoryUpdateOffset, positions)
+	case x.FeeCollector != nil && (*x.FeeCollector == common.Address{} || *x.FeeCollector == protocol.NativeSystemAddress || *x.FeeCollector == protocol.RollupXEEZL2Address):
+		return fmt.Errorf("%w: rollupX feeCollector %v", ErrInvalid, *x.FeeCollector)
 	}
 	return nil
 }
 
+// HistoryUpdate reports whether block number may carry an L1 history update
+// under the v0.1 rule set: whether it is HistoryUpdateOffset+1 blocks after
+// a Sync position.
+func (x *RollupXConfig) HistoryUpdate(number uint64) bool {
+	if x.HistoryUpdateOffset == nil {
+		return false
+	}
+	delay := *x.HistoryUpdateOffset + 1
+	return number >= delay && (number-delay)%x.SyncIntervalBlocks == 0
+}
+
 // ValidateChain rejects chain configuration fields the rule set fixes
-// otherwise. RollupX runs Osaka from genesis, burns the base fee and has the
-// 2/50 EIP-1559 rule.
+// otherwise. RollupX runs Osaka from genesis and has the 2/50 EIP-1559 rule;
+// v0.0.1 burns the base fee, v0.1 sends it to the rollupX fee collector.
 func (c *L2Config) ValidateChain(cc *chain.Config) error {
 	if c.RollupX == nil {
 		if cc.BaseFeeChangeDenominator != nil {
@@ -196,8 +229,12 @@ func (c *L2Config) ValidateChain(cc *chain.Config) error {
 	switch {
 	case cc.BaseFeeChangeDenominator == nil || *cc.BaseFeeChangeDenominator != RollupXBaseFeeChangeDenominator:
 		return fmt.Errorf("%w: rollupX needs baseFeeChangeDenominator %d", ErrInvalid, RollupXBaseFeeChangeDenominator)
-	case cc.FeeCollector != nil || len(cc.BurntContract) > 0:
-		return fmt.Errorf("%w: rollupX burns the base fee", ErrInvalid)
+	case len(cc.BurntContract) > 0:
+		return fmt.Errorf("%w: rollupX has no burnt contract", ErrInvalid)
+	case c.RollupX.FeeCollector == nil && cc.FeeCollector != nil:
+		return fmt.Errorf("%w: rollupX v0.0.1 burns the base fee", ErrInvalid)
+	case c.RollupX.FeeCollector != nil && (cc.FeeCollector == nil || *cc.FeeCollector != *c.RollupX.FeeCollector):
+		return fmt.Errorf("%w: feeCollector differs from the rollupX fee collector %v", ErrInvalid, *c.RollupX.FeeCollector)
 	case cc.OsakaTime == nil || *cc.OsakaTime != 0 || cc.AmsterdamTime != nil:
 		return fmt.Errorf("%w: rollupX runs Osaka from genesis and no later fork", ErrInvalid)
 	}
@@ -206,7 +243,8 @@ func (c *L2Config) ValidateChain(cc *chain.Config) error {
 
 // CheckGenesis checks the genesis against the schedule: block 0, a whole
 // number of slots after the L1 reference, the reference prevRandao as
-// mixHash.
+// mixHash. Under v0.1 the reference precedes genesis by a slot at least,
+// where the first history interval starts.
 func (x *RollupXConfig) CheckGenesis(genesis *types.Header) error {
 	slot := x.BlockIntervalSeconds * x.SyncIntervalBlocks
 	ref := x.L1Reference
@@ -217,6 +255,8 @@ func (x *RollupXConfig) CheckGenesis(genesis *types.Header) error {
 		return fmt.Errorf("%w: rollupX genesis time %d off the slots of L1 reference time %d", ErrInvalid, genesis.Time, ref.Timestamp)
 	case genesis.MixDigest != ref.PrevRandao:
 		return fmt.Errorf("%w: rollupX genesis mixHash %x, want L1 reference prevRandao %x", ErrInvalid, genesis.MixDigest, ref.PrevRandao)
+	case x.HistoryUpdateOffset != nil && genesis.Time == ref.Timestamp:
+		return fmt.Errorf("%w: rollupX v0.1 genesis time %d at its L1 reference", ErrInvalid, genesis.Time)
 	}
 	return nil
 }
