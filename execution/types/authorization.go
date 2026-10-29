@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -74,6 +77,29 @@ func (ath *Authorization) RecoverSigner() (common.Address, error) {
 
 	hash := authorizationSigningHash(ath.ChainID, ath.Address, ath.Nonce)
 	return recoverSignerFromHash(hash, ath.YParity, ath.R, ath.S)
+}
+
+const authsPerRecoverWorker = 32
+
+// RecoverSigners is RecoverSigner for each auth of chainID or chain 0 (a nil chainID is chain 0), on several
+// goroutines for a long list; other auths are left zero.
+func RecoverSigners(auths []Authorization, chainID *uint256.Int) ([]common.Address, []error) {
+	signers, errs := make([]common.Address, len(auths)), make([]error, len(auths))
+	var next atomic.Int64
+	recoverNext := func() {
+		for i := int(next.Add(1) - 1); i < len(auths); i = int(next.Add(1) - 1) {
+			if auth := &auths[i]; auth.ChainID.IsZero() || chainID != nil && auth.ChainID.Eq(chainID) {
+				signers[i], errs[i] = auth.RecoverSigner()
+			}
+		}
+	}
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(auths)/authsPerRecoverWorker) - 1 {
+		wg.Go(recoverNext)
+	}
+	recoverNext()
+	wg.Wait()
+	return signers, errs
 }
 
 // SignAuthorization returns an EIP-7702 authorization signed by key. The
