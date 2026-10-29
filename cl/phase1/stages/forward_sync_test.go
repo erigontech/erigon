@@ -85,7 +85,7 @@ func (*forwardSyncTipSentinel) PeersInfo(context.Context, *sentinelproto.PeersIn
 }
 
 func (*forwardSyncTipSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
-	return &sentinelproto.PeerCount{Active: 1}, nil
+	return &sentinelproto.PeerCount{Active: 2}, nil
 }
 
 func (*forwardSyncTipSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {

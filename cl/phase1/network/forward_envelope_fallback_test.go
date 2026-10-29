@@ -175,7 +175,6 @@ func TestForwardBeaconDownloaderRequiresDistinctPeersForEmptyTipRange(t *testing
 	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
 	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
 	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
-	downloader.peerCount = func() (uint64, error) { return 1, nil }
 	downloader.SetHighestProcessedSlot(9)
 	downloader.gloasLookahead = tip
 	downloader.gloasLookaheadPeer = "tip-peer"
@@ -277,51 +276,31 @@ func TestForwardBeaconDownloaderRequiresDistinctPeersForEmptyFullRange(t *testin
 }
 
 func TestForwardBeaconDownloaderSinglePeerCrossesEmptyFullRange(t *testing.T) {
-	previousInterval := forwardBeaconRequestInterval
-	previousTipTimeout := forwardTipEnvelopeTimeout
-	forwardBeaconRequestInterval = time.Millisecond
-	forwardTipEnvelopeTimeout = 25 * time.Millisecond
-	t.Cleanup(func() {
-		forwardBeaconRequestInterval = previousInterval
-		forwardTipEnvelopeTimeout = previousTipTimeout
-	})
-
-	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
-	sentinel := &peerCountEnvelopeSentinel{immediateEnvelopeSentinel: immediateEnvelopeSentinel{empty: true}, active: 1}
-	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), sentinel)
-	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
-	downloader.SetHighestProcessedSlot(9)
-	downloader.gloasLookahead = tip
-	downloader.gloasLookaheadPeer = "tip-peer"
-	downloader.gloasNextUnscanned = 11
-	downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
-	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
-		return []*cltypes.SignedBeaconBlock{}, "peer-a", nil
-	}
-	var processCalls atomic.Int32
-	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-		processCalls.Add(1)
-		return blocks[len(blocks)-1].Block.Slot, nil
-	})
-
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
-	downloader.RequestMore(ctx)
-
-	require.Zero(t, processCalls.Load())
-	require.False(t, downloader.CaughtUpTo(50))
-	start, pending := downloader.nextRequestStart(false)
-	require.True(t, pending)
-	require.Equal(t, uint64(44), start)
-}
-
-func TestForwardBeaconDownloaderUnknownPeerCountRequiresDistinctPeerForEmptyFullRange(t *testing.T) {
 	tests := []struct {
-		name      string
-		peerCount func() (uint64, error)
+		name               string
+		sentinel           sentinelproto.SentinelClient
+		configurePeerCount func(*ForwardBeaconDownloader)
+		wantStart          uint64
 	}{
-		{name: "nil"},
-		{name: "error", peerCount: func() (uint64, error) { return 0, errors.New("unavailable") }},
+		{
+			name:      "single peer",
+			sentinel:  &peerCountEnvelopeSentinel{immediateEnvelopeSentinel: immediateEnvelopeSentinel{empty: true}, active: 1},
+			wantStart: 44,
+		},
+		{
+			name:               "unknown peer count",
+			sentinel:           &immediateEnvelopeSentinel{empty: true},
+			configurePeerCount: func(downloader *ForwardBeaconDownloader) { downloader.peerCount = nil },
+			wantStart:          11,
+		},
+		{
+			name:     "peer count error",
+			sentinel: &immediateEnvelopeSentinel{empty: true},
+			configurePeerCount: func(downloader *ForwardBeaconDownloader) {
+				downloader.peerCount = func() (uint64, error) { return 0, errors.New("unavailable") }
+			},
+			wantStart: 11,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -330,9 +309,11 @@ func TestForwardBeaconDownloaderUnknownPeerCountRequiresDistinctPeerForEmptyFull
 			t.Cleanup(func() { forwardBeaconRequestInterval = previousInterval })
 
 			tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
-			rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
+			rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), tt.sentinel)
 			downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
-			downloader.peerCount = tt.peerCount
+			if tt.configurePeerCount != nil {
+				tt.configurePeerCount(downloader)
+			}
 			downloader.SetHighestProcessedSlot(9)
 			downloader.gloasLookahead = tip
 			downloader.gloasLookaheadPeer = "tip-peer"
@@ -352,11 +333,174 @@ func TestForwardBeaconDownloaderUnknownPeerCountRequiresDistinctPeerForEmptyFull
 			downloader.RequestMore(ctx)
 
 			require.Zero(t, processCalls.Load())
+			require.False(t, downloader.CaughtUpTo(50))
 			start, pending := downloader.nextRequestStart(false)
 			require.True(t, pending)
-			require.Equal(t, uint64(11), start)
+			require.Equal(t, tt.wantStart, start)
 		})
 	}
+}
+
+func TestForwardBeaconDownloaderSinglePeerWithHTTPFallbackScansFromLookahead(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	previousFallbackDelay := forwardBeaconFallbackDelay
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = time.Second
+	forwardBeaconFallbackDelay = 50 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+		forwardBeaconFallbackDelay = previousFallbackDelay
+	})
+
+	cfg := gloasFromGenesisConfig()
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	successor := makeGloasBlock(12, hash(0xbb), hash(0xcc))
+	linkBeaconBlocks(t, tip, successor)
+	encodedSuccessor, err := successor.EncodeSSZ(nil)
+	require.NoError(t, err)
+	var requestedSlot11 atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/eth/v2/beacon/blocks/11":
+			requestedSlot11.Store(true)
+			http.NotFound(w, req)
+		case "/eth/v2/beacon/blocks/12":
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(encodedSuccessor)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	sentinel := &peerCountEnvelopeSentinel{immediateEnvelopeSentinel: immediateEnvelopeSentinel{empty: true}, active: 1}
+	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), sentinel)
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, cfg)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "peer-a", nil
+	}
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	downloader.RequestMore(t.Context())
+
+	require.True(t, requestedSlot11.Load())
+	require.Equal(t, int32(1), processCalls.Load())
+	require.NotNil(t, downloader.gloasLookahead)
+	require.Equal(t, uint64(12), downloader.gloasLookahead.Block.Slot)
+	require.False(t, downloader.CaughtUpTo(50))
+}
+
+func TestForwardBeaconDownloaderHoldsTipAfterSinglePeerCrossing(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTipTimeout := forwardTipEnvelopeTimeout
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardTipEnvelopeTimeout = 25 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardTipEnvelopeTimeout = previousTipTimeout
+	})
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
+	var peerCount atomic.Uint64
+	peerCount.Store(1)
+	downloader.peerCount = func() (uint64, error) { return peerCount.Load(), nil }
+	var useDistinctPeers atomic.Bool
+	var tipRangeCalls atomic.Int32
+	downloader.requestBlocksByRange = func(_ context.Context, start, _ uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		if start == 11 || !useDistinctPeers.Load() {
+			return []*cltypes.SignedBeaconBlock{}, "peer-a", nil
+		}
+		if tipRangeCalls.Add(1)%2 == 0 {
+			return []*cltypes.SignedBeaconBlock{}, "peer-c", nil
+		}
+		return []*cltypes.SignedBeaconBlock{}, "peer-b", nil
+	}
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	downloader.RequestMore(ctx)
+	cancel()
+	start, pending := downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(44), start)
+	require.Zero(t, processCalls.Load())
+
+	peerCount.Store(2)
+	useDistinctPeers.Store(true)
+	ctx, cancel = context.WithTimeout(t.Context(), 200*time.Millisecond)
+	downloader.RequestMore(ctx)
+	cancel()
+
+	require.Zero(t, processCalls.Load())
+	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
+	require.False(t, downloader.CaughtUpTo(50))
+}
+
+func TestForwardBeaconDownloaderUsesStoredPeerConfirmationAfterPeerCountDrops(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	forwardBeaconRequestInterval = time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval = previousInterval })
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
+	var peerCount atomic.Uint64
+	peerCount.Store(2)
+	downloader.peerCount = func() (uint64, error) { return peerCount.Load(), nil }
+	var peer atomic.Value
+	peer.Store("peer-a")
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, peer.Load().(string), nil
+	}
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	downloader.RequestMore(ctx)
+	cancel()
+	start, pending := downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(11), start)
+
+	peerCount.Store(1)
+	peer.Store("peer-b")
+	ctx, cancel = context.WithTimeout(t.Context(), 50*time.Millisecond)
+	downloader.RequestMore(ctx)
+	cancel()
+
+	start, pending = downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(44), start)
+	require.False(t, downloader.gloasScanUnconfirmed)
 }
 
 func TestForwardBeaconDownloaderRequiresMatchingEmptyTipRanges(t *testing.T) {
