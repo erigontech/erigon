@@ -305,6 +305,80 @@ func (s *envelopeResponseSentinel) BanPeerForInvalidData(ctx context.Context, pe
 	return s.BanPeer(ctx, peer, opts...)
 }
 
+type retryEnvelopeSentinel struct {
+	envelopeResponseSentinel
+	malformedProtocol string
+	sentMalformed     bool
+	validRequests     int
+}
+
+func (s *retryEnvelopeSentinel) SendRequest(ctx context.Context, req *sentinelproto.RequestData, opts ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	if !s.sentMalformed {
+		response := &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "malformed-response-peer"}}
+		if req.Topic == s.malformedProtocol {
+			response.Data = []byte{1}
+			s.sentMalformed = true
+		}
+		return response, nil
+	}
+	s.validRequests++
+	return s.envelopeResponseSentinel.SendRequest(ctx, req, opts...)
+}
+
+func TestRequestEnvelopesFranticallyRetriesMalformedResponseWithoutBan(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeBatchExpiration = time.Second
+	requestEnvelopeRetryInterval = time.Millisecond
+	t.Cleanup(func() {
+		requestEnvelopeBatchExpiration = previousExpiration
+		requestEnvelopeRetryInterval = previousRetryInterval
+	})
+
+	for _, tc := range []struct {
+		name     string
+		protocol string
+		validate bool
+	}{
+		{name: "by-root", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
+		{name: "by-range", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
+		{name: "by-root with validator", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, validate: true},
+		{name: "by-range with validator", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, validate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := gloasFromGenesisConfig()
+			cfg.InitializeForkSchedule()
+			_, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+			digest, err := clock.ComputeForkDigest(0)
+			require.NoError(t, err)
+			var wire bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+			sentinel := &retryEnvelopeSentinel{
+				envelopeResponseSentinel: envelopeResponseSentinel{response: wire.Bytes()},
+				malformedProtocol:        tc.protocol,
+			}
+			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
+			roots := [][32]byte{envelope.Message.BeaconBlockRoot}
+			var received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+			if tc.validate {
+				validate := newEnvelopeValidator([]*cltypes.SignedBeaconBlock{block}, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+					return ValidateDownloadedGloasEnvelope(cfg, block, envelope)
+				})
+				received, err = requestEnvelopesFranticallyWithValidator(t.Context(), client, roots, validate, nil, block)
+			} else {
+				received, err = RequestEnvelopesFrantically(t.Context(), client, roots, block)
+			}
+			require.NoError(t, err)
+			require.True(t, sentinel.sentMalformed)
+			require.Equal(t, 1, sentinel.validRequests)
+			require.Empty(t, sentinel.banned)
+			require.Len(t, received, 1)
+			require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, received[envelope.Message.BeaconBlockRoot]))
+		})
+	}
+}
+
 type backfillEnvelopeSentinel struct {
 	envelopeResponseSentinel
 	invalidResponse []byte
