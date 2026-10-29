@@ -331,6 +331,7 @@ type installingForkchoice struct {
 	headers      map[common.Hash]*cltypes.BeaconBlockHeader
 	blocks       map[common.Hash]*cltypes.SignedBeaconBlock
 	onBlockCalls int
+	afterOnBlock func()
 }
 
 type conflictAfterValidationForkchoice struct {
@@ -374,6 +375,9 @@ func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedB
 	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
 	f.blocks[root] = block
 	f.onBlockCalls++
+	if f.afterOnBlock != nil {
+		f.afterOnBlock()
+	}
 	return nil
 }
 
@@ -2538,7 +2542,7 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
 
 	for range 2 {
-		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip, func() {})
 		require.ErrorContains(t, err, "database unavailable")
 		var writeErr *clservices.AcceptedBlockWriteError
 		require.ErrorAs(t, err, &writeErr)
@@ -2565,7 +2569,7 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 
 	require.NoError(t, err)
 }
@@ -2580,7 +2584,7 @@ func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) 
 	incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
 	incoming.Signature[0] ^= 1
 
-	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2589,7 +2593,7 @@ func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.
 	block := blocks[1]
 	fcu.FinalizedSlotVal = block.Block.Slot
 
-	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2604,7 +2608,7 @@ func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) 
 	conflict.Root[0] ^= 1
 	fcu.Headers[common.Hash{0xff}] = conflict
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 

@@ -68,20 +68,16 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		return err
 	}
 
-	archive := d.IsArchivedMode()
-	custody, err := d.state.GetMyCustodyColumns()
-	if err != nil {
-		return err
-	}
+	store := ColumnsToStore(d)
 	for _, sidecar := range sidecars {
-		if !archive && len(custody) > 0 && !custody[sidecar.Index] {
+		if !store(sidecar.Index) {
 			continue
 		}
 		if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
 			return err
 		}
 	}
-	if archive {
+	if d.IsArchivedMode() {
 		return d.TryScheduleRecover(block.Block.Slot, blockRoot)
 	}
 	return nil

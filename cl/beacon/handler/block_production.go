@@ -101,8 +101,8 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
-	// A published block is normally stored within one block service tick (50 ms) plus OnBlock; the bound only caps
-	// how long a stalled store can delay the block's data columns.
+	// A published block is normally imported within one block service tick (50 ms) plus OnBlock; the bound only caps
+	// how long a stalled import can delay the block's data columns.
 	publishedBlockStoreWaitBeforeColumns = time.Second
 )
 
@@ -2999,10 +2999,19 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		}
 	}
 
+	// The store job writes sidecar fields, so column gossip must not encode the sidecars concurrently.
+	columnsSidecarsSSZ := make([][]byte, len(columnsSidecars))
+	for i, column := range columnsSidecars {
+		if columnsSidecarsSSZ[i], err = column.EncodeSSZ(nil); err != nil {
+			return err
+		}
+	}
+	servable := make(chan struct{})
+	markServable := sync.OnceFunc(func() { close(servable) })
 	store := func(ctx context.Context) error {
 		finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 		defer finishBlockWork()
-		return a.storeBlockAndBlobs(ctx, blk, blobsSidecars, columnsSidecars, validation)
+		return a.storeBlockAndBlobs(ctx, blk, blobsSidecars, columnsSidecars, validation, markServable)
 	}
 	lenBlobs := 0
 	if blk.Version() >= clparams.DenebVersion {
@@ -3050,18 +3059,16 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		// A Gloas column has no signed block header. Lighthouse requests an unknown block from the column's peer
 		// and penalizes that peer if it cannot serve the block.
 		if blk.Version() >= clparams.GloasVersion && job != nil {
-			storeCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
-			_ = job.Wait(storeCtx) // a failed or slow store must not hold back the columns of an already gossiped block
+			servableCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			select {
+			case <-servable:
+			case <-servableCtx.Done(): // a failed or slow import must not hold back the columns of an already gossiped block
+			}
 			cancel()
 		}
-		for _, column := range columnsSidecars {
-			columnSSZ, err := column.EncodeSSZ(nil)
-			if err != nil {
-				a.logger.Error("Failed to encode column sidecar", "err", err)
-				return err
-			}
+		for i, column := range columnsSidecars {
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if err := a.publishGossip(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
+			if err := a.publishGossip(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnsSidecarsSSZ[i]); err != nil {
 				return err
 			}
 		}
@@ -3161,6 +3168,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
 	validation BlockPublishingValidation,
+	markServable func(),
 ) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -3180,10 +3188,6 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	} else if validation != BlockPublishingValidationGossip && block.Block.Slot <= a.forkchoiceStore.FinalizedSlot() {
 		return fmt.Errorf("%w: block is at or below the finalized validation horizon", forkchoice.ErrBlockInvalid)
 	}
-	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
-		return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
-	}
-
 	if block.Version() < clparams.FuluVersion {
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
 			return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
@@ -3214,6 +3218,15 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
+		if knownBlock {
+			return &clservices.AcceptedBlockWriteError{Block: block, Err: err}
+		}
+		return err
+	}
+	markServable()
+	// Columns are chosen after OnBlock, which can raise the custody group count.
+	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
+		err = fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
 		if knownBlock {
 			return &clservices.AcceptedBlockWriteError{Block: block, Err: err}
 		}
@@ -3261,9 +3274,13 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 	if a.columnStorage == nil {
 		return errors.New("data column storage unavailable")
 	}
+	store := das.ColumnsToStore(a.peerDas)
 	for _, sidecar := range sidecars {
 		if sidecar == nil {
 			return errors.New("nil data column sidecar")
+		}
+		if !store(sidecar.Index) {
+			continue
 		}
 		if sidecar.Index > math.MaxInt64 {
 			return fmt.Errorf("data column index %d exceeds storage range", sidecar.Index)
