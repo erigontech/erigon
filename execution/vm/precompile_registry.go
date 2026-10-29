@@ -77,19 +77,6 @@ func RegisterPrecompiles(chainID *uint256.Int, overlay PrecompiledContracts) {
 	storeChainSets(*chainID, &sets)
 }
 
-func unregisterPrecompiles(chainID *uint256.Int) {
-	if chainID == nil || chainID.IsZero() {
-		panic("vm: unregisterPrecompiles: chain ID 0")
-	}
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if _, exists := chainSetsSnapshot()[*chainID]; exists {
-		next := maps.Clone(chainSetsSnapshot())
-		delete(next, *chainID)
-		chainSets.Store(&next)
-	}
-}
-
 func rulesChainID(rules *chain.Rules) uint256.Int {
 	if rules.ChainID == nil {
 		return uint256.Int{}

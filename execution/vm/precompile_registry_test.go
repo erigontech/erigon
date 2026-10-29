@@ -83,8 +83,6 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	for _, id := range []*uint256.Int{nil, new(uint256.Int)} {
 		require.Panics(t, func() { RegisterPrecompiles(id, nil) },
 			"a nil or zero chain ID must be refused on register")
-		require.Panics(t, func() { unregisterPrecompiles(id) },
-			"and refused on unregister too, or the same argument has two contracts")
 	}
 }
 
@@ -117,26 +115,6 @@ func TestRegisteredProviderWinsOnCollision(t *testing.T) {
 	p, ok := Precompiles(rulesForChain(chainID))[ecrecoverAddr]
 	require.True(t, ok)
 	require.Equal(t, "CHAIN-ECRECOVER", p.Name(), "the chain's own entry must replace the built-in")
-}
-
-func TestReRegisterServesNewOverlay(t *testing.T) {
-	const chainID = 900503
-	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x44}))
-	newAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x45}))
-	rules := rulesForChain(chainID)
-
-	registerPrecompiles(t, chainID, PrecompiledContracts{oldAddr: stubPrecompile{"OLD"}})
-	_, ok := Precompiles(rules)[oldAddr]
-	require.True(t, ok, "the first overlay must resolve")
-
-	unregisterPrecompiles(uint256.NewInt(chainID))
-	registerPrecompiles(t, chainID, PrecompiledContracts{newAddr: stubPrecompile{"NEW"}})
-
-	merged := Precompiles(rules)
-	_, ok = merged[newAddr]
-	require.True(t, ok, "the newly registered overlay must be served")
-	_, ok = merged[oldAddr]
-	require.False(t, ok, "the unregistered overlay must not survive re-registration")
 }
 
 func TestProviderNilContractPanics(t *testing.T) {
