@@ -475,6 +475,7 @@ func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
 	}
 	return r
 }
+
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }
