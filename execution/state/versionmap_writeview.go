@@ -11,7 +11,9 @@ import (
 // versionMapWriteView is a read-only WriteSetView over a tx's versionMap slice.
 // The key-set (which cells the tx wrote) comes from keys; the values are read
 // from the versionMap floor at the tx's txIndex rather than from a copied
-// WriteSet. Yielded VersionedWrite values are reused per element, never pointers
+// WriteSet. Storage values come from keys: a storage cell at txIndex holds the
+// key-set's value for every write the flush materializes, and a net-zero write on
+// a BAL block has no cell. Yielded VersionedWrite values are reused per element, never pointers
 // into the map, so a consumer cannot mutate the map through the view.
 type versionMapWriteView struct {
 	keys  WriteSetView
@@ -149,11 +151,7 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			scratch = scratch[:len(inner)]
 			i := 0
 			for key, kw := range inner {
-				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				if !ok {
-					val = kw.Val
-				}
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -185,11 +183,7 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 				if kw.valStatus == ValueUnchanged {
 					continue
 				}
-				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				if !ok {
-					val = kw.Val
-				}
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
