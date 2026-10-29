@@ -19,7 +19,9 @@ package block_collector
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -445,6 +447,9 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	}
 
 	body := executionPayload.Body()
+	if slices.ContainsFunc(body.Transactions, types.TypedTransactionMarshalledAsRlpString) {
+		return nil, errors.New("typed txn marshalled as RLP string")
+	}
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
 		return nil, err
