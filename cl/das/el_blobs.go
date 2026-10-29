@@ -31,13 +31,13 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 			}
 		}
 	}
+	cells, err := peerdasutils.ComputeBlobsCells(blobs)
+	if err != nil {
+		return err
+	}
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
-	for i, blob := range blobs {
-		blobCells, err := ComputeCells((*cltypes.Blob)(blob))
-		if err != nil {
-			return fmt.Errorf("blob %d: %w", i, err)
-		}
-		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: blobCells, Proofs: make([]cltypes.KZGProof, numberOfColumns)}
+	for i := range blobs {
+		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells[i], Proofs: make([]cltypes.KZGProof, numberOfColumns)}
 		for j := range cellsAndProofs[i].Proofs {
 			copy(cellsAndProofs[i].Proofs[j][:], cellProofs[i][j])
 		}
