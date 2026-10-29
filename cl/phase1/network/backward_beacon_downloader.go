@@ -131,7 +131,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 	if rpc != nil {
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
 		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-			return RequestEnvelopesFrantically(ctx, rpc, roots, blocks...)
+			return requestEnvelopesFranticallyWithValidator(ctx, rpc, roots, newEnvelopeCommitmentValidator(beaconCfg, blocks), rpc.BanPeer, blocks...)
 		}
 	}
 	return b

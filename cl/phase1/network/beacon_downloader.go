@@ -561,6 +561,7 @@ Process:
 					f.rpc,
 					fullRoots,
 					newEnvelopeCommitmentValidator(f.beaconCfg, processBlocks),
+					nil,
 					processBlocks...,
 				)
 				if envErr != nil {
