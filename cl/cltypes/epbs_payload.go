@@ -252,6 +252,32 @@ func NewIndexedPayloadAttestation(cfg *clparams.BeaconChainConfig) *IndexedPaylo
 	}
 }
 
+func (i *IndexedPayloadAttestation) UnmarshalJSON(buf []byte) error {
+	var decoded struct {
+		AttestingIndices *json.RawMessage        `json:"attesting_indices"`
+		Data             *PayloadAttestationData `json:"data"`
+		Signature        common.Bytes96          `json:"signature"`
+	}
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return err
+	}
+	if decoded.AttestingIndices == nil || decoded.Data == nil {
+		return errors.New("indexed payload attestation requires attesting_indices and data")
+	}
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices != nil && i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	indices := solid.NewRawUint64List(limit, nil)
+	if err := json.Unmarshal(*decoded.AttestingIndices, indices); err != nil {
+		return err
+	}
+	i.AttestingIndices = indices
+	i.Data = decoded.Data
+	i.Signature = decoded.Signature
+	return nil
+}
+
 func (i *IndexedPayloadAttestation) Static() bool {
 	return false
 }
