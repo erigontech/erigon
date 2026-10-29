@@ -451,6 +451,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
 	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
 	if snaptype.IsCaplinType(t) {
+		if t == snaptype.CaplinEnums.BeaconBlocks {
+			return snaptype.Erigon2MergeLimit
+		}
 		return snaptype.CaplinMergeLimit
 	}
 

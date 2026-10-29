@@ -346,9 +346,12 @@ func (s SnapType) Indexes() []Index {
 }
 
 func (s SnapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	salt, err := GetIndexSalt(info.Dir(), logger)
-	if err != nil {
-		return err
+	var salt uint32
+	if !IsCaplinType(s.enum) {
+		var err error
+		if salt, err = GetIndexSalt(info.Dir(), logger); err != nil {
+			return err
+		}
 	}
 
 	if indexBuilder == nil {
