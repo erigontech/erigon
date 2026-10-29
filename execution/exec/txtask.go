@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -240,6 +241,9 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
+	// blockGas is the gas the block has left before a message that takes its
+	// gas from the block, once BindBlockGas knows it.
+	blockGas atomic.Pointer[uint64]
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -397,6 +401,7 @@ func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil
+	t.blockGas.Store(nil)
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
@@ -412,7 +417,37 @@ func (t *TxTask) GasPool() *protocol.GasPool {
 	if t.Header == nil || t.Config == nil {
 		return nil
 	}
-	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
+	gasLimit := t.Header.GasLimit
+	if left := t.blockGas.Load(); left != nil {
+		gasLimit = *left
+	}
+	return protocol.NewGasPool(gasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
+}
+
+// BindBlockGas records left, the gas the block has left before the task,
+// when the task's message takes its gas from the block; later executions get
+// a pool of left. It reports whether the last execution ran with other gas,
+// which the per-invocation pool of the block limit gives before binding.
+func (t *TxTask) BindBlockGas(left uint64) (stale bool, err error) {
+	msg, err := t.TxMessage()
+	if err != nil || msg == nil || !msg.GasFromBlock() {
+		return false, err
+	}
+	executed := t.BlockGasLimit()
+	if prev := t.blockGas.Swap(&left); prev != nil {
+		executed = *prev
+	}
+	return min(msg.Gas(), executed) != min(msg.Gas(), left), nil
+}
+
+// InclusionGas is the gas the task's transaction reserves in its block: its
+// gas limit or, once bound by BindBlockGas, the gas its message executes with.
+func (t *TxTask) InclusionGas() uint64 {
+	gas := t.Tx().GetGasLimit()
+	if left := t.blockGas.Load(); left != nil {
+		gas = min(gas, *left)
+	}
+	return gas
 }
 
 func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {

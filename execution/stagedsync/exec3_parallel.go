@@ -3127,7 +3127,11 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	}
 
 	if txn := txTask.Tx(); txn != nil {
-		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
+		gas := txn.GetGasLimit()
+		if chainTx, ok := txTask.(*exec.TxTask); ok {
+			gas = chainTx.InclusionGas()
+		}
+		regularContribution, stateContribution := protocol.InclusionContributions(gas, txTask.Rules().IsAmsterdam, false)
 		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution, txn.GetBlobGas()); err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 		}
@@ -3249,6 +3253,19 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), txTask.Version().TxNum), be.blockNum)
 				} else {
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
+				}
+			}
+			if chainTx, ok := txTask.(*exec.TxTask); ok && be.gasPool != nil {
+				// A message that takes its gas from the block ran with the
+				// block limit; it re-runs with what the block has left.
+				stale, err := chainTx.BindBlockGas(be.gasPool.ExecutionGasAvailable())
+				if err != nil {
+					return nil, err
+				}
+				if stale {
+					be.validateTasks.clearComplete(tx)
+					be.signalSelfLoopReexec(tx)
+					break
 				}
 			}
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {

@@ -285,3 +285,47 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 		})
 	}
 }
+
+func TestBindBlockGas(t *testing.T) {
+	const capped = 16_777_216
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	newTask := func(fromBlock bool) *TxTask {
+		msg := types.NewMessage(accounts.InternAddress(common.Address{1}), accounts.InternAddress(to), 0, new(uint256.Int), capped,
+			new(uint256.Int), new(uint256.Int), new(uint256.Int), nil, nil, false, false, false, true, nil)
+		msg.SetGasFromBlock(fromBlock)
+		return &TxTask{
+			Header:  &types.Header{GasLimit: 30_000_000},
+			Txs:     types.Transactions{&types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: capped}}},
+			Config:  chain.TestChainOsakaConfig,
+			message: msg,
+		}
+	}
+
+	task := newTask(false)
+	stale, err := task.BindBlockGas(1_000_000)
+	require.NoError(t, err)
+	require.False(t, stale)
+	require.Equal(t, uint64(capped), task.InclusionGas())
+	require.Equal(t, uint64(30_000_000), task.GasPool().ExecutionGasAvailable())
+
+	// The block has more than the cap left: the block-limit run stands.
+	task = newTask(true)
+	stale, err = task.BindBlockGas(20_000_000)
+	require.NoError(t, err)
+	require.False(t, stale)
+	require.Equal(t, uint64(capped), task.InclusionGas())
+
+	// Less: the run is stale until it re-runs with what is left.
+	task = newTask(true)
+	stale, err = task.BindBlockGas(10_000_000)
+	require.NoError(t, err)
+	require.True(t, stale)
+	require.Equal(t, uint64(10_000_000), task.InclusionGas())
+	require.Equal(t, uint64(10_000_000), task.GasPool().ExecutionGasAvailable())
+	stale, err = task.BindBlockGas(10_000_000)
+	require.NoError(t, err)
+	require.False(t, stale)
+
+	task.ResetTx(1, 0)
+	require.Equal(t, uint64(30_000_000), task.GasPool().ExecutionGasAvailable())
+}
