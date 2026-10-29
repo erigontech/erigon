@@ -98,6 +98,12 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	if tx.Frames[0].IsExpiryVerifier() && validation.Deadline < evm.Context.Time {
 		return nil, errors.New("expired frame transaction")
 	}
+	if validation.recentRoot >= 0 {
+		validation.RecentRoots, err = ParseRecentRootReferences(tx.Frames[validation.recentRoot].Data)
+		if err != nil {
+			return nil, err
+		}
+	}
 	config, txContext := evm.Config(), evm.TxContext
 	defer evm.ResetBetweenBlocks(evm.Context, txContext, evm.IntraBlockState(), config, evm.ChainRules())
 	validation.evm = evm
@@ -150,13 +156,11 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	}
 	if i < len(tx.Frames) {
 		f := &tx.Frames[i]
-		if f.Mode == types.FrameVerify && f.Target != nil && *f.Target == types.FrameRecentRootVerifier {
+		if f.IsRecentRootVerifier() {
 			if f.Flags != 0 || !f.Value.IsZero() || f.Limits.State != 0 {
 				return nil, invalid
 			}
-			var err error
-			v.RecentRoots, err = ParseRecentRootReferences(f.Data)
-			if err != nil {
+			if err := validateRecentRootDataLength(len(f.Data)); err != nil {
 				return nil, err
 			}
 			v.recentRoot = i

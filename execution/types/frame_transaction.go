@@ -123,6 +123,10 @@ func (frame *Frame) IsExpiryVerifier() bool {
 	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameExpiryVerifier
 }
 
+func (frame *Frame) IsRecentRootVerifier() bool {
+	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameRecentRootVerifier
+}
+
 func (sig *FrameSignature) VerificationGas() uint64 {
 	switch sig.Scheme {
 	case FrameSignatureArbitrary:

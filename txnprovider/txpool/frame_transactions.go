@@ -251,7 +251,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	// Root dependencies are signed transaction data, so they do not need to be
 	// duplicated in the validation RPC reply.
 	for _, frame := range txn.Txn.(*types.FrameTransaction).Frames {
-		if frame.Mode == types.FrameVerify && frame.Target != nil && *frame.Target == types.FrameRecentRootVerifier {
+		if frame.IsRecentRootVerifier() {
 			v.RecentRoots, err = protocol.ParseRecentRootReferences(frame.Data)
 			if err != nil {
 				return nil, err

@@ -25,7 +25,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-const RecentRootLength = 8192
+const (
+	RecentRootLength    = 8192
+	recentRootTupleSize = 72
+)
 
 // RecentRootCode is the ordinary contract runtime required by the public pool:
 // https://eips.ethereum.org/EIPS/eip-8272#bytecode.
@@ -48,18 +51,25 @@ func (r RecentRootReference) ValidAt(slot uint64) bool {
 	return r.Slot < slot && slot-r.Slot < RecentRootLength
 }
 
-func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
-	const tupleSize, maxReferences = 72, 16
-	if len(data) == 0 || len(data)%tupleSize != 0 || len(data) > maxReferences*tupleSize {
-		return nil, errors.New("invalid recent root data length")
+func validateRecentRootDataLength(size int) error {
+	const maxReferences = 16
+	if size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
+		return errors.New("invalid recent root data length")
 	}
-	refs := make([]RecentRootReference, 0, len(data)/tupleSize)
-	var entryData [32 + tupleSize]byte
+	return nil
+}
+
+func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
+	if err := validateRecentRootDataLength(len(data)); err != nil {
+		return nil, err
+	}
+	refs := make([]RecentRootReference, 0, len(data)/recentRootTupleSize)
+	var entryData [32 + recentRootTupleSize]byte
 	var storageData [32 + 32 + 8]byte
 	copy(entryData[:], recentRootEntryDomain[:])
 	copy(storageData[:], recentRootStorageDomain[:])
 	for len(data) != 0 {
-		tuple := data[:tupleSize]
+		tuple := data[:recentRootTupleSize]
 		slot := binary.BigEndian.Uint64(tuple[32:40])
 		copy(entryData[32:], tuple)
 		copy(storageData[32:64], tuple[:32])
@@ -73,7 +83,7 @@ func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
 		if !slices.Contains(refs, ref) {
 			refs = append(refs, ref)
 		}
-		data = data[tupleSize:]
+		data = data[recentRootTupleSize:]
 	}
 	return refs, nil
 }
