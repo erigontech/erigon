@@ -43,7 +43,7 @@ func TestCodeTrio_UniformVersionValidation(t *testing.T) {
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: code})
 	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: Version{TxIndex: 1}, valStatus: ValueUnchanged}, Val: code.Hash})
 	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: code.Len()})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	// tx3's reads were served from storage (cold) and now collide with the flush.
 	readStorage := ReadHeader{Source: StorageRead, Version: Version{TxIndex: 3}}

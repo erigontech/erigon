@@ -107,7 +107,7 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), finalizeErr: tc.engineErr(cause)}
 			se, task := newSerialFinalizeTestExec(t, engine)
 
-			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
+			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
 
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
@@ -144,7 +144,7 @@ func TestSerialFinalizeStateReadErrorPassesThrough(t *testing.T) {
 	se.applyTx = failingAccountTemporalTx{TemporalTx: se.applyTx, address: beneficiary, err: cause}
 	task.Withdrawals = types.Withdrawals{{Address: beneficiary, Amount: 1}}
 
-	_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
+	_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
 
 	require.ErrorIs(t, err, cause)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)

@@ -840,7 +840,9 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
-	for _, repair := range f.envelopeIndexRepairs.repairs() {
+	repairs := f.envelopeIndexRepairs.repairs()
+	for i := range repairs {
+		repair := repairs[i]
 		if limit <= 0 || ctx.Err() != nil {
 			return
 		}
@@ -863,7 +865,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 				limit--
 				continue
 			}
-			repair = f.envelopeIndexRepairs.setValues(repair, persisted.Message.Payload.BlockNumber, persisted.Message.Payload.BlockHash)
+			repair = f.captureEnvelopeIndexRepairValues(repair, persisted)
 			if repair.generation == 0 {
 				limit--
 				continue

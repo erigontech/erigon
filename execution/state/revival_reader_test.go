@@ -516,7 +516,7 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 
 			fw, fwErr := ibs.FinalizedWrites(&chain.Rules{})
 			require.NoError(t, fwErr)
-			vm.FlushVersionedWrites(fw, true, "")
+			vm.FlushVersionedWrites(fw, true)
 
 			// The destruct's wipe is confirmed by the write-side signals ReadAccountData
 			// reconstructs from, not by read-side field synthesis: both a burn

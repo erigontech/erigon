@@ -112,8 +112,9 @@ type attesterSlashingErrorStore struct {
 
 type onBlockErrorStore struct {
 	forkchoice.ForkChoiceStorage
-	err   error
-	calls atomic.Int32
+	err     error
+	calls   atomic.Int32
+	headers sync.Map
 }
 
 type doneObservedContext struct {
@@ -131,9 +132,24 @@ func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing
 	return s.err
 }
 
-func (s *onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+func (s *onBlockErrorStore) OnBlock(_ context.Context, block *cltypes.SignedBeaconBlock, _, _, _ bool) error {
 	s.calls.Add(1)
-	return s.err
+	if s.err != nil {
+		return s.err
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	s.headers.Store(common.Hash(root), block.SignedBeaconBlockHeader().Header)
+	return nil
+}
+
+func (s *onBlockErrorStore) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if header, ok := s.headers.Load(root); ok {
+		return header.(*cltypes.BeaconBlockHeader), true
+	}
+	return s.ForkChoiceStorage.GetHeader(root)
 }
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
@@ -334,10 +350,14 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	queuedValue, scheduled := impl.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, scheduled, "the block must be queued for a retry")
 
-	// The block is already on disk, so a retry must not rewrite it.
+	// A local execution failure leaves the block queued in memory. Its indices
+	// must stay absent until validation succeeds, including across retries.
 	db := svc.(*blockService).db
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteHeaderSlot(tx, blockRoot, sentinelSlot)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		require.NoError(t, err)
+		require.Nil(t, slot)
+		return nil
 	}))
 
 	job := queuedValue.(*blockJob)
@@ -359,8 +379,7 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 		require.NoError(t, err)
-		require.NotNil(t, slot)
-		require.Equal(t, uint64(sentinelSlot), *slot, "the retry rewrote the block")
+		require.Nil(t, slot)
 		return nil
 	}))
 }
@@ -404,7 +423,48 @@ func TestBlockServiceIgnoresLocalOnBlockFailureOnly(t *testing.T) {
 	}
 }
 
-const sentinelSlot = 0xbadbad
+func TestBlockServicePreservesStateRootForUnacceptedBlock(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "rejected", err: forkchoice.ErrBlockInvalid},
+		{name: "waiting for data", err: forkchoice.ErrEIP7594ColumnDataNotAvailable},
+		{name: "ignored"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			store := mock_services.NewForkChoiceStorageMock(t)
+			store.OnBlockErr = tc.err
+			service := &blockService{db: db, forkchoiceStore: store}
+			canonicalRoot := common.Hash{1}
+			stateRoot := common.Hash{2}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.WriteStateRoot(tx, canonicalRoot, stateRoot)
+			}))
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.StateRoot = stateRoot
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+
+			_, err = service.processAndStoreBlock(t.Context(), block, false)
+			require.ErrorIs(t, err, tc.err)
+
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				root, err := beacon_indicies.ReadBlockRootByStateRoot(tx, stateRoot)
+				require.NoError(t, err)
+				require.Equal(t, canonicalRoot, root)
+				slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+				require.NoError(t, err)
+				require.Nil(t, slot)
+				body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+				require.NoError(t, err)
+				require.Empty(t, body)
+				return nil
+			}))
+		})
+	}
+}
 
 func TestBlockServiceYoungerThanParent(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -686,7 +746,7 @@ func TestBlockServiceGossipUsesPostUpgradeExecutionHeadAtGloasBoundary(t *testin
 	fcu.Blocks[parentRoot] = blocks[0]
 	fcu.StateAtBlockRootVal[parentRoot] = parentState
 	fcu.Ancestors[0] = forkchoice.ForkChoiceNode{Root: parentRoot}
-	service := NewBlockService(t.Context(), db, fcu, syncedDataManager, ethClock, &cfg, nil)
+	service := NewBlockService(t.Context(), db, fcu, nil, syncedDataManager, ethClock, &cfg, nil)
 
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
@@ -1200,6 +1260,15 @@ func TestBlockServiceQueuesClockBoundaryBlockForRetry(t *testing.T) {
 	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, queued)
 	require.Equal(t, int32(3), processing.calls.Load())
+	require.NoError(t, impl.db.View(t.Context(), func(tx kv.Tx) error {
+		storedRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, child.Block.StateRoot)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash(root), storedRoot)
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(child.Block.Slot, root))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
+		return nil
+	}))
 }
 
 func TestBlockServiceCommittedReservationAllowsExactRESTReplayOnly(t *testing.T) {
@@ -1322,7 +1391,7 @@ func TestScheduledBlockKeepsPayloadPreparationBehindRetries(t *testing.T) {
 			return forkchoice.ErrNewPayloadNoStatus
 		}
 		return nil
-	}, true)
+	}, true, false)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
@@ -1342,7 +1411,7 @@ func TestClaimingScheduleUpgradesUnclaimedBlockJob(t *testing.T) {
 	service := &blockService{forkchoiceStore: store}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 10
-	job, _ := service.scheduleBlockForLaterProcessing(block, nil, false)
+	job, _ := service.scheduleBlockForLaterProcessing(block, nil, false, false)
 	service.ScheduleBlockForLaterProcessing(block)
 
 	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), 10, 11)
@@ -1813,7 +1882,7 @@ func TestScheduledBlockRejectsInvalidParentSlotBeforeStateAccess(t *testing.T) {
 			child.Block.Slot = test.blockSlot
 			root, err := child.Block.HashSSZ()
 			require.NoError(t, err)
-			job, _ := service.scheduleBlockForLaterProcessing(child, nil, false)
+			job, _ := service.scheduleBlockForLaterProcessing(child, nil, false, false)
 			store.OnBlockErr = forkchoice.ErrParentEnvelopePending
 
 			stateReads := 0
@@ -2466,7 +2535,7 @@ func TestPublishedBlockJobRefreshSurvivesEarlierExpirySample(t *testing.T) {
 func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := clparams.MainnetBeaconConfig
-	service := NewBlockService(ctx, nil, mock_services.NewForkChoiceStorageMock(t), nil, nil, &cfg, nil).(*blockService)
+	service := NewBlockService(ctx, nil, mock_services.NewForkChoiceStorageMock(t), nil, nil, nil, &cfg, nil).(*blockService)
 	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock.Block.Slot = 1
