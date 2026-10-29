@@ -791,3 +791,34 @@ func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
 	hash := keccak.Sum256(encodedBytes)
 	return append(dst[:start], hash[:]...)
 }
+
+func TestUnfoldRejectsInvalidRecords(t *testing.T) {
+	branch := func(path []byte) []byte {
+		n := fork(path)
+		n.plane = planeAccount
+		n.setStoredChild(0, bytes.Repeat([]byte{1}, 32), nil)
+		n.setStoredChild(1, bytes.Repeat([]byte{2}, 32), nil)
+		data := encodeRecord(n, len(path), nil)
+		return data[:len(data)-10]
+	}
+	for _, tc := range []struct {
+		name string
+		path []byte
+		data []byte
+	}{
+		{"self-extension flag without an extension", nil, []byte{0x90}},
+		{"bare header at the root", nil, []byte{0x10}},
+		{"bare header below the root", []byte{3}, []byte{0x10}},
+		{"short leaf root", nil, []byte{0x80, 1, 2, 3}},
+		{"truncated slot at the root", nil, branch(nil)},
+		{"truncated slot below the root", []byte{3}, branch([]byte{3})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newShardedContext()
+			require.NoError(t, ctx.PutBranch(nodeKey(planeAccount, nil, tc.path, nil), tc.data, nil))
+			var err error
+			require.NotPanics(t, func() { _, err = unfold(ctx, tc.path, planeAccount, nil) })
+			require.Error(t, err)
+		})
+	}
+}
