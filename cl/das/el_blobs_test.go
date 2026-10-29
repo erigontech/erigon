@@ -146,7 +146,7 @@ func TestImportColumnsFromBlobsTrustsELCellProofs(t *testing.T) {
 	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
-	proofs[0][5] = proofs[1][5]
+	proofs[0][5] = proofs[0][6]
 
 	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
 
