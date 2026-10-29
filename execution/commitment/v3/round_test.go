@@ -455,7 +455,7 @@ func TestScheduling(t *testing.T) {
 		}
 		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{parityAccount(address, 3), commitmenttest.StorageAt(commitmenttest.SlotKey(address, paritySlot(3)), 3)})
 		before := storageRoot()
-		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{commitmenttest.Op{Key: address, Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField, Balance: *uint256.NewInt(99)}}})
+		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{{Key: address, Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField, Balance: *uint256.NewInt(99)}}})
 		require.Equal(t, before, storageRoot())
 	})
 

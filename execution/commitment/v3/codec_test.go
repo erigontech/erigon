@@ -455,12 +455,14 @@ func TestRecordCodec(t *testing.T) {
 			suffix := packPath(bytes.Repeat([]byte{1}, 60), nil)
 			extension := extFixture([]byte{6, 7, 8})
 			second := extFixture([]byte{9})
-			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0005,
+			data := commitmenttest.Record(&commitmenttest.RecordSpec{
+				Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0005,
 				Extensions: [16][]byte{0: extension, 2: second},
 				Leaves: [16]commitmenttest.Leaf{
 					1: {Suffix: suffix, Value: []byte{0x11, 0x12}},
 					3: {Suffix: suffix, Value: []byte{0x31}},
-				}})
+				},
+			})
 			require.NoError(t, Validate(data, depth))
 			r := Record{data: data, depth: depth}
 			l := r.layout()
@@ -501,12 +503,14 @@ func TestRecordCodec(t *testing.T) {
 			require.Equal(t, value, gotValue)
 		}},
 		{"E27/RecordDecodeNoAllocations", func(t *testing.T) {
-			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0001,
+			data := commitmenttest.Record(&commitmenttest.RecordSpec{
+				Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0001,
 				Extensions: [16][]byte{0: extFixture([]byte{6, 7})},
 				Leaves: [16]commitmenttest.Leaf{
 					1: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{1}},
 					3: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{3}},
-				}})
+				},
+			})
 			r := Record{data: data, depth: 3}
 			require.Zero(t, testing.AllocsPerRun(100, func() {
 				l := r.layout()
