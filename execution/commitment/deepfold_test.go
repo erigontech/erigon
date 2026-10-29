@@ -351,6 +351,32 @@ func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
 	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
 }
 
+func TestSoleAccount_SwapOnlySlotThenGrow(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4245))
+	old := storageLocsForNibble(0x8, 1, 21)
+	swapped := storageLocsForNibble(0x2, 1, 23)
+	fresh := storageLocsForNibble(0xc, 1, 29)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ub1.Storage(a, old[0], old[0])
+	ub2 := NewUpdateBuilder().Balance(a, 1)
+	ub2.DeleteStorage(a, old[0])
+	ub2.Storage(a, swapped[0], swapped[0])
+	ub3 := NewUpdateBuilder().Balance(a, 1)
+	ub3.Storage(a, fresh[0], fresh[0])
+
+	ubf := NewUpdateBuilder().Balance(a, 1)
+	ubf.Storage(a, swapped[0], swapped[0])
+	ubf.Storage(a, fresh[0], fresh[0])
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub1, ub2, ub3)
+	require.Equal(t, want, carried, "carried trie navigated the swapped slot by the slot it replaced")
+	require.Equal(t, want, restored, "state-restored trie navigated the swapped slot by the slot it replaced")
+}
+
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
 func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
 	rnd := rand.New(rand.NewSource(seed))

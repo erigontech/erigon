@@ -1989,6 +1989,12 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	}
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
+	if row == 0 && (upCell.accountAddrLen > 0 || upCell.storageAddrLen > 0) {
+		upCell.hashedExtLen = 0
+		if err := upCell.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			return err
+		}
+	}
 
 	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
 		return err
