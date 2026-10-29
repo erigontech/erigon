@@ -286,6 +286,40 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 	}
 }
 
+const registeredTxType = 0x7c
+
+func init() {
+	types.RegisterTxType(registeredTxType, types.TxTypeSpec{New: func() types.Transaction { return nil }, MintsValue: true})
+}
+
+// registeredTxn is a dynamic-fee transaction carrying a registered type id.
+type registeredTxn struct{ *types.DynamicFeeTransaction }
+
+func (registeredTxn) Type() byte { return registeredTxType }
+
+func TestChargesSenderAtValidation(t *testing.T) {
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	plain := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}}
+	for _, tc := range []struct {
+		name string
+		txn  types.Transaction
+		want bool
+	}{
+		{name: "plain call", txn: plain, want: true},
+		{name: "registered type", txn: registeredTxn{plain}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &TxTask{
+				Header: &types.Header{},
+				Txs:    types.Transactions{tc.txn},
+				Config: chain.TestChainOsakaConfig,
+				sender: accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111")),
+			}
+			require.Equal(t, tc.want, task.ChargesSenderAtValidation(0))
+		})
+	}
+}
+
 func TestBindBlockGas(t *testing.T) {
 	const capped = 16_777_216
 	to := common.HexToAddress("0x2222222222222222222222222222222222222222")

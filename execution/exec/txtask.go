@@ -308,8 +308,10 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
+	// Registered types may define their own sender rules, such as minting
+	// their value, which the deferred charge does not model.
 	isPlainCall := txn != nil && txn.GetTo() != nil && len(txn.GetAuthorizations()) == 0 &&
-		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType
+		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType && !types.IsRegisteredTxType(txn.Type())
 	if !isPlainCall {
 		return false
 	}
