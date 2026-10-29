@@ -1323,7 +1323,14 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 					batching = false
 				}
 			}
-			if err := a.buildFiles(ctx, db, step, finalityCtx, nil, batch); err != nil {
+			err := a.buildFiles(ctx, db, step, finalityCtx, nil, batch)
+			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				batch.Close()
+				batch, batching = nil, false
+				err = a.buildFiles(ctx, db, step, finalityCtx, nil, nil)
+			}
+			if err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2453,7 +2460,14 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 					batching = false
 				}
 			}
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch); err != nil {
+			err := a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch)
+			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				batch.Close()
+				batch, batching = nil, false
+				err = a.buildFiles(a.ctx, db, step, finalityCtx, fin, nil)
+			}
+			if err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}

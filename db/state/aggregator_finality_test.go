@@ -21,6 +21,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -157,6 +158,40 @@ func TestBuildFilesFallsBackToSingleStepWhenBatchCollationFails(t *testing.T) {
 
 			build(t, agg, asTemporalRoDB(db))
 			require.GreaterOrEqual(t, agg.EndTxNumMinimax(), uint64(2*16))
+		})
+	}
+}
+
+func TestBuildFilesRetriesStepWithoutBatchWhenBatchedBuildFails(t *testing.T) {
+	for name, build := range map[string]func(t *testing.T, agg *Aggregator, db kv.TemporalRoDB){
+		"BuildFilesInBackground": func(t *testing.T, agg *Aggregator, db kv.TemporalRoDB) {
+			<-agg.BuildFilesInBackground(db, 4*16, unboundedFinalityCtx)
+		},
+		"BuildFiles2": func(t *testing.T, agg *Aggregator, db kv.TemporalRoDB) {
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+			agg.background.Wait()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, 16)
+			d := agg.d[kv.AccountsDomain]
+			writeDupSortStepBacklog(t, db, d, 16, 4, 8, 3)
+			obstacle := filepath.Join(agg.dirs.Tmp, filepath.Base(d.History.vNewFilePath(0, 1))+".idt")
+			require.NoError(t, os.Mkdir(obstacle, 0o755))
+			staged := filepath.Join(agg.dirs.Tmp, filepath.Base(d.kvNewFilePath(1, 2))+".idt")
+			var attempts atomic.Int32
+			var stagedAtRetry atomic.Bool
+			agg.SetMaintenanceObserver(func(_ context.Context, event MaintenanceEvent) {
+				if event.Point == MaintenanceBuildStarted && attempts.Add(1) == 2 {
+					_, err := os.Stat(staged)
+					stagedAtRetry.Store(err == nil)
+					_ = dir.RemoveAll(obstacle)
+				}
+			})
+
+			build(t, agg, asTemporalRoDB(db))
+			require.GreaterOrEqual(t, agg.EndTxNumMinimax(), uint64(16))
+			require.False(t, stagedAtRetry.Load(), "batch must be closed before the single-step retry")
 		})
 	}
 }
