@@ -17,6 +17,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -736,7 +737,7 @@ type dupMaxSchema struct {
 
 func (s *dupMaxSchema) name() string {
 	if s.u16 {
-		return "u16off"
+		return fmt.Sprintf("u16off-%d", s.limit)
 	}
 	return fmt.Sprintf("dupmax-varint-%d", s.limit)
 }
@@ -1228,6 +1229,10 @@ func TestIISchemaSpike(t *testing.T) {
 		func() spikeSchema { return &dupChunkSchema{limit: 512} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512, u16: true} },
+		func() spikeSchema { return &dupMaxSchema{limit: 256} },
+		func() spikeSchema { return &dupMaxSchema{limit: 1024} },
+		func() spikeSchema { return &dupMaxSchema{limit: 256, u16: true} },
+		func() spikeSchema { return &dupMaxSchema{limit: 1024, u16: true} },
 		func() spikeSchema { return prodSchema{} },
 		func() spikeSchema { return prodPfSchema{} },
 		func() spikeSchema { return &chunkSchema{codec: varintCodec{}, limit: 1024} },
@@ -1252,6 +1257,13 @@ func TestIISchemaSpike(t *testing.T) {
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{spikeTbl: kv.TableCfgItem{Flags: s.flags()}} }).MustOpen()
 		spikeDB = db
 		ctx := t.Context()
+		var ops []string
+		opsAt := spikePageOps(t, db)
+		phase := func(name string) {
+			now := spikePageOps(t, db)
+			ops = append(ops, fmt.Sprintf("%s:%d/%d/%d/%d", name, now.Split-opsAt.Split, now.Merge-opsAt.Merge, now.Cow-opsAt.Cow, now.Newly-opsAt.Newly))
+			opsAt = now
+		}
 
 		// bulk: [first, tipFrom) in 200k-txNum flushes
 		start := time.Now()
@@ -1276,6 +1288,7 @@ func TestIISchemaSpike(t *testing.T) {
 			i = j
 		}
 		bulk := time.Since(start)
+		phase("bulk")
 
 		// tip: one flush+commit per 250 txNums
 		var tipDur time.Duration
@@ -1308,6 +1321,7 @@ func TestIISchemaSpike(t *testing.T) {
 			i = j
 		}
 		nTip := (last - tipFrom + tipBatch - 1) / tipBatch
+		phase("tip")
 
 		ro, err := db.BeginRo(ctx)
 		if err != nil {
@@ -1348,6 +1362,7 @@ func TestIISchemaSpike(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
+		phase("unw")
 		tx, err = db.BeginRw(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -1361,6 +1376,7 @@ func TestIISchemaSpike(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
+		phase("prune")
 		// correctness: every arm must return the same counts
 		ro, _ = db.BeginRo(ctx)
 		_, after := 0, 0
@@ -1386,11 +1402,19 @@ func TestIISchemaSpike(t *testing.T) {
 		if want != after {
 			t.Fatalf("%s: after prune+unwind got %d want %d", s.name(), after, want)
 		}
-		fmt.Printf("%-22s %8.2f %8.3f %9s %9.1f %9.1f %9.1f %9.1f %9.1f %9.1f %8.2f %8.1f  dups=%d chk=%d/%d/%d/%d/%d/%d\n", s.name(),
+		fmt.Printf("%-22s %8.2f %8.3f %9s %9.1f %9.1f %9.1f %9.1f %9.1f %9.1f %8.2f %8.1f  dups=%d chk=%d/%d/%d/%d/%d/%d ops(split/merge/cow/newly)=%s\n", s.name(),
 			bulk.Seconds(), float64(tipDur.Microseconds())/1000/float64(nTip), datasize.ByteSize(dirty/nTip).HR(),
 			float64(size)/1e6, us(hotTip), us(hotAll), us(hotDesc), us(cold), us(coldTip), pr.Seconds(), float64(unw.Microseconds())/1000,
-			dups, n1, n2, n3, n4, n5, after)
+			dups, n1, n2, n3, n4, n5, after, strings.Join(ops, ","))
 	}
+}
+
+func spikePageOps(t *testing.T, db kv.RwDB) mdbxgo.EnfInfoPageOps {
+	info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.PageOps
 }
 
 func us(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1000 }
