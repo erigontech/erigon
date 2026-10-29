@@ -86,7 +86,7 @@ This can be thought of a reverse operation from the one described before. When a
 transactions, pending_pool, queued_pool => pending_pool`, queued_pool`
 ```
 
-An interesting note here is that if the block contained any transactions local to the node, by being first removed from the pool (from the "local" part of it), and then re-injected, they effective lose their priority over the "remote" transactions. In order to prevent that, somehow the fact that certain transactions were local, needs to be remembered for some time (up to some "immutability threshold")
+Local transactions keep their priority when re-injected: the pool remembers their hashes, and an unwound transaction gets its local flag back from there.
 
 ## Question about persistence of the transactions
 In the current implementation, transactions from the pool are persisted upon graceful shutdown. Upon restart, they are recovered and used for reducing the amount of reconciliation that is done via `eth/65` pooled transactions. However, if we assume that transactions in the

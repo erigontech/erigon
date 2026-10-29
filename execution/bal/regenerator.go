@@ -121,7 +121,7 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if body == nil {
 		return nil, nil
 	}
-	reader, err := g.historyStateReader(ctx, tx, blockNum)
+	blockStartTxNum, err := g.historyStartTxNum(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -146,17 +146,11 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if block == nil {
 		return nil, nil
 	}
-	ibs := state.New(reader)
-	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		return g.blockReader.Header(ctx, tx, hash, number)
-	}
-	chainReader := exec.NewChainReader(cfg, tx, g.blockReader, g.logger)
-	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, g.logger)
+	vio, err := RederiveFromHistory(ctx, cfg, g.engine, g.blockReader, tx, block, blockStartTxNum, g.logger)
 	if err != nil {
 		return nil, err
 	}
+	bal := vio.AsBlockAccessList()
 	computedHash := bal.Hash()
 	if computedHash != *header.BlockAccessListHash {
 		// A canonical block whose replay diverges from its commitment is a
@@ -172,22 +166,36 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	return encoded, nil
 }
 
-// historyStateReader positions a history reader at the block's first txNum,
-// i.e. before its init system call, so the whole block can be replayed.
-func (g *Regenerator) historyStateReader(ctx context.Context, tx kv.TemporalTx, blockNum uint64) (state.StateReader, error) {
+// historyStartTxNum returns the block's first txNum, i.e. the txNum of its init
+// system call, once the state history there is available.
+func (g *Regenerator) historyStartTxNum(ctx context.Context, tx kv.TemporalTx, blockNum uint64) (uint64, error) {
 	minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if minTxNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := g.txNumReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNum, firstAvailBlock)
+		return 0, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNum, firstAvailBlock)
 	}
-	return state.NewHistoryReaderV3(tx, minTxNum), nil
+	return minTxNum, nil
+}
+
+// RederiveFromHistory replays block on the state history at blockStartTxNum,
+// the txNum of its init system call, and returns the I/O its access list is
+// built from.
+func RederiveFromHistory(ctx context.Context, cfg *chain.Config, engine rules.Engine, blockReader dbservices.FullBlockReader, tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, logger log.Logger) (*state.VersionedIO, error) {
+	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return blockReader.Header(ctx, tx, hash, number)
+	}
+	chainReader := exec.NewChainReader(cfg, tx, blockReader, logger)
+	return RederiveBlockAccessList(ctx, cfg, engine, chainReader, getHeader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, logger)
 }
 
 type loaderMutex[K comparable] struct {

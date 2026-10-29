@@ -436,6 +436,11 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
 }
 
+// BlockServeRangeStartSlot returns the first slot in the mandatory block-serving range.
+func (b *BeaconChainConfig) BlockServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForBlockRequests(), 0)
+}
+
 // BlobSidecarServeRangeStartSlot returns the first slot in the mandatory blob-serving range.
 func (b *BeaconChainConfig) BlobSidecarServeRangeStartSlot(currentSlot uint64) uint64 {
 	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForBlobSidecarsRequests, b.DenebForkEpoch)
@@ -1393,8 +1398,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60000910
 	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
-	cfg.GloasForkEpoch = 132352
-	cfg.GloasForkVersion = 0x80000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1414,9 +1417,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.BlobSchedule = []BlobParameters{
 		{52480, 15},
 		{54016, 21},
-	}
-	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
-		{Epoch: 132352, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()

@@ -19,6 +19,7 @@ package tests
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strconv"
@@ -104,7 +105,7 @@ func GetGloasFixture(name string, transitionFixture bool, forkEpoch uint64) Gloa
 	cfg := preState.BeaconConfig()
 	cfg.GloasForkEpoch = forkEpoch
 	postState, err := spectest.ReadBeaconState(root, clparams.GloasVersion, spectest.PostSsz)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		panic(err)
 	}
 	blocks := make([]*cltypes.SignedBeaconBlock, 0)
