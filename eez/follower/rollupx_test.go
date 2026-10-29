@@ -108,7 +108,7 @@ func replayL1(t *testing.T, r *testfixtures.EEZDevReplay, ref *config.L1Referenc
 func TestEEZDevReplay(t *testing.T) {
 	r, err := testfixtures.LoadEEZDevReplay()
 	require.NoError(t, err)
-	spec := networks.Chiado
+	spec := networks.Chiado699069
 	_, chain := derivertest.NewL2Of(t, spec)
 	var blobs replayBlobs
 	for _, b := range r.Batches {
@@ -161,7 +161,7 @@ func TestEEZDevReplay(t *testing.T) {
 func TestL1Reference(t *testing.T) {
 	r, err := testfixtures.LoadEEZDevReplay()
 	require.NoError(t, err)
-	spec := networks.Chiado
+	spec := networks.Chiado699069
 	ref := spec.Config.L2.(*config.L2Config).RollupX.L1Reference
 	_, chain := derivertest.NewL2Of(t, spec)
 	other := ref

@@ -53,10 +53,47 @@ var Devnet = chainspec.Spec{
 //go:embed devnet-genesis.json
 var devnetGenesis []byte
 
-// Chiado is eez.dev, the eez-rollupX network on Chiado of fixture
-// eezdev-699069.
-var Chiado = chainspec.Spec{
+// Chiado699169 is eez.dev, rollup 2 of a registry it shares on Chiado: the
+// eez-rollupX v0.1 network that replaced Chiado699069 on 2026-10-28.
+// Scanning starts at its registration.
+var Chiado699169 = chainspec.Spec{
 	Name:             "eez-chiado",
+	GenesisHash:      common.HexToHash("0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0"),
+	GenesisStateRoot: common.HexToHash("0x2e09b0500a7fc5d147f7a4ec7f3fa8b447cb89b131585689f8625e0556fab321"),
+	Genesis: mustRollupXGenesis(chiado699169Genesis, &config.L2Config{
+		RollupID:            2,
+		L1ChainID:           10200,
+		Registry:            common.HexToAddress("0x6258189d3a04eb31a196a8931077dfe001a9f6fd"),
+		RegistryDeployBlock: 23_731_532,
+		BlockInterval:       1,
+		L1BlockTime:         5,
+		BlockGasLimit:       config.RollupXBlockGasLimit,
+	}),
+}
+
+// Chiado916969 is eez.asuscomm.com, rollup 4 of a registry it shares on
+// Chiado: the eez-rollupX v0.1 network that replaced Chiado906969 on
+// 2026-10-28. Rollup 1 of the same registry used chain id 916969 before.
+// Scanning starts at its registration.
+var Chiado916969 = chainspec.Spec{
+	Name:             "eez-chiado-asus",
+	GenesisHash:      common.HexToHash("0xbb9e52d97581ec62134cdfd6a4c21330de6002557f66fb8bd49b3e2f800d80ae"),
+	GenesisStateRoot: common.HexToHash("0x0b4679c7fa435b5f542d605212abb50165397164ae0aa43badf21e2fae7f8549"),
+	Genesis: mustRollupXGenesis(chiado916969Genesis, &config.L2Config{
+		RollupID:            4,
+		L1ChainID:           10200,
+		Registry:            common.HexToAddress("0x3b1d212f8f352c2d9334733aa31cf7546f15c239"),
+		RegistryDeployBlock: 23_731_484,
+		BlockInterval:       1,
+		L1BlockTime:         5,
+		BlockGasLimit:       config.RollupXBlockGasLimit,
+	}),
+}
+
+// Chiado699069 is eez.dev until 2026-10-28, the eez-rollupX v0.0.1 network
+// of fixture eezdev-699069. Its last batch settled in L1 block 23,723,620.
+var Chiado699069 = chainspec.Spec{
+	Name:             "eez-chiado-699069",
 	GenesisHash:      common.HexToHash("0x05227a1af51a988231b625b276c6b29594f0a93090efd93463934cd1bf6e606e"),
 	GenesisStateRoot: common.HexToHash("0x8255029550a16e602838f463ca67bfc560ff9841d576905e2412844de258c18e"),
 	Genesis: mustRollupXGenesis(chiado699069Genesis, &config.L2Config{
@@ -70,10 +107,11 @@ var Chiado = chainspec.Spec{
 	}),
 }
 
-// ChiadoAsus is eez.asuscomm.com, the eez-rollupX network on Chiado that
-// rehearses protocol upgrades.
-var ChiadoAsus = chainspec.Spec{
-	Name:             "eez-chiado-asus",
+// Chiado906969 is eez.asuscomm.com until 2026-10-28, the eez-rollupX v0.0.1
+// network on Chiado that rehearsed protocol upgrades. Its last batch
+// settled in L1 block 23,691,477.
+var Chiado906969 = chainspec.Spec{
+	Name:             "eez-chiado-906969",
 	GenesisHash:      common.HexToHash("0x10c9ab15fb55a85ca101320e9bf842a67946704b36b98f5ae18ecac8ba8ffcd5"),
 	GenesisStateRoot: common.HexToHash("0xc0082ef15873213ec8a9217c0bfd503c0058dd73422c8e318cc98625f0ebac5e"),
 	Genesis: mustRollupXGenesis(chiado906969Genesis, &config.L2Config{
@@ -105,6 +143,20 @@ var Mainnet = chainspec.Spec{
 	}),
 }
 
+// chiado699169Genesis and chiado916969Genesis are rebuilt from the state
+// the networks' nodes served for block 0 on 2026-10-29: balance, nonce, code
+// and storage of the accounts and slots of eez-rollupX's genesis.json at
+// d0130ab931fcdb264d0822707fc1ef5889122f6f, with config.rollupX from
+// debug_chainConfig and the header fields from block 0. No genesis file is
+// published; the hashes are the initial block hashes of the networks'
+// RollupCreated logs.
+var (
+	//go:embed chiado-699169-genesis.json
+	chiado699169Genesis []byte
+	//go:embed chiado-916969-genesis.json
+	chiado916969Genesis []byte
+)
+
 // chiado699069Genesis is the genesis.json of fixture eezdev-699069,
 // unchanged; eez/testdata/SOURCES.md records its source.
 //
@@ -121,8 +173,10 @@ var (
 	ethereum696990Genesis []byte
 )
 
+var all = []*chainspec.Spec{&Devnet, &Chiado699169, &Chiado916969, &Chiado699069, &Chiado906969, &Mainnet}
+
 func init() {
-	for _, spec := range []*chainspec.Spec{&Devnet, &Chiado, &ChiadoAsus, &Mainnet} {
+	for _, spec := range all {
 		spec.Config = spec.Genesis.Config
 	}
 }
@@ -132,7 +186,7 @@ var registerOnce sync.Once
 // Register makes the EEZ networks available to --chain.
 func Register() {
 	registerOnce.Do(func() {
-		for _, spec := range []*chainspec.Spec{&Devnet, &Chiado, &ChiadoAsus, &Mainnet} {
+		for _, spec := range all {
 			chainspec.RegisterChainSpec(spec.Name, *spec)
 		}
 	})
@@ -152,7 +206,7 @@ func mustGenesis(raw []byte, l2 *config.L2Config) *types.Genesis {
 
 // mustRollupXGenesis is mustGenesis for an eez-rollupX genesis, whose
 // config.rollupX section is the l2 section's schedule and implies the 2/50
-// EIP-1559 rule.
+// EIP-1559 rule. A v0.1 section's fee collector is the chain's.
 func mustRollupXGenesis(raw []byte, l2 *config.L2Config) *types.Genesis {
 	var doc struct {
 		Config struct {
@@ -166,6 +220,9 @@ func mustRollupXGenesis(raw []byte, l2 *config.L2Config) *types.Genesis {
 	g := mustGenesis(raw, l2)
 	denominator := config.RollupXBaseFeeChangeDenominator
 	g.Config.BaseFeeChangeDenominator = &denominator
+	if collector := l2.RollupX.FeeCollector; collector != nil {
+		g.Config.FeeCollector = new(*collector)
+	}
 	if err := l2.ValidateChain(g.Config); err != nil {
 		panic(fmt.Sprintf("eez genesis: %v", err))
 	}

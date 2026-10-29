@@ -58,7 +58,7 @@ func requireBalance(t *testing.T, ibs *state.IntraBlockState, want uint64, addrs
 // block does not.
 func TestRollupXBlockStartBurn(t *testing.T) {
 	eezl2 := accounts.InternAddress(protocol.RollupXEEZL2Address)
-	cfg, ibs, header := block1(t, networks.Chiado)
+	cfg, ibs, header := block1(t, networks.Chiado699069)
 	e, err := New(cfg)
 	require.NoError(t, err)
 	custom, _ := syscalls(cfg, e, header, ibs)
@@ -87,9 +87,9 @@ func TestRollupXBlockStartBurn(t *testing.T) {
 }
 
 func TestRollupXVerifyHeader(t *testing.T) {
-	cfg, _, header := block1(t, networks.Chiado)
+	cfg, _, header := block1(t, networks.Chiado699069)
 	e, reader := newTestEngine(t, cfg)
-	genesis, _, err := genesiswrite.GenesisToBlock(networks.Chiado.Genesis, datadir.New(t.TempDir()), log.New())
+	genesis, _, err := genesiswrite.GenesisToBlock(networks.Chiado699069.Genesis, datadir.New(t.TempDir()), log.New())
 	require.NoError(t, err)
 	reader.headers[genesis.Hash()] = genesis.Header()
 
@@ -110,7 +110,7 @@ func TestRollupXVerifyHeader(t *testing.T) {
 }
 
 func TestRollupXNew(t *testing.T) {
-	cfg := networks.Chiado.Config.Copy()
+	cfg := networks.Chiado699069.Config.Copy()
 	cfg.BaseFeeChangeDenominator = nil
 	_, err := New(cfg)
 	require.ErrorIs(t, err, config.ErrInvalid)
