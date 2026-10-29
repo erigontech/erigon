@@ -13,6 +13,10 @@ Both files carry `schemaVersion`, `protocolCommit` and `solidityOracle`; the loa
 
 License: `MIT OR Apache-2.0` (eez-rollup0).
 
+`native-profile-v1.json` is `crates/eez-control-rpc/conformance/native-profile-v1.json` of `eez-association/eez-rollupX` at `d0130ab931fcdb264d0822707fc1ef5889122f6f`, the revision 699169 and 916969 run. Per its notes, its expected bytes were built by hand-written Python ABI and RLP encoders and cross-checked with Foundry `cast` 1.7.1; they are encodings, not execution outcomes. The loader requires format 1, validation version 7 and history envelope version 1.
+
+License: `MIT` (eez-rollupX).
+
 ## windows/
 
 Recorded L2 block windows with their execution witnesses, from `eez-association/eez-rollup0` at `a270a06a92131d1987d49903a4174eef04ce959c`, `crates/eez-prover-stateless/tests/fixtures/<name>/`. Each directory keeps the upstream `README.md` describing its recording. Blocks are consensus RLP (`debug_getRawBlock`), witnesses are reth `debug_executionWitness` results, `oracle.json` and `blocks.json` hold values read back from the chain or the reference signer.
@@ -66,6 +70,7 @@ License: `LGPL-3.0-only` (nethermind).
 | `chiado/header-23507949.rlp.hex` | `b6c2ffc4aea6c879093cd6bf111dddf24807997d1b1b6bda485953950b22d373` |
 | `chiado/rollup-created-23413747.json` | `986dbf338aa6ed9b8bae098578d5421665aa298caddc72095ce7aa0cca2a953d` |
 | `rollupx/eezdev-699069/replay-0-2250.json` | `6815ec581ed88eedada5a53e09bb485907139311f7d8a170b7af851314717096` |
+| `vectors/native-profile-v1.json` | `e34194f2a2cba5151f27fb3964be1c6a22961a3ad7a11ff46d66668e9d966276` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
 | `windows/captured-devnet-anchor-402/block-397.rlp.hex` | `f7768c77f78a57ee124aceef59fac0a9e6c5a06203cf4c000ea94e6d63f2cb88` |
