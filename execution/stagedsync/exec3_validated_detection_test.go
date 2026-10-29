@@ -34,7 +34,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		tasks:               tasks,
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(nil),
-		readerByAddr:        map[accounts.Address][]int{},
+		readerByAddr:        map[accounts.Address]pathReaders{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
@@ -216,6 +216,29 @@ func TestMarkReadersDirty(t *testing.T) {
 
 	t.Run("storage write flags only the later reader of the slot", func(t *testing.T) {
 		be := newBE()
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a lone reader is flagged only by a write of a cell it read", func(t *testing.T) {
+		be := newDetExecutor(t, 4)
+		be.revalidate = map[int]bool{}
+		read(be, 2, 0, slot1)
+		be.markReadersDirty(1, newWS().stor(addr, slot2, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a lower second reader of another path keeps the first reader's path", func(t *testing.T) {
+		be := newDetExecutor(t, 4)
+		be.revalidate = map[int]bool{}
+		rs := state.ReadSet{}
+		rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+		be.blockIO.RecordReads(state.Version{TxIndex: 3}, rs)
+		be.indexReads(3, rs)
+		read(be, 2, 0, slot1)
+		be.markReadersDirty(1, newWS().bal(addr, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{3: true}, be.revalidate)
+		be.revalidate = map[int]bool{}
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
