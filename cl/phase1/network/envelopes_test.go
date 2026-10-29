@@ -336,11 +336,14 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 		name             string
 		protocol         string
 		invalidSignature bool
+		single           bool
 	}{
 		{name: "by-root commitment", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
 		{name: "by-range commitment", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
 		{name: "by-root signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidSignature: true},
 		{name: "by-range signature", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidSignature: true},
+		{name: "single commitment", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, single: true},
+		{name: "single signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidSignature: true, single: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
@@ -375,6 +378,15 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 			downloader := NewBackwardBeaconDownloader(t.Context(), client, nil, nil, nil, cfg)
 			t.Cleanup(downloader.reqInterval.Stop)
 			downloader.SetGloasEnvelopeSignatureValidator(anchorState)
+			validate := downloader.validateGloasEnvelope
+			validations := 0
+			downloader.validateGloasEnvelope = func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+				err := validate(block, envelope)
+				if err == nil {
+					validations++
+				}
+				return err
+			}
 			downloader.SetExpectedRoot(valid.Message.BeaconBlockRoot)
 			downloader.SetSlotToDownload(block.Block.Slot)
 			child := makeGloasBlock(11, hash(2), valid.Message.Payload.BlockHash)
@@ -382,15 +394,22 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 			downloader.prevBatchTopBlock = child
 			downloader.SetOnNewBlock(func(got *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
 				require.Same(t, block, got)
-				require.NoError(t, downloader.validateGloasEnvelope(got, envelope))
+				require.NoError(t, validate(got, envelope))
 				return true, nil
 			})
 
-			require.NoError(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{block}))
+			if tc.single {
+				envelope, err := downloader.fetchSingleEnvelopeP2P(t.Context(), block)
+				require.NoError(t, err)
+				require.NoError(t, validate(block, envelope))
+			} else {
+				require.NoError(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{block}))
+				require.True(t, downloader.Finished())
+				require.Equal(t, uint64(1), downloader.Processed())
+				require.Equal(t, block.Block.ParentRoot, downloader.expectedRoot)
+			}
 			require.Equal(t, []string{"invalid-envelope-peer"}, sentinel.banned)
-			require.True(t, downloader.Finished())
-			require.Equal(t, uint64(1), downloader.Processed())
-			require.Equal(t, block.Block.ParentRoot, downloader.expectedRoot)
+			require.Equal(t, 1, validations)
 			require.Zero(t, downloader.consecutiveEnvelopeFailures)
 		})
 	}
