@@ -629,3 +629,49 @@ func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, kvs, commitmentFilesByEnd(t, agg.Dirs().SnapDomain))
 }
+
+func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
+	for _, name := range []string{"branch", "empty"} {
+		t.Run(name, func(t *testing.T) {
+			const stepSize, steps = 1, 4
+			useCommitmentSchema(t, false)
+			db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+			_, del, putAccount := domainWriter(t, domains, rwTx)
+			next := uint64(1)
+			addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+			other := addressWithHashPrefix(t, []byte{9}, &next)
+			for txNum := range uint64(stepSize * steps) {
+				switch {
+				case txNum < stepSize*2:
+					for _, a := range addrs {
+						putAccount(a, txNum)
+					}
+				case name == "branch":
+					putAccount(other, txNum)
+				case txNum == stepSize*2:
+					for _, a := range addrs {
+						del(kv.AccountsDomain, a, txNum)
+					}
+				}
+				_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum, txNum, "", nil)
+				require.NoError(t, err)
+			}
+			require.NoError(t, domains.Flush(t.Context(), rwTx))
+			require.NoError(t, rwTx.Commit())
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, steps-1, unboundedFinalityCtx, false))
+			require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
+
+			runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+			c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+			require.NoError(t, err)
+			kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
+			keys, vals := readKVFile(t, agg, kvs[len(kvs)-1])
+			idx := slices.IndexFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
+			require.GreaterOrEqual(t, idx, 0)
+			_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", c.Root))
+			require.Greater(t, len(kvs), 1)
+		})
+	}
+}

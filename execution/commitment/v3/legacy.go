@@ -475,6 +475,9 @@ func (c *LegacyConverter) EmitRootExtension(stateValue []byte, emit LegacyEmitFu
 	if len(record) != 0 {
 		return emit(key, record, LegacySynthesized)
 	}
+	if c.incremental {
+		return emit(key, nil, LegacyTombstone)
+	}
 	return nil
 }
 
