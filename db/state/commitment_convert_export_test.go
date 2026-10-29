@@ -25,6 +25,7 @@ package state
 var (
 	ConvertCommitmentFileForTest = convertCommitmentFile
 	ErrSkipForTest               = errSkip
+	DumpCommitmentStepForTest    = dumpCommitmentStep
 )
 
 // SetConvertPhase1AfterFileHookForTest installs (or clears, via nil) the

@@ -615,6 +615,29 @@ func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bo
 	require.Equal(t, history, commitmentHistory(t, tdb, txNum), "the rebuilt commitment history reads as the original")
 }
 
+func TestDumpCommitmentStepClosesCollationOnBuildError(t *testing.T) {
+	schema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = schema })
+	statecfg.EnableHistoricalCommitment()
+	db, agg := testDbAndAggregatorv3(t, 16)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, []byte("key1"), []byte("value1"), 1, nil))
+
+	dirs := agg.Dirs()
+	require.NoError(t, dir.RemoveFile(dirs.SnapHistory), "no history file is open yet, so the empty dir can go and History.buildFiles cannot write .ef")
+	require.Error(t, state.DumpCommitmentStepForTest(ctx, agg, domains, 0))
+	leftovers, err := filepath.Glob(filepath.Join(dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Empty(t, leftovers, "the domain values compressor is closed when buildFiles fails")
+}
+
 func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())

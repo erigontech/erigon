@@ -1264,6 +1264,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 		coll.Close()
 		return err
 	}
+	defer coll.Close()
 	sf, err := d.buildFiles(ctx, step, coll, background.NewProgressSet())
 	if err != nil {
 		return err
