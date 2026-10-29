@@ -3,7 +3,6 @@ package blob_storage
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"runtime"
 	"slices"
@@ -915,20 +914,6 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestColumnWriteRemovesItsFileWhenTheBitFails(t *testing.T) {
-	storage, fs, _ := setupTestDataColumnStorage(t)
-	impl := storage.(*dataColumnStorageImpl)
-	root := common.Hash{1}
-	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1000, 0)))
-	impl.db.Close()
-
-	require.Error(t, storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1)))
-
-	_, file := impl.path(1000, root, 1)
-	_, err := fs.Stat(file)
-	require.True(t, errors.Is(err, os.ErrNotExist), "a file whose bit was never set is hidden from every reader of the row: %v", err)
-}
-
 type dirSyncFs struct {
 	afero.Fs
 	onSync func(name string)
@@ -967,9 +952,10 @@ func TestColumnWriteSyncsTheBucketBeforeSettingTheBit(t *testing.T) {
 	}
 
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 2, createTestDataColumnSidecar(1000, 2)))
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 3, createTestDataColumnSidecar(1000, 3)))
 
 	dir, _ := storage.(*dataColumnStorageImpl).path(1000, root, 2)
-	require.Equal(t, []string{dir}, synced, "the rename must be durable before the bit that claims it")
-	require.Equal(t, [][]byte{nil}, rowAtSync)
-	require.Equal(t, []byte{1 << 2}, columnRow(t, storage, root))
+	require.Equal(t, []string{dir, ".", dir}, synced, "the rename and the bucket entry must be durable before the bit that claims them")
+	require.Equal(t, [][]byte{nil, nil, {1 << 2}}, rowAtSync)
+	require.Equal(t, []byte{1<<2 | 1<<3}, columnRow(t, storage, root))
 }

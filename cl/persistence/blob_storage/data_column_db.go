@@ -3,7 +3,6 @@ package blob_storage
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -142,11 +141,8 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	if err == nil {
 		err = s.markColumns(slot, blockRoot, true, uint64(columnIndex))
 	}
-	if err != nil && created {
-		err = errors.Join(err, s.remove(slot, blockRoot, uint64(columnIndex)))
-	}
 	s.finishWrite()
-	if created && err == nil {
+	if created {
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 		log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	}

@@ -59,8 +59,9 @@ type bucketStore struct {
 	pruneFloor uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
-	bucketLocks []sync.RWMutex
-	dropRows    func(roots []common.Hash) error
+	bucketLocks    []sync.RWMutex
+	dropRows       func(roots []common.Hash) error
+	durableBuckets sync.Map
 }
 
 func (b *bucketStore) init(fs afero.Fs) {
@@ -148,7 +149,21 @@ func (b *bucketStore) syncBucket(slot uint64) error {
 		return nil
 	}
 	dir, _ := b.path(slot, common.Hash{}, 0)
-	d, err := b.fs.Open(dir)
+	if err := b.syncDir(dir); err != nil {
+		return err
+	}
+	if _, ok := b.durableBuckets.Load(dir); ok {
+		return nil
+	}
+	if err := b.syncDir("."); err != nil {
+		return err
+	}
+	b.durableBuckets.Store(dir, struct{}{})
+	return nil
+}
+
+func (b *bucketStore) syncDir(name string) error {
+	d, err := b.fs.Open(name)
 	if err != nil {
 		return err
 	}
