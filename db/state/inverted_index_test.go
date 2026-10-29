@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -1743,7 +1744,7 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 	var prevKey []byte
 	var prevMax uint64
 	require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
-		require.LessOrEqual(t, len(v), 8+iiChunkDeltasLimit)
+		require.LessOrEqual(t, len(v), 8+iiChunkOffsetsLimit)
 		txNums, err := decodeIIChunk(nil, v)
 		require.NoError(t, err)
 		require.Equal(t, binary.BigEndian.Uint64(v), txNums[len(txNums)-1], "chunk prefix is its max")
@@ -1896,6 +1897,9 @@ func TestInvertedIndexChunks(t *testing.T) {
 				var txNums []uint64
 				for range r.IntN(300) {
 					tip += 1 + r.Uint64N(3)
+					if r.IntN(50) == 0 {
+						tip += math.MaxUint16
+					}
 					txNums = append(txNums, tip)
 				}
 				iiChunkAdd(t, tx, ii.ValuesTable, m, key, txNums...)
@@ -1972,4 +1976,26 @@ func TestInvertedIndexPrefetchOncePerKey(t *testing.T) {
 	require.NoError(t, w.Flush(t.Context(), tx))
 	require.EqualValues(t, 2, cursor.prefetchSeeks.Load(), "the writer seeks each key once per batch")
 	require.Len(t, iiValuePairs(t, tx, ii.ValuesTable), 101)
+}
+
+func TestInvertedIndexChunkLayout(t *testing.T) {
+	v := appendIIChunk(nil, []uint64{1000, 1003, 1010, 1500})
+	require.Equal(t, "00000000000005dc"+"0300"+"0a00"+"f401", hex.EncodeToString(v), "BE8(max) || LE uint16 offsets from min, min implicit")
+	txNums, err := decodeIIChunk(nil, v)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1000, 1003, 1010, 1500}, txNums)
+
+	require.Equal(t, "0000000000000007", hex.EncodeToString(appendIIChunk(nil, []uint64{7})), "a one-txNum chunk is the 8-byte value of the old format")
+
+	require.Equal(t, 2, iiChunkFit([]uint64{10, 10 + math.MaxUint16, 10 + math.MaxUint16 + 1}), "max-min must fit into uint16")
+	dense := make([]uint64, 300)
+	for i := range dense {
+		dense[i] = uint64(i)
+	}
+	require.Equal(t, 1+iiChunkOffsetsLimit/2, iiChunkFit(dense))
+
+	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 1, 2, 0})
+	require.Error(t, err, "offset above max")
+	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 9, 2})
+	require.Error(t, err, "odd offsets length")
 }

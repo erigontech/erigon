@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -31,54 +32,81 @@ import (
 )
 
 // The values table of an inverted index is DupSort: key -> chunks of ascending txNums.
-// A chunk is BE8(max txNum) followed by uvarint deltas going down from it, so the dups of a key
-// sort by their max and SeekBothRange(key, BE8(t)) finds the chunk with the first txNum >= t.
-// A chunk without deltas is the 8-byte value of the format before chunking.
+// A chunk is BE8(max txNum) followed by LE uint16 offsets (txNum - min) of every txNum but min,
+// so min = max - last offset, the dups of a key sort by their max and SeekBothRange(key, BE8(t))
+// finds the chunk with the first txNum >= t. A one-txNum chunk is the 8-byte value of the format
+// before chunking.
 
-// iiChunkDeltasLimit keeps a chunk far below the inline value limit of a 4 KB page.
-const iiChunkDeltasLimit = 512
+// iiChunkOffsetsLimit keeps a chunk far below the inline value limit of a 4 KB page.
+const iiChunkOffsetsLimit = 512
 
 func appendIIChunk(dst []byte, txNums []uint64) []byte {
-	prev := txNums[len(txNums)-1]
-	dst = binary.BigEndian.AppendUint64(dst, prev)
-	for i := len(txNums) - 2; i >= 0; i-- {
-		dst = binary.AppendUvarint(dst, prev-txNums[i])
-		prev = txNums[i]
+	dst = binary.BigEndian.AppendUint64(dst, txNums[len(txNums)-1])
+	for _, n := range txNums[1:] {
+		dst = binary.LittleEndian.AppendUint16(dst, uint16(n-txNums[0]))
 	}
 	return dst
 }
 
-func decodeIIChunk(dst []uint64, v []byte) ([]uint64, error) {
-	if len(v) < 8 {
-		return dst, fmt.Errorf("inverted index chunk too short: %x", v)
+// iiChunk reads the txNums of a chunk in place.
+type iiChunk struct {
+	min  uint64
+	offs []byte
+}
+
+func parseIIChunk(v []byte) (iiChunk, error) {
+	if len(v) < 8 || len(v)%2 != 0 {
+		return iiChunk{}, fmt.Errorf("inverted index chunk has bad length: %x", v)
 	}
-	start := len(dst)
-	prev := binary.BigEndian.Uint64(v)
-	dst = append(dst, prev)
-	for b := v[8:]; len(b) > 0; {
-		delta, n := binary.Uvarint(b)
-		if n <= 0 || delta == 0 || delta > prev {
+	c := iiChunk{min: binary.BigEndian.Uint64(v), offs: v[8:]}
+	if len(c.offs) > 0 {
+		last := uint64(binary.LittleEndian.Uint16(c.offs[len(c.offs)-2:]))
+		if last > c.min {
+			return iiChunk{}, fmt.Errorf("inverted index chunk corrupted: %x", v)
+		}
+		c.min -= last
+	}
+	return c, nil
+}
+
+func (c iiChunk) len() int { return 1 + len(c.offs)/2 }
+
+func (c iiChunk) at(i int) uint64 {
+	if i == 0 {
+		return c.min
+	}
+	return c.min + uint64(binary.LittleEndian.Uint16(c.offs[2*i-2:]))
+}
+
+// search returns the index of the first txNum >= t, or len() if there is none.
+func (c iiChunk) search(t uint64) int {
+	return sort.Search(c.len(), func(i int) bool { return c.at(i) >= t })
+}
+
+func decodeIIChunk(dst []uint64, v []byte) ([]uint64, error) {
+	c, err := parseIIChunk(v)
+	if err != nil {
+		return dst, err
+	}
+	for i := range c.len() {
+		n := c.at(i)
+		if i > 0 && n <= dst[len(dst)-1] {
 			return dst, fmt.Errorf("inverted index chunk corrupted: %x", v)
 		}
-		b = b[n:]
-		prev -= delta
-		dst = append(dst, prev)
+		dst = append(dst, n)
 	}
-	slices.Reverse(dst[start:])
 	return dst, nil
 }
 
 // iiChunkFit returns how many leading txNums fit into one chunk.
 func iiChunkFit(txNums []uint64) int {
-	var buf [binary.MaxVarintLen64]byte
-	size := 0
-	for i := 1; i < len(txNums); i++ {
-		size += binary.PutUvarint(buf[:], txNums[i]-txNums[i-1])
-		if size > iiChunkDeltasLimit {
+	n := min(len(txNums), 1+iiChunkOffsetsLimit/2)
+	for i := 1; i < n; i++ {
+		if txNums[i]-txNums[0] > math.MaxUint16 {
 			return i
 		}
 	}
-	return len(txNums)
+	return n
 }
 
 // iiChunkWriter adds txNums arriving in ETL order (grouped by key) to the values table.
@@ -320,7 +348,7 @@ type iiChunkStream struct {
 	asc   bool
 	limit int
 
-	chunk   []uint64
+	chunk   iiChunk
 	i       int
 	hasNext bool
 	nextN   uint64
@@ -367,15 +395,20 @@ func (s *iiChunkStream) seek(t uint64) {
 		return
 	}
 	if s.asc {
-		s.i, _ = slices.BinarySearch(s.chunk, t)
+		s.i = s.chunk.search(t)
 	} else {
-		i, found := slices.BinarySearch(s.chunk, t)
-		if found {
-			i++
-		}
-		s.i = i - 1
+		s.i = s.lastAtMost(t)
 	}
 	s.advance()
+}
+
+// lastAtMost returns the index of the last txNum of the chunk <= t, or -1.
+func (s *iiChunkStream) lastAtMost(t uint64) int {
+	i := s.chunk.search(t)
+	if i < s.chunk.len() && s.chunk.at(i) == t {
+		i++
+	}
+	return i - 1
 }
 
 func (s *iiChunkStream) load(v []byte) bool {
@@ -384,7 +417,7 @@ func (s *iiChunkStream) load(v []byte) bool {
 		return false
 	}
 	var err error
-	if s.chunk, err = decodeIIChunk(s.chunk[:0], v); err != nil {
+	if s.chunk, err = parseIIChunk(v); err != nil {
 		s.err = err
 		return false
 	}
@@ -393,7 +426,7 @@ func (s *iiChunkStream) load(v []byte) bool {
 
 func (s *iiChunkStream) advance() {
 	if s.asc {
-		for s.i >= len(s.chunk) {
+		for s.i >= s.chunk.len() {
 			_, v, err := s.c.NextDup()
 			if err != nil {
 				s.err = err
@@ -404,7 +437,7 @@ func (s *iiChunkStream) advance() {
 			}
 			s.i = 0
 		}
-		n := s.chunk[s.i]
+		n := s.chunk.at(s.i)
 		s.i++
 		s.hasNext = s.to < 0 || n < uint64(s.to)
 		s.nextN = n
@@ -419,9 +452,9 @@ func (s *iiChunkStream) advance() {
 		if !s.load(v) {
 			return
 		}
-		s.i = len(s.chunk) - 1
+		s.i = s.chunk.len() - 1
 	}
-	n := s.chunk[s.i]
+	n := s.chunk.at(s.i)
 	s.i--
 	s.hasNext = s.to < 0 || n > uint64(s.to)
 	s.nextN = n
@@ -450,17 +483,13 @@ func (s *iiChunkStream) Seek(t uint64) error {
 	if s.err != nil || !s.hasNext || s.asc && t <= s.nextN || !s.asc && t >= s.nextN {
 		return s.err
 	}
-	if s.asc && t <= s.chunk[len(s.chunk)-1] {
-		s.i, _ = slices.BinarySearch(s.chunk, t)
+	if s.asc && t <= s.chunk.at(s.chunk.len()-1) {
+		s.i = s.chunk.search(t)
 		s.advance()
 		return s.err
 	}
-	if !s.asc && t >= s.chunk[0] {
-		i, found := slices.BinarySearch(s.chunk, t)
-		if found {
-			i++
-		}
-		s.i = i - 1
+	if !s.asc && t >= s.chunk.min {
+		s.i = s.lastAtMost(t)
 		s.advance()
 		return s.err
 	}
