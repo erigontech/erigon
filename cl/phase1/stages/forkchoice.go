@@ -519,6 +519,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
+	cfg.forkChoiceIndicesChanged = cfg.emitter.BlockIndicesChanged()
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)

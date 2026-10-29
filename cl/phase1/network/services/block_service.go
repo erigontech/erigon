@@ -1104,6 +1104,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 			}
 			return true, fmt.Errorf("%w: write block: %w", errBlockStorage, err)
 		}
+		b.emitter.NotifyBlockIndicesChanged()
 	}
 
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {

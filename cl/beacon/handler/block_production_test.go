@@ -43,6 +43,7 @@ import (
 	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
@@ -2536,6 +2537,8 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	}
 	handler.forkchoiceStore = installing
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	for range 2 {
 		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
@@ -2543,6 +2546,11 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 		var writeErr *clservices.AcceptedBlockWriteError
 		require.ErrorAs(t, err, &writeErr)
 		require.Same(t, block, writeErr.Block)
+	}
+	select {
+	case <-indicesChanged:
+		t.Fatal("failed writes must not notify index readers")
+	default:
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
 }
@@ -2564,10 +2572,17 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
 
 	require.NoError(t, err)
+	select {
+	case <-indicesChanged:
+	default:
+		t.Fatal("the committed block indices must notify readers even if fork choice is busy")
+	}
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {

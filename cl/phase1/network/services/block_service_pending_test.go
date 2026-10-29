@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -138,6 +139,8 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 			processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
 			service.forkchoiceStore = processing
 			failure := errors.New("database unavailable")
+			service.emitter = beaconevents.NewEventEmitter()
+			indicesChanged := service.emitter.BlockIndicesChanged()
 			db := &blockDBError{RwDB: service.db}
 			if tc.writeFailure {
 				db.updateErr = failure
@@ -173,10 +176,20 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 				require.ErrorIs(t, job.lastAttempt.err, tc.interveningError)
 				processing.err = nil
 			}
+			select {
+			case <-indicesChanged:
+				t.Fatal("failed writes must not notify index readers")
+			default:
+			}
 			db.viewErr, db.updateErr = nil, nil
 			callsBefore := processing.calls.Load()
 			service.processScheduledBlock(t.Context(), root, job, now)
 			require.NoError(t, job.lastAttempt.err)
+			select {
+			case <-indicesChanged:
+			default:
+				t.Fatal("the successful retry must notify index readers")
+			}
 			if tc.writeFailure {
 				require.Equal(t, callsBefore, processing.calls.Load())
 			} else {
@@ -195,8 +208,15 @@ func TestPendingGossipFinalizedIndexFailureDoesNotReject(t *testing.T) {
 	service.forkchoiceStore = processing
 	db := &blockDBError{RwDB: service.db, failUpdateAt: 2, updateErr: errors.New("index unavailable")}
 	service.db = db
+	service.emitter = beaconevents.NewEventEmitter()
+	indicesChanged := service.emitter.BlockIndicesChanged()
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+	select {
+	case <-indicesChanged:
+	default:
+		t.Fatal("the committed block indices must notify readers even if the finalized index write fails")
+	}
 	require.Equal(t, int32(1), processing.calls.Load())
 	require.Equal(t, 2, db.updates)
 	root, err := block.Block.HashSSZ()

@@ -92,6 +92,7 @@ type Cfg struct {
 	executionHead               common.Hash
 	forkChoiceRerunAt           time.Time
 	forkChoiceWaitingForIndices bool
+	forkChoiceIndicesChanged    <-chan struct{}
 	chainTipRejections          *chainTipRejections
 	pendingBlockWrite           *pendingBlockWrite
 }
@@ -255,12 +256,16 @@ func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBloc
 }
 
 func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
-	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+	if err := cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
-	})
+	}); err != nil {
+		return err
+	}
+	cfg.emitter.NotifyBlockIndicesChanged()
+	return nil
 }
 
 func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
@@ -521,7 +526,15 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					if cfg.forkChoiceWaitingForIndices {
-						return common.Sleep(ctx, sleepForSlotRewakeInterval)
+						timer := time.NewTimer(sleepForSlotRewakeInterval)
+						defer timer.Stop()
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-cfg.forkChoiceIndicesChanged:
+						case <-timer.C:
+						}
+						return nil
 					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
