@@ -2176,8 +2176,22 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	var overlay kv.Getter
+	if blockOverlay := sd.BlockOverlay(); blockOverlay != nil {
+		overlay = blockOverlay.NewReadView(tx)
+	}
 	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(sd.commitmentCtxs))
 	for _, domain := range sd.CommitmentDomains() {
+		if overlay != nil {
+			stopped, err := rawdb.ReadCommitmentDomainStopped(overlay, domain)
+			if err != nil {
+				return 0, 0, err
+			}
+			if stopped {
+				sd.commitmentCtxs[domain].ResetPendingUpdates()
+				continue
+			}
+		}
 		contexts = append(contexts, sd.commitmentCtxs[domain])
 	}
 	txNum, blockNum, err = commitmentdb.SeekCommitments(ctx, tx, contexts...)
