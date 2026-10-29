@@ -773,3 +773,69 @@ func TestMetrics(t *testing.T) {
 		}
 	})
 }
+
+type slotFactory struct {
+	ctx   commitment.PatriciaContext
+	slots chan struct{}
+}
+
+func (f *slotFactory) factory(ctx context.Context) (commitment.PatriciaContext, func()) {
+	if kv.IsNonBlockingAcquire(ctx) {
+		select {
+		case f.slots <- struct{}{}:
+		default:
+			return nil, nil
+		}
+	} else {
+		select {
+		case f.slots <- struct{}{}:
+		case <-ctx.Done():
+			return nil, nil
+		}
+	}
+	return f.ctx, func() { <-f.slots }
+}
+
+func requireFinishes(t *testing.T, label string, run func() error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- run() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err, label)
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s: hung with a two-slot context factory", label)
+	}
+}
+
+func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
+	entries := benchEntries("storage", 40)
+	updates := updatesOf(entries)
+	for i := range 20 {
+		c := newShardedContext()
+		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
+		tr := &Trie{scheduleWorkers: 2}
+		tr.ResetContext(c)
+		tr.SetTrieContextFactory(f.factory)
+		u := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries, updates)
+		requireFinishes(t, fmt.Sprintf("process run %d", i), func() error {
+			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
+			return err
+		})
+		tr.Release()
+	}
+
+	paths := make([][]byte, 64)
+	for i := range paths {
+		paths[i] = commitmenttest.Path([]byte{byte(i % 16), byte(i / 16)}, 5)
+	}
+	tasks := []storageTask{storageTaskFor([32]byte{1}, storageOps(paths)), storageTaskFor([32]byte{2}, storageOps(paths))}
+	for i := range 20 {
+		c := newShardedContext()
+		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
+		roots, parts := make([][32]byte, len(tasks)), make([]deltaParts, len(tasks))
+		requireFinishes(t, fmt.Sprintf("storage phase run %d", i), func() error {
+			return runStoragePhase(context.Background(), c, f.factory, tasks, roots, parts, 2, 16)
+		})
+	}
+}

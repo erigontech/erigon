@@ -913,6 +913,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		if !sharedSource {
 			var err error
 			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
+			if errors.Is(err, kv.ErrReadTxLimitExceeded) {
+				return nil, nil
+			}
 			if err != nil {
 				return &errorTrieContext{err: err}, func() {}
 			}

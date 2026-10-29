@@ -23,9 +23,11 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -247,35 +249,57 @@ func (g graph) childExt(n, child, root *node) []byte {
 }
 
 type foldPlan struct {
-	ctx       context.Context
-	factory   commitment.TrieContextFactory
-	workers   int
-	fanOutMin int
+	ctx        context.Context
+	factory    commitment.TrieContextFactory
+	workers    int
+	fanOutMin  int
+	tryAcquire bool
 }
 
 func (p foldPlan) parallel() bool {
 	return p.factory != nil && p.workers > 1
 }
 
-func (p foldPlan) run(nibs []int, fn func(commitment.PatriciaContext, int, int) error) error {
+func (p foldPlan) run(caller commitment.PatriciaContext, nibs []int, fn func(commitment.PatriciaContext, int, int) error) error {
 	eg, egCtx := errgroup.WithContext(p.ctx)
 	eg.SetLimit(min(p.workers, len(nibs)))
+	acquireCtx := egCtx
+	if p.tryAcquire {
+		acquireCtx = kv.WithNonBlockingAcquire(egCtx)
+	}
+	var mu sync.Mutex
+	var left []int
 	for k, nib := range nibs {
 		eg.Go(func() error {
-			workerCtx, cleanup := p.factory(egCtx)
+			workerCtx, cleanup := p.factory(acquireCtx)
 			if cleanup != nil {
 				defer cleanup()
 			}
 			if workerCtx == nil {
-				return errNodeRecord
+				if !p.tryAcquire {
+					return errNodeRecord
+				}
+				mu.Lock()
+				left = append(left, k)
+				mu.Unlock()
+				return nil
 			}
 			return fn(workerCtx, k, nib)
 		})
 	}
-	return eg.Wait()
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+	slices.Sort(left)
+	for _, k := range left {
+		if err := fn(caller, k, nibs[k]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts, error) {
+func (g graph) materializeRootChildren(ctx commitment.PatriciaContext, root *node, plan foldPlan) ([]deltaParts, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
 		if root.child(nib) != nil {
@@ -288,7 +312,7 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts,
 
 	accs := make([]deltaParts, len(nibs))
 	hashes := make([][32]byte, len(nibs))
-	err := plan.run(nibs, func(workerCtx commitment.PatriciaContext, k, nib int) error {
+	err := plan.run(ctx, nibs, func(workerCtx commitment.PatriciaContext, k, nib int) error {
 		hash, err := g.materialize(workerCtx, root.child(nib), root, &accs[k])
 		hashes[k] = hash
 		return err
@@ -312,7 +336,7 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	var accs []deltaParts
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
-		if accs, err = g.materializeRootChildren(root, plan); err != nil {
+		if accs, err = g.materializeRootChildren(ctx, root, plan); err != nil {
 			return nil, err
 		}
 	}

@@ -72,7 +72,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	if fanOutMin <= 0 {
 		fanOutMin = defaultStorageFanOutMin
 	}
-	taskPlan := foldPlan{ctx: gCtx, factory: factory, workers: accountPlaneFanout, fanOutMin: fanOutMin}
+	taskPlan := foldPlan{ctx: gCtx, factory: factory, workers: accountPlaneFanout, fanOutMin: fanOutMin, tryAcquire: true}
 	for range workers {
 		g.Go(func() error {
 			workerCtx, cleanup := factory(gCtx)
@@ -215,7 +215,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		groupHashes[nib], pipelined[nib] = hash, true
 		return nil
 	}
-	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, pipeline)
+	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, func() { <-storageReady }, pipeline)
 	<-storageReady
 	if storageErr != nil {
 		return [32]byte{}, nil, storageErr
@@ -302,13 +302,13 @@ type pendingRemoval struct {
 	rest  []int
 }
 
-func (g graph) planAccounts(ctx commitment.PatriciaContext, root *node, accounts []accountEntry, plans []accountPlan, plan foldPlan, after func(ctx commitment.PatriciaContext, nib int, group []int) error) error {
+func (g graph) planAccounts(ctx commitment.PatriciaContext, root *node, accounts []accountEntry, plans []accountPlan, plan foldPlan, wait func(), after func(ctx commitment.PatriciaContext, nib int, group []int) error) error {
 	planOne := func(ctx commitment.PatriciaContext, i int) error {
 		p, err := g.accountPlanFor(ctx, root, accounts[i])
 		plans[i] = p
 		return err
 	}
-	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne, after)
+	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne, wait, after)
 	if err != nil || fanned {
 		return err
 	}
@@ -385,7 +385,7 @@ func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, ni
 	return nil
 }
 
-func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error, after func(ctx commitment.PatriciaContext, nib int, group []int) error) (bool, error) {
+func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error, wait func(), after func(ctx commitment.PatriciaContext, nib int, group []int) error) (bool, error) {
 	if !plan.parallel() || len(root.path) != 0 {
 		return false, nil
 	}
@@ -406,15 +406,20 @@ func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nib
 	if err := g.ensureRootChildren(ctx, root, nibs); err != nil {
 		return true, err
 	}
-	return true, plan.run(nibs, func(workerCtx commitment.PatriciaContext, _, nib int) error {
+	if err := plan.run(ctx, nibs, func(workerCtx commitment.PatriciaContext, _, nib int) error {
 		for _, i := range groups[nib] {
 			if err := fn(workerCtx, i); err != nil {
 				return err
 			}
 		}
-		if after != nil {
-			return after(workerCtx, nib, groups[nib])
-		}
 		return nil
+	}); err != nil || after == nil {
+		return true, err
+	}
+	if wait != nil {
+		wait()
+	}
+	return true, plan.run(ctx, nibs, func(workerCtx commitment.PatriciaContext, _, nib int) error {
+		return after(workerCtx, nib, groups[nib])
 	})
 }
