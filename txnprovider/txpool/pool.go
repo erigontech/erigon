@@ -1501,10 +1501,13 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		}
 		if reason == txpoolcfg.Success {
 			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
-			if p.all.get(txn.SenderID, txn.Nonce) == nil {
+			blobs := uint64(len(txn.GetBlobHashes()))
+			// A replacement adds only its blobs over the pooled txn's, which the pool already counts.
+			if replaced := p.all.get(txn.SenderID, txn.Nonce); replaced != nil {
+				blobs -= min(blobs, uint64(len(replaced.TxnSlot.GetBlobHashes())))
+			} else {
 				senderTxns[txn.SenderID]++
 			}
-			blobs := uint64(len(txn.GetBlobHashes()))
 			senderBlobs[txn.SenderID] += blobs
 			totalBlobs += blobs
 			// Success here means no DiscardReason yet, so leave it NotSet

@@ -358,6 +358,43 @@ func TestRemoteBatchOfBlobReplacementsRespectsSenderBlobSlots(t *testing.T) {
 	require.LessOrEqual(t, pool.all.blobCount(senderID), pool.cfg.BlobSlots)
 }
 
+// A batch of fee bumps replaces blobs already counted in the pool, so it must pass where
+// the same bumps one by one pass.
+func TestRemoteBatchOfBlobFeeBumpsCountsOnlyAddedBlobs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.BlobSlots = 6
+	sender := [20]byte{1}
+	nonces := []uint64{0, 1}
+	addRemoteBlobBatch(t, ctx, pool, [][20]byte{sender, sender}, nonces)
+	senderID := pool.senders.senderIDs[sender]
+	require.Equal(t, len(nonces), pool.all.count(senderID))
+
+	var bumps TxnSlots
+	for i, nonce := range nonces {
+		s := makeBlobSlot(0x90+byte(i), false)
+		s.Nonce = nonce
+		bt := s.Txn.(*types.BlobTx)
+		bt.Nonce = nonce
+		bt.TipCap.Mul(&bt.TipCap, uint256.NewInt(2))
+		bt.FeeCap.Mul(&bt.FeeCap, uint256.NewInt(2))
+		bt.MaxFeePerBlobGas.Mul(&bt.MaxFeePerBlobGas, uint256.NewInt(2))
+		bumps.Append(&s, sender[:], false)
+	}
+	pool.AddRemoteTxns(ctx, bumps, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	for i, nonce := range nonces {
+		mt := pool.all.get(senderID, nonce)
+		require.NotNil(t, mt, "nonce %d", nonce)
+		require.Equal(t, byte(0x90+i), mt.TxnSlot.IDHash[0], "nonce %d was not replaced", nonce)
+	}
+}
+
 func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
