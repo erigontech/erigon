@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package tools implements the eez command: batch decoding, chain diffs and
-// L1 captures.
+// Package tools implements the eez command: batch decoding, chain diffs, L1
+// captures and blob mirrors.
 package tools
 
 import (

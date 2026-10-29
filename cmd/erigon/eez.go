@@ -114,6 +114,9 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 	if cfg.L1Beacon != "" {
 		fc.Blobs = l1.NewBeacon(cfg.L1Beacon)
 	}
+	if cfg.L1Blobs != "" {
+		fc.Blobs = l1.NewBlobDir(cfg.L1Blobs, fc.Blobs)
+	}
 	if cfg.SequencerRPC != "" {
 		if fc.Sequencer, err = follower.DialSequencer(ctx, cfg.SequencerRPC, logger); err != nil {
 			return nil, err

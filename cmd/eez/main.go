@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Command eez decodes EEZ batches, compares EEZ chains and captures the L1
-// data a follower reads.
+// Command eez decodes EEZ batches, compares EEZ chains, captures the L1 data
+// a follower reads and mirrors the blobs of a network's batches.
 package main
 
 import (
@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -32,9 +33,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/tools"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func main() {
@@ -70,6 +73,18 @@ func main() {
 					&cli.StringFlag{Name: "out", Usage: "Directory the recording is written to", Required: true},
 				},
 				Action: capture,
+			},
+			{
+				Name:  "mirror",
+				Usage: "Index the batches of an EEZ network and store their blobs",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "chain", Usage: "EEZ network", Required: true},
+					&cli.StringFlag{Name: "l1.rpc", Usage: "JSON-RPC endpoint of the L1 node", Required: true},
+					&cli.StringFlag{Name: "beacon", Usage: "REST endpoint of the L1 beacon node; without it, stored blobs are only checked"},
+					&cli.StringFlag{Name: "dir", Usage: "Mirror directory: <chain id>.jsonl indexes, blobs/<versioned hash>.blob", Required: true},
+					&cli.Uint64Flag{Name: "to", Usage: "Last L1 block indexed (default: the finalized block)"},
+				},
+				Action: mirror,
 			},
 		},
 	}
@@ -158,4 +173,52 @@ func capture(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	return recording.Write(cmd.String("out"), c)
+}
+
+func mirror(ctx context.Context, cmd *cli.Command) error {
+	eez.Register()
+	spec, err := chainspec.ChainSpecByName(cmd.String("chain"))
+	if err != nil {
+		return err
+	}
+	l2, ok := spec.Config.L2.(*config.L2Config)
+	if !ok {
+		return fmt.Errorf("chain %s is not an EEZ network", cmd.String("chain"))
+	}
+	logger := log.New()
+	reader, err := l1.DialRPC(ctx, cmd.String("l1.rpc"), logger)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	to := cmd.Uint64("to")
+	if !cmd.IsSet("to") {
+		f, err := reader.Finalized(ctx)
+		if err != nil {
+			return fmt.Errorf("L1 finalized block: %w", err)
+		}
+		to = f.Number
+	}
+	scanner := l1.NewScanner(reader, l2.Registry, l2.RollupID)
+	if l2.RollupX != nil {
+		scanner.UseRollupX()
+	}
+	var source l1.BlobSource
+	if cmd.IsSet("beacon") {
+		source = l1.NewBeacon(cmd.String("beacon"))
+	}
+	root := cmd.String("dir")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	index := filepath.Join(root, spec.Config.ChainID.String()+".jsonl")
+	stats, err := tools.Mirror(ctx, scanner, l1.NewBlobDir(filepath.Join(root, "blobs"), source), index, l2.RegistryDeployBlock, to, logger)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s: indexed %d batches through L1 block %d, stored %d blobs\n", index, stats.Indexed, to, stats.Stored)
+	if n := len(stats.Unavailable); n > 0 {
+		return fmt.Errorf("%d batches with blobs not served, L1 blocks %d to %d", n, stats.Unavailable[0].L1Block, stats.Unavailable[n-1].L1Block)
+	}
+	return nil
 }

@@ -47,6 +47,10 @@ var (
 		Name:  "eez.l1.beacon",
 		Usage: "REST endpoint of the L1 beacon node that serves the blobs of blob-backed batches",
 	}
+	L1BlobsFlag = cli.StringFlag{
+		Name:  "eez.l1.blobs",
+		Usage: "Directory of blobs named by versioned hash, read before the beacon node; blobs the beacon node serves are stored in it",
+	}
 	L1PollFlag = cli.DurationFlag{
 		Name:  "eez.l1.poll",
 		Usage: "Interval between reads of the L1 head",
@@ -97,7 +101,7 @@ var (
 
 // Flags lists the EEZ command-line flags.
 var Flags = []cli.Flag{
-	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
+	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -106,6 +110,7 @@ type Config struct {
 	L1RPC        string
 	L1KV         string
 	L1Beacon     string
+	L1Blobs      string
 	L1Poll       time.Duration
 	L1LogChunk   uint64
 	L1ReorgDepth int
@@ -138,6 +143,7 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 		L1RPC:        cmd.String(L1RPCFlag.Name),
 		L1KV:         cmd.String(L1KVFlag.Name),
 		L1Beacon:     cmd.String(L1BeaconFlag.Name),
+		L1Blobs:      cmd.String(L1BlobsFlag.Name),
 		L1Poll:       cmd.Duration(L1PollFlag.Name),
 		L1LogChunk:   cmd.Uint64(L1LogChunkFlag.Name),
 		L1ReorgDepth: int(cmd.Int(L1ReorgDepthFlag.Name)),

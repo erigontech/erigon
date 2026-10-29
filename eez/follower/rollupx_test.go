@@ -17,14 +17,12 @@
 package follower_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/config"
@@ -38,71 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// replayBlobs serves the blobs of the replay's beacon slots.
-type replayBlobs [][]byte
-
-func (r replayBlobs) Blobs(_ context.Context, _ *l1.Header, hashes []common.Hash) ([][]byte, error) {
-	return l1.MatchBlobs(r, hashes)
-}
-
-// replayL1 returns the L1 of the replay: the genesis's L1 reference, then
-// its batches' blocks with their posting transactions and logs, joined by
-// headers with made-up hashes, finalized at the last.
-func replayL1(t *testing.T, r *testfixtures.EEZDevReplay, ref *config.L1Reference) *recording.MemoryChain {
-	t.Helper()
-	from := ref.Number
-	recorded := map[uint64]*recording.Block{
-		from: {Header: l1.Header{Number: from, Hash: ref.Hash, Time: ref.Timestamp, MixDigest: ref.PrevRandao}},
-	}
-	var last uint64
-	for i := range r.Batches {
-		b := &r.Batches[i]
-		tx := &types.BlobTx{
-			DynamicFeeTransaction: types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{Nonce: uint64(i), To: &r.Registry, Data: b.Transaction.Input},
-				ChainID:  *uint256.NewInt(10200),
-			},
-			BlobVersionedHashes: b.Transaction.BlobVersionedHashes,
-		}
-		n := uint64(b.L1Block.Number)
-		blk := &recording.Block{
-			Header: l1.Header{Number: n, Hash: b.L1Block.Hash, ParentHash: b.L1Block.ParentHash, Time: uint64(b.L1Block.Timestamp), MixDigest: b.L1Block.MixHash},
-			Txs:    make([]types.Transaction, int(b.Transaction.Index)+1),
-		}
-		blk.Txs[b.Transaction.Index] = tx
-		for _, l := range b.Logs {
-			blk.Logs = append(blk.Logs, &types.Log{Address: r.Registry, Topics: l.Topics, Data: l.Data, TxIndex: hexutil.Uint(l.TransactionIndex)})
-			if int(l.TransactionIndex) >= len(blk.Txs) {
-				blk.Txs = append(blk.Txs, make([]types.Transaction, int(l.TransactionIndex)+1-len(blk.Txs))...)
-			}
-		}
-		recorded[n] = blk
-		last = max(last, n)
-	}
-	hashOf := func(n uint64) common.Hash {
-		if b, ok := recorded[n]; ok {
-			return b.Header.Hash
-		}
-		if b, ok := recorded[n+1]; ok {
-			return b.Header.ParentHash
-		}
-		return crypto.Keccak256Hash(append([]byte("replay"), uint256.NewInt(n).Bytes()...))
-	}
-	block := func(n uint64) *recording.Block {
-		if b, ok := recorded[n]; ok {
-			return b
-		}
-		return &recording.Block{Header: l1.Header{Number: n, Hash: hashOf(n), ParentHash: hashOf(n - 1)}}
-	}
-	c, err := recording.NewMemoryChain(10200, block(from))
-	require.NoError(t, err)
-	for n := from + 1; n <= last; n++ {
-		require.NoError(t, c.Append(block(n)))
-	}
-	require.NoError(t, c.Finalize(last))
-	return c
-}
-
 // TestEEZDevReplay derives eez.dev, the rollupX network on Chiado, from the
 // L1 data of its first fourteen settlements, and requires the hash the
 // network served for each of its blocks 0 to 2250.
@@ -111,13 +44,13 @@ func TestEEZDevReplay(t *testing.T) {
 	require.NoError(t, err)
 	spec := networks.Chiado699069
 	_, chain := derivertest.NewL2Of(t, spec)
-	var blobs replayBlobs
+	var blobs derivertest.ReplayBlobs
 	for _, b := range r.Batches {
 		blobs = append(blobs, b.Blobs()...)
 	}
 	cfg := testConfig
 	cfg.Blobs = blobs
-	f, err := follower.New(replayL1(t, r, &spec.Config.L2.(*config.L2Config).RollupX.L1Reference), chain, spec.Config, cfg, log.New())
+	f, err := follower.New(derivertest.ReplayL1(t, r, &spec.Config.L2.(*config.L2Config).RollupX.L1Reference), chain, spec.Config, cfg, log.New())
 	require.NoError(t, err)
 	require.NoError(t, f.Boot(t.Context()))
 	for n, want := range r.L2Hashes {
@@ -167,7 +100,7 @@ func TestL1Reference(t *testing.T) {
 	_, chain := derivertest.NewL2Of(t, spec)
 	other := ref
 	other.PrevRandao = common.Hash{1}
-	f, err := follower.New(replayL1(t, r, &other), chain, spec.Config, testConfig, log.New())
+	f, err := follower.New(derivertest.ReplayL1(t, r, &other), chain, spec.Config, testConfig, log.New())
 	require.NoError(t, err)
 	require.ErrorIs(t, f.Boot(t.Context()), follower.ErrL1Reference)
 }
@@ -224,7 +157,7 @@ func TestRollupXV01Replay(t *testing.T) {
 			r, err := testfixtures.LoadRollupXL1Replay(spec.Config.ChainID.Uint64())
 			require.NoError(t, err)
 			_, chain := derivertest.NewL2Of(t, spec)
-			var blobs replayBlobs
+			var blobs derivertest.ReplayBlobs
 			for _, b := range r.Batches {
 				for _, trimmed := range b.SlotBlobs {
 					blob := make([]byte, testfixtures.BlobSize)
