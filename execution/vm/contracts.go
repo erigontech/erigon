@@ -225,7 +225,7 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
-// Deprecated: prefer ActivePrecompiles, which includes a registered provider's
+// Deprecated: prefer ActivePrecompiles, which includes the registered chain's
 // overlay. These are the built-in addresses for a fork and nothing else.
 var (
 	PrecompiledAddressesHomestead []accounts.Address

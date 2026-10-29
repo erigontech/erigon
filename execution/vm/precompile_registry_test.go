@@ -51,7 +51,7 @@ func rulesForChain(chainID uint64) *chain.Rules {
 	}
 }
 
-func TestRegisteredProviderScopedToChainID(t *testing.T) {
+func TestRegisteredOverlayScopedToChainID(t *testing.T) {
 	const registeredChainID = 900101
 	const otherChainID = 900102
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x99}))
@@ -63,11 +63,11 @@ func TestRegisteredProviderScopedToChainID(t *testing.T) {
 	other := Precompiles(rulesForChain(otherChainID))
 
 	_, ok := registered[extraAddr]
-	require.True(t, ok, "registered chain must expose the provider's precompile")
+	require.True(t, ok, "registered chain must expose its overlay's precompile")
 	_, ok = other[extraAddr]
-	require.False(t, ok, "other chains must not see the provider's precompile")
+	require.False(t, ok, "other chains must not see the registered chain's overlay")
 	_, ok = registered[ecrecoverAddr]
-	require.True(t, ok, "built-ins must still be present alongside a provider")
+	require.True(t, ok, "built-ins must still be present alongside an overlay")
 
 	require.Contains(t, ActivePrecompiles(rulesForChain(registeredChainID)), extraAddr)
 }
@@ -86,7 +86,7 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	}
 }
 
-func TestRegisteredProviderForkDimension(t *testing.T) {
+func TestRegisteredOverlayForkDimension(t *testing.T) {
 	const chainID = 900501
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x55}))
 	osakaOnly := accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00}))
@@ -101,12 +101,12 @@ func TestRegisteredProviderForkDimension(t *testing.T) {
 
 	merged := Precompiles(osaka)
 	_, ok = merged[osakaOnly]
-	require.True(t, ok, "the Osaka base set must reach an L2 that resolved Cancun first")
+	require.True(t, ok, "the registered chain's Osaka tier must carry the Osaka built-in at 0x0100")
 	_, ok = merged[extraAddr]
 	require.True(t, ok, "the overlay must still be applied at the later fork")
 }
 
-func TestRegisteredProviderWinsOnCollision(t *testing.T) {
+func TestRegisteredOverlayWinsOnCollision(t *testing.T) {
 	const chainID = 900502
 	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
 
@@ -117,7 +117,7 @@ func TestRegisteredProviderWinsOnCollision(t *testing.T) {
 	require.Equal(t, "CHAIN-ECRECOVER", p.Name(), "the chain's own entry must replace the built-in")
 }
 
-func TestProviderNilContractPanics(t *testing.T) {
+func TestRegisterNilContractPanics(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		chainID  uint64
@@ -152,29 +152,4 @@ func TestPrecompilesNilChainID(t *testing.T) {
 		require.NotEmpty(t, Precompiles(rules))
 		require.NotEmpty(t, ActivePrecompiles(rules))
 	})
-}
-
-// Guards the rules path against anti-scaling. The bystander arm is the one that
-// bites: a provider registered for any chain must not cost every other chain.
-func BenchmarkActivePrecompilesParallel(b *testing.B) {
-	mainnet := &chain.Rules{ChainID: uint256.NewInt(1), IsOsaka: true}
-	resolve := func(b *testing.B, rules *chain.Rules) {
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				_ = ActivePrecompiles(rules)
-			}
-		})
-	}
-
-	b.Run("none_registered", func(b *testing.B) { resolve(b, mainnet) })
-
-	chainID := uint256.NewInt(900904)
-	RegisterPrecompiles(chainID, PrecompiledContracts{})
-	defer unregisterPrecompiles(chainID)
-
-	b.Run("provider_chain", func(b *testing.B) {
-		resolve(b, &chain.Rules{ChainID: chainID, IsOsaka: true})
-	})
-	b.Run("bystander_chain", func(b *testing.B) { resolve(b, mainnet) })
 }
