@@ -625,17 +625,23 @@ func TestSetupGenesis(t *testing.T) {
 	}
 }
 
-// Genesis is computed over empty state: a SharedDomains that already holds the alloc must not get it added a second time.
-func TestComputeGenesisCommitmentOverExistingAllocKeepsTheRoot(t *testing.T) {
+func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := log.New()
-	genSpec := &types.Genesis{
-		Config: chain.AllProtocolChanges,
-		Alloc: types.GenesisAlloc{
-			common.HexToAddress("0x00000000000000000000000000000000c0ffee02"): {Balance: big.NewInt(1_000_000)},
-		},
+	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+	newGenesis := func(balance int64, code []byte, slotVal common.Hash) *types.Genesis {
+		return &types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{addr: {
+				Balance: big.NewInt(balance),
+				Code:    code,
+				Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): slotVal},
+			}},
+		}
 	}
+	stale := newGenesis(100, []byte{0x60, 0x01}, common.HexToHash("0x0a"))
+	genSpec := newGenesis(5, []byte{0x60, 0x02}, common.HexToHash("0x0b"))
 	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	ibs.Close()
@@ -648,11 +654,13 @@ func TestComputeGenesisCommitmentOverExistingAllocKeepsTheRoot(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	for run := 1; run <= 2; run++ {
-		head, _ := genesiswrite.GenesisWithoutStateToBlock(genSpec)
-		root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genSpec, tx, sd, head)
+	for _, g := range []*types.Genesis{stale, genSpec} {
+		head, _ := genesiswrite.GenesisWithoutStateToBlock(g)
+		root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, g, tx, sd, head)
 		require.NoError(t, err)
 		ibs.Close()
-		require.Equal(t, want.Root(), common.BytesToHash(root), "run %d", run)
+		if g == genSpec {
+			require.Equal(t, want.Root(), common.BytesToHash(root))
+		}
 	}
 }
