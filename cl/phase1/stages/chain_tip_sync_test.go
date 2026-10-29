@@ -141,6 +141,10 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	epochsBehindAtTip.atForwardSyncTip = true
 	epochsBehindAtTipPublished := epochsBehindAtTip
 	epochsBehindAtTipPublished.headUnpublished = false
+	epochsBehindAtTipNoPeers := epochsBehindAtTip
+	epochsBehindAtTipNoPeers.peers = 0
+	epochsBehindAtTipNoPeersPublished := epochsBehindAtTipNoPeers
+	epochsBehindAtTipNoPeersPublished.headUnpublished = false
 
 	tests := []struct {
 		name              string
@@ -156,6 +160,7 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "forward sync, head published", stage: ForwardSync, args: behind, want: ChainTipSync},
 		{name: "forward sync, epochs behind", stage: ForwardSync, args: epochsBehind, want: ForwardSync},
 		{name: "forward sync, epochs behind at tip", stage: ForwardSync, args: epochsBehindAtTip, want: ForkChoice},
+		{name: "forward sync, epochs behind at tip, no peers, head unpublished", stage: ForwardSync, args: epochsBehindAtTipNoPeers, want: ForkChoice},
 		{name: "chain tip timeout, head unpublished", stage: ChainTipSync, args: unpublished, err: context.DeadlineExceeded, want: ForkChoice},
 		{name: "chain tip timeout, head published", stage: ChainTipSync, args: behind, err: context.DeadlineExceeded, want: ChainTipSync},
 		{name: "chain tip timeout, head published at forward sync tip", stage: ChainTipSync, args: epochsBehindAtTipPublished, err: context.DeadlineExceeded, want: ChainTipSync},
@@ -164,6 +169,7 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		// ForkChoice may fail to publish; going straight back to ForkChoice would stop fetching blocks.
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
 		{name: "fork choice, epochs behind at forward sync tip", stage: ForkChoice, args: epochsBehindAtTip, want: ChainTipSync},
+		{name: "fork choice, epochs behind at forward sync tip, no peers, head published", stage: ForkChoice, args: epochsBehindAtTipNoPeersPublished, want: ForwardSync},
 		// CleanupAndPruning reruns ForkChoice for a block that gossip imported during either stage.
 		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: CleanupAndPruning},
 		{name: "cleanup and pruning at tip, head unpublished", stage: CleanupAndPruning, args: atTip, want: ForkChoice},
