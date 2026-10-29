@@ -83,7 +83,7 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 		if !frame.UsesLegacyNonce() {
 			dependencies = append(dependencies, types.FrameNonceManager[:])
 		}
-		if first := &frame.Frames[0]; first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier {
+		if first := &frame.Frames[0]; first.IsExpiryVerifier() {
 			expiry = binary.BigEndian.Uint64(first.Data)
 			dependencies = append(dependencies, types.FrameExpiryVerifier[:])
 		}

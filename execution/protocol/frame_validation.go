@@ -93,7 +93,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	if err != nil {
 		return nil, err
 	}
-	if first := &tx.Frames[0]; first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier && validation.Deadline < evm.Context.Time {
+	if tx.Frames[0].IsExpiryVerifier() && validation.Deadline < evm.Context.Time {
 		return nil, errors.New("expired frame transaction")
 	}
 	config, txContext := evm.Config(), evm.TxContext
@@ -139,7 +139,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	}
 	v := &frameValidationTracer{deploy: -1}
 	i := 0
-	if f := &tx.Frames[0]; f.Mode == types.FrameVerify && f.Target != nil && *f.Target == types.FrameExpiryVerifier {
+	if f := &tx.Frames[0]; f.IsExpiryVerifier() {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
 			return nil, invalid
 		}
@@ -289,7 +289,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		banned = true
 	case vm.TIMESTAMP:
 		frame := &ctx.Transaction.Frames[ctx.Index]
-		banned = ctx.Index != 0 || frame.Mode != types.FrameVerify || frame.Target == nil || *frame.Target != types.FrameExpiryVerifier || scope.Address().Value() != types.FrameExpiryVerifier || !bytes.Equal(scope.Code(), frameExpiryCode)
+		banned = ctx.Index != 0 || !frame.IsExpiryVerifier() || scope.Address().Value() != types.FrameExpiryVerifier || !bytes.Equal(scope.Code(), frameExpiryCode)
 	case vm.GAS:
 		code := scope.Code()
 		banned = pc+1 >= uint64(len(code))

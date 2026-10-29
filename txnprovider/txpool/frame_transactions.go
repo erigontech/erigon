@@ -381,10 +381,9 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
-		first := &frame.Frames[0]
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
-		if first.Mode == types.FrameVerify && first.Target != nil && *first.Target == types.FrameExpiryVerifier && previous.Deadline < blockTime {
+		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < blockTime {
 			p.removeFromSubPool(mt, "frame expired")
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 			continue
