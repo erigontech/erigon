@@ -269,10 +269,14 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
+	// Claim the tuple atomically: columns built from EL blobs may have claimed it during validation.
+	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
+		return ErrIgnore
+	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
+		s.seenSidecar.Remove(seenKey)
 		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
-	s.seenSidecar.Add(seenKey, struct{}{})
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
