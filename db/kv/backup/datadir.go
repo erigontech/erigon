@@ -95,7 +95,7 @@ func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
 
 const bloatRatio = 4 // autoCompactDatadir rewrites a db whose free pages exceed its data this many times
 
-var autoCompactMinFree = 10 * datasize.GB // a small db crosses bloatRatio but gives back nothing
+var autoCompactMinFree = 1 * datasize.GB // a small db crosses bloatRatio but gives back nothing
 
 // ApplyMigrations compacts bloated dbs; a datadir locked by another process is skipped.
 func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
