@@ -729,11 +729,44 @@ func (s *dupChunkSchema) unwind(tx kv.RwTx, keys [][]byte, txFrom uint64) error 
 
 type dupMaxSchema struct {
 	limit int
+	u16   bool // dup = BE8(max) || LE uint16 offsets from min, ascending, min implicit
 	vbuf  []uint64
 	ebuf  []byte
 }
 
-func (s *dupMaxSchema) name() string         { return fmt.Sprintf("dupmax-varint-%d", s.limit) }
+func (s *dupMaxSchema) name() string {
+	if s.u16 {
+		return "u16off"
+	}
+	return fmt.Sprintf("dupmax-varint-%d", s.limit)
+}
+
+func (s *dupMaxSchema) enc(dst []byte, vals []uint64) []byte {
+	if !s.u16 {
+		return dupMaxEncode(dst, vals)
+	}
+	dst = binary.BigEndian.AppendUint64(dst, vals[len(vals)-1])
+	for _, v := range vals[1:] {
+		dst = binary.LittleEndian.AppendUint16(dst, uint16(v-vals[0]))
+	}
+	return dst
+}
+
+func (s *dupMaxSchema) dec(dst []uint64, v []byte) []uint64 {
+	if !s.u16 {
+		return dupMaxDecode(dst, v)
+	}
+	max, offs := binary.BigEndian.Uint64(v), v[8:]
+	min := max
+	if len(offs) > 0 {
+		min -= uint64(binary.LittleEndian.Uint16(offs[len(offs)-2:]))
+	}
+	dst = append(dst, min)
+	for ; len(offs) > 0; offs = offs[2:] {
+		dst = append(dst, min+uint64(binary.LittleEndian.Uint16(offs)))
+	}
+	return dst
+}
 func (s *dupMaxSchema) flags() kv.TableFlags { return kv.DupSort }
 
 func dupMaxEncode(dst []byte, vals []uint64) []byte {
@@ -763,6 +796,13 @@ func dupMaxDecode(dst []uint64, v []byte) []uint64 {
 
 // fit returns the longest prefix of vals that encodes into the limit.
 func (s *dupMaxSchema) fit(vals []uint64) int {
+	if s.u16 {
+		n := 1
+		for n < len(vals) && 2*n <= s.limit && vals[n]-vals[0] <= math.MaxUint16 {
+			n++
+		}
+		return n
+	}
 	size := 0
 	for i := 1; i < len(vals); i++ {
 		var tmp [binary.MaxVarintLen64]byte
@@ -778,7 +818,7 @@ func (s *dupMaxSchema) fit(vals []uint64) int {
 func (s *dupMaxSchema) write(c kv.RwCursorDupSort, key []byte, vals []uint64, replace bool) error {
 	for len(vals) > 0 {
 		n := s.fit(vals)
-		s.ebuf = dupMaxEncode(s.ebuf[:0], vals[:n])
+		s.ebuf = s.enc(s.ebuf[:0], vals[:n])
 		if replace {
 			if err := c.PutCurrent(key, s.ebuf); err != nil {
 				return err
@@ -820,13 +860,13 @@ func (s *dupMaxSchema) flush(tx kv.RwTx, keys [][]byte, vals [][]uint64) error {
 			if err != nil {
 				return err
 			}
-			s.vbuf = append(dupMaxDecode(s.vbuf[:0], last), vals[i]...)
+			s.vbuf = append(s.dec(s.vbuf[:0], last), vals[i]...)
 			if err := s.write(c, k, s.vbuf, true); err != nil {
 				return err
 			}
 			continue
 		}
-		old := dupMaxDecode(nil, v)
+		old := s.dec(nil, v)
 		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
@@ -838,7 +878,7 @@ func (s *dupMaxSchema) flush(tx kv.RwTx, keys [][]byte, vals [][]uint64) error {
 			if v == nil {
 				break
 			}
-			old = dupMaxDecode(old, v)
+			old = s.dec(old, v)
 			if err := c.DeleteCurrent(); err != nil {
 				return err
 			}
@@ -868,7 +908,7 @@ func (s *dupMaxSchema) rangeCount(tx kv.Tx, key []byte, from, to uint64, asc boo
 			if err != nil {
 				return 0, err
 			}
-			s.vbuf = dupMaxDecode(s.vbuf[:0], v)
+			s.vbuf = s.dec(s.vbuf[:0], v)
 			i, _ := slices.BinarySearch(s.vbuf, from)
 			for _, x := range s.vbuf[i:] {
 				if x >= to || n == limit {
@@ -892,7 +932,7 @@ func (s *dupMaxSchema) rangeCount(tx kv.Tx, key []byte, from, to uint64, asc boo
 		if err != nil {
 			return 0, err
 		}
-		s.vbuf = dupMaxDecode(s.vbuf[:0], v)
+		s.vbuf = s.dec(s.vbuf[:0], v)
 		i, found := slices.BinarySearch(s.vbuf, from)
 		if found {
 			i++
@@ -933,9 +973,9 @@ func (s *dupMaxSchema) prune(tx kv.RwTx, txTo uint64) error {
 				}
 				continue
 			}
-			s.vbuf = dupMaxDecode(s.vbuf[:0], v)
+			s.vbuf = s.dec(s.vbuf[:0], v)
 			if i, _ := slices.BinarySearch(s.vbuf, txTo); i > 0 {
-				if err := c.PutCurrent(key, dupMaxEncode(s.ebuf[:0], s.vbuf[i:])); err != nil {
+				if err := c.PutCurrent(key, s.enc(s.ebuf[:0], s.vbuf[i:])); err != nil {
 					return err
 				}
 			}
@@ -971,7 +1011,7 @@ func (s *dupMaxSchema) unwind(tx kv.RwTx, keys [][]byte, txFrom uint64) error {
 				break
 			}
 			if first {
-				s.vbuf = dupMaxDecode(s.vbuf[:0], v)
+				s.vbuf = s.dec(s.vbuf[:0], v)
 				i, _ := slices.BinarySearch(s.vbuf, txFrom)
 				keep = append(keep[:0], s.vbuf[:i]...)
 				first = false
@@ -981,7 +1021,7 @@ func (s *dupMaxSchema) unwind(tx kv.RwTx, keys [][]byte, txFrom uint64) error {
 			}
 		}
 		if len(keep) > 0 {
-			if err := c.Put(key, dupMaxEncode(s.ebuf[:0], keep)); err != nil {
+			if err := c.Put(key, s.enc(s.ebuf[:0], keep)); err != nil {
 				return err
 			}
 		}
@@ -1143,6 +1183,18 @@ func TestIISchemaSpike(t *testing.T) {
 	sd := spikeLoad(t, path, stepSize)
 	first, last := sd.pairs[0].tx, sd.pairs[len(sd.pairs)-1].tx+1
 	t.Logf("%s: keys=%d pairs=%d tx=[%d,%d)", filepath.Base(path), len(sd.keys), len(sd.pairs), first, last)
+	prevTx := make([]uint64, len(sd.keys))
+	var gaps, bigGaps int
+	for _, p := range sd.pairs {
+		if prevTx[p.k] != 0 {
+			gaps++
+			if p.tx-prevTx[p.k] > math.MaxUint16 {
+				bigGaps++
+			}
+		}
+		prevTx[p.k] = p.tx
+	}
+	fmt.Printf("gaps=%d gaps>=65536=%d (%.3f%%)\n", gaps, bigGaps, 100*float64(bigGaps)/float64(gaps))
 
 	bulkBatch := uint64(200_000)
 	tipBatch := uint64(250)
@@ -1175,6 +1227,7 @@ func TestIISchemaSpike(t *testing.T) {
 		func() spikeSchema { return &chunkSchema{codec: varintCodec{}, limit: 256} },
 		func() spikeSchema { return &dupChunkSchema{limit: 512} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, u16: true} },
 		func() spikeSchema { return prodSchema{} },
 		func() spikeSchema { return prodPfSchema{} },
 		func() spikeSchema { return &chunkSchema{codec: varintCodec{}, limit: 1024} },
@@ -1261,6 +1314,7 @@ func TestIISchemaSpike(t *testing.T) {
 			t.Fatal(err)
 		}
 		size, _ := ro.BucketSize(spikeTbl)
+		dups, _ := ro.Count(spikeTbl)
 		q := func(keys [][]byte, from, to uint64, asc bool, limit int) (time.Duration, int) {
 			st := time.Now()
 			total := 0
@@ -1332,10 +1386,10 @@ func TestIISchemaSpike(t *testing.T) {
 		if want != after {
 			t.Fatalf("%s: after prune+unwind got %d want %d", s.name(), after, want)
 		}
-		fmt.Printf("%-22s %8.2f %8.3f %9s %9.1f %9.1f %9.1f %9.1f %9.1f %9.1f %8.2f %8.1f  chk=%d/%d/%d/%d/%d/%d\n", s.name(),
+		fmt.Printf("%-22s %8.2f %8.3f %9s %9.1f %9.1f %9.1f %9.1f %9.1f %9.1f %8.2f %8.1f  dups=%d chk=%d/%d/%d/%d/%d/%d\n", s.name(),
 			bulk.Seconds(), float64(tipDur.Microseconds())/1000/float64(nTip), datasize.ByteSize(dirty/nTip).HR(),
 			float64(size)/1e6, us(hotTip), us(hotAll), us(hotDesc), us(cold), us(coldTip), pr.Seconds(), float64(unw.Microseconds())/1000,
-			n1, n2, n3, n4, n5, after)
+			dups, n1, n2, n3, n4, n5, after)
 	}
 }
 
