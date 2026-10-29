@@ -1177,13 +1177,15 @@ func TestValidateChainChecksInclusionListAgainstStateAfterBlockTxns(t *testing.T
 
 	for _, parallel := range []bool{false, true} {
 		for _, tc := range []struct {
-			name      string
-			nonce     uint64
-			to        common.Address
-			satisfied bool
+			name         string
+			nonce        uint64
+			to           common.Address
+			fullBlockGas bool
+			satisfied    bool
 		}{
 			{name: "next nonce txn is missing", nonce: 1, to: common.Address{1}, satisfied: false},
 			{name: "spent nonce txn is invalid", nonce: 0, to: common.Address{2}, satisfied: true},
+			{name: "next nonce txn above gas left is skipped", nonce: 1, to: common.Address{1}, fullBlockGas: true, satisfied: true},
 		} {
 			t.Run(fmt.Sprintf("parallel=%t/%s", parallel, tc.name), func(t *testing.T) {
 				dbg.Exec3Parallel = parallel
@@ -1193,8 +1195,12 @@ func TestValidateChainChecksInclusionListAgainstStateAfterBlockTxns(t *testing.T
 					gen.AddTx(blockTxn)
 				})
 				require.NoError(t, err)
+				ilGas := params.TxGas
+				if tc.fullBlockGas {
+					ilGas = chainPack.Blocks[0].GasLimit()
+				}
 				ilTxn, err := types.SignTx(
-					types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+					types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), ilGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 					*types.LatestSignerForChainID(m.ChainConfig.ChainID),
 					m.Key,
 				)
@@ -1226,6 +1232,18 @@ func TestInclusionListSatisfiedWithoutStateHistoryIsNil(t *testing.T) {
 	require.NoError(t, err)
 	block := chainPack.Blocks[0]
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	clearStateHistory(t, m)
+	il := types.Transactions{blockTxn}
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.Nil(t, satisfied)
+	_, cached := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
+	require.False(t, cached)
+}
+
+func clearStateHistory(t *testing.T, m *execmoduletester.ExecModuleTester) {
+	t.Helper()
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 		for _, table := range []string{
 			kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
@@ -1238,17 +1256,13 @@ func TestInclusionListSatisfiedWithoutStateHistoryIsNil(t *testing.T) {
 		}
 		return nil
 	}))
-	il := types.Transactions{blockTxn}
-
-	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
-	require.NoError(t, err)
-	require.Nil(t, satisfied)
-	_, cached := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
-	require.False(t, cached)
 }
 
-func TestInclusionListSatisfiedUsesOverlayOnlyStateHistory(t *testing.T) {
-	t.Parallel()
+// newOverlayPauseTester returns a tester and a func that runs one FCU to header and
+// holds it after the overlay is published, before the commit. The returned release
+// func resumes the FCU and waits for it.
+func newOverlayPauseTester(t *testing.T) (*execmoduletester.ExecModuleTester, func(header *types.Header) (release func())) {
+	t.Helper()
 	var armed atomic.Bool
 	published := make(chan struct{})
 	proceed := make(chan struct{})
@@ -1266,37 +1280,54 @@ func TestInclusionListSatisfiedUsesOverlayOnlyStateHistory(t *testing.T) {
 		}),
 	)
 	m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
-	blockTxn := signedInclusionListTxn(t, m)
-	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
-		gen.AddTx(blockTxn)
-	})
-	require.NoError(t, err)
-	block := chainPack.Blocks[0]
+	pauseFCU := func(header *types.Header) func() {
+		armed.Store(true)
+		fcuDone := make(chan error, 1)
+		go func() {
+			_, err := m.UpdateForkChoice(t.Context(), header)
+			fcuDone <- err
+		}()
+		resume := sync.OnceFunc(func() { close(proceed) })
+		t.Cleanup(resume)
+		select {
+		case <-published:
+		case <-time.After(time.Minute):
+			t.Fatal("FCU result was not published")
+		}
+		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+			committed, err := stages.GetStageProgress(tx, stages.Execution)
+			require.Less(t, committed, header.Number.Uint64())
+			return err
+		}))
+		return func() {
+			resume()
+			require.NoError(t, <-fcuDone)
+		}
+	}
+	return m, pauseFCU
+}
+
+func insertAndValidate(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
 	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
 	validation, err := m.ValidateChain(t.Context(), block.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+}
 
-	armed.Store(true)
-	fcuDone := make(chan error, 1)
-	go func() {
-		_, err := m.UpdateForkChoice(t.Context(), block.Header())
-		fcuDone <- err
-	}()
-	release := sync.OnceFunc(func() { close(proceed) })
-	defer release()
-	select {
-	case <-published:
-	case <-time.After(time.Minute):
-		t.Fatal("FCU result was not published")
-	}
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		committed, err := stages.GetStageProgress(tx, stages.Execution)
-		require.Less(t, committed, block.NumberU64())
-		return err
-	}))
+func TestInclusionListSatisfiedUsesOverlayOnlyStateHistory(t *testing.T) {
+	t.Parallel()
+	m, pauseFCU := newOverlayPauseTester(t)
+	blockTxn := signedInclusionListTxn(t, m)
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+		gen.AddTx(blockTxn)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	insertAndValidate(t, m, block)
+	release := pauseFCU(block.Header())
 
 	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{blockTxn})
 	require.NoError(t, err)
@@ -1304,7 +1335,75 @@ func TestInclusionListSatisfiedUsesOverlayOnlyStateHistory(t *testing.T) {
 	require.True(t, *satisfied)
 
 	release()
-	require.NoError(t, <-fcuDone)
+}
+
+// Not parallel: it toggles the global in-mem history flag.
+func TestInclusionListSatisfiedFromOverlayChecksStateAfterBlockTxns(t *testing.T) {
+	for _, inMemHistory := range []bool{true, false} {
+		for _, tc := range []struct {
+			name      string
+			nonce     uint64
+			to        common.Address
+			satisfied bool
+		}{
+			{name: "next nonce txn is missing", nonce: 1, to: common.Address{1}, satisfied: false},
+			{name: "spent nonce txn is invalid", nonce: 0, to: common.Address{2}, satisfied: true},
+		} {
+			t.Run(fmt.Sprintf("inMemHistory=%t/%s", inMemHistory, tc.name), func(t *testing.T) {
+				execmodule.SetInMemHistoryReads(t, inMemHistory)
+				m, pauseFCU := newOverlayPauseTester(t)
+				blockTxn := signedInclusionListTxn(t, m)
+				chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+					gen.AddTx(blockTxn)
+				})
+				require.NoError(t, err)
+				block := chainPack.Blocks[0]
+				ilTxn, err := types.SignTx(
+					types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+					*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+					m.Key,
+				)
+				require.NoError(t, err)
+				il := types.Transactions{ilTxn}
+				insertAndValidate(t, m, block)
+				release := pauseFCU(block.Header())
+
+				satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+				require.NoError(t, err)
+				if inMemHistory {
+					require.NotNil(t, satisfied)
+					require.Equal(t, tc.satisfied, *satisfied)
+				} else {
+					require.Nil(t, satisfied)
+					_, cached := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
+					require.False(t, cached)
+				}
+
+				release()
+			})
+		}
+	}
+}
+
+func TestInclusionListSatisfiedForCommittedBlockWithoutStateHistoryUnderOverlayIsNil(t *testing.T) {
+	t.Parallel()
+	m, pauseFCU := newOverlayPauseTester(t)
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	committed, next := chainPack.Blocks[0], chainPack.Blocks[1]
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{committed}))
+	clearStateHistory(t, m)
+	insertAndValidate(t, m, next)
+	release := pauseFCU(next.Header())
+
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), committed.Hash(), committed.NumberU64(), il)
+	require.NoError(t, err)
+	require.Nil(t, satisfied)
+	_, cached := m.ReadAheader.ReadInclusionListResult(committed.Hash(), exec.InclusionListHash(il))
+	require.False(t, cached)
+
+	release()
 }
 
 func TestInclusionListSatisfiedUsesCachedResult(t *testing.T) {

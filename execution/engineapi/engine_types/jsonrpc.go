@@ -169,6 +169,17 @@ type PayloadStatus struct {
 	SSZVersion             clparams.StateVersion `json:"-"`
 }
 
+func (s PayloadStatus) MarshalJSON() ([]byte, error) {
+	type alias PayloadStatus
+	if s.SSZVersion.Before(clparams.HezeVersion) {
+		return json.Marshal(alias(s))
+	}
+	return json.Marshal(struct {
+		alias
+		InclusionListSatisfied *bool `json:"inclusionListSatisfied"`
+	}{alias(s), s.InclusionListSatisfied})
+}
+
 type ForkChoiceUpdatedResponse struct {
 	PayloadId     *hexutil.Bytes `json:"payloadId"` // We need to reformat the uint64 so this makes more sense.
 	PayloadStatus *PayloadStatus `json:"payloadStatus"`

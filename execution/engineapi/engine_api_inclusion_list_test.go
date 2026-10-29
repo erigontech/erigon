@@ -557,6 +557,7 @@ func TestPayloadStatusMarshalsInclusionListSatisfied(t *testing.T) {
 		want   string
 	}{
 		{"nil omitted", engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, ""},
+		{"V6 nil is null", engine_types.PayloadStatus{Status: engine_types.SyncingStatus, SSZVersion: clparams.HezeVersion}, `null`},
 		{"false", engine_types.PayloadStatus{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied}, `false`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -670,6 +671,25 @@ func TestNewPayloadV6JSONRPC(t *testing.T) {
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.NotNil(t, status.InclusionListSatisfied)
 	require.True(t, *status.InclusionListSatisfied)
+}
+
+func TestNewPayloadV6JSONRPCSyncingHasNullInclusionListSatisfied(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+		LatestValidHash:  common.Hash{0x1},
+	}, nil, ilTestMaxReorgDepth)
+	client := newEngineInProcClient(t, srv)
+
+	var fields map[string]json.RawMessage
+	require.NoError(t, client.CallContext(t.Context(), &fields, "engine_newPayloadV6",
+		bogotaPayload(t, parent), []common.Hash{}, common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg)))
+	require.JSONEq(t, `"SYNCING"`, string(fields["status"]))
+	require.Contains(t, fields, "inclusionListSatisfied")
+	require.JSONEq(t, `null`, string(fields["inclusionListSatisfied"]))
 }
 
 func TestNewPayloadV6JSONRPCClient(t *testing.T) {
