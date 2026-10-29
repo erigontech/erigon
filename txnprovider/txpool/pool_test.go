@@ -3214,3 +3214,87 @@ func TestOnNewBlockKeepsOriginalWhenUnwoundReplacementRejected(t *testing.T) {
 	pending, baseFee, queued := pool.CountContent()
 	require.Equal(t, 1, pending+baseFee+queued)
 }
+
+func newTestSenderTxnSlot(sender common.Address, nonce uint64) *TxnSlot {
+	s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+	s.IDHash[0] = byte(nonce + 1)
+	s.Rlp = []byte{byte(nonce + 1)}
+	s.Txn.SetSender(accounts.InternAddress(sender))
+	return s
+}
+
+func providedNonces(t *testing.T, ctx context.Context, pool *TxPool) []uint64 {
+	t.Helper()
+	txns, err := pool.ProvideTxns(ctx)
+	require.NoError(t, err)
+	nonces := make([]uint64, len(txns))
+	for i, txn := range txns {
+		nonces[i] = txn.GetNonce()
+	}
+	return nonces
+}
+
+// A reorg re-injects the unwound txn as remote while the sender's next txn stays
+// local.
+func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		return &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 1,
+			BlockGasLimit:       1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: uint64(height),
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{height}),
+				Direction:   direction,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT,
+					Address: gointerfaces.ConvertAddressToH160(sender),
+					Data:    accounts.SerialiseV3(&account),
+				}},
+			}},
+		}
+	}
+
+	var local TxnSlots
+	local.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
+	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	var mined TxnSlots
+	mined.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
+
+	var unwound TxnSlots
+	unwound.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), unwound, TxnSlots{}, TxnSlots{}))
+	pending, _, _ := pool.CountContent()
+	require.Equal(t, 2, pending)
+
+	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
+}
+
+// One sender's nonces can reach the pool by different routes: a lower nonce via
+// devp2p (remote) and a higher nonce via RPC (local).
+func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+
+	var remote TxnSlots
+	remote.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	pool.AddRemoteTxns(ctx, remote, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	var local TxnSlots
+	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	pending, _, _ := pool.CountContent()
+	require.Equal(t, 2, pending)
+
+	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
+}
