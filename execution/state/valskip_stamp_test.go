@@ -216,3 +216,33 @@ func TestValSkip_PromotionWithoutLifecycleCellDoesNotBump(t *testing.T) {
 	require.True(t, vm.QuietBelow(5, stamp), "Validated->Done on a plain account must not bump")
 	require.Zero(t, vm.stamps.inflight[vm.stamps.slot(3)+1].Load(), "cancelled brackets leave no in-flight count")
 }
+
+func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x05"))
+	for _, tc := range []struct {
+		j     int
+		quiet bool
+	}{{3, false}, {4, false}, {5, true}, {9, true}} {
+		vm := newStampedMap(32)
+		flushLifecycle(vm, addr, tc.j, cellBalance)
+		stamp := vm.WriteSeq()
+		vm.Delete(addr, BalancePath, accounts.NilKey, tc.j, true)
+		require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "Delete by j=%d against i=5", tc.j)
+	}
+}
+
+func TestQuietBelow_DeleteAllBumpsStamp(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x06"))
+	for _, tc := range []struct {
+		j     int
+		quiet bool
+	}{{3, false}, {4, false}, {5, true}, {9, true}} {
+		vm := newStampedMap(32)
+		flushLifecycle(vm, addr, tc.j, cellBalance)
+		stamp := vm.WriteSeq()
+		vm.DeleteAll(addr, tc.j)
+		require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "DeleteAll by j=%d against i=5", tc.j)
+	}
+}
