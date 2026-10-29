@@ -167,6 +167,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		return nil, err
 	}
 	for _, r := range rewards {
+		if config.IsEIPEnabled(7928, header.Time) && r.Amount.IsZero() {
+			continue
+		}
 		var err error
 		switch r.Kind {
 		case rules.RewardAuthor:
