@@ -161,7 +161,7 @@ func requestEnvelopesByRoot(
 	}
 	for chunk := range slices.Chunk(roots, maxRoots) {
 		responses, pid, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, chunk)
-		rejected := acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, validate, pid, banPeer)
+		rejected := acceptEnvelopeResponsesWithValidator(responses, err, requestedRoots, received, validate, pid, banPeer)
 		if rejected || err != nil {
 			return rejected, err
 		}
@@ -171,13 +171,14 @@ func requestEnvelopesByRoot(
 
 func acceptEnvelopeResponsesWithValidator(
 	responses []*cltypes.SignedExecutionPayloadEnvelope,
+	responseErr error,
 	requestedRoots map[common.Hash]struct{},
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	validate envelopeCandidateValidator,
 	pid string,
 	banPeer func(string),
 ) bool {
-	rejected := false
+	rejected := errors.Is(responseErr, rpc.ErrInvalidResponse)
 	for _, env := range responses {
 		if env == nil || env.Message == nil {
 			continue
@@ -235,7 +236,7 @@ func requestEnvelopesByRangeWithValidator(
 			return false
 		}
 		envelopes, pid, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, slotRange.start, slotRange.count)
-		if acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate, pid, banPeer) {
+		if acceptEnvelopeResponsesWithValidator(envelopes, err, requestedRoots, received, validate, pid, banPeer) {
 			return true
 		}
 		if err != nil {

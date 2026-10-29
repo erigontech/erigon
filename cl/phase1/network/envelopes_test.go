@@ -311,6 +311,11 @@ type backfillEnvelopeSentinel struct {
 	invalidProtocol string
 }
 
+type rawEnvelopeSSZ []byte
+
+func (r rawEnvelopeSSZ) EncodeSSZ(dst []byte) ([]byte, error) { return append(dst, r...), nil }
+func (r rawEnvelopeSSZ) EncodingSizeSSZ() int                 { return len(r) }
+
 func (s *backfillEnvelopeSentinel) SendRequest(ctx context.Context, req *sentinelproto.RequestData, opts ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	if len(s.banned) > 0 {
 		return s.envelopeResponseSentinel.SendRequest(ctx, req, opts...)
@@ -322,10 +327,18 @@ func (s *backfillEnvelopeSentinel) SendRequest(ctx context.Context, req *sentine
 	return response, nil
 }
 
+func (s *backfillEnvelopeSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
 type blockedEnvelopeBanSentinel struct {
 	backfillEnvelopeSentinel
 	banStarted chan struct{}
 	banOnce    sync.Once
+}
+
+func (s *blockedEnvelopeBanSentinel) BanPeer(ctx context.Context, peer *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return s.BanPeerForInvalidData(ctx, peer, opts...)
 }
 
 func (s *blockedEnvelopeBanSentinel) BanPeerForInvalidData(ctx context.Context, _ *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
@@ -347,11 +360,14 @@ func TestBackwardBeaconDownloaderCancelsBlockedEnvelopeBan(t *testing.T) {
 		name         string
 		protocol     string
 		cancelCaller bool
+		excessChunks bool
 	}{
 		{name: "by-root batch expiration", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
 		{name: "by-range batch expiration", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
 		{name: "by-root caller cancellation", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, cancelCaller: true},
 		{name: "by-range caller cancellation", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, cancelCaller: true},
+		{name: "by-root excess chunks batch expiration", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, excessChunks: true},
+		{name: "by-range excess chunks caller cancellation", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, excessChunks: true, cancelCaller: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requestEnvelopeBatchExpiration = 100 * time.Millisecond
@@ -368,6 +384,9 @@ func TestBackwardBeaconDownloaderCancelsBlockedEnvelopeBan(t *testing.T) {
 			require.NoError(t, err)
 			var wire bytes.Buffer
 			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+			if tc.excessChunks {
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, append([]byte{0}, digest[:]...)...))
+			}
 			sentinel := &blockedEnvelopeBanSentinel{
 				backfillEnvelopeSentinel: backfillEnvelopeSentinel{
 					invalidResponse: wire.Bytes(),
@@ -425,20 +444,31 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 	})
 
 	for _, tc := range []struct {
-		name             string
-		protocol         string
-		invalidSignature bool
-		single           bool
+		name        string
+		protocol    string
+		invalidKind string
+		single      bool
 	}{
 		{name: "by-root commitment", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
 		{name: "by-range commitment", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
-		{name: "by-root signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidSignature: true},
-		{name: "by-range signature", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidSignature: true},
+		{name: "by-root signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "signature"},
+		{name: "by-range signature", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidKind: "signature"},
+		{name: "by-root config", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "config"},
+		{name: "by-range config", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidKind: "config"},
+		{name: "by-root SSZ", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "ssz"},
+		{name: "by-range SSZ", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidKind: "ssz"},
+		{name: "by-root framing", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "framing"},
+		{name: "by-range framing", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidKind: "framing"},
+		{name: "by-root fork digest", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "fork"},
+		{name: "by-range fork digest", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidKind: "fork"},
+		{name: "by-root excess chunks", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "excess"},
+		{name: "by-range excess chunks", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, invalidKind: "excess"},
 		{name: "single commitment", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, single: true},
-		{name: "single signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidSignature: true, single: true},
+		{name: "single signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "signature", single: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
+			cfg.MaxBuilderDepositRequestsPerPayload = 1
 			cfg.InitializeForkSchedule()
 			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
 			digest, err := clock.ComputeForkDigest(0)
@@ -448,19 +478,39 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 			require.NoError(t, err)
 			invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
 			require.NoError(t, invalid.DecodeSSZ(validBytes, int(clparams.GloasVersion)))
-			if tc.invalidSignature {
+			switch tc.invalidKind {
+			case "signature":
 				signBackfilledGloasEnvelope(t, cfg, anchorState, invalid, backfillOtherKey)
 				require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid))
 				require.ErrorContains(t, validateBackfilledGloasEnvelopeSignature(anchorState, block, invalid), "invalid signature")
-			} else {
+			case "config":
+				invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+				invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+				require.ErrorContains(t, invalid.ValidateForConfig(cfg), "builder deposits")
+			case "":
 				invalid.Message.BuilderIndex++
 				require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid), "builder index mismatch")
 			}
-			require.NoError(t, invalid.ValidateForConfig(cfg))
+			if tc.invalidKind != "config" {
+				require.NoError(t, invalid.ValidateForConfig(cfg))
+			}
 
 			var validWire, invalidWire bytes.Buffer
 			require.NoError(t, ssz_snappy.EncodeAndWrite(&validWire, valid, digest[:]...))
-			require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, digest[:]...))
+			switch tc.invalidKind {
+			case "ssz":
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, rawEnvelopeSSZ{0}, digest[:]...))
+			case "framing":
+				_, err = invalidWire.Write(digest[:1])
+				require.NoError(t, err)
+			case "fork":
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, 0, 0, 0, 0))
+			case "excess":
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, valid, digest[:]...))
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, valid, append([]byte{0}, digest[:]...)...))
+			default:
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, digest[:]...))
+			}
 			sentinel := &backfillEnvelopeSentinel{
 				envelopeResponseSentinel: envelopeResponseSentinel{response: validWire.Bytes()},
 				invalidResponse:          invalidWire.Bytes(),
@@ -523,7 +573,7 @@ func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 		nil,
 		{},
 		{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: unsolicitedRoot}},
-	}, requestedRoots, received, func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	}, nil, requestedRoots, received, func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
 		require.Same(t, requestedEnvelope, envelope)
 		return nil
 	}, "peer", func(pid string) { t.Errorf("unexpected ban of %s", pid) })
@@ -536,17 +586,20 @@ func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 func TestRequestEnvelopesByRangeRetainsValidatedPrefixOnError(t *testing.T) {
 	client, requestedRoot, block := newMixedEnvelopeResponseClient(t)
 	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+	var banned []string
 
-	requestEnvelopesByRangeWithValidator(
+	rejected := requestEnvelopesByRangeWithValidator(
 		context.Background(),
 		client,
 		[]*cltypes.SignedBeaconBlock{block},
 		map[common.Hash]struct{}{requestedRoot: {}},
 		received,
 		nil,
-		nil,
+		func(pid string) { banned = append(banned, pid) },
 	)
 
+	require.True(t, rejected)
+	require.Equal(t, []string{"mixed-response-peer"}, banned)
 	require.Contains(t, received, requestedRoot)
 	require.Equal(t, requestedRoot, received[requestedRoot].Message.BeaconBlockRoot)
 }
@@ -555,10 +608,12 @@ func TestRequestEnvelopesByRootRetainsValidatedPrefixOnError(t *testing.T) {
 	client, requestedRoot, _ := newMixedEnvelopeResponseClient(t)
 
 	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
-	rejected, err := requestEnvelopesByRoot(context.Background(), client, [][32]byte{requestedRoot, {2}}, map[common.Hash]struct{}{requestedRoot: {}}, received, nil, nil)
+	var banned []string
+	rejected, err := requestEnvelopesByRoot(context.Background(), client, [][32]byte{requestedRoot, {2}}, map[common.Hash]struct{}{requestedRoot: {}}, received, nil, func(pid string) { banned = append(banned, pid) })
 
 	require.Error(t, err)
-	require.False(t, rejected)
+	require.True(t, rejected)
+	require.Equal(t, []string{"mixed-response-peer"}, banned)
 	require.Len(t, received, 1)
 	require.Equal(t, requestedRoot, received[requestedRoot].Message.BeaconBlockRoot)
 }
@@ -580,16 +635,16 @@ func TestAcceptEnvelopeResponsesRejectsInvalidCandidateBeforeProgress(t *testing
 	var banned []string
 	banPeer := func(pid string) { banned = append(banned, pid) }
 
-	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, requested, received, validate, "invalid-peer", banPeer))
+	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, nil, requested, received, validate, "invalid-peer", banPeer))
 	require.Equal(t, [][32]byte{root}, filterReceived([][32]byte{root}, received))
 	require.Equal(t, []string{"invalid-peer"}, banned)
 
-	require.False(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, requested, received, validate, "valid-peer", banPeer))
+	require.False(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, nil, requested, received, validate, "valid-peer", banPeer))
 	require.Same(t, valid, received[root])
 	require.Equal(t, []string{"invalid-peer"}, banned)
 
 	delete(received, root)
-	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid, invalid, invalid}, requested, received, validate, "mixed-peer", banPeer))
+	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid, invalid, invalid}, rpc.ErrInvalidResponse, requested, received, validate, "mixed-peer", banPeer))
 	require.Same(t, valid, received[root])
 	require.Equal(t, []string{"invalid-peer", "mixed-peer"}, banned)
 }
