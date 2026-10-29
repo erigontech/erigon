@@ -199,9 +199,15 @@ type blockValidationContext struct {
 	hasLatestExecutionPayloadBid       bool
 }
 
+// elColumnsPublisher handles columns built from local EL blobs as if they arrived on gossip.
+type elColumnsPublisher interface {
+	PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
+}
+
 type blockService struct {
 	forkchoiceStore      forkchoice.ForkChoiceStorage
 	engine               execution_client.ExecutionEngine
+	dataColumns          elColumnsPublisher
 	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
 	syncedData           *synced_data.SyncedDataManager
 	ethClock             eth_clock.EthereumClock
@@ -231,6 +237,7 @@ func NewBlockService(
 	db kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	engine execution_client.ExecutionEngine,
+	dataColumns elColumnsPublisher,
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
@@ -238,6 +245,7 @@ func NewBlockService(
 ) BlockService {
 	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
 	b.engine = engine
+	b.dataColumns = dataColumns
 	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
 	return b
@@ -336,6 +344,10 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments.Len() == 0 || b.engine == nil {
 		return
 	}
+	// A queued block can get here before gossip validation checked its blob count.
+	if uint64(block.Block.Body.BlobKzgCommitments.Len()) > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock {
+		return
+	}
 	peerDas := b.forkchoiceStore.GetPeerDas()
 	if peerDas == nil {
 		return
@@ -362,9 +374,13 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
 	}
-	if err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs); err != nil {
+	stored, err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs)
+	if err != nil {
 		log.Debug("[blockService] columns not built from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
+	}
+	if b.dataColumns != nil {
+		b.dataColumns.PublishColumnsFromEL(ctx, stored)
 	}
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }

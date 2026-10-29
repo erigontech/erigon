@@ -104,6 +104,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		t.mockSyncedData,
 		t.mockColumnSidecarStorage,
 		beaconevents.NewEventEmitter(),
+		nil,
 	)
 
 	t.mockFuncs = &mockFuncs{
