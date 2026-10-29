@@ -1492,8 +1492,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// A bounded read observes a staged unwind, not stable committed state.
 	if willFill {
 		readTxNum := step.LastTxNum(sd.StepSize())
-		// A read-only snapshot can end inside the step. Its latest value was
-		// written below that exact end, unlike a writable view's cached bound.
+		// A step-end timestamp can exceed a read-only snapshot's last visible txNum
+		// and hide valid cache hits. Clamp it to that txNum; a writable view's cached
+		// bound may lag behind its writes and cannot be used for this clamp.
 		if !writableTx(kv.UnderlyingTx(tx)) {
 			if end, ok := tx.Debug().DomainVisibleEnd(domain); ok && end > 0 {
 				readTxNum = min(readTxNum, end-1)
