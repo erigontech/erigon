@@ -241,14 +241,14 @@ func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBloc
 	}
 
 	// Block roots exclude signatures. Persist the copy accepted by fork choice.
-	block, ok := cfg.forkChoice.GetBlock(blockRoot)
+	acceptedBlock, ok := cfg.forkChoice.GetBlock(blockRoot)
 	if !ok {
 		return nil
 	}
-	if err := persistAcceptedBlock(ctx, cfg, block); err != nil {
+	if err := persistAcceptedBlock(ctx, cfg, acceptedBlock); err != nil {
 		// Fork choice advances before persistence. Keep the accepted block across stage
 		// transitions and finish its write before importing more blocks or reporting success.
-		cfg.pendingBlockWrite = &pendingBlockWrite{block: block}
+		cfg.pendingBlockWrite = &pendingBlockWrite{block: acceptedBlock}
 		return err
 	}
 	return nil
