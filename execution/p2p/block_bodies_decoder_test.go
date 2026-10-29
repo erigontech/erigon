@@ -57,6 +57,17 @@ func TestDecodeBlockBodiesResponseMatchesHeader(t *testing.T) {
 	}
 }
 
+func TestDecodeBlockBodiesResponseStopsAtFirstMismatch(t *testing.T) {
+	headers := newMockBlockHeaders(2)
+	mismatching, err := rlp.EncodeToBytes(&types.Body{Withdrawals: []*types.Withdrawal{}})
+	require.NoError(t, err)
+	malformed := rlpTestList(append(rlpTestList([]byte{rlp.EmptyStringCode}), rlp.EmptyListCode))
+
+	decoded, err := decodeBlockBodiesResponse(append(mismatching, malformed...), headers)
+	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+	require.Nil(t, decoded)
+}
+
 func TestDecodeBlockBodiesResponseRejectsMalformedTransactionBeforeMismatch(t *testing.T) {
 	transactions := rlpTestList([]byte{rlp.EmptyStringCode})
 	body := rlpTestList(append(transactions, rlp.EmptyListCode))
