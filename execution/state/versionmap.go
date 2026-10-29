@@ -1918,6 +1918,9 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 // txIdx. Split out of ValidateVersion so a worker can validate its own freshly-produced
 // read-set in parallel, before the exec loop commits.
 func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
+	if vm.HasBAL && dbg.ExecBALSkipValidation {
+		return VersionValid
+	}
 	valid = VersionValid
 	// ok latches valid and stops the scan on the first invalid result.
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }

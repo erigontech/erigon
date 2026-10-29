@@ -145,6 +145,7 @@ var (
 	ReadAhead                     = EnvBool("READ_AHEAD", true)
 	ReadAheadWorkers              = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
 	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
+	ExecBALSkipValidation         = EnvBool("EXEC_BAL_SKIP_VALIDATION", false)
 	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
 	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
