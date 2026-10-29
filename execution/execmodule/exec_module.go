@@ -125,45 +125,39 @@ var (
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	// A pinned read view must keep its selected state generation, including an
 	// explicit no-overlay selection, even when a newer generation is published.
-	sd, hasSelection, err := selectedSharedDomains(tx)
-	if err != nil {
-		return nil, err
+	if overlay, pinned := membatchwithdb.ViewOverlay(tx); pinned {
+		if overlay != nil {
+			sd, ok := overlay.DomainReader.(*execctx.SharedDomains)
+			if !ok {
+				return nil, fmt.Errorf("unsupported selected domain reader %T", overlay.DomainReader)
+			}
+			return &CacheView{context: sd, getter: sd.AsSnapshotGetter(tx)}, nil
+		}
+		var stateCache *cache.StateCache
+		if c.execModule != nil {
+			stateCache = c.execModule.stateCache
+		}
+		return &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}, nil
 	}
+
+	var sd *execctx.SharedDomains
 	var stateCache *cache.StateCache
 	if c.execModule != nil {
 		stateCache = c.execModule.stateCache
-		if !hasSelection {
-			c.execModule.lock.RLock()
-			sd = c.execModule.currentContext
-			c.execModule.lock.RUnlock()
-		}
+		c.execModule.lock.RLock()
+		sd = c.execModule.currentContext
+		c.execModule.lock.RUnlock()
 	}
 	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
-	if !hasSelection && sd == nil && c.publishedSD != nil {
+	if sd == nil && c.publishedSD != nil {
 		sd = c.publishedSD()
 	}
 
-	switch {
-	case sd == nil:
-		return &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}, nil
-	case hasSelection:
-		return &CacheView{context: sd, getter: sd.AsSnapshotGetter(tx)}, nil
-	default:
+	if sd != nil {
 		return &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}, nil
 	}
-}
-
-func selectedSharedDomains(tx kv.TemporalTx) (*execctx.SharedDomains, bool, error) {
-	overlay, selected := membatchwithdb.ViewOverlay(tx)
-	if overlay == nil {
-		return nil, selected, nil
-	}
-	domains, ok := overlay.DomainReader.(*execctx.SharedDomains)
-	if !ok {
-		return nil, true, fmt.Errorf("unsupported selected domain reader %T", overlay.DomainReader)
-	}
-	return domains, true, nil
+	return &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}, nil
 }
 
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
@@ -196,17 +190,14 @@ func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 
 func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if c.context != nil {
+		// Disabled in-memory history is not a cache miss: the backing
+		// transaction may not contain the requested state.
 		if len(key) == 20 {
-			v, ok, err = c.context.GetAsOf(kv.AccountsDomain, key, ts)
-		} else {
-			v, ok, err = c.context.GetAsOf(kv.StorageDomain, key, ts)
+			return c.context.GetAsOf(kv.AccountsDomain, key, ts)
 		}
-		if errors.Is(err, kv.ErrInMemHistoryDisabled) {
-			// A cache miss lets the historical reader fall back to its transaction.
-			return nil, false, nil
-		}
+		return c.context.GetAsOf(kv.StorageDomain, key, ts)
 	}
-	return v, ok, err
+	return nil, false, nil
 }
 
 type ExecModule struct {

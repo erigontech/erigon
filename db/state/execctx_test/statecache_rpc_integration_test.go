@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -352,33 +354,88 @@ func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
 	}
 }
 
-func TestEmbeddedRPCCacheViewTreatsDisabledHistoryAsMiss(t *testing.T) {
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	tx, err := db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	domains.SetInMemHistoryReads(false)
-	require.NoError(t, domains.InitBlockOverlay(tx))
+func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		history bool
+		pinned  bool
+	}{
+		{"pinned/history enabled", true, true},
+		{"pinned/history disabled", false, true},
+		{"unpinned/history enabled", true, false},
+		{"unpinned/history disabled", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			db := newTestDb(t, 16)
+			address, slot := common.Address{0xaa}, common.Hash{0xbb}
+			storageKey := make([]byte, 0, len(address)+len(slot))
+			storageKey = append(append(storageKey, address[:]...), slot[:]...)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			seed, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer seed.Close()
+			seed.SetTxNum(10)
+			require.NoError(t, seed.DomainPut(kv.AccountsDomain, rwTx, address[:], encAccount(1), 10, nil))
+			require.NoError(t, seed.DomainPut(kv.StorageDomain, rwTx, storageKey, []byte{1}, 10, nil))
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, 0, 19))
+			require.NoError(t, seed.Commit(ctx, rwTx))
 
-	rpcCache := &execmodule.Cache{}
-	view, err := rpcCache.View(ctx, rpchelper.PinToOverlay(tx, domains.BlockOverlay()))
-	require.NoError(t, err)
-	cacheView := view.(*execmodule.CacheView)
-	for _, phase := range []string{"before teardown", "after teardown"} {
-		t.Run(phase, func(t *testing.T) {
-			for name, keyLen := range map[string]int{"account": 20, "storage": 52} {
-				t.Run(name, func(t *testing.T) {
-					_, ok, err := cacheView.GetAsOf(make([]byte, keyLen), 1)
-					require.NoError(t, err)
-					require.False(t, ok, "unavailable in-memory history must allow the reader to try the database")
+			tx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			domains.SetInMemHistoryReads(tc.history)
+			require.NoError(t, domains.InitBlockOverlay(tx))
+			domains.SetTxNum(20)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(2), 20, encAccount(1)))
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{2}, 20, []byte{1}))
+			domains.SetTxNum(22)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(3), 22, encAccount(2)))
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{3}, 22, []byte{2}))
+
+			rpcTx := tx
+			if tc.pinned {
+				rpcTx = rpchelper.PinToOverlay(tx, domains.BlockOverlay())
+			}
+			rpcCache := &execmodule.Cache{}
+			rpcCache.SetPublishedSD(func() *execctx.SharedDomains { return domains })
+			view, err := rpcCache.View(ctx, rpcTx)
+			require.NoError(t, err)
+			// Read at txNum 21, between the overlay writes: neither the database
+			// value nor the latest overlay value is the correct historical state.
+			reader, err := rpchelper.CreateHistoryCachedStateReader(ctx, view, rpcTx, 1, 0, rawdbv3.TxNums)
+			require.NoError(t, err)
+			for _, phase := range []string{"before teardown", "after teardown"} {
+				t.Run(phase, func(t *testing.T) {
+					t.Run("account", func(t *testing.T) {
+						account, err := reader.ReadAccountByPlainAddr(address)
+						if !tc.history {
+							require.ErrorIs(t, err, kv.ErrInMemHistoryDisabled)
+							return
+						}
+						require.NoError(t, err)
+						require.NotNil(t, account)
+						require.Equal(t, uint64(2), account.Nonce)
+					})
+					t.Run("storage", func(t *testing.T) {
+						value, found, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
+						if !tc.history {
+							require.ErrorIs(t, err, kv.ErrInMemHistoryDisabled)
+							return
+						}
+						require.NoError(t, err)
+						require.True(t, found)
+						require.Equal(t, *uint256.NewInt(2), value)
+					})
 				})
+				domains.Close()
 			}
 		})
-		domains.Close()
 	}
 }
 
