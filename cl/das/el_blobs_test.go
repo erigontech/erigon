@@ -45,7 +45,7 @@ func elBlobsFixture(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltypes.Sig
 	return block, root, blobs, proofs
 }
 
-func newELBlobsTestPeerDas(t *testing.T, cfg *clparams.BeaconChainConfig, caplinConfig *clparams.CaplinConfig) *peerdas {
+func newELBlobsTestPeerDas(t testing.TB, cfg *clparams.BeaconChainConfig, caplinConfig *clparams.CaplinConfig) *peerdas {
 	t.Helper()
 	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	state := peerdasstate.NewPeerDasState(cfg, &networkConfig)
@@ -118,8 +118,6 @@ func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
 		"short blob":     func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { b[1] = b[1][:100]; return b, p },
 		"missing proofs": func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { p[1] = p[1][:1]; return b, p },
 		"short proof":    func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { p[1][3] = p[1][3][:47]; return b, p },
-		"swapped blobs":  func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { b[0], b[1] = b[1], b[0]; return b, p },
-		"wrong proof":    func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { p[0][5] = p[1][5]; return b, p },
 	}
 	for name, corrupt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -134,4 +132,22 @@ func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
 			require.Empty(t, saved)
 		})
 	}
+}
+
+// The EL verifies cell proofs when it admits a blob transaction, so the columns are built from its
+// response as is (Fulu p2p: clients SHOULD skip verification of blobs from the local EL).
+func TestImportColumnsFromBlobsTrustsELCellProofs(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{ArchiveBlobs: true})
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+	proofs[0][5] = proofs[1][5]
+
+	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
+
+	sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, 5)
+	require.NoError(t, err)
+	require.Equal(t, proofs[0][5], sidecar.KzgProofs.Get(0)[:])
 }

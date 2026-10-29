@@ -83,7 +83,7 @@ func TestPeerDasStartWithoutStoredCustodyGroupCountKeepsRequirement(t *testing.T
 	require.Equal(t, beaconConfig.CustodyRequirement, state.GetAdvertisedCgc())
 }
 
-func newCgcTestLocalNode(t *testing.T) *enode.LocalNode {
+func newCgcTestLocalNode(t testing.TB) *enode.LocalNode {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
