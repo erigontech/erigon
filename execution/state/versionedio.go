@@ -3277,6 +3277,11 @@ func (s ReadSet) DependsOnAny(headers []WriteHeader) bool {
 	return slices.ContainsFunc(headers, s.DependsOn)
 }
 
+// ReadsStorageWrittenBy reports whether s read a slot of addr that ws writes.
+func (s ReadSet) ReadsStorageWrittenBy(ws *WriteSet, addr accounts.Address) bool {
+	return anyCommonKey(ws.storage[addr], s.storage[addr])
+}
+
 // anyCommonKey probes the smaller map's keys in the larger one.
 func anyCommonKey[K comparable, A, B any](a map[K]A, b map[K]B) bool {
 	if len(a) > len(b) {
