@@ -1596,10 +1596,8 @@ func TestCheckCommitmentFileHasRoot_Bt(t *testing.T) {
 			data, err := seg.NewDecompressor(kvPath)
 			require.NoError(t, err)
 			defer data.Close()
-			bt, err := btindex.CreateBtreeIndexWithDecompressor(filepath.Join(tmp, "v2.0-commitment.0-1.bt"), filepath.Join(tmp, "v1.2-commitment.0-1.kvei"),
-				seg.NewReader(data.MakeGetter(), compression), 1, background.NewProgressSet(), tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
-			require.NoError(t, err)
-			bt.Close()
+			require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "v2.0-commitment.0-1.bt"), filepath.Join(tmp, "v1.2-commitment.0-1.kvei"),
+				seg.NewReader(data.MakeGetter(), compression), background.NewProgressSet(), tmp, 1, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence))
 
 			hasState, broken, _, err := checkCommitmentFileHasRoot(kvPath)
 			require.NoError(t, err)
