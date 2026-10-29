@@ -616,11 +616,6 @@ Examples:
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
-	if opts.TargetV3 {
-		if err := rawdbreset.ResetExec(ctx, db); err != nil {
-			return err
-		}
-	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
@@ -634,7 +629,11 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// references. The deferred Close itself is safe (refcount decrement +
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
-	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+	converted, err := dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+	if err != nil || !converted || !opts.TargetV3 {
+		return err
+	}
+	return rawdbreset.ResetExec(ctx, db)
 }
 
 // integration commitment visualize
