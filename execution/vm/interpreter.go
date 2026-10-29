@@ -50,10 +50,6 @@ type Config struct {
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
-	// ParallelAuthRecovery recovers a long EIP-7702 authorization list on several goroutines: block execution
-	// only, so one RPC call cannot take every core.
-	ParallelAuthRecovery bool
-
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
