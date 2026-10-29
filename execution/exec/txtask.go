@@ -471,7 +471,7 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
-		vmCfg := vm.Config{ParallelAuthRecovery: true}
+		var vmCfg vm.Config
 		if callTracer != nil {
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
