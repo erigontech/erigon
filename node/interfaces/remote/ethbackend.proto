@@ -299,6 +299,7 @@ message FrameValidationReply {
   bool paymaster = 5;
   uint64 deadline = 6;
   repeated bytes dependencies = 7;
+  repeated FrameCreationNonce creation_nonces = 8;
 }
 
 message BlockForTxNumRequest {
@@ -329,4 +330,10 @@ message SetHeadReply {
 message BlockBodyReply {
   bytes body_rlp = 1;
   uint32 tx_count = 2;
+}
+
+message FrameCreationNonce {
+  bytes address = 1;
+  uint64 min_nonce = 2;
+  uint64 max_nonce = 3;
 }

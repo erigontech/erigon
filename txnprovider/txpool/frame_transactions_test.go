@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"math"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -50,14 +51,16 @@ import (
 
 type frameValidationBackend struct {
 	remoteproto.ETHBACKENDClient
-	payer      common.Address
-	balance    uint64
-	paymaster  bool
-	valid      bool
-	err        error
-	calls      []common.Hash
-	deadlines  []time.Time
-	onValidate func()
+	payer          common.Address
+	balance        uint64
+	paymaster      bool
+	valid          bool
+	err            error
+	calls          []common.Hash
+	deadlines      []time.Time
+	onValidate     func()
+	dependencies   [][]byte
+	creationNonces []*remoteproto.FrameCreationNonce
 }
 
 func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
@@ -75,7 +78,7 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 		return nil, b.err
 	}
 	var expiry uint64
-	var dependencies [][]byte
+	dependencies := append([][]byte(nil), b.dependencies...)
 	if frame, ok := tx.(*types.FrameTransaction); ok {
 		if !frame.UsesLegacyNonce() {
 			dependencies = append(dependencies, types.FrameNonceManager[:])
@@ -86,7 +89,7 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 		}
 	}
 	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetFeeCap())
-	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies}, nil
+	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces}, nil
 }
 
 func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
@@ -928,7 +931,7 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 		{name: "second selected key", key: 2, revalidate: true},
 		{name: "unwind selected key", key: 1, direction: remoteproto.Direction_UNWIND, revalidate: true},
 		{name: "unwind unselected key", key: 3, direction: remoteproto.Direction_UNWIND},
-		{name: "manager account", action: remoteproto.Action_UPSERT, revalidate: true},
+		{name: "manager account", action: remoteproto.Action_UPSERT},
 		{name: "manager code", action: remoteproto.Action_CODE, revalidate: true},
 		{name: "manager account and code", action: remoteproto.Action_UPSERT_CODE, revalidate: true},
 		{name: "manager removed", action: remoteproto.Action_REMOVE, revalidate: true},
@@ -978,12 +981,13 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 
 func TestFramePoolExpiry(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		deadline        uint64
-		blockTime       uint64
-		baseFee         uint64
-		expired         bool
-		verifierChanged bool
+		name                   string
+		deadline               uint64
+		blockTime              uint64
+		baseFee                uint64
+		expired                bool
+		verifierChanged        bool
+		verifierBalanceChanged bool
 	}{
 		{name: "before deadline", deadline: 100, blockTime: 99, baseFee: 1},
 		{name: "at deadline", deadline: 100, blockTime: 100, baseFee: 1},
@@ -993,6 +997,7 @@ func TestFramePoolExpiry(t *testing.T) {
 		{name: "zero deadline", baseFee: 1},
 		{name: "expired zero deadline", blockTime: 1, baseFee: 1, expired: true},
 		{name: "verifier code changed", deadline: 100, blockTime: 99, baseFee: 1, verifierChanged: true},
+		{name: "verifier balance changed", deadline: 100, blockTime: 99, baseFee: 1, verifierBalanceChanged: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
@@ -1034,6 +1039,13 @@ func TestFramePoolExpiry(t *testing.T) {
 					Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_CODE, Code: []byte{0xfe},
 				}}
 			}
+			if tc.verifierBalanceChanged {
+				acc := accounts.NewAccount()
+				acc.Balance.SetUint64(1)
+				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+					Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_UPSERT, Data: accounts.SerialiseV3(&acc),
+				}}
+			}
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.verifierChanged {
 				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
@@ -1053,6 +1065,60 @@ func TestFramePoolExpiry(t *testing.T) {
 			require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 			require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[sender].cost)
 			require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+		})
+	}
+}
+
+func TestFramePoolCreationNonceChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		minNonce, maxNonce, nonce uint64
+		revalidate                bool
+	}{
+		{"CREATE balance change", 1, 1, 1, false},
+		{"CREATE nonce change", 1, 1, 2, true},
+		{"CREATE2 nonce change", 0, math.MaxUint64 - 1, 2, false},
+		{"CREATE2 nonce exhausted", 0, math.MaxUint64 - 1, math.MaxUint64, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			factory := common.Address{2}
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.dependencies = [][]byte{factory[:]}
+			backend.creationNonces = []*remoteproto.FrameCreationNonce{{Address: factory[:], MinNonce: tc.minNonce, MaxNonce: tc.maxNonce}}
+			tx := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+				Frames: []types.Frame{
+					{Mode: types.FrameDefault, Target: &factory, Limits: mdgas.MdGas{Execution: 10_000, State: 400_000}},
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
+				},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&encoded))
+			slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			backend.calls, backend.valid = nil, false
+			acc := accounts.NewAccount()
+			acc.Nonce = tc.nonce
+			acc.Balance.SetUint64(2)
+			change := newBlockChangeForAccounts(common.Hash{1}, 0)
+			change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+				Address: gointerfaces.ConvertAddressToH160(factory), Action: remoteproto.Action_UPSERT, Data: accounts.SerialiseV3(&acc),
+			}}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			if tc.revalidate {
+				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+			} else {
+				require.Empty(t, backend.calls)
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+			}
 		})
 	}
 }

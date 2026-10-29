@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -229,6 +230,16 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		}
 		v.Dependencies = append(v.Dependencies, common.BytesToAddress(dependency))
 	}
+	for _, dependency := range reply.CreationNonces {
+		if dependency == nil || len(dependency.Address) != 20 || dependency.MinNonce > dependency.MaxNonce {
+			return nil, errors.New("invalid frame creation nonce dependency")
+		}
+		address := common.BytesToAddress(dependency.Address)
+		v.Dependencies = append(v.Dependencies, address)
+		v.CreationNonces = append(v.CreationNonces, protocol.FrameCreationNonce{
+			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+		})
+	}
 	return v, nil
 }
 
@@ -345,14 +356,21 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	}
 	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
 	touched := make(map[common.Address]struct{})
+	codeChanged := make(map[common.Address]struct{})
+	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
-	var nonceManagerAccountChanged bool
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
 			touched[address] = struct{}{}
+			switch change.Action {
+			case remoteproto.Action_CODE, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
+				codeChanged[address] = struct{}{}
+			}
+			if change.Action == remoteproto.Action_UPSERT || change.Action == remoteproto.Action_UPSERT_CODE {
+				accountChanges[address] = change.Data
+			}
 			if address == types.FrameNonceManager {
-				nonceManagerAccountChanged = nonceManagerAccountChanged || change.Action != remoteproto.Action_STORAGE
 				for _, storage := range change.StorageChanges {
 					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 				}
@@ -375,15 +393,29 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
+		// Helpers depend only on code. Sender and payer state can also change
+		// approval or funding; creation nonces are checked separately below.
 		for _, dependency := range previous.Dependencies {
-			// Storage-only changes to the nonce manager need only the selected slots
-			// checked below. If the manager is the sender, validation can read all its storage.
-			if dependency == types.FrameNonceManager && keyedNonce && frame.SenderAddress != types.FrameNonceManager && !nonceManagerAccountChanged {
-				continue
+			changed := codeChanged
+			if dependency == frame.SenderAddress || dependency == previous.Payer {
+				changed = touched
 			}
-			if _, ok := touched[dependency]; ok {
+			if _, ok := changed[dependency]; ok {
 				affected = true
 				break
+			}
+		}
+		if !affected {
+			for _, dependency := range previous.CreationNonces {
+				data, ok := accountChanges[dependency.Address]
+				if !ok {
+					continue
+				}
+				var account accounts.Account
+				if len(data) == 0 || accounts.DeserialiseV3(&account, data) != nil || account.Nonce < dependency.MinNonce || account.Nonce > dependency.MaxNonce {
+					affected = true
+					break
+				}
 			}
 		}
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
