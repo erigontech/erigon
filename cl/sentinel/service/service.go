@@ -142,8 +142,7 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	}
 	s.logger.Debug("[Sentinel] Banning peer", "peer", pid)
 	s.sentinel.Peers().SetBanStatus(pid, true)
-	s.sentinel.Host().Peerstore().RemovePeer(pid)
-	s.closePeer(pid)
+	s.dropPeer(pid)
 	return &sentinelproto.EmptyMessage{}, nil
 }
 

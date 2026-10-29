@@ -229,27 +229,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 
 	responseLimit := min(count, maxRequestPayloads)
 	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), responseLimit), responseLimit)
-	if responseErr != nil && len(responsePacket) == 0 {
-		return nil, pid, responseErr
-	}
-
-	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
-	for _, data := range responsePacket {
-		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
-			return envelopes, pid, fmt.Errorf("%w: %w", ErrInvalidResponse, err)
-		}
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
-		}
-		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
-			return envelopes, pid, fmt.Errorf("%w: execution payload envelope by range decode: %w", ErrInvalidResponse, err)
-		}
-		if err := envelope.ValidateForConfig(b.beaconConfig); err != nil {
-			return envelopes, pid, fmt.Errorf("%w: execution payload envelope by range validation: %w", ErrInvalidResponse, err)
-		}
-		envelopes = append(envelopes, envelope)
-	}
-	return envelopes, pid, responseErr
+	envelopes, err := b.decodeExecutionPayloadEnvelopes("by range", responsePacket, responseErr)
+	return envelopes, pid, err
 }
 
 // SendExecutionPayloadEnvelopesByRootReq retrieves execution payload envelopes by block root.
@@ -272,27 +253,32 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 	}
 
 	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), uint64(len(roots))), uint64(len(roots)))
+	envelopes, err := b.decodeExecutionPayloadEnvelopes("by root", responsePacket, responseErr)
+	return envelopes, pid, err
+}
+
+func (b *BeaconRpcP2P) decodeExecutionPayloadEnvelopes(requestKind string, responsePacket []responseData, responseErr error) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if responseErr != nil && len(responsePacket) == 0 {
-		return nil, pid, responseErr
+		return nil, responseErr
 	}
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
-			return envelopes, pid, fmt.Errorf("%w: %w", ErrInvalidResponse, err)
+			return envelopes, fmt.Errorf("%w: %w", ErrInvalidResponse, err)
 		}
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
 		}
 		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
-			return envelopes, pid, fmt.Errorf("%w: execution payload envelope by root decode: %w", ErrInvalidResponse, err)
+			return envelopes, fmt.Errorf("%w: execution payload envelope %s decode: %w", ErrInvalidResponse, requestKind, err)
 		}
 		if err := envelope.ValidateForConfig(b.beaconConfig); err != nil {
-			return envelopes, pid, fmt.Errorf("%w: execution payload envelope by root validation: %w", ErrInvalidResponse, err)
+			return envelopes, fmt.Errorf("%w: execution payload envelope %s validation: %w", ErrInvalidResponse, requestKind, err)
 		}
 		envelopes = append(envelopes, envelope)
 	}
-	return envelopes, pid, responseErr
+	return envelopes, responseErr
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
