@@ -532,8 +532,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		return progress >= blockNumber, err
 	}
-	// Read header/body from the block overlay on currentContext if available
-	// (block data written by InsertBlocks hasn't been flushed to DB yet),
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)
