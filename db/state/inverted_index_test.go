@@ -1980,7 +1980,11 @@ func TestInvertedIndexPrefetchOncePerKey(t *testing.T) {
 
 func TestInvertedIndexChunkLayout(t *testing.T) {
 	v := appendIIChunk(nil, []uint64{1000, 1003, 1010, 1500})
-	require.Equal(t, "00000000000005dc"+"0300"+"0a00"+"f401", hex.EncodeToString(v), "BE8(max) || LE uint16 offsets from min, min implicit")
+	want := binary.BigEndian.AppendUint64(nil, 1500)
+	for _, off := range []uint16{3, 10, 500} {
+		want = binary.NativeEndian.AppendUint16(want, off)
+	}
+	require.Equal(t, want, v, "BE8(max) || native-endian uint16 offsets from min, min implicit")
 	txNums, err := decodeIIChunk(nil, v)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{1000, 1003, 1010, 1500}, txNums)

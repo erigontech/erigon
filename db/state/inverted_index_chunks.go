@@ -32,10 +32,11 @@ import (
 )
 
 // The values table of an inverted index is DupSort: key -> chunks of ascending txNums.
-// A chunk is BE8(max txNum) followed by LE uint16 offsets (txNum - min) of every txNum but min,
+// A chunk is BE8(max txNum) followed by native-endian uint16 offsets (txNum - min) of every txNum but min,
 // so min = max - last offset, the dups of a key sort by their max and SeekBothRange(key, BE8(t))
 // finds the chunk with the first txNum >= t. A one-txNum chunk is the 8-byte value of the format
-// before chunking.
+// before chunking. Offsets use the native byte order because chaindata is not portable across
+// byte orders anyway, so readers can use them as []uint16.
 
 // iiChunkOffsetsLimit keeps a chunk far below the inline value limit of a 4 KB page.
 const iiChunkOffsetsLimit = 512
@@ -43,7 +44,7 @@ const iiChunkOffsetsLimit = 512
 func appendIIChunk(dst []byte, txNums []uint64) []byte {
 	dst = binary.BigEndian.AppendUint64(dst, txNums[len(txNums)-1])
 	for _, n := range txNums[1:] {
-		dst = binary.LittleEndian.AppendUint16(dst, uint16(n-txNums[0]))
+		dst = binary.NativeEndian.AppendUint16(dst, uint16(n-txNums[0]))
 	}
 	return dst
 }
@@ -60,7 +61,7 @@ func parseIIChunk(v []byte) (iiChunk, error) {
 	}
 	c := iiChunk{min: binary.BigEndian.Uint64(v), offs: v[8:]}
 	if len(c.offs) > 0 {
-		last := uint64(binary.LittleEndian.Uint16(c.offs[len(c.offs)-2:]))
+		last := uint64(binary.NativeEndian.Uint16(c.offs[len(c.offs)-2:]))
 		if last > c.min {
 			return iiChunk{}, fmt.Errorf("inverted index chunk corrupted: %x", v)
 		}
@@ -75,7 +76,7 @@ func (c iiChunk) at(i int) uint64 {
 	if i == 0 {
 		return c.min
 	}
-	return c.min + uint64(binary.LittleEndian.Uint16(c.offs[2*i-2:]))
+	return c.min + uint64(binary.NativeEndian.Uint16(c.offs[2*i-2:]))
 }
 
 // search returns the index of the first txNum >= t, or len() if there is none.
