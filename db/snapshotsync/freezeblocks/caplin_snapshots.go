@@ -97,6 +97,14 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
+func (s *CaplinSnapshots) SegmentsMax() uint64 {
+	to := s.VisibleSegmentsMaxTo(snaptype.CaplinEnums.BeaconBlocks)
+	if to == 0 {
+		return 0
+	}
+	return to - 1
+}
+
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
 		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1))
