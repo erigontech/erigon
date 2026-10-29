@@ -1389,6 +1389,7 @@ func TestIISchemaSpike(t *testing.T) {
 		func() spikeSchema { return &dupMaxSchema{limit: 512, width: 3} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -1, widths: []int{2, 3}} },
 		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -1, widths: []int{1, 2, 3}} },
+		func() spikeSchema { return &dupMaxSchema{limit: 512, width: -1, widths: []int{2, 4}} },
 		func() spikeSchema { return prodSchema{} },
 		func() spikeSchema { return prodPfSchema{} },
 		func() spikeSchema { return &chunkSchema{codec: varintCodec{}, limit: 1024} },
