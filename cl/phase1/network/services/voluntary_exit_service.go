@@ -93,7 +93,7 @@ func (s *voluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, ver
 		Receiver:            &sentinelproto.Peer{Pid: pid.String()},
 		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
 	}
-	if err := obj.SignedVoluntaryExit.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedVoluntaryExit, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

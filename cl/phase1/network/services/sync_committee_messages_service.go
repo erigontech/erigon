@@ -116,7 +116,7 @@ func (s *syncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []b
 		Receiver:             &sentinelproto.Peer{Pid: pid.String()},
 		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
 	}
-	if err := obj.SyncCommitteeMessage.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SyncCommitteeMessage, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
