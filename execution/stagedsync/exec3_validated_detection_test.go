@@ -228,6 +228,20 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
+	t.Run("a lower second reader of another path keeps the first reader's path", func(t *testing.T) {
+		be := newDetExecutor(t, 4)
+		be.revalidate = map[int]bool{}
+		rs := state.ReadSet{}
+		rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+		be.blockIO.RecordReads(state.Version{TxIndex: 3}, rs)
+		be.indexReads(3, rs)
+		read(be, 2, 0, slot1)
+		be.markReadersDirty(1, newWS().bal(addr, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{3: true}, be.revalidate)
+		be.revalidate = map[int]bool{}
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
 	t.Run("self-destruct flags every later reader of the address", func(t *testing.T) {
 		be := newBE()
 		be.markReadersDirty(1, newWS().selfDestruct(addr, writer, true).build())
