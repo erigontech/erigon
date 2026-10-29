@@ -96,6 +96,7 @@ type TxnExecutor struct {
 	state                 *state.IntraBlockState
 	evm                   *vm.EVM
 	mintsValue            bool
+	nonceless             bool
 	gas                   uint64
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
@@ -147,6 +148,7 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		data:       msg.Data(),
 		state:      evm.IntraBlockState(),
 		mintsValue: mintsValue(msg),
+		nonceless:  nonceless(msg),
 		gas:        executionGas(msg, gp),
 	}
 }
@@ -166,6 +168,13 @@ func executionGas(msg Message, gp *GasPool) uint64 {
 func mintsValue(msg Message) bool {
 	typed, ok := msg.(interface{ TxType() byte })
 	return ok && typed.TxType() != 0 && types.TxTypeMintsValue(typed.TxType())
+}
+
+// nonceless reports whether msg has a registered type that leaves its
+// sender's nonce alone.
+func nonceless(msg Message) bool {
+	typed, ok := msg.(interface{ TxType() byte })
+	return ok && typed.TxType() != 0 && types.TxTypeNonceless(typed.TxType())
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -617,7 +626,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 
-	if !contractCreation && !st.chargeSenderAtValidation {
+	if !contractCreation && !st.chargeSenderAtValidation && !st.nonceless {
 		// Increment the nonce for the next transaction
 		nonce, err := st.state.GetNonce(sender)
 		if err != nil {

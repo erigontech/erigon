@@ -46,6 +46,9 @@ type TxTypeSpec struct {
 	// mints their value instead of debiting it from the sender: the sender's
 	// balance need not cover it, and a failed call mints nothing.
 	MintsValue bool
+	// Nonceless declares that this type's transactions do not increment their
+	// sender's nonce; their messages must not check it either.
+	Nonceless bool
 }
 
 var (
@@ -95,6 +98,12 @@ func IsRegisteredTxType(id byte) bool {
 func TxTypeMintsValue(id byte) bool {
 	spec, ok := registeredTxType(id)
 	return ok && spec.MintsValue
+}
+
+// TxTypeNonceless reports whether id was registered with Nonceless.
+func TxTypeNonceless(id byte) bool {
+	spec, ok := registeredTxType(id)
+	return ok && spec.Nonceless
 }
 
 func registeredTxType(id byte) (TxTypeSpec, bool) {
