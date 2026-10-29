@@ -19,6 +19,7 @@ package rules
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -70,9 +71,11 @@ type Engine struct {
 }
 
 var (
-	_ rules.Engine = (*Engine)(nil)
+	_ rules.Engine          = (*Engine)(nil)
+	_ rules.TxPostProcessor = (*Engine)(nil)
 
-	systemAddress = accounts.InternAddress(protocol.SystemAddress)
+	systemAddress       = accounts.InternAddress(protocol.SystemAddress)
+	nativeSystemAddress = accounts.InternAddress(protocol.NativeSystemAddress)
 )
 
 // New returns the engine of an EEZ chain configuration.
@@ -160,19 +163,24 @@ func (e *Engine) verifyHeader(config *chain.Config, header, parent *types.Header
 	return nil
 }
 
-// Initialize runs the block-start system calls. Under rollupX it then burns
-// the balances of EEZL2 and the system address: EEZL2's is mint its last
-// block did not consume, and the system address only receives.
-func (e *Engine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
+// Initialize runs the block-start system calls. Under rollupX v0.0.1 it then
+// burns the balances of EEZL2 and the system address: EEZL2's is mint its
+// last block did not consume, and the system address only receives.
+func (e *Engine) Initialize(cc *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) error {
-	if err := e.Merge.Initialize(config, chain, header, ibs, syscall, logger, tracer); err != nil {
+	if err := e.Merge.Initialize(cc, chain, header, ibs, syscall, logger, tracer); err != nil {
 		return err
 	}
-	if e.l2.RollupX == nil {
+	if e.l2.RuleSet() != config.RollupX {
 		return nil
 	}
-	for _, addr := range []accounts.Address{accounts.InternAddress(e.l2.EEZL2()), systemAddress} {
+	return burn(ibs, accounts.InternAddress(e.l2.EEZL2()), systemAddress)
+}
+
+// burn zeroes the balances of addrs; accounts without one stay untouched.
+func burn(ibs *state.IntraBlockState, addrs ...accounts.Address) error {
+	for _, addr := range addrs {
 		balance, err := ibs.GetBalance(addr)
 		if err != nil {
 			return err
@@ -186,14 +194,49 @@ func (e *Engine) Initialize(config *chain.Config, chain rules.ChainHeaderReader,
 	return nil
 }
 
-// Finalize rejects withdrawals, which only a beacon chain could issue, and
-// collects the requests of the contracts present in state.
+// burnProtocolBalances is the rollupX v0.1 cleanup after a cross-chain group
+// and at the end of every block: it burns what EEZL2 and the native system
+// address hold.
+func (e *Engine) burnProtocolBalances(ibs *state.IntraBlockState) error {
+	return burn(ibs, accounts.InternAddress(protocol.RollupXEEZL2Address), nativeSystemAddress)
+}
+
+// PostProcessTx burns the protocol balances under rollupX v0.1 once
+// txs[i] completes a cross-chain group: a delivery on its own, or the user
+// transaction after a load.
+func (e *Engine) PostProcessTx(_ *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error {
+	if e.l2.RuleSet() != config.RollupXV01 || !completesGroup(txs, i) {
+		return nil
+	}
+	return e.burnProtocolBalances(ibs)
+}
+
+func completesGroup(txs types.Transactions, i int) bool {
+	switch txs[i].Type() {
+	case protocol.NativeTxType:
+		return nativeCall(txs[i]) == protocol.ExecuteIncomingCrossChainCallSelector
+	case protocol.HistoryTxType, protocol.SystemTxType:
+		return false
+	}
+	return i > 0 && txs[i-1].Type() == protocol.NativeTxType && nativeCall(txs[i-1]) == protocol.LoadExecutionTableSelector
+}
+
+// nativeCall returns the selector of a native transaction's call to EEZL2.
+func nativeCall(txn types.Transaction) [4]byte {
+	var selector [4]byte
+	copy(selector[:], txn.GetData())
+	return selector
+}
+
+// Finalize rejects withdrawals, which only a beacon chain could issue, burns
+// the protocol balances under rollupX v0.1, and collects the requests of the
+// contracts present in state.
 func (e *Engine) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
-	if len(withdrawals) > 0 {
-		return nil, fmt.Errorf("%w: %w: %d withdrawals", rules.ErrInvalidBlock, rules.ErrUnexpectedWithdrawals, len(withdrawals))
+	if err := e.finalize(ibs, withdrawals); err != nil {
+		return nil, err
 	}
 	return e.Merge.Finalize(config, header, ibs, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
 }
@@ -202,20 +245,32 @@ func (e *Engine) FinalizeAndAssemble(config *chain.Config, header *types.Header,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger,
 ) (*types.Block, types.FlatRequests, error) {
-	if len(withdrawals) > 0 {
-		return nil, nil, fmt.Errorf("%w: %w: %d withdrawals", rules.ErrInvalidBlock, rules.ErrUnexpectedWithdrawals, len(withdrawals))
+	if err := e.finalize(ibs, withdrawals); err != nil {
+		return nil, nil, err
 	}
 	return e.Merge.FinalizeAndAssemble(config, header, ibs, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 }
 
-// IsServiceTransaction reports whether sender is the EEZ system address,
-// whose transactions execute fee-free.
+func (e *Engine) finalize(ibs *state.IntraBlockState, withdrawals []*types.Withdrawal) error {
+	if len(withdrawals) > 0 {
+		return fmt.Errorf("%w: %w: %d withdrawals", rules.ErrInvalidBlock, rules.ErrUnexpectedWithdrawals, len(withdrawals))
+	}
+	if e.l2.RuleSet() == config.RollupXV01 {
+		return e.burnProtocolBalances(ibs)
+	}
+	return nil
+}
+
+// IsServiceTransaction reports whether sender is the system address of type
+// 0x76, whose transactions execute fee-free. Types 0x45 and 0x46 are
+// fee-free by their messages.
 func (e *Engine) IsServiceTransaction(sender accounts.Address, _ rules.SystemCall) bool {
-	return sender == systemAddress
+	return e.l2.RuleSet() != config.RollupXV01 && sender == systemAddress
 }
 
 // ValidateBlockPostExecution applies the default checks and rejects blob
-// transactions, which EEZ chains do not support.
+// transactions, which EEZ chains do not support, and under rollupX v0.1 the
+// misplaced system transactions.
 func (e *Engine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header, gasUsed, blobGasUsed uint64,
 	checkReceipts, checkBloom bool, receipts types.Receipts, txns types.Transactions, logger log.Logger,
 ) error {
@@ -224,7 +279,54 @@ func (e *Engine) ValidateBlockPostExecution(chainConfig *chain.Config, header *t
 			return fmt.Errorf("%w: block %d: blob transaction %d", rules.ErrInvalidBlock, header.Number.Uint64(), i)
 		}
 	}
+	if e.l2.RuleSet() == config.RollupXV01 {
+		if err := e.validateV01(header, receipts, txns); err != nil {
+			return fmt.Errorf("%w: block %d: %w", rules.ErrInvalidBlock, header.Number.Uint64(), err)
+		}
+	}
 	return e.Merge.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+}
+
+// validateV01 checks the positions of the rollupX v0.1 system transactions:
+// a history update only first and in an update block, succeeding without
+// logs; a native transaction with the gas its block has left, calling
+// loadExecutionTable or executeIncomingCrossChainCall; and every load
+// followed by an ordinary transaction.
+func (e *Engine) validateV01(header *types.Header, receipts types.Receipts, txns types.Transactions) error {
+	withReceipts := len(receipts) == len(txns)
+	for i, txn := range txns {
+		var cumulative uint64
+		if withReceipts && i > 0 {
+			cumulative = receipts[i-1].CumulativeGasUsed
+		}
+		switch txn.Type() {
+		case protocol.HistoryTxType:
+			switch {
+			case i > 0:
+				return fmt.Errorf("history update at %d", i)
+			case !e.l2.RollupX.HistoryUpdate(header.Number.Uint64()):
+				return errors.New("history update off schedule")
+			case withReceipts && (receipts[i].Status != types.ReceiptStatusSuccessful || len(receipts[i].Logs) > 0):
+				return errors.New("history update failed or logged")
+			}
+		case protocol.NativeTxType:
+			switch call := nativeCall(txn); {
+			case call != protocol.LoadExecutionTableSelector && call != protocol.ExecuteIncomingCrossChainCallSelector:
+				return fmt.Errorf("native transaction %d calls %x", i, call)
+			case withReceipts && txn.GetGasLimit() != protocol.NativeTxGasLimit(header.GasLimit, cumulative):
+				return fmt.Errorf("native transaction %d has gas limit %d, its position %d", i, txn.GetGasLimit(), protocol.NativeTxGasLimit(header.GasLimit, cumulative))
+			case call == protocol.LoadExecutionTableSelector && (i+1 == len(txns) || systemType(txns[i+1].Type())):
+				return fmt.Errorf("load %d without its user transaction", i)
+			}
+		case protocol.SystemTxType:
+			return fmt.Errorf("type 0x76 transaction %d", i)
+		}
+	}
+	return nil
+}
+
+func systemType(t byte) bool {
+	return t == protocol.NativeTxType || t == protocol.HistoryTxType || t == protocol.SystemTxType
 }
 
 // Prepare sets the proof-of-stake difficulty.
