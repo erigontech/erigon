@@ -1641,6 +1641,11 @@ func TestPostExecutionPayloadEnvelopesRejectsNullEnvelope(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) {
+	t.Run("canonical", func(t *testing.T) { testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t, true) })
+	t.Run("legacy", func(t *testing.T) { testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t, false) })
+}
+
+func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, canonical bool) {
 	ctrl := gomock.NewController(t)
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
@@ -1714,16 +1719,24 @@ func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) 
 	}}
 	body, err := json.Marshal(signedEnvelope)
 	require.NoError(t, err)
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	path := "/eth/v1/beacon/execution_payload_envelope"
+	if canonical {
+		path = "/eth/v1/beacon/execution_payload_envelopes"
+	}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Eth-Blob-Data-Included", "false")
-	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
-
-	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+	if canonical {
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		request.Header.Set("Eth-Consensus-Version", "gloas")
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+	} else {
+		handler.postEthV1BeaconExecutionPayloadEnvelopeLegacy(recorder, request)
+	}
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, int32(handler.beaconChainCfg.NumberOfColumns), columnsWritten.Load())
+	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
 }
 
 func TestPostExecutionPayloadEnvelopesSSZDecodesReferencedScheduleCapacity(t *testing.T) {
