@@ -17,13 +17,22 @@
 package state
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type finalityContextStub struct {
@@ -102,26 +111,71 @@ func TestReadyForCollationPreservesFinalityContextResult(t *testing.T) {
 	require.Equal(t, uint64(25), lastTxInDB)
 }
 
-func TestBuildFilesClosesBatchValuesWhenCollationTxFails(t *testing.T) {
+func TestBuildFilesClosesBatchValuesWhenHistoryCollationFails(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 16)
 	d := agg.d[kv.AccountsDomain]
 	writeDupSortStepBacklog(t, db, d, 16, 2, 8, 3)
 	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	comps, err := d.collateValuesBatch(t.Context(), 0, 2, roTx)
+	comps, err := d.collateValuesBatch(t.Context(), 0, 1, roTx)
 	roTx.Rollback()
 	require.NoError(t, err)
-	batch := &collationBatch{from: 0, to: 2}
+	batch := &collationBatch{from: 0, to: 1}
 	batch.values[kv.AccountsDomain] = comps
+	defer batch.Close()
+	obstacle := filepath.Join(agg.dirs.Tmp, filepath.Base(d.History.vNewFilePath(0, 1))+".idt")
+	require.NoError(t, os.Mkdir(obstacle, 0o755))
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	require.Error(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil, batch))
-	batch.Close()
+	require.Error(t, agg.buildFiles(t.Context(), asTemporalRoDB(db), 0, unboundedFinalityCtx, nil, batch))
 	leftover, err := filepath.Glob(filepath.Join(agg.dirs.Tmp, "*.idt"))
 	require.NoError(t, err)
-	require.Empty(t, leftover)
+	require.Equal(t, []string{obstacle}, leftover)
+}
+
+func TestBuildFilesFallsBackToSingleStepWhenBatchCollationFails(t *testing.T) {
+	for name, build := range map[string]func(t *testing.T, agg *Aggregator, db kv.TemporalRoDB){
+		"BuildFilesInBackground": func(t *testing.T, agg *Aggregator, db kv.TemporalRoDB) {
+			<-agg.BuildFilesInBackground(db, 4*16, unboundedFinalityCtx)
+		},
+		"BuildFiles2": func(t *testing.T, agg *Aggregator, db kv.TemporalRoDB) {
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+			agg.background.Wait()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, 16)
+			d := agg.d[kv.AccountsDomain]
+			writeDupSortStepBacklog(t, db, d, 16, 4, 8, 3)
+			obstacle := filepath.Join(agg.dirs.Tmp, filepath.Base(d.kvNewFilePath(1, 2))+".idt")
+			require.NoError(t, os.Mkdir(obstacle, 0o755))
+			agg.SetMaintenanceObserver(func(_ context.Context, event MaintenanceEvent) {
+				if event.Point == MaintenanceBuildStarted {
+					_ = dir.RemoveAll(obstacle)
+				}
+			})
+
+			build(t, agg, asTemporalRoDB(db))
+			require.GreaterOrEqual(t, agg.EndTxNumMinimax(), uint64(2*16))
+		})
+	}
+}
+
+func TestBuildFilesInBackgroundStopsWhenBatchCollationIsCanceled(t *testing.T) {
+	logger := log.New()
+	var warnings bytes.Buffer
+	logger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(&warnings, log.LogfmtFormat())))
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+	agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder(db))
+	writeDupSortStepBacklog(t, db, agg.d[kv.AccountsDomain], 16, 4, 8, 3)
+
+	agg.ctxCancel()
+	<-agg.BuildFilesInBackground(asTemporalRoDB(db), 4*16, unboundedFinalityCtx)
+	require.Empty(t, warnings.String())
 }
 
 func TestCollateBatchCoversAtMostMaxSteps(t *testing.T) {

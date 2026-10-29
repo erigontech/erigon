@@ -1310,12 +1310,17 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 		}
 		var batch *collationBatch
 		defer func() { batch.Close() }()
+		batching := true
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if !batch.covers(step) {
+			if batching && !batch.covers(step) {
 				batch.Close()
 				var err error
 				if batch, err = a.collateBatch(ctx, db, step, toStep, finalityCtx); err != nil {
-					panic(err)
+					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+						panic(err)
+					}
+					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+					batching = false
 				}
 			}
 			if err := a.buildFiles(ctx, db, step, finalityCtx, nil, batch); err != nil {
@@ -2434,13 +2439,18 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		var batch *collationBatch
 		defer func() { batch.Close() }()
+		batching := true
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if !batch.covers(step) {
+			if batching && !batch.covers(step) {
 				batch.Close()
 				var err error
 				if batch, err = a.collateBatch(a.ctx, db, step, lastInDB, finalityCtx); err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+						close(fin)
+						return
+					}
 					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-					break
+					batching = false
 				}
 			}
 			if err := a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch); err != nil {

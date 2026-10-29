@@ -70,13 +70,20 @@ func TestDomain_CollationMatchesFullScanOnChaindata(t *testing.T) {
 			comps, err := d.collateValuesBatch(t.Context(), steps[from], steps[to-1]+1, roTx)
 			require.NoError(t, err)
 			for _, step := range steps[from:to] {
+				batched := comps[step-steps[from]]
+				comps[step-steps[from]] = nil
 				want := fullScanCollation(t, roTx, cfg.ValuesTable, step)
-				for _, values := range []*seg.Compressor{nil, comps[step-steps[from]]} {
+				for _, values := range []*seg.Compressor{nil, batched} {
 					got := collatedValueWords(t, d, step, stepSize, roTx, values)
 					require.Equal(t, len(want), len(got), "%s step %d batched=%t: word count", cfg.ValuesTable, step, values != nil)
 					for i := range want {
 						require.True(t, bytes.Equal(want[i], got[i]), "%s step %d batched=%t: word %d differs", cfg.ValuesTable, step, values != nil, i)
 					}
+				}
+			}
+			for _, comp := range comps {
+				if comp != nil {
+					comp.Close()
 				}
 			}
 		}

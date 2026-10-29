@@ -1185,20 +1185,6 @@ func TestDomain_CollationBatchMatchesPerStepCollation(t *testing.T) {
 	}
 }
 
-func BenchmarkDomain_CollateOldestStepOfBacklog(b *testing.B) {
-	const stepSize, steps, keys = 16, 256, 4000
-	db, d := testDbAndDomainOfStep(b, statecfg.Schema.StorageDomain, stepSize, log.New())
-	writeDupSortStepBacklog(b, db, d, stepSize, steps, keys, 11)
-	roTx, err := db.BeginRo(b.Context())
-	require.NoError(b, err)
-	defer roTx.Rollback()
-	for b.Loop() {
-		coll, err := d.collate(b.Context(), 0, 0, stepSize, roTx)
-		require.NoError(b, err)
-		coll.Close()
-	}
-}
-
 func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomain(t, log.New())
