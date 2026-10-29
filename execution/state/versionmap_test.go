@@ -1616,3 +1616,17 @@ func TestVersionMapStoreOriginStorageAllocations(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(0), v.Uint64(), "origin storage is write-once")
 }
+
+var newVersionMapSink *VersionMap
+
+// One VersionMap is built per RPC call and most never seed an origin slot, so the
+// origin storage table must not be allocated up front.
+func TestNewVersionMapAllocations(t *testing.T) {
+	allocs := testing.AllocsPerRun(1000, func() {
+		newVersionMapSink = NewVersionMap(nil)
+	})
+	require.LessOrEqual(t, allocs, 1.0, "NewVersionMap allocates %v times", allocs)
+
+	_, ok := newVersionMapSink.LoadOriginStorage(getAddress(1), accounts.InternKey(uint256.NewInt(1).Bytes32()))
+	require.False(t, ok)
+}
