@@ -43,6 +43,9 @@ const (
 	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
+
+	// CodeCacheDeprecated held decompressed contract code keyed by code hash.
+	CodeCacheDeprecated = "CodeCache"
 )
 
 const (
@@ -468,6 +471,7 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
+	CodeCacheDeprecated, // dropped by the drop_code_cache_table migration
 }
 
 // Diagnostics tables
