@@ -402,6 +402,53 @@ func TestForwardBeaconDownloaderSinglePeerWithHTTPFallbackScansFromLookahead(t *
 	require.False(t, downloader.CaughtUpTo(50))
 }
 
+func TestForwardBeaconDownloaderSinglePeerCrossesEmptyFullRangeAfterHTTPFallbackFails(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	previousFallbackDelay := forwardBeaconFallbackDelay
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = time.Second
+	forwardBeaconFallbackDelay = 50 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+		forwardBeaconFallbackDelay = previousFallbackDelay
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	sentinel := &peerCountEnvelopeSentinel{immediateEnvelopeSentinel: immediateEnvelopeSentinel{empty: true}, active: 1}
+	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), sentinel)
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "peer-a", nil
+	}
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	downloader.RequestMore(t.Context())
+
+	start, pending := downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(44), start)
+	require.Zero(t, processCalls.Load())
+	require.True(t, downloader.gloasScanUnconfirmed)
+	require.False(t, downloader.CaughtUpTo(50))
+}
+
 func TestForwardBeaconDownloaderHoldsTipAfterSinglePeerCrossing(t *testing.T) {
 	previousInterval := forwardBeaconRequestInterval
 	previousTipTimeout := forwardTipEnvelopeTimeout

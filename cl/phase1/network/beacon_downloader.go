@@ -184,6 +184,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		return
 	}
 	var atomicResp atomic.Value
+	var httpFallbackFailed atomic.Bool
 	atomicResp.Store(peerAndBlocks{})
 	commitHTTPBlocks := func(sampledHighestSlot, httpStart, httpCount uint64, hadGloasPending bool, blocks []*cltypes.SignedBeaconBlock) bool {
 		if len(blocks) == 0 {
@@ -237,6 +238,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 			return
 		default:
 			// HTTP failed — fall back to P2P probing.
+			httpFallbackFailed.Store(true)
 			f.httpPreferred.Store(false)
 		}
 		if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
@@ -372,6 +374,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					return
 				}
 				if httpErr != nil {
+					httpFallbackFailed.Store(true)
 					log.Debug("[ForwardBeaconDownloader] HTTP fallback also failed", "err", httpErr)
 				}
 			})
@@ -484,7 +487,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						if hadGloasPending && completedReqCount == reqCount {
 							lastSlot := lastSlotInRange(reqSlot, reqCount)
 							confirmed := f.confirmEmptyRange(peerId, lastSlot) != nil
-							singlePeer := !confirmed && f.httpFallbackURL == "" && !f.canAskAnotherPeer()
+							singlePeer := !confirmed && (f.httpFallbackURL == "" || httpFallbackFailed.Load()) && !f.canAskAnotherPeer()
 							if confirmed || singlePeer {
 								emptyResponse = &emptyRangeResult{
 									lastSlot: lastSlot,
