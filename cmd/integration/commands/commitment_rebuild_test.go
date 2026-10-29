@@ -109,3 +109,21 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 	require.NoError(t, commitmentRebuild(db, t.Context(), log.New()))
 	requireExecutionReset(t, db, countTail)
 }
+
+func TestCommitmentClearKeepsTheDBTail(t *testing.T) {
+	db, dirs, countTail := dbWithStateTail(t)
+	snapCfg := ethconfig.Defaults.Snapshot
+	snapCfg.ChainName = networkname.Test
+	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())
+	t.Cleanup(blockSnaps.Close)
+	openBlockReaderOnce.Do(func() {
+		_blockReaderSingleton, _blockWriterSingleton = freezeblocks.NewBlockReader(blockSnaps), blockio.NewBlockWriter()
+	})
+	prevDatadir, prevClear, prevYes := datadirCli, clearCommitment, yes
+	t.Cleanup(func() { datadirCli, clearCommitment, yes = prevDatadir, prevClear, prevYes })
+	datadirCli, clearCommitment, yes = dirs.DataDir, true, true
+
+	tail := countTail()
+	require.NoError(t, commitmentRebuild(db, t.Context(), log.New()))
+	require.Equal(t, tail, countTail(), "--clear-commitment removes commitment only")
+}
