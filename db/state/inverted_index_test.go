@@ -1744,7 +1744,7 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 	var prevKey []byte
 	var prevMax uint64
 	require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
-		require.LessOrEqual(t, len(v), 8+iiChunkDeltasLimit)
+		require.LessOrEqual(t, len(v), iiChunkMaxBytes)
 		txNums, err := decodeIIChunk(nil, v)
 		require.NoError(t, err)
 		require.Equal(t, binary.BigEndian.Uint64(v), txNums[len(txNums)-1], "chunk prefix is its max")
@@ -1996,7 +1996,7 @@ func TestInvertedIndexChunkLayout(t *testing.T) {
 	for i := range dense {
 		dense[i] = uint64(i)
 	}
-	require.Equal(t, 1+iiChunkDeltasLimit/2, iiChunkFit(dense))
+	require.Equal(t, 257, iiChunkFit(dense))
 
 	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 1, 2, 0})
 	require.Error(t, err, "delta above max")

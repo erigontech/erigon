@@ -38,8 +38,8 @@ import (
 // before chunking. Deltas use the native byte order because chaindata is not portable across
 // byte orders anyway, so readers can use them as []uint16.
 
-// iiChunkDeltasLimit keeps a chunk far below the inline value limit of a 4 KB page.
-const iiChunkDeltasLimit = 512
+// iiChunkMaxBytes keeps a chunk far below the inline value limit of a 4 KB page.
+const iiChunkMaxBytes = 8 + 512
 
 func appendIIChunk(dst []byte, txNums []uint64) []byte {
 	dst = binary.BigEndian.AppendUint64(dst, txNums[len(txNums)-1])
@@ -101,7 +101,7 @@ func decodeIIChunk(dst []uint64, v []byte) ([]uint64, error) {
 
 // iiChunkFit returns how many leading txNums fit into one chunk.
 func iiChunkFit(txNums []uint64) int {
-	n := min(len(txNums), 1+iiChunkDeltasLimit/2)
+	n := min(len(txNums), 1+(iiChunkMaxBytes-8)/2)
 	for i := 1; i < n; i++ {
 		if txNums[i]-txNums[0] > math.MaxUint16 {
 			return i
