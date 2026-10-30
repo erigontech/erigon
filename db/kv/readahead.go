@@ -29,6 +29,20 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// ValueWarmer pages in a zero-copy value before the caller touches it, so a
+// multi-page read costs one async read instead of a major fault per page.
+type ValueWarmer interface {
+	WarmValue(v []byte)
+}
+
+// WarmValue is a no-op unless tx is backed by an engine that hands out pointers
+// into its own mapping.
+func WarmValue(tx Tx, v []byte) {
+	if w, ok := tx.(ValueWarmer); ok {
+		w.WarmValue(v)
+	}
+}
+
 type DBWithDistributionSupport interface {
 	// DistributeCursors partitions table into n approximately equal-count key
 	// ranges using mdbx's b-tree distribution. Fast on Table >> RAM: it touches
