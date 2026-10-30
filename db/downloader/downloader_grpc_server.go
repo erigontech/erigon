@@ -111,6 +111,9 @@ func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequ
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.DeleteRequest) (_ *emptypb.Empty, err error) {
 	err = s.checkNamesAndLogCall(request.Paths, "Delete")
+	if err != nil {
+		return
+	}
 	for _, name := range request.Paths {
 		err = errors.Join(err, s.d.Delete(name))
 	}

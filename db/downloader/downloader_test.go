@@ -1429,3 +1429,15 @@ func TestGrpcServerRejectsNonLocalNames(t *testing.T) {
 		require.Error(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
 	}
 }
+
+func TestGrpcServerDeleteKeepsFilesOutsideSnapDir(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	victim := filepath.Join(filepath.Dir(test.dirs.Snap), "victim.seg.torrent")
+	require.NoError(t, os.WriteFile(victim, []byte("x"), 0o644))
+
+	_, err = grpcServer.Delete(t.Context(), &downloaderproto.DeleteRequest{Paths: []string{"../victim.seg"}})
+	require.Error(t, err)
+	require.FileExists(t, victim)
+}
