@@ -148,6 +148,16 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 	stackLen := len(stackData)
 	caller := scope.Address()
 	switch {
+	case stackLen >= 3 && op == vm.TXDIFF:
+		param := &stackData[stackLen-1]
+		if !param.IsUint64() || param.Uint64() > 5 {
+			return
+		}
+		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
+		t.lookupAccount(addr)
+		if param.Uint64() <= 1 {
+			t.lookupStorage(addr, stackData[stackLen-3].Bytes32())
+		}
 	case stackLen >= 1 && (op == vm.SLOAD || op == vm.SSTORE):
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
 		t.lookupStorage(caller, slot)

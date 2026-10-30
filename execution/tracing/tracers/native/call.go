@@ -302,8 +302,8 @@ func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasU
 			stateGasUsed := hexutil.Int64(frame.GasUsed.State)
 			call.StateGasUsed = &stateGasUsed
 			if t.config.WithLog {
-				// Batch rollback can remove logs from successful frames. A failed
-				// frame does not remove logs from its other siblings.
+				// An atomic batch or POST_TX failure can remove logs from a
+				// successful frame, without changing its receipt status.
 				clearFailedLogs(call, len(frame.Logs) == 0)
 			}
 		}

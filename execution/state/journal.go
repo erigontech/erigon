@@ -561,7 +561,11 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAccessListAddSlot:
-		s.accessList.DeleteSlot(je.account, je.key)
+		if je.flags != 0 {
+			delete(s.accessList.slotsOnly, frameStorageSlot{je.account, je.key})
+		} else {
+			s.accessList.DeleteSlot(je.account, je.key)
+		}
 		return nil
 	}
 	panic(fmt.Sprintf("revert: unknown journal entry kind %d", je.kind))

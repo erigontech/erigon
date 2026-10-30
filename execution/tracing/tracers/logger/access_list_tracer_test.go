@@ -327,3 +327,28 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 	require.True(t, seeded.UsedBeforeCreation(addr))
 	require.Empty(t, seeded.CreatedContracts())
 }
+
+func TestAccessListTracerTxDiff(t *testing.T) {
+	for _, tc := range []struct {
+		param         uint64
+		account, slot bool
+	}{
+		{0, true, true}, {1, true, true}, {2, true, false}, {5, true, false}, {6, false, false}, {12, false, false},
+	} {
+		tracer := NewAccessListTracer(nil, nil, nil)
+		scope := &testOpContext{stack: []uint256.Int{{}, *new(uint256.Int).SetBytes(addr[:]), *uint256.NewInt(tc.param)}}
+		tracer.OnOpcodeV2(0, byte(vm.TXDIFF), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, nil, 1, nil)
+		if !tc.account {
+			require.Empty(t, tracer.AccessList())
+			continue
+		}
+		list := tracer.AccessList()
+		require.Len(t, list, 1)
+		require.Equal(t, addr, list[0].Address)
+		if tc.slot {
+			require.Equal(t, []common.Hash{{}}, list[0].StorageKeys)
+		} else {
+			require.Empty(t, list[0].StorageKeys)
+		}
+	}
+}

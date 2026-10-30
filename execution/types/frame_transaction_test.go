@@ -106,7 +106,7 @@ func TestFrameTransactionConstraints(t *testing.T) {
 		"chain ID":                  func(tx *FrameTransaction) { tx.ChainID.SetUint64(2) },
 		"empty frames":              func(tx *FrameTransaction) { tx.Frames = nil },
 		"too many frames":           func(tx *FrameTransaction) { tx.Frames = make([]Frame, 65) },
-		"mode":                      func(tx *FrameTransaction) { tx.Frames[0].Mode = 3 },
+		"mode":                      func(tx *FrameTransaction) { tx.Frames[0].Mode = 4 },
 		"flags":                     func(tx *FrameTransaction) { tx.Frames[0].Flags = 8 },
 		"value in verify":           func(tx *FrameTransaction) { tx.Frames[0].Value.SetUint64(1) },
 		"execution approval target": func(tx *FrameTransaction) { tx.Frames[0].Target = &expiry },

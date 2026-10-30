@@ -39,6 +39,9 @@ type FrameContext struct {
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8 // Charging frame index plus one; zero means no outstanding charge.
+	journalStart   int
+	logStart       int
+	trace          *TransactionTrace
 
 	// Transaction data is fixed during execution, so hash caches survive frame reverts.
 	signingHash      common.Hash
@@ -56,6 +59,7 @@ func (ibs *IntraBlockState) NewFrameContext(tx *types.FrameTransaction, maxCost 
 	ctx := &FrameContext{Transaction: tx, Receipts: make([]types.FrameReceipt, len(tx.Frames)), MaxCost: maxCost, journal: ibs.journal}
 	ctx.undo.frame = ctx
 	ctx.storageOwners = make(map[frameStorageSlot]uint8)
+	ctx.journalStart, ctx.logStart = len(ibs.journal.entries), ibs.LogCount()
 	return ctx
 }
 

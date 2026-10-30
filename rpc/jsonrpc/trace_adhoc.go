@@ -747,7 +747,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
 				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN,
-				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD:
+				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD, vm.TXTRACE, vm.TXDIFF:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -759,7 +759,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 			var setMem bool
 			switch ot.lastOp {
 			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY, vm.MCOPY,
-				vm.FRAMEDATACOPY, vm.SIGDATACOPY:
+				vm.FRAMEDATACOPY, vm.SIGDATACOPY, vm.EVENTDATACOPY:
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
@@ -836,7 +836,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = tracers.StackBack(st, 2).Uint64()
 			}
-		case vm.EXTCODECOPY:
+		case vm.EXTCODECOPY, vm.EVENTDATACOPY:
 			if len(st) > 3 {
 				ot.lastMemOff = tracers.StackBack(st, 1).Uint64()
 				ot.lastMemLen = tracers.StackBack(st, 3).Uint64()
