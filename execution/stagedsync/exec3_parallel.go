@@ -2890,17 +2890,17 @@ type blockExecutor struct {
 	// The old set is needed alongside the new one so a dependent that read a key the
 	// new incarnation DROPPED is still re-checked.
 	writeChangedPrev map[int]*state.WriteSet
-	// readerByAddr: reverse index (address -> reader task indices) so a published write
-	// re-checks only txs that read its address, not every later task. A per-cell index
-	// costs several map operations per read on the serial execLoop; the exact cell is
-	// checked against the reader's read set instead, once per written address.
-	readerByAddr map[accounts.Address][]int
+	// readerByPath: reverse index ((address, path) -> reader task indices) so a published
+	// write re-checks only txs that read a written path, not every reader of the address:
+	// txs of one sender all read the sender, but rarely the nonce and balance it writes.
+	// Storage keys are not indexed; the exact cell is checked against the reader's read set.
+	readerByPath map[readerKey][]int
 
 	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
 	// published, so it must be re-validated at the finalize boundary. A clean tx is
 	// provably still valid there — every predecessor is final and any write to one of
 	// its read cells went through markReadersDirty. Maintained only on the execLoop
-	// (the single result-processing/finalize goroutine), like readerByAddr, so no lock.
+	// (the single result-processing/finalize goroutine), like readerByPath, so no lock.
 	revalidate map[int]bool
 
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
@@ -2960,7 +2960,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
-		readerByAddr:        map[accounts.Address][]int{},
+		readerByPath:        map[readerKey][]int{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
 		slDone:              make(chan struct{}),
@@ -2973,13 +2973,28 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 // incarnations; the DependsOn re-check filters stale entries, so over-inclusion
 // only costs a redundant check.
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
-	rs.RangeFullHeaders(func(a accounts.Address, _ state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
-		l := be.readerByAddr[a]
+	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
+		k := readerKey{a, p}
+		l := be.readerByPath[k]
 		if i, found := slices.BinarySearch(l, taskIdx); !found {
-			be.readerByAddr[a] = slices.Insert(l, i, taskIdx)
+			be.readerByPath[k] = slices.Insert(l, i, taskIdx)
 		}
 		return true
 	})
+}
+
+type readerKey struct {
+	addr accounts.Address
+	path state.AccountPath
+}
+
+// invalidatedPaths returns the range of read paths a write of h can invalidate: a
+// lifecycle write invalidates a read of any path at the address.
+func invalidatedPaths(h state.WriteHeader) (from, to state.AccountPath) {
+	if h.Path.AffectsAccountLifecycle() {
+		return state.AddressPath, state.CreateContractPath
+	}
+	return h.Path, h.Path
 }
 
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
@@ -3000,15 +3015,19 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	if ws == nil {
 		return
 	}
-	seen := map[accounts.Address]struct{}{}
+	seen := map[readerKey]struct{}{}
 	for h := range ws.AllHeaders() {
-		if _, ok := seen[h.Address]; ok {
-			continue
-		}
-		seen[h.Address] = struct{}{}
-		for _, tx := range readersAbove(be.readerByAddr[h.Address], writerTx) {
-			if !be.revalidate[tx] && be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOnAt(ws, h.Address) {
-				be.revalidate[tx] = true
+		from, to := invalidatedPaths(h)
+		for p := from; p <= to; p++ {
+			k := readerKey{h.Address, p}
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			for _, tx := range readersAbove(be.readerByPath[k], writerTx) {
+				if !be.revalidate[tx] && be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOnAt(ws, h.Address) {
+					be.revalidate[tx] = true
+				}
 			}
 		}
 	}
@@ -3424,8 +3443,10 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 				continue
 			}
 			seen[h.Address] = struct{}{}
-			for _, tx := range readersAbove(be.readerByAddr[h.Address], changedTx) {
-				set[tx] = struct{}{}
+			for p := state.AddressPath; p <= state.CreateContractPath; p++ {
+				for _, tx := range readersAbove(be.readerByPath[readerKey{h.Address, p}], changedTx) {
+					set[tx] = struct{}{}
+				}
 			}
 		}
 	}
