@@ -156,17 +156,17 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if ci.incarnation > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		if dbg.AssertEnabled && ci.flag == FlagDone && flag == FlagEstimate {
+		if dbg.AssertEnabled && ci.loadFlag() == FlagDone && flag == FlagEstimate {
 			panic(fmt.Errorf("versionMap: Done->Estimate downgrade addr=%x path=%s txIdx=%d inc %d->%d", addr, path, txIdx, ci.incarnation, incarnation))
 		}
-		ci.flag = flag
+		ci.flag.Store(uint32(flag))
 		ci.incarnation = incarnation
 		ci.Value = value
 		ci.valStatus = valStatus
 		return cells
 	}
 	cell := getCell()
-	cell.flag = flag
+	cell.flag.Store(uint32(flag))
 	cell.incarnation = incarnation
 	cell.Value = value
 	cell.valStatus = valStatus
@@ -191,7 +191,7 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Add
 		panic(fmt.Sprintf("markFlag: incarnation have=%d want=%d addr=%x path=%s key=%x txIdx=%d",
 			ci.incarnation, incarnation, addr.Value(), path, key.Value(), txIdx))
 	}
-	ci.flag = flag
+	ci.flag.Store(uint32(flag))
 }
 
 // missingCellMsg is called from panic paths only: the mark* helpers run once per
@@ -225,7 +225,7 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 			panic(fmt.Sprintf("markComplete: value changed at published version addr=%x path=%s txIdx=%d inc=%d old=%v new=%v", addr.Value(), path, txIdx, incarnation, ci.Value, value))
 		}
 	}
-	ci.flag = FlagDone
+	ci.flag.Store(uint32(FlagDone))
 }
 
 type VersionMap struct {
@@ -585,7 +585,7 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	switch fv.flag {
+	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
@@ -691,7 +691,7 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	switch fv.flag {
+	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
@@ -956,7 +956,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		// the read side (readSelfDestructMemo→resolved) already treats it as a
 		// destruct, so this single lifecycle authority must too, or the two disagree
 		// on a validated destruct and a wiped-slot read never settles.
-		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value {
+		if (v.loadFlag() == FlagDone || v.loadFlag() == FlagValidated) && v.Value {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}
@@ -965,7 +965,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 	if !wiped {
 		return LifecycleLive, Version{}, 0, 0
 	}
-	if latest.flag == FlagDone || latest.flag == FlagValidated {
+	if latest.loadFlag() == FlagDone || latest.loadFlag() == FlagValidated {
 		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
 	} else {
 		canonicalVer = Version{TxIndex: destroyedAt, Incarnation: wipeInc}
@@ -998,7 +998,7 @@ func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolv
 		// Only Done proves a lasting revival: a Validated cell is still revertible
 		// until the in-order seal, and withdrawing it re-validates its own readers,
 		// not the AddressPath reader this verdict serves.
-		if resolvedOnly && v.flag != FlagDone {
+		if resolvedOnly && v.loadFlag() != FlagDone {
 			return true
 		}
 		hi, ok = k, true
@@ -1048,7 +1048,7 @@ func (vm *VersionMap) selfDestructInRange(addr accounts.Address, lo, hi int, tar
 		if k < lo {
 			return false
 		}
-		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value == target {
+		if (v.loadFlag() == FlagDone || v.loadFlag() == FlagValidated) && v.Value == target {
 			ver = Version{TxIndex: k, Incarnation: v.incarnation}
 			found = true
 			return false
@@ -1072,7 +1072,7 @@ func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Versi
 		if k < lo {
 			return false
 		}
-		if v.flag == FlagDone && v.Value == target {
+		if v.loadFlag() == FlagDone && v.Value == target {
 			ver = Version{TxIndex: k, Incarnation: v.incarnation}
 			found = true
 			return false
@@ -1136,8 +1136,8 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, getCell func() *WriteCell[T], eq func(a, b T) bool, complete, hasLifecycle bool) *btree.Map[int, *WriteCell[T]] {
 	if !complete && !hasLifecycle && cells != nil {
 		if ci, ok := cells.Get(version.TxIndex); ok && eq(ci.Value, value) {
-			if !(ci.flag == FlagDone && flag == FlagEstimate) { // never downgrade Done->Estimate
-				ci.flag = flag
+			if !(ci.loadFlag() == FlagDone && flag == FlagEstimate) { // never downgrade Done->Estimate
+				ci.flag.Store(uint32(flag))
 			}
 			ci.valStatus = valStatus
 			return cells
@@ -1158,7 +1158,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 	if !ok || !eq(ci.Value, value) || ci.valStatus != valStatus {
 		return false
 	}
-	return ci.flag == flag || (ci.flag == FlagDone && flag == FlagEstimate)
+	return ci.loadFlag() == flag || (ci.loadFlag() == FlagDone && flag == FlagEstimate)
 }
 
 // flushAllNoOp reports whether every write this tx made to addr is already present, so the
@@ -1212,7 +1212,7 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 			}
 			if vw.valStatus == ValueUnchanged {
 				if cells != nil {
-					if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
+					if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
 						return false
 					}
 				}
@@ -1303,14 +1303,15 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				// goes back to the seed or away. Before the seal a Done cell holds the seed.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
 					if cells := e.Storage[key]; cells != nil {
-						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
+						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
 							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
 								// As in flushCell, a changed value needs a new version, so that the
 								// readers of the earlier value are invalidated.
 								if !c.Value.Eq(&seed) {
 									c.incarnation = vw.Version.Incarnation
 								}
-								c.Value, c.flag, c.valStatus = seed, FlagDone, ValueChanged
+								c.Value, c.valStatus = seed, ValueChanged
+								c.flag.Store(uint32(FlagDone))
 							} else {
 								cells.Delete(vw.Version.TxIndex)
 								releaseCellStorage(c)
@@ -1343,8 +1344,8 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		if e == nil {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
-		e.mu.Lock()
-		defer e.mu.Unlock()
+		e.mu.RLock()
+		defer e.mu.RUnlock()
 		if vw, ok := writes.address[addr]; ok {
 			markCellComplete(e.Address, addr, AddressPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 		}
@@ -2017,11 +2018,15 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 // AccountPath's value-type contract, so a wrong-T write is a compile-time error, and
 // typed Read primitives consume Value directly without crossing the any boundary.
 type WriteCell[T any] struct {
-	flag        statusFlag
+	// flag is atomic so MarkWritesComplete can flip Validated/Estimate->Done under the
+	// entry's read lock: readers of the same address do not wait for the commit.
+	flag        atomic.Uint32
 	valStatus   valueStatus
 	incarnation Incarnation
 	Value       T
 }
+
+func (c *WriteCell[T]) loadFlag() statusFlag { return statusFlag(c.flag.Load()) }
 
 // Per-T pools for *WriteCell[T], spanning VersionMap lifetimes: a cell freed by
 // Delete/DeleteAll in block N is recycled into block N+1's first write. Slice-valued
