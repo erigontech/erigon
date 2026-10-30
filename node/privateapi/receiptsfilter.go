@@ -213,7 +213,6 @@ func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.
 		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
 			Log:            l,
 			BlockTimestamp: blockTimestamp,
-			Removed:        rn.Removed,
 		}))
 	}
 
@@ -237,7 +236,7 @@ func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.
 	for _, frame := range receipt.FrameReceipts {
 		logs := make([]*remoteproto.SubscribeLogsReply, 0, len(frame.Logs))
 		for _, l := range frame.Logs {
-			logs = append(logs, logNotificationToProto(&notifications.LogNotification{Log: l, BlockTimestamp: blockTimestamp, Removed: rn.Removed}))
+			logs = append(logs, logNotificationToProto(&notifications.LogNotification{Log: l, BlockTimestamp: blockTimestamp}))
 		}
 		protoReceipt.FrameReceipts = append(protoReceipt.FrameReceipts, &remoteproto.FrameReceipt{Status: frame.Status, ExecutionGasUsed: frame.GasUsed.Execution, StateGasUsed: frame.GasUsed.State, Logs: logs})
 	}

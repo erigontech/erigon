@@ -31,8 +31,6 @@ import (
 )
 
 const (
-	// minCachedPrecompileGas keeps calls whose compute is cheaper than a cache lookup out of the cache.
-	minCachedPrecompileGas   = 2000
 	maxCachedPrecompileInput = 64 * 1024
 )
 
@@ -77,7 +75,8 @@ func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, 
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
-	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < max(minCachedPrecompileGas, uint64(len(in))) {
+	// Below its key length a call costs less than the insert a miss pays.
+	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < uint64(len(in)) {
 		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
@@ -150,17 +149,15 @@ const modExpHeaderLength = 96
 
 // modExpKey drops everything past the operands the header declares.
 func modExpKey(input []byte) ([]byte, bool) {
-	if len(input) <= modExpHeaderLength {
-		return input, true
-	}
 	baseLen := new(uint256.Int).SetBytes(getData(input, 0, 32))
 	expLen := new(uint256.Int).SetBytes(getData(input, 32, 32))
 	modLen := new(uint256.Int).SetBytes(getData(input, 64, 32))
-	if !baseLen.IsUint64() || !expLen.IsUint64() || !modLen.IsUint64() {
+	// A zero modulus answers from the header faster than a lookup.
+	if modLen.IsZero() || !baseLen.IsUint64() || !expLen.IsUint64() || !modLen.IsUint64() {
 		return nil, false
 	}
-	if baseLen.IsZero() && modLen.IsZero() {
-		return input[:modExpHeaderLength], true
+	if len(input) <= modExpHeaderLength {
+		return input, true
 	}
 	end := new(uint256.Int).AddUint64(baseLen, modExpHeaderLength)
 	end.Add(end, expLen)

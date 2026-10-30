@@ -92,6 +92,12 @@ type Cfg struct {
 	executionHead      common.Hash
 	forkChoiceRerunAt  time.Time
 	chainTipRejections *chainTipRejections
+	pendingBlockWrite  *pendingBlockWrite
+}
+
+type pendingBlockWrite struct {
+	block            *cltypes.SignedBeaconBlock
+	collectExecution bool
 }
 
 type Args struct {
@@ -214,27 +220,72 @@ func catchUpPublishingHead(args Args) StageName {
 	return next
 }
 
-func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
-			return err
-		}
-		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
-	}); err != nil {
+func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, newPayload bool) error {
+	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 		return err
 	}
-
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
 	}
 
 	_, hasHeaderInFCU := cfg.forkChoice.GetHeader(blockRoot)
-	if !checkDataAvaiability && hasHeaderInFCU {
-		return nil
+	if !hasHeaderInFCU {
+		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, true, false); err != nil {
+			return err
+		}
+		// OnBlock can return nil for old blocks it ignores. Require acceptance before
+		// writing indices: an unvalidated state root can overwrite another block's mapping.
+		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
+			return nil
+		}
 	}
 
-	return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
+	if err := persistAcceptedBlock(ctx, cfg, block); err != nil {
+		// Fork choice advances before persistence. Keep the accepted block across stage
+		// transitions and finish its write before importing more blocks or reporting success.
+		cfg.pendingBlockWrite = &pendingBlockWrite{block: block}
+		return err
+	}
+	return nil
+}
+
+func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
+	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
+	})
+}
+
+func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
+	pending := cfg.pendingBlockWrite
+	if pending == nil {
+		return nil
+	}
+	block := pending.block
+	for {
+		err := persistAcceptedBlock(ctx, cfg, block)
+		if err == nil && pending.collectExecution {
+			if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
+				err = fmt.Errorf("failed to add block to collector: %w", err)
+			}
+		}
+		if err == nil {
+			cfg.pendingBlockWrite = nil
+			if cfg.peerDas != nil {
+				cfg.peerDas.BackfillCustodyColumns(block.Block.Slot, block.Block.Slot)
+			}
+			return nil
+		}
+		log.Warn("[Caplin] failed to persist accepted block, retrying", "slot", block.Block.Slot, "err", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 /*
@@ -350,6 +401,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
 					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
 					downloader.SetGloasSuccessorValidator(network2.NewGloasSuccessorValidator(cfg.state, startingRoot))
+					downloader.SetGloasEnvelopeSignatureValidator(cfg.state)
 					if checkpoint_sync.RemoteCheckpointSyncEnabled(cfg.caplinConfig) {
 						if urls := clparams.GetAllCheckpointSyncEndpoints(cfg.caplinConfig.NetworkId); len(urls) > 0 {
 							downloader.SetHTTPFallbackURL(urls[0])
@@ -367,6 +419,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ForwardSync: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.pendingBlockWrite != nil {
+						return ChainTipSync
+					}
 					// If forward sync is stale (no progress), go directly to ChainTipSync
 					// so gossip can deliver blocks that range requests cannot.
 					if errors.Is(err, ErrForwardSyncStale) {
@@ -385,6 +440,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.pendingBlockWrite != nil {
+						return ChainTipSync
+					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}

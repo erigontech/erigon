@@ -2899,6 +2899,51 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
+	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
+
+	if p.feeCalculator != nil {
+		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if pendingBaseFee == 0 {
+		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			pendingBaseFee = binary.BigEndian.Uint64(v)
+		}
+	}
+
+	if pendingBlobFee == 0 {
+		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			pendingBlobFee = binary.BigEndian.Uint64(v)
+		}
+	}
+
+	if pendingBlobFee == 0 {
+		pendingBlobFee = minBlobGasPrice
+	}
+
+	if blockGasLimit == 0 {
+		blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
+	}
+
+	// The validation and insertion below read these from p, so publish them first.
+	var pendingBaseFee256 uint256.Int
+	pendingBaseFee256.SetUint64(pendingBaseFee)
+	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
+	p.pendingBaseFee.Store(pendingBaseFee)
+	p.pendingBlobFee.Store(pendingBlobFee)
+	p.blockGasLimit.Store(blockGasLimit)
+
 	txns := TxnSlots{}
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
@@ -2947,47 +2992,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		i++
 	}
 
-	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
-
-	if p.feeCalculator != nil {
-		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
-		if err != nil {
-			return err
-		}
-	}
-
-	if pendingBaseFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			pendingBaseFee = binary.BigEndian.Uint64(v)
-		}
-	}
-
-	if pendingBlobFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			pendingBlobFee = binary.BigEndian.Uint64(v)
-		}
-	}
-
-	if pendingBlobFee == 0 {
-		pendingBlobFee = minBlobGasPrice
-	}
-
-	if blockGasLimit == 0 {
-		if p.chainConfig.DefaultBlockGasLimit != nil {
-			blockGasLimit = *p.chainConfig.DefaultBlockGasLimit
-		} else {
-			blockGasLimit = ethconfig.DefaultBlockGasLimit
-		}
-	}
-
 	err = p.senders.registerNewSenders(&txns, p.logger)
 	if err != nil {
 		return err
@@ -3020,14 +3024,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return true
 	})
 
-	// Initialise cached pendingBaseFee values in all queues so that their
-	// comparators use the correct base fee even before the first OnNewBlock.
-	var pendingBaseFee256 uint256.Int
-	pendingBaseFee256.SetUint64(pendingBaseFee)
-	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
-	p.pendingBaseFee.Store(pendingBaseFee)
-	p.pendingBlobFee.Store(pendingBlobFee)
-	p.blockGasLimit.Store(blockGasLimit)
 	return nil
 }
 

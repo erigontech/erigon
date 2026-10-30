@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	g "github.com/anacrolix/generics"
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
@@ -84,11 +85,11 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
 		type addrState struct {
-			balance        *uint256.Int
+			balance        g.Option[uint256.Int]
 			balanceDeleted bool
-			nonce          *uint64
-			incarnation    *uint64
-			codeHash       *accounts.CodeHash
+			nonce          g.Option[uint64]
+			incarnation    g.Option[uint64]
+			codeHash       g.Option[accounts.CodeHash]
 			code           []byte
 			codeWritten    bool
 			selfDestruct   bool
@@ -106,24 +107,20 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			return d
 		}
 		for a, vw := range writes.Balances() {
-			v := vw.Val
 			d := ensure(a)
-			d.balance = &v
+			d.balance = g.Some(vw.Val)
 			d.balanceDeleted = vw.Deletes()
 		}
 		for a, vw := range writes.Nonces() {
-			v := vw.Val
-			ensure(a).nonce = &v
+			ensure(a).nonce = g.Some(vw.Val)
 		}
 		for a, vw := range writes.Incarnations() {
-			v := vw.Val
-			ensure(a).incarnation = &v
+			ensure(a).incarnation = g.Some(vw.Val)
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
 		for a, vw := range writes.CodeHashes() {
-			v := vw.Val
-			ensure(a).codeHash = &v
+			ensure(a).codeHash = g.Some(vw.Val)
 		}
 		for a, vw := range writes.Codes() {
 			d := ensure(a)
@@ -150,11 +147,11 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for _, d := range perAddr {
 			if d.selfDestruct {
 				if d.balanceDeleted {
-					d.balance = nil
+					d.balance.SetNone()
 				}
-				d.nonce = nil
-				d.incarnation = nil
-				d.codeHash = nil
+				d.nonce.SetNone()
+				d.incarnation.SetNone()
+				d.codeHash.SetNone()
 				d.code = nil
 				d.codeWritten = false
 				d.storage = nil
@@ -182,8 +179,8 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 				// An EIP-8246 self-destruct keeps its balance write; the record
 				// survives only when a non-zero balance is left to preserve.
-				sdPreservedBalance := d.balance != nil && !d.balance.IsZero()
-				pureDelete := !sdPreservedBalance && d.nonce == nil && d.incarnation == nil && d.codeHash == nil
+				sdPreservedBalance := d.balance.Ok && !d.balance.Value.IsZero()
+				pureDelete := !sdPreservedBalance && !d.nonce.Ok && !d.incarnation.Ok && !d.codeHash.Ok
 				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 					return err
 				}
@@ -218,7 +215,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
-			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.codeWritten {
+			if d.balance.Ok || d.nonce.Ok || d.incarnation.Ok || d.codeHash.Ok || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
@@ -234,17 +231,17 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						}
 					}
 				}
-				if d.balance != nil {
-					acc.Balance = *d.balance
+				if d.balance.Ok {
+					acc.Balance = d.balance.Value
 				}
-				if d.nonce != nil {
-					acc.Nonce = *d.nonce
+				if d.nonce.Ok {
+					acc.Nonce = d.nonce.Value
 				}
-				if d.incarnation != nil {
-					acc.Incarnation = *d.incarnation
+				if d.incarnation.Ok {
+					acc.Incarnation = d.incarnation.Value
 				}
-				if d.codeHash != nil {
-					acc.CodeHash = *d.codeHash
+				if d.codeHash.Ok {
+					acc.CodeHash = d.codeHash.Value
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
@@ -613,87 +610,67 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
 
-// NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
-// It reconstructs account state from the per-field writes and calls
-// ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
-// have been called on the accumulator before this function is invoked.
-func NotifyAccumulator(accumulator *shards.Accumulator, writes WriteSetView) {
-	if accumulator == nil || writes.IsEmpty() {
-		return
+// NotifyAccumulator sends a block's state changes to the accumulator. It reads every
+// account's latest state, so the block's writes must already be applied. StartChange
+// must be called on the accumulator first.
+func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx, blockWrites []WriteSetView) error {
+	if accumulator == nil {
+		return nil
 	}
 
-	type pendingAccount struct {
-		balance     *uint256.Int
-		nonce       *uint64
-		incarnation *uint64
-		codeHash    *accounts.CodeHash
+	latest := make(map[accounts.Address]accounts.Account)
+	account := func(addr accounts.Address) (accounts.Account, error) {
+		if acc, ok := latest[addr]; ok {
+			return acc, nil
+		}
+		acc := accounts.NewAccount()
+		address := addr.Value()
+		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+		if err != nil {
+			return accounts.Account{}, err
+		}
+		if len(v) > 0 {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
+				return accounts.Account{}, err
+			}
+		}
+		latest[addr] = acc
+		return acc, nil
 	}
 
-	pending := make(map[accounts.Address]*pendingAccount, writes.Count()/4+1)
-	get := func(addr accounts.Address) *pendingAccount {
-		p := pending[addr]
-		if p == nil {
-			p = &pendingAccount{}
-			pending[addr] = p
+	for _, writes := range blockWrites {
+		for addr, write := range writes.Codes() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
 		}
-		return p
-	}
-
-	for addr, w := range writes.Balances() {
-		v := w.Val
-		get(addr).balance = &v
-	}
-	for addr, w := range writes.Nonces() {
-		v := w.Val
-		get(addr).nonce = &v
-	}
-	for addr, w := range writes.Incarnations() {
-		v := w.Val
-		get(addr).incarnation = &v
-	}
-	for addr, w := range writes.CodeHashes() {
-		v := w.Val
-		get(addr).codeHash = &v
-	}
-	for addr, w := range writes.Codes() {
-		var inc uint64
-		if p := pending[addr]; p != nil && p.incarnation != nil {
-			inc = *p.incarnation
+		for addr, byKey := range writes.Storages() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			for key, write := range byKey {
+				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
+			}
 		}
-		accumulator.ChangeCode(addr.Value(), inc, w.Val.Bytes)
-	}
-	for addr, byKey := range writes.Storages() {
-		var inc uint64
-		if p := pending[addr]; p != nil && p.incarnation != nil {
-			inc = *p.incarnation
+		for addr := range writes.Balances() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
-		for key, w := range byKey {
-			val := w.Val
-			accumulator.ChangeStorage(addr.Value(), inc, key.Value(), val.Bytes())
+		for addr := range writes.Nonces() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
 	}
-
-	// Flush pending account field groups.
-	for addr, p := range pending {
-		if p.balance == nil && p.nonce == nil {
-			continue // no account fields collected (e.g. only storage/code)
-		}
-		var acc accounts.Account
-		if p.balance != nil {
-			acc.Balance = *p.balance
-		}
-		if p.nonce != nil {
-			acc.Nonce = *p.nonce
-		}
-		if p.incarnation != nil {
-			acc.Incarnation = *p.incarnation
-		}
-		if p.codeHash != nil {
-			acc.CodeHash = *p.codeHash
-		}
-		serialised := accounts.SerialiseV3(&acc)
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, serialised)
-	}
+	return nil
 }
 
 // Writer - used by parallel workers to accumulate updates and then send them to conflict-resolution.

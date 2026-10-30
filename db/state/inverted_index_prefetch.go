@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 
 	"golang.org/x/sync/errgroup"
@@ -78,9 +79,12 @@ func (p *invertedIndexPrefetcher) fetch(ctx context.Context, tx kv.Tx, pairs [][
 		return err
 	}
 	defer c.Close()
-	for _, pair := range pairs {
+	for i, pair := range pairs {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if i > 0 && bytes.Equal(pair[0], pairs[i-1][0]) { // pairs come grouped by key, and the writer reads each key once
+			continue
 		}
 		// we do SeekExact here on purpose to warm the first duplicate's leaf page,
 		// which mdbx put reads even when the insertion position is on another page.

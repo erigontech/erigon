@@ -463,15 +463,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			panic(pe.chaosFaults.ApplyLoopPanic)
 		}
 
-		// Open a thread-local read-only tx for domain operations. The apply loop
-		// must not use the rwTx for domain reads — rwTx is thread-bound to the
-		// caller goroutine and will be used only for flush/unwind/stage-update.
-		applyRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
-		if err != nil {
-			return fmt.Errorf("apply loop: open roTx: %w", err)
-		}
-		defer applyRoTx.Rollback()
-
 		// appliedBlocks tracks blockNums that completed full apply-loop processing
 		// (including post-block validation). Compared at exit against txResultBlocks
 		// to catch "channel closed cleanly but a block was silently missed" — its
@@ -795,10 +786,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							continue
 						}
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						for _, writes := range pendingAccumulatorWrites {
-							state.NotifyAccumulator(pe.accumulator, writes)
-						}
+						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+						if notifyErr != nil {
+							<-balDone
+							failInfra(fmt.Errorf("notify accumulator, block %d: %w", applyResult.BlockNum, notifyErr))
+							continue
+						}
 					}
 
 					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
@@ -1285,7 +1279,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	prevSenderTx := map[accounts.Address]int{}
+	prevAccountTx := map[common.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -1343,16 +1337,21 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if err != nil {
 				return err
 			}
+			addresses := make([]common.Address, 0, 2)
 			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
 				sender = accounts.NilAddress
 			}
 			if !sender.IsNil() {
-				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i)
+				addresses = append(addresses, sender.Value())
+			}
+			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
+				addresses = append(addresses, *tx.GetTo())
+			}
+			for _, address := range addresses {
+				if tx, ok := prevAccountTx[address]; ok && executor.execTasks.addDependency(tx, i) {
 					executor.execTasks.clearPending(i)
 				}
-
-				prevSenderTx[sender] = i
+				prevAccountTx[address] = i
 			}
 		}
 
@@ -1660,9 +1659,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		execLoopCtxCancel(cause)
 		cancelWorkers()
 
-		// Drain in-flight dispatch goroutines before tearing down worker contexts:
-		// cancelWorkers unblocks any waiting on runSem, so no goroutine touches a
-		// worker after teardown.
+		// Join the scheduler before draining workers: it may still add to runWG.
+		_ = pe.wait()
 		pe.runWG.Wait()
 		for drained := false; !drained; {
 			select {
@@ -1683,8 +1681,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		}
 		pe.mintedWorkers = nil
 		pe.mintMu.Unlock()
-
-		_ = pe.wait()
 	}, nil
 }
 

@@ -1178,7 +1178,7 @@ func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_t
 	case execmodule.ExecutionStatusMissingSegment:
 		return engine_types.AcceptedStatus
 	case execmodule.ExecutionStatusTooFarAway:
-		return engine_types.AcceptedStatus
+		return engine_types.SyncingStatus
 	case execmodule.ExecutionStatusBadBlock:
 		return engine_types.InvalidStatus
 	case execmodule.ExecutionStatusBusy:

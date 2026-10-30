@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -119,7 +120,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -144,6 +145,14 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 		WithFeeCalculator(nil),
 	)
 	require.NoError(t, err)
+
+	return ctx, pool, poolDB, coreDB
+}
+
+func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
+
+	ctx, pool, poolDB, coreDB := newTestPool(t)
 
 	sender := common.Address{1}
 	account := accounts.Account{
@@ -457,6 +466,64 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	invalidHash := invalidTxn.Txn.Hash()
 	require.Contains(t, pool.byHash, string(validHash[:]))
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
+}
+
+// A restart reaches fromDB before any OnNewBlock sets the block gas limit.
+func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
+	ctx, pool, poolDB, coreDB := newTestPool(t)
+	sender := common.Address{1}
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
+
+	txn := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	hash := txn.Txn.Hash()
+	var encoded bytes.Buffer
+	require.NoError(t, txn.Txn.MarshalBinary(&encoded))
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+
+	require.Contains(t, pool.byHash, string(hash[:]))
+}
+
+// addLocked drops blob txns below p.pendingBlobFee.
+func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
+	const blobFee = 1_000_000
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	blobTxn := func(nonce, blobFeeCap uint64) ([]byte, common.Hash) {
+		wrapped := types.MakeV1WrappedBlobTxn(chain.AllProtocolChanges.ChainID)
+		wrapped.Tx.Nonce = nonce
+		wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(blobFeeCap)
+		wrapped.Tx.FeeCap = *uint256.NewInt(1_000_000_000)
+		wrapped.Tx.TipCap = *uint256.NewInt(1_000_000_000)
+		var encoded bytes.Buffer
+		require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+		return append(sender[:], encoded.Bytes()...), wrapped.Tx.Hash()
+	}
+	priced, pricedHash := blobTxn(0, 2*blobFee)
+	underpriced, underpricedHash := blobTxn(1, blobFee/2)
+
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.Put(kv.PoolInfo, PoolPendingBlobFeeKey, binary.BigEndian.AppendUint64(nil, blobFee)); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.PoolTransaction, pricedHash[:], priced); err != nil {
+			return err
+		}
+		return tx.Put(kv.PoolTransaction, underpricedHash[:], underpriced)
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+
+	require.Contains(t, pool.byHash, string(pricedHash[:]))
+	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
 }
 
 func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {

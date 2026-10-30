@@ -1,13 +1,16 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -231,6 +234,7 @@ type VersionMap struct {
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
+	bal      types.BlockAccessList
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -238,7 +242,7 @@ type VersionMap struct {
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
 	originAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = committed-absent)
-	originStorage  sync.Map // originStorageKey -> uint256.Int
+	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
@@ -273,15 +277,23 @@ func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Accoun
 
 // StoreOriginStorage records the committed base slot value write-once.
 func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	vm.originStorage.LoadOrStore(originStorageKey{addr, key}, val)
+	m := vm.originStorage.Load()
+	if m == nil {
+		m = xsync.NewMap[originStorageKey, uint256.Int]()
+		if !vm.originStorage.CompareAndSwap(nil, m) {
+			m = vm.originStorage.Load()
+		}
+	}
+	m.LoadOrStore(originStorageKey{addr, key}, val)
 }
 
 // LoadOriginStorage returns the committed base slot value and whether it was seeded.
 func (vm *VersionMap) LoadOriginStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	if v, ok := vm.originStorage.Load(originStorageKey{addr, key}); ok {
-		return v.(uint256.Int), true
+	m := vm.originStorage.Load()
+	if m == nil {
+		return uint256.Int{}, false
 	}
-	return uint256.Int{}, false
+	return m.Load(originStorageKey{addr, key})
 }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
@@ -307,9 +319,32 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
+		bal:    changes,
 	}
 	vm.WriteChanges(changes)
 	return vm
+}
+
+// seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
+// list is validated, so its accounts, slots and changes are in increasing order.
+func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
+	address := addr.Value()
+	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
+	if i == len(vm.bal) || vm.bal[i].Address != address {
+		return uint256.Int{}, false
+	}
+	slots := vm.bal[i].StorageChanges
+	j := sort.Search(len(slots), func(j int) bool { return slots[j].Slot.Cmp(key) >= 0 })
+	if j == len(slots) || slots[j].Slot.Cmp(key) != 0 {
+		return uint256.Int{}, false
+	}
+	changes := slots[j].Changes
+	index := uint32(txIdx + 1)
+	k := sort.Search(len(changes), func(k int) bool { return changes[k].Index >= index })
+	if k == len(changes) || changes[k].Index != index {
+		return uint256.Int{}, false
+	}
+	return changes[k].Value, true
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -1122,7 +1157,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // per-tx flush can be skipped without taking the write lock (and thus without parking the
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
 // is omitted from the BAL and folded away by StoragesChanged, so it is never materialized and
-// counts as already-present, unless an earlier run of the tx left a cell the flush removes.
+// counts as already-present, unless an earlier run of the tx left a cell the flush resets or removes.
 // Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
 // Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
@@ -1255,15 +1290,23 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 			for key, vw := range inner {
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
-				// StoragesChanged, so it is never materialized here (nor sealed below), and the cell
-				// an earlier run of the tx left is removed. A reader resolves the floor, which
-				// already holds this unchanged value. Before the seal only the access list seeds a
-				// Done cell, so a Done cell stays.
+				// StoragesChanged, so it is never materialized here (nor sealed below). The slot
+				// must read as the access list seeds it, so a cell an earlier run of the tx left
+				// goes back to the seed or away. Before the seal a Done cell holds the seed.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
 					if cells := e.Storage[key]; cells != nil {
 						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.flag != FlagDone {
-							cells.Delete(vw.Version.TxIndex)
-							releaseCellStorage(c)
+							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
+								// As in flushCell, a changed value needs a new version, so that the
+								// readers of the earlier value are invalidated.
+								if !c.Value.Eq(&seed) {
+									c.incarnation = vw.Version.Incarnation
+								}
+								c.Value, c.flag, c.valStatus = seed, FlagDone, ValueChanged
+							} else {
+								cells.Delete(vw.Version.TxIndex)
+								releaseCellStorage(c)
+							}
 						}
 					}
 					continue

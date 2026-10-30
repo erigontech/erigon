@@ -194,7 +194,14 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			result.Err = ibs.FinalizeTx(rules, noop)
 		}
 	case txTask.IsBlockEnd():
-		// this is handled by the reducer in process results
+		if txTask.BlockNumber() == 0 {
+			break
+		}
+		result.TraceTos = map[accounts.Address]struct{}{}
+		result.TraceTos[accounts.InternAddress(header.Coinbase)] = struct{}{}
+		for _, uncle := range txTask.Uncles {
+			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
+		}
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {

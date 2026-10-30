@@ -112,9 +112,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	return
 }
 
-// updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
-// It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
-// and then marks the new chain segments as canonical.
+// updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
+// block or the trusted anchor as canonical, once the required block indices are available.
 func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
 	type canonicalEntry struct {
 		slot uint64
@@ -122,6 +121,19 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	}
 	currentRoot := headRoot
 	currentSlot := headSlot
+	// The trusted anchor can come from a checkpoint state without block indices.
+	anchorRoot := cfg.forkChoice.AnchorRoot()
+	// Accepted blocks may not have their indices yet. Wait for the required ancestry
+	// before marking the head canonical: later updates stop at that head and would
+	// leave any canonical ancestors from the old fork unchanged.
+	storedSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, headRoot)
+	if err != nil {
+		return fmt.Errorf("failed to read block slot by block root: %w", err)
+	}
+	if storedSlot == nil && headRoot != anchorRoot {
+		return fmt.Errorf("block indices are not yet available for %s", headRoot)
+	}
+
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
@@ -137,8 +149,8 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
-	// Trace back through the parent block roots until the current root matches the canonical root
-	for currentRoot != currentCanonical {
+	// Trace back to a canonical block or the trusted anchor.
+	for currentRoot != currentCanonical && currentRoot != anchorRoot {
 		var newFoundSlot *uint64
 
 		// Read the parent block root
@@ -151,7 +163,14 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 			return fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
-			break
+			if currentRoot != anchorRoot {
+				return fmt.Errorf("block indices are not yet available for %s", currentRoot)
+			}
+			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
+			if !ok {
+				return fmt.Errorf("anchor header is not available for %s", anchorRoot)
+			}
+			newFoundSlot = &header.Slot
 		}
 
 		currentSlot = *newFoundSlot
