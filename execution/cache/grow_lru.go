@@ -21,12 +21,53 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/math"
+)
+
+// freelruElem mirrors freelru's element, which is unexported: the stored value
+// with a hashed key, five uint32 list indices and an expiry around it. The
+// caches are generic over their value, so the slot cost has to follow that
+// value rather than the sizes this package happens to instantiate.
+//
+//nolint:unused // layout mirror: only unsafe.Sizeof reads it
+type freelruElem[T any] struct {
+	key                                           uint64
+	value                                         T
+	nextBucket, prevBucket, bucketPos, next, prev uint32
+	expire                                        int64
+}
+
+// elemBytesFor is what one table slot costs: the element plus its uint32 bucket
+// index in the parallel table.
+func elemBytesFor[T any]() int64 {
+	var e freelruElem[T]
+	return int64(unsafe.Sizeof(e)) + 4
+}
+
+// freelruShardBytes covers a shard beyond its two arrays: the LRU struct and the
+// slice headers. Measured at 239-359 B; charged high to stay covering. The zero
+// key and value it also holds scale with the value type, so shardChargeBytes
+// adds a slot on top.
+const freelruShardBytes = 512
+
+func shardChargeBytes(elemBytes int64) int64 { return freelruShardBytes + elemBytes }
+
+// maxCacheSlots caps the slot array whatever the byte budget says.
+const maxCacheSlots = 16_000_000
+
+func u64identity(k uint64) uint32 { return uint32(k) }
+
+const (
+	// genericCacheStartCapacity is the slot count a jump-grow cache is born with.
+	// A cache whose working set never exceeds it (a test fixture) stays this small
+	// regardless of its configured byte budget.
+	genericCacheStartCapacity = 1024
+	genericCacheGrowFactor    = 4
 )
 
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
@@ -40,8 +81,7 @@ import (
 // only for content-addressed layers, where a key's payload never changes: a
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
-// drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. The onEvict-maintained counters are
+// drops it on the next read. Do not reuse for mutable-per-key values. The onEvict-maintained counters are
 // approximate across grow windows (a lost write is counted but never
 // evicted; a raced removal can subtract twice).
 type growLRU[V any] struct {
@@ -70,20 +110,6 @@ type growLRU[V any] struct {
 func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
 	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes),
 		uint32(runtime.GOMAXPROCS(0)), onEvict)
-}
-
-func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
-	if avgBytes == 0 {
-		avgBytes = avgBytesPerEntry
-	}
-	procs := uint32(runtime.GOMAXPROCS(0))
-	elemBytes := elemBytesFor[V]()
-	perSlot := int64(avgBytes) + slotChargeBytes(elemBytes)
-	approx := max(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots)), 1)
-	maxCap := fitCeiling(approx, maxCacheSlots, maxBytes, func(c uint32) int64 {
-		return growLRUBytes(c, procs, int64(avgBytes), elemBytes)
-	})
-	return newGrowLRUWith(maxCap, int64(avgBytes), procs, onEvict)
 }
 
 // growLRUGeneration is the table size and shard count freelru builds a capacity
