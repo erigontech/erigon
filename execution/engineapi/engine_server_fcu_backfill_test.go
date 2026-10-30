@@ -47,6 +47,10 @@ func (f *initialHeaderRecorder) FetchHeadersBackwards(_ context.Context, hash co
 	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
 }
 
+func (f *initialHeaderRecorder) FetchHeaders(context.Context, uint64, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
+}
+
 func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *initialHeaderRecorder, *types.Header) {
 	head := makeParentHeader(1000)
 	headNumber := head.Number.Uint64()
