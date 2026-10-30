@@ -56,13 +56,11 @@ jobs:
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           # Decide which clients, if any, run besides erigon:
-          # - schedule: all of them on Sunday (UTC), none on the other days
+          # - schedule: all of them, every day
           # - workflow_dispatch: controlled by inputs, any combination of them
           PEERS=()
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ "$(date -u +%w)" = "0" ]; then  # 0..6 = Sun..Sat
-              PEERS=(geth nethermind reth)
-            fi
+            PEERS=(geth nethermind reth)
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             for input in "geth:$INPUT_RUN_GETH" "nethermind:$INPUT_RUN_NETHERMIND" "reth:$INPUT_RUN_RETH"; do
               [ "${input#*:}" = "true" ] && PEERS+=("${input%%:*}")
