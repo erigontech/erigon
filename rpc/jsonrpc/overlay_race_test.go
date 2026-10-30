@@ -2746,3 +2746,16 @@ func TestGraphQLCall_PublishCycleDuringTxAcquisition(t *testing.T) {
 	require.NoError(t, err,
 		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
 }
+
+func TestGetModifiedAccountsByHash_NonCanonicalErrors(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t)
+	c := insertOverlayRaceChain(t, m)
+	api := newDebugApiForTest(m)
+
+	_, err := api.GetModifiedAccountsByHash(m.Ctx, writeForkHeader(t, m.Ctx, m, 1), nil)
+	require.ErrorContains(t, err, "not currently canonical")
+	forkEnd := writeForkHeader(t, m.Ctx, m, 2)
+	_, err = api.GetModifiedAccountsByHash(m.Ctx, c.Blocks[0].Hash(), &forkEnd)
+	require.ErrorContains(t, err, "not currently canonical")
+}
