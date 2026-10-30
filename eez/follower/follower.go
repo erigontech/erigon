@@ -247,6 +247,7 @@ func (f *Follower) Run(ctx context.Context) error {
 		unsafeTick = t.C
 	}
 	var retry <-chan time.Time
+	var failing time.Time
 	pause := f.cfg.Retry
 	for {
 		var err error
@@ -269,7 +270,10 @@ func (f *Follower) Run(ctx context.Context) error {
 			if halts(err) {
 				return err
 			}
-			f.logger.Warn("[eez] follower step failed, retrying", "event", "eez.deriver.resync.failed", "in", pause, "err", err)
+			if retry == nil {
+				failing = time.Now()
+			}
+			f.logRetry("[eez] follower step failed, retrying", err, failing, "event", "eez.deriver.resync.failed", "in", pause)
 			retry, pause = time.After(pause), min(2*pause, f.cfg.MaxRetry)
 			continue
 		}
@@ -284,12 +288,16 @@ func (f *Follower) Run(ctx context.Context) error {
 // the L1 head, retrying failures that may pass.
 func (f *Follower) Boot(ctx context.Context) error {
 	pause := f.cfg.Retry
+	var failing time.Time
 	for attempt := 1; ; attempt++ {
 		err := f.recover(ctx, f.boot(ctx))
 		if err == nil || halts(err) || (f.cfg.BootAttempts > 0 && attempt >= f.cfg.BootAttempts) {
 			return err
 		}
-		f.logger.Warn("[eez] boot catch-up failed, retrying", "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause, "err", err)
+		if attempt == 1 {
+			failing = time.Now()
+		}
+		f.logRetry("[eez] boot catch-up failed, retrying", err, failing, "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -515,6 +523,22 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 		return err
 	}
 	return retryable{err}
+}
+
+// blobGrace is how long a blob may be missing before the retries log at
+// error level: a beacon node serves the blobs of a slot seconds after the L1
+// execution node has its block.
+const blobGrace = time.Minute
+
+// logRetry logs err, failing since failing, before a retry: at error level
+// once a blob is lost or missing for over blobGrace, since derivation cannot
+// pass it until an operator supplies it.
+func (f *Follower) logRetry(msg string, err error, failing time.Time, ctx ...any) {
+	logFn := f.logger.Warn
+	if errors.Is(err, l1.ErrBlobLost) || (errors.Is(err, l1.ErrBlobUnavailable) && time.Since(failing) > blobGrace) {
+		logFn = f.logger.Error
+	}
+	logFn(msg, append(ctx, "err", err)...)
 }
 
 // retryable marks an error whose cause may pass.

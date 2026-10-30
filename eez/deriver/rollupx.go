@@ -61,11 +61,11 @@ func (d *Deriver) decodeRollupX(ctx context.Context, b *l1.ScannedBatch) (*rollu
 		}
 	}
 	if d.blobs == nil {
-		return nil, fmt.Errorf("%w: batch %x carries its payload in blobs and no beacon node is set", l1.ErrBlobUnavailable, b.TxHash)
+		return nil, fmt.Errorf("%w: batch %s carries its payload in blobs and no beacon node is set", l1.ErrBlobLost, b.TxHash.TerminalString())
 	}
 	blobs, err := d.blobs.Blobs(ctx, &l1.Header{Number: b.L1Block, Hash: b.L1BlockHash, Time: b.L1Time}, b.BlobHashes)
 	if err != nil {
-		return nil, fmt.Errorf("batch %x: %w", b.TxHash, err)
+		return nil, fmt.Errorf("batch %s: %w", b.TxHash.TerminalString(), err)
 	}
 	native, err := da.DecodeNative(blobs, d.l2.RollupID)
 	if err != nil {

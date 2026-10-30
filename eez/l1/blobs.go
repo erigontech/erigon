@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 
@@ -40,6 +41,10 @@ const BlobSize = goethkzg.ScalarsPerBlob * goethkzg.SerializedScalarSize
 // ErrBlobUnavailable reports a blob the source does not serve, which
 // derivation cannot proceed without.
 var ErrBlobUnavailable = errors.New("blob not served")
+
+// ErrBlobLost reports a blob the source does not serve and will not serve
+// later either, so derivation stays stuck until an operator supplies it.
+var ErrBlobLost = fmt.Errorf("%w for good", ErrBlobUnavailable)
 
 // BlobSource serves the blobs of L1 transactions.
 type BlobSource interface {
@@ -90,8 +95,9 @@ type Beacon struct {
 
 	mu sync.Mutex
 	// genesis and slot are the beacon chain's genesis time and seconds per
-	// slot, zero until read.
-	genesis, slot uint64
+	// slot, zero until read; retention is the slots the node keeps blobs
+	// for, zero when its spec does not say.
+	genesis, slot, retention uint64
 }
 
 var _ BlobSource = (*Beacon)(nil)
@@ -130,18 +136,30 @@ func (b *Beacon) Blobs(ctx context.Context, h *Header, hashes []common.Hash) ([]
 		if err != nil {
 			return nil, err
 		}
-		if !found {
-			return nil, fmt.Errorf("%w: slot %d of L1 block %d", ErrBlobUnavailable, slot, h.Number)
-		}
 		for _, s := range sidecars.Data {
 			served = append(served, s.Blob)
 		}
 	}
 	out, err := MatchBlobs(served, hashes)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrBlobUnavailable) && b.expired(slot):
+		return nil, fmt.Errorf("%w: %x of L1 block %d: slot %d is past the node's blob retention", ErrBlobLost, hashes, h.Number, slot)
+	case !found:
+		return nil, fmt.Errorf("%w: slot %d of L1 block %d", ErrBlobUnavailable, slot, h.Number)
+	case err != nil:
 		return nil, fmt.Errorf("slot %d of L1 block %d: %w", slot, h.Number, err)
 	}
 	return out, nil
+}
+
+// expired reports whether slot is past the node's blob retention, after
+// which a node that does not serve its blobs never will; archive nodes keep
+// older slots too.
+func (b *Beacon) expired(slot uint64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := uint64(time.Now().Unix())
+	return b.retention > 0 && now > b.genesis && (now-b.genesis)/b.slot > slot+b.retention
 }
 
 // slotOf returns the slot of an execution block with timestamp t.
@@ -157,6 +175,8 @@ func (b *Beacon) slotOf(ctx context.Context, t uint64) (uint64, error) {
 		var spec struct {
 			Data struct {
 				SecondsPerSlot string `json:"SECONDS_PER_SLOT"`
+				SlotsPerEpoch  string `json:"SLOTS_PER_EPOCH"`
+				BlobEpochs     string `json:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS"`
 			} `json:"data"`
 		}
 		if err := b.mustGet(ctx, "/eth/v1/beacon/genesis", &genesis); err != nil {
@@ -173,7 +193,10 @@ func (b *Beacon) slotOf(ctx context.Context, t uint64) (uint64, error) {
 		if err != nil || s == 0 {
 			return 0, fmt.Errorf("beacon SECONDS_PER_SLOT %q: %w", spec.Data.SecondsPerSlot, err)
 		}
-		b.genesis, b.slot = g, s
+		// Without these no slot is known to be past retention.
+		epochs, _ := strconv.ParseUint(spec.Data.BlobEpochs, 10, 64)
+		perEpoch, _ := strconv.ParseUint(spec.Data.SlotsPerEpoch, 10, 64)
+		b.genesis, b.slot, b.retention = g, s, epochs*perEpoch
 	}
 	if t < b.genesis || (t-b.genesis)%b.slot != 0 {
 		return 0, fmt.Errorf("%w: L1 timestamp %d is off the beacon slots from %d every %d s", ErrInconsistent, t, b.genesis, b.slot)

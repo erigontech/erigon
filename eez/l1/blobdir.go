@@ -98,7 +98,7 @@ func (d *BlobDir) Blobs(ctx context.Context, h *Header, hashes []common.Hash) ([
 		return out, nil
 	}
 	if d.next == nil {
-		return nil, fmt.Errorf("%w: %x of L1 block %d in %s", ErrBlobUnavailable, missing[0], h.Number, d.dir)
+		return nil, fmt.Errorf("%w: %x of L1 block %d in %s, which no source backs", ErrBlobLost, missing[0], h.Number, d.dir)
 	}
 	fetched, err := d.next.Blobs(ctx, h, missing)
 	if err != nil {

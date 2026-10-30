@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -34,8 +35,9 @@ import (
 )
 
 // beaconServer serves slots of blobs; legacy serves them only as
-// blob_sidecars, as a node before Fulu does.
-func beaconServer(t *testing.T, genesis, secondsPerSlot uint64, slots map[uint64][][]byte, legacy bool) *httptest.Server {
+// blob_sidecars, as a node before Fulu does. A nonzero retention is the
+// epochs of 16 slots its spec keeps blobs for.
+func beaconServer(t *testing.T, genesis, secondsPerSlot uint64, slots map[uint64][][]byte, legacy bool, retention uint64) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		write := func(v any) { require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": v})) }
@@ -49,7 +51,11 @@ func beaconServer(t *testing.T, genesis, secondsPerSlot uint64, slots map[uint64
 		case path == "/eth/v1/beacon/genesis":
 			write(map[string]string{"genesis_time": strconv.FormatUint(genesis, 10)})
 		case path == "/eth/v1/config/spec":
-			write(map[string]string{"SECONDS_PER_SLOT": strconv.FormatUint(secondsPerSlot, 10)})
+			spec := map[string]string{"SECONDS_PER_SLOT": strconv.FormatUint(secondsPerSlot, 10)}
+			if retention > 0 {
+				spec["SLOTS_PER_EPOCH"], spec["MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS"] = "16", strconv.FormatUint(retention, 10)
+			}
+			write(spec)
 		case strings.HasPrefix(path, "/eth/v1/beacon/blobs/") && !legacy:
 			blobs, ok := slotOf("/eth/v1/beacon/blobs/")
 			if !ok {
@@ -89,7 +95,7 @@ func TestBeaconBlobs(t *testing.T) {
 		slots[b.Slot] = b.Blobs()
 	}
 	for _, legacy := range []bool{false, true} {
-		srv := beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, slots, legacy)
+		srv := beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, slots, legacy, 0)
 		beacon := l1.NewBeacon(srv.URL + "/")
 		for i, b := range replay.Batches {
 			h := &l1.Header{Number: uint64(b.L1Block.Number), Hash: b.L1Block.Hash, Time: uint64(b.L1Block.Timestamp)}
@@ -115,18 +121,18 @@ func TestBeaconBlobsRejects(t *testing.T) {
 
 	tampered := b.Blobs()
 	tampered[0][100] ^= 1
-	srv := beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, map[uint64][][]byte{b.Slot: tampered}, false)
+	srv := beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, map[uint64][][]byte{b.Slot: tampered}, false, 0)
 	_, err = l1.NewBeacon(srv.URL).Blobs(ctx, h, hashes)
 	require.ErrorIs(t, err, l1.ErrBlobUnavailable)
 
 	// A blob that is no field element vector.
 	invalid := b.Blobs()
 	invalid[0][0] = 0xff
-	srv = beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, map[uint64][][]byte{b.Slot: invalid}, false)
+	srv = beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, map[uint64][][]byte{b.Slot: invalid}, false, 0)
 	_, err = l1.NewBeacon(srv.URL).Blobs(ctx, h, hashes)
 	require.ErrorIs(t, err, l1.ErrInconsistent)
 
-	srv = beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, map[uint64][][]byte{}, false)
+	srv = beaconServer(t, replay.BeaconGenesisTime, replay.SecondsPerSlot, map[uint64][][]byte{}, false, 0)
 	beacon := l1.NewBeacon(srv.URL)
 	_, err = beacon.Blobs(ctx, h, hashes)
 	require.ErrorIs(t, err, l1.ErrBlobUnavailable)
@@ -137,4 +143,32 @@ func TestBeaconBlobsRejects(t *testing.T) {
 	require.ErrorIs(t, err, l1.ErrBlobUnavailable)
 	_, err = l1.MatchBlobs([][]byte{{1}}, hashes)
 	require.ErrorIs(t, err, l1.ErrInconsistent)
+}
+
+// TestBeaconBlobsLost requires the blobs of a slot past the node's
+// retention to be lost when it does not serve them, and those of a recent
+// slot to be unavailable only.
+func TestBeaconBlobsLost(t *testing.T) {
+	replay, err := testfixtures.LoadEEZDevReplay()
+	require.NoError(t, err)
+	b := replay.Batches[0]
+	hashes := b.Transaction.BlobVersionedHashes
+	const secondsPerSlot, epochs, head = 5, 10, 1000
+	genesis := uint64(time.Now().Unix()) - head*secondsPerSlot
+	old, recent := uint64(head-epochs*16-2), uint64(head-2)
+	// old+1 serves no blobs; old+2 is kept by an archive node.
+	slots := map[uint64][][]byte{old + 1: {}, old + 2: b.Blobs()}
+	beacon := l1.NewBeacon(beaconServer(t, genesis, secondsPerSlot, slots, false, epochs).URL)
+	at := func(slot uint64) *l1.Header { return &l1.Header{Number: slot, Time: genesis + slot*secondsPerSlot} }
+	ctx := context.Background()
+
+	for _, slot := range []uint64{old, old + 1} {
+		_, err = beacon.Blobs(ctx, at(slot), hashes)
+		require.ErrorIs(t, err, l1.ErrBlobLost, "slot %d", slot)
+	}
+	_, err = beacon.Blobs(ctx, at(old+2), hashes)
+	require.NoError(t, err)
+	_, err = beacon.Blobs(ctx, at(recent), hashes)
+	require.ErrorIs(t, err, l1.ErrBlobUnavailable)
+	require.NotErrorIs(t, err, l1.ErrBlobLost)
 }

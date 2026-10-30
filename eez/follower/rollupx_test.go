@@ -17,6 +17,7 @@
 package follower_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -90,6 +91,25 @@ func TestEEZDevReplay(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, common.HexToHash(seed), h.MixDigest, "block %d", n)
 	}
+}
+
+// TestBlobLost boots eez.dev from an empty blob directory that no source
+// backs: the retries log at error level.
+func TestBlobLost(t *testing.T) {
+	r, err := testfixtures.LoadEEZDevReplay()
+	require.NoError(t, err)
+	spec := networks.Chiado699069
+	_, chain := derivertest.NewL2Of(t, spec)
+	cfg := testConfig
+	cfg.Blobs = l1.NewBlobDir(t.TempDir(), nil)
+	var out bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&out, log.LogfmtFormat()))
+	f, err := follower.New(derivertest.ReplayL1(t, r, &spec.Config.L2.(*config.L2Config).RollupX.L1Reference), chain, spec.Config, cfg, logger)
+	require.NoError(t, err)
+	require.ErrorIs(t, f.Boot(t.Context()), l1.ErrBlobLost)
+	require.Regexp(t, `lvl=eror msg="\[eez\] boot catch-up failed, retrying" event=eez.node.deriver.boot_catch_up.failed attempt=1 in=\S+ err="batch [0-9a-f]{6}…[0-9a-f]{6}: blob not served for good: `, out.String())
+	require.NotContains(t, out.String(), "lvl=warn")
 }
 
 func TestL1Reference(t *testing.T) {

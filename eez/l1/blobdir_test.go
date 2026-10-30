@@ -54,7 +54,7 @@ func TestBlobDir(t *testing.T) {
 	hashes := b.Transaction.BlobVersionedHashes
 
 	_, err = l1.NewBlobDir(dir, nil).Blobs(ctx, h, hashes)
-	require.ErrorIs(t, err, l1.ErrBlobUnavailable)
+	require.ErrorIs(t, err, l1.ErrBlobLost)
 
 	// Read through to next once, then from the directory.
 	d := l1.NewBlobDir(dir, next)
