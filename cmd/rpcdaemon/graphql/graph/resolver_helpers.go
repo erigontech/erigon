@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -51,6 +52,9 @@ func (r *queryResolver) block(ctx context.Context, number *string, hash *string,
 	if hash != nil {
 		blockHash := common.HexToHash(*hash)
 		res, err := r.GraphQLAPI.GetBlockDetailsByHash(ctx, blockHash, &withTxs)
+		if errors.As(err, new(rpc.BlockNotFoundErr)) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -79,6 +83,9 @@ func (r *queryResolver) block(ctx context.Context, number *string, hash *string,
 	}
 
 	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber, &withTxs)
+	if errors.As(err, new(rpc.BlockNotFoundErr)) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
