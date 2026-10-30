@@ -114,7 +114,7 @@ func (p *TxPool) processRemoteBatch(ctx context.Context) ([]txpoolcfg.DiscardRea
 	var frames []remoteFrameTxn
 	for i, txn := range txns.Txns {
 		if txn.TxType() == FrameTxnType {
-			frames = append(frames, remoteFrameTxn{txn, common.BytesToAddress(txns.Senders.At(i)), sources[i]})
+			frames = append(frames, remoteFrameTxn{txn, txns.Senders.AddressAt(i), sources[i]})
 		} else {
 			ordinary.Append(txn, txns.Senders.At(i), false)
 			ordinarySources = append(ordinarySources, sources[i])

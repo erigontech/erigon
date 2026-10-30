@@ -274,7 +274,7 @@ func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, tra
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
 	executed, err := protocol.ApplyMessage(evm, msg, protocol.NewGasPool(30_000_000, 0), true, false, nil)
 	require.NoError(t, err)
-	receipt := protocol.MakeReceipt(uint256.NewInt(1), common.Hash{}, msg, tx, executed.ReceiptGasUsed, executed, evm.IntraBlockState(), evm)
+	receipt := protocol.MakeReceipt(uint256.NewInt(1), common.Hash{}, tx, executed.ReceiptGasUsed, executed, evm.IntraBlockState(), evm)
 	tracer.EmitTxEnd(receipt, executed.TxnGasUsage, nil)
 	return result, receipt
 }

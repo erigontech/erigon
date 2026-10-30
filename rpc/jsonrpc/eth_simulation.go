@@ -1124,7 +1124,7 @@ func (s *simulator) simulateCall(
 	}
 	gasUsed.AddResult(result)
 	s.gasBudget -= result.ReceiptGasUsed
-	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, gasUsed.Receipt, result, intraBlockState, evm)
+	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, txn, gasUsed.Receipt, result, intraBlockState, evm)
 	gasUsed.Blob += receipt.BlobGasUsed
 
 	var logs []*types.Log

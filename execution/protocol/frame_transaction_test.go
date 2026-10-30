@@ -706,9 +706,7 @@ func TestFrameTransactionMakeReceipt(t *testing.T) {
 	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
 	result, err := applyFrameTest(t, evm, tx)
 	require.NoError(t, err)
-	msg, err := tx.AsMessage(types.Signer{}, nil, evm.ChainRules())
-	require.NoError(t, err)
-	receipt := MakeReceipt(uint256.NewInt(1), common.Hash{}, msg, tx, result.ReceiptGasUsed, result, evm.IntraBlockState(), evm)
+	receipt := MakeReceipt(uint256.NewInt(1), common.Hash{}, tx, result.ReceiptGasUsed, result, evm.IntraBlockState(), evm)
 	require.Equal(t, result.Payer, receipt.Payer)
 	require.Equal(t, result.FrameReceipts, receipt.FrameReceipts)
 	require.Zero(t, receipt.ContractAddress)

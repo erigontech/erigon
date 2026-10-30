@@ -1543,7 +1543,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if i >= len(sources) || sources[i].peerID == nil {
 			return false
 		}
-		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+		return slices.Contains(kzgOffenders, sources[i].peerKey())
 	}
 
 	for i, txn := range txns.Txns {
@@ -1571,7 +1571,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
 		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
 			if i < len(sources) && sources[i].peerID != nil {
-				kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+				kzgOffenders = append(kzgOffenders, sources[i].peerKey())
 			} else {
 				skipAllRemote = true
 			}

@@ -116,7 +116,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = MakeReceipt(&header.Number, header.Hash(), msg, txn, gasUsed.Receipt, result, ibs, evm)
+		receipt = MakeReceipt(&header.Number, header.Hash(), txn, gasUsed.Receipt, result, ibs, evm)
 	}
 
 	return receipt, err
@@ -154,7 +154,6 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 func MakeReceipt(
 	blockNumber *uint256.Int,
 	blockHash common.Hash,
-	msg *types.Message,
 	txn types.Transaction,
 	cumulativeGasUsed uint64,
 	result *evmtypes.ExecutionResult,
