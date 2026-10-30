@@ -37,6 +37,8 @@ import (
 )
 
 var (
+	// ExecGCPercent: GOGC while ExecV3 runs, restored after; 0 keeps the process value.
+	ExecGCPercent = EnvInt("EXEC_GC_PERCENT", 400)
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling

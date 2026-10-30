@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -159,6 +160,9 @@ func ExecV3(ctx context.Context,
 	rng execRange, blockSrc blockSource,
 	logger log.Logger,
 ) (out execV3Outcome, execErr error) {
+	if p := dbg.ExecGCPercent; p > 0 {
+		defer debug.SetGCPercent(debug.SetGCPercent(p))
+	}
 	defer func() {
 		if cfg.readAheader != nil && (out.verdict != nil || commonerrors.NilIfCanceled(execErr) != nil) {
 			cfg.readAheader.CancelWarmup()
