@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func TestFetchSuppressesResidentBodiesAfterRejectionHistoryEviction(t *testing.T) {
+func TestFetchRevalidatesBodiesAfterRejectionHistoryEviction(t *testing.T) {
 	ctx := t.Context()
 	pool, db, signed, _ := newFetchTestTransactions(t, 0, 1, 2)
 	pool.cfg.MinFeeCap = 300_001
@@ -71,20 +71,16 @@ func TestFetchSuppressesResidentBodiesAfterRejectionHistoryEviction(t *testing.T
 			return messages[0]
 		},
 		func() *sentryproto.InboundMessage {
-			require.Empty(t, pool.unprocessedRemoteTxns.Txns, "a resident packet must retain its rejection after history eviction")
-			return messages[1]
-		},
-		func() *sentryproto.InboundMessage {
-			require.Empty(t, pool.unprocessedRemoteTxns.Txns)
-			return messages[2]
+			processRejected()
+			require.Equal(t, int64(4), parses())
+			return messages[0]
 		},
 		func() *sentryproto.InboundMessage {
 			require.Empty(t, pool.unprocessedRemoteTxns.Txns)
 			return nil
 		},
 	)
-	require.Empty(t, pool.pinnedDiscards)
-	require.Equal(t, int64(3), parses())
+	require.Equal(t, int64(4), parses())
 	require.Empty(t, sent)
 	require.Empty(t, penalties)
 }

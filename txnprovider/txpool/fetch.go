@@ -339,7 +339,6 @@ type bodyCacheEntry struct {
 	unsubmitted Hashes
 	revision    uint64
 	result      *RemoteTxnsResult
-	release     func()
 }
 
 func (entry bodyCacheEntry) hasInvalidSidecar() bool {
@@ -379,9 +378,6 @@ func newBodyCache() *bodyCache {
 	cache := &bodyCache{}
 	cache.entries, _ = simplelru.NewLRU[bodyCacheKey, bodyCacheEntry](1024, func(_ bodyCacheKey, entry bodyCacheEntry) {
 		cache.hashBytes -= len(entry.hashes) + len(entry.unsubmitted)
-		if entry.release != nil {
-			entry.release()
-		}
 	})
 	return cache
 }
@@ -398,9 +394,6 @@ func (c *bodyCache) add(key bodyCacheKey, entry bodyCacheEntry) {
 	c.entries.Remove(key)
 	weight := len(entry.hashes) + len(entry.unsubmitted)
 	if weight > maxBodyCacheHashBytes {
-		if entry.release != nil {
-			entry.release()
-		}
 		return
 	}
 	for c.hashBytes+weight > maxBodyCacheHashBytes {
@@ -408,12 +401,6 @@ func (c *bodyCache) add(key bodyCacheKey, entry bodyCacheEntry) {
 	}
 	c.entries.Add(key, entry)
 	c.hashBytes += weight
-}
-
-func (c *bodyCache) purge() {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	c.entries.Purge()
 }
 
 func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.SentryClient) error {
@@ -436,30 +423,15 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 	}
 
 	var (
-		batch      = make([]*sentryproto.InboundMessage, 0, 256)
-		batchBytes int
-		batchLock  sync.Mutex
-		flushLock  sync.Mutex
+		batch     = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock sync.Mutex
 	)
-	// Bound queued packet data as well as the metadata retained for deduplication.
-	const maxBatchBytes = 4 * 1024 * 1024
 	seenBodies := newBodyCache()
-	defer func() {
-		cancel()
-		flushLock.Lock()
-		defer flushLock.Unlock()
-		seenBodies.purge()
-	}()
 	isBody := func(req *sentryproto.InboundMessage) bool {
 		return req.Id == sentryproto.MessageId_TRANSACTIONS_66 || req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66
 	}
 
 	flushBatch := func() {
-		flushLock.Lock()
-		defer flushLock.Unlock()
-		if streamCtx.Err() != nil {
-			return
-		}
 		batchLock.Lock()
 		if len(batch) == 0 {
 			batchLock.Unlock()
@@ -467,7 +439,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 		toProcess := batch
 		batch = make([]*sentryproto.InboundMessage, 0, 256)
-		batchBytes = 0
 		batchLock.Unlock()
 
 		if !f.pool.Started() {
@@ -515,9 +486,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				}
 				entry, handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient)
 				if handleErr != nil {
-					if entry.release != nil {
-						entry.release()
-					}
 					if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
 						f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
 					}
@@ -527,8 +495,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				if cacheable && entry.hashes != nil {
 					entry.revision = revision
 					seenBodies.add(key, entry)
-				} else if entry.release != nil {
-					entry.release()
 				}
 			}()
 		}
@@ -567,32 +533,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		if isBody(req) {
-			if entry, found := seenBodies.get(bodyCacheKey{hash: maphash.Hash(req.Data), id: req.Id}); found {
-				_, retry, retryErr := entry.retry(streamCtx, f.pool)
-				if retryErr == nil && !retry {
-					if f.wg != nil {
-						f.wg.Done()
-					}
-					continue
-				}
-			}
-		}
-
-		batchLock.Lock()
-		full := len(batch) >= 256 || batchBytes+len(req.Data) > maxBatchBytes
-		batchLock.Unlock()
-		if full {
-			flushBatch()
-		}
 		batchLock.Lock()
 		batch = append(batch, req)
-		batchBytes += len(req.Data)
-		full = batchBytes >= maxBatchBytes
 		batchLock.Unlock()
-		if full {
-			flushBatch()
-		}
 	}
 }
 
@@ -814,7 +757,6 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				return bodyCacheEntry{hashes: Hashes{}}, nil
 			}
 		}
-		entry.release = f.pool.PinP2PHashes(entry.hashes)
 		var submitted Hashes
 		if len(txns.Txns) > 0 {
 			submitted, entry.result = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)

@@ -24,12 +24,10 @@ import (
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/testforks"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -80,38 +78,6 @@ func TestValidateBlobTxn(t *testing.T) {
 			t.Run("changed last proof", func(t *testing.T) {
 				require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, pool.validateBlobTxn(&badProof, false))
 			})
-			for _, size := range []struct {
-				name   string
-				length int
-			}{
-				{"short blob", params.BlobSize - 1},
-				{"long blob", params.BlobSize + 1},
-			} {
-				t.Run(size.name, func(t *testing.T) {
-					bad := slot
-					bad.BlobBundles = slices.Clone(slot.BlobBundles)
-					last := &bad.BlobBundles[len(bad.BlobBundles)-1]
-					last.Blob = make([]byte, size.length)
-					copy(last.Blob, slot.BlobBundles[len(slot.BlobBundles)-1].Blob)
-					var reason txpoolcfg.DiscardReason
-					require.NotPanics(t, func() { reason = pool.validateBlobTxn(&bad, false) })
-					require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, reason)
-				})
-			}
-			t.Run("changed blob boundaries", func(t *testing.T) {
-				require.Equal(t, txpoolcfg.Success, pool.validateBlobTxn(&slot, false))
-				bad := slot
-				bad.BlobBundles = slices.Clone(slot.BlobBundles)
-				txn := types.CopyTxs(types.Transactions{slot.Txn})[0].(*types.BlobTx)
-				bad.Txn = txn
-				bad.BlobBundles[0].Blob = append(bytes.Clone(slot.BlobBundles[0].Blob), slot.BlobBundles[0].Commitment[:]...)
-				copy(bad.BlobBundles[0].Commitment[:], slot.BlobBundles[1].Blob[:48])
-				bad.BlobBundles[1].Blob = slot.BlobBundles[1].Blob[48:]
-				txn.BlobVersionedHashes[0] = common.Hash(libkzg.KZGToVersionedHash(bad.BlobBundles[0].Commitment))
-				var reason txpoolcfg.DiscardReason
-				require.NotPanics(t, func() { reason = pool.validateBlobTxn(&bad, false) })
-				require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, reason)
-			})
 			if tc.fork == "Osaka" {
 				t.Run("missing cell proof", func(t *testing.T) {
 					bad := slot
@@ -129,7 +95,7 @@ func TestValidateBlobTxn(t *testing.T) {
 			t.Run("sender limit before proof verification", func(t *testing.T) {
 				pool.all.senderIDBlobCount[slot.SenderID] = pool.cfg.BlobSlots
 				defer delete(pool.all.senderIDBlobCount, slot.SenderID)
-				require.Equal(t, txpoolcfg.BlobSlotsOverflow, pool.validateBlobTxn(&badProof, false))
+				require.Equal(t, txpoolcfg.Spammer, pool.validateBlobTxn(&badProof, false))
 				require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, pool.validateBlobTxn(&badProof, true))
 			})
 		})

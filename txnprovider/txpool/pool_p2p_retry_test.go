@@ -273,71 +273,6 @@ func TestP2PRetrySuppressesIgnoredRemoteTransactions(t *testing.T) {
 	}))
 }
 
-func pinP2PHashesForTest(t *testing.T, pool *TxPool, hashes Hashes) func() {
-	t.Helper()
-	return pool.PinP2PHashes(hashes)
-}
-
-func TestP2PPinsRetainFutureOutcomesUntilLastRelease(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	require.NoError(t, pool.start(ctx))
-	txn := newTestTxnSlot(0, 0, 0, 0, 21_000)
-	txn.IDHash[0] = 1
-	releaseFirst := pinP2PHashesForTest(t, pool, txn.IDHash[:])
-	defer releaseFirst()
-	_, retry := p2pRetryForTest(t, pool, txn.IDHash[:], 0)
-	require.True(t, retry, "pinning a missing outcome must remain fail-open")
-	var txns TxnSlots
-	txns.Append(txn, sender[:], false)
-	pool.AddRemoteTxns(ctx, txns, peerID, nil)
-	require.NoError(t, pool.processRemoteTxns(ctx))
-	releaseSecond := pinP2PHashesForTest(t, pool, txn.IDHash[:])
-	defer releaseSecond()
-	pool.discardReasonsLRU.Purge()
-	_, retry = p2pRetryForTest(t, pool, txn.IDHash[:], 0)
-	require.False(t, retry)
-	releaseFirst()
-	releaseFirst()
-	_, retry = p2pRetryForTest(t, pool, txn.IDHash[:], 0)
-	require.False(t, retry, "another cached packet still owns the rejection outcome")
-	releaseSecond()
-	_, retry = p2pRetryForTest(t, pool, txn.IDHash[:], 0)
-	require.True(t, retry, "the last release must remove evicted history")
-}
-
-func TestP2PPinsPreserveNonceGapAfterBadSidecar(t *testing.T) {
-	ctx := t.Context()
-	pool := seedBlobKZGTestPool(t, ctx)
-	sender := common.Address{1}
-	good := makeBlobSlot(1, false)
-	good.Nonce = 65
-	good.Txn.(*types.BlobTx).Nonce = 65
-	var goodTxns TxnSlots
-	goodTxns.Append(&good, sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, goodTxns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
-	release := pinP2PHashesForTest(t, pool, good.IDHash[:])
-	defer release()
-	pool.discardReasonsLRU.Purge()
-	bad := makeBlobSlot(1, true)
-	bad.Nonce = 65
-	bad.Txn.(*types.BlobTx).Nonce = 65
-	var badTxns TxnSlots
-	badTxns.Append(&bad, sender[:], true)
-	reasons, err = pool.AddLocalTxns(ctx, badTxns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
-	bridge := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
-	bridge.IDHash[0] = 2
-	var lower TxnSlots
-	lower.Append(bridge, sender[:], true)
-	_, err = pool.AddLocalTxns(ctx, lower)
-	require.NoError(t, err)
-	_, retry := p2pRetryForTest(t, pool, good.IDHash[:], 0)
-	require.True(t, retry, "an evicted pinned nonce gap must survive another sidecar's failure")
-}
-
 func TestCachedPacketRetriesNonceGapSkippedByAnotherPacket(t *testing.T) {
 	ctx := t.Context()
 	pool := seedBlobKZGTestPool(t, ctx)
@@ -352,8 +287,6 @@ func TestCachedPacketRetriesNonceGapSkippedByAnotherPacket(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, goodTxns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
-	release := pool.PinP2PHashes(good.IDHash[:])
-	defer release()
 	updateP2PRetryNonce(t, pool, sender, 65, 1)
 	revision, retry := p2pRetryForTest(t, pool, good.IDHash[:], 0)
 	require.True(t, retry)

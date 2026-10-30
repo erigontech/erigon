@@ -287,46 +287,6 @@ func TestFetchAcceptsIdenticalReplyAfterCorrectedAnnouncement(t *testing.T) {
 	require.Equal(t, peerID, PeerID((<-penalties).PeerId))
 }
 
-func TestFetchFlushesRepeatedBodiesBeforeStreamEnds(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx := t.Context()
-		pool, db, signed, _ := newFetchTestTransaction(t, 0)
-		encoded := encodeFetchTestTransactions(t, signed)[0]
-		const transactionsPerPacket = 1024
-		transactions := make([][]byte, transactionsPerPacket)
-		for i := range transactions {
-			transactions[i] = encoded
-		}
-		body := EncodePooledTransactions66(transactions, 1, nil)
-		messageCount := 8*1024*1024/len(body) + 1
-		require.Less(t, messageCount, 256)
-		client, sent, penalties := newFetchTestClient(t)
-		var wg sync.WaitGroup
-		fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
-		parses := countFetchTestParses(fetch)
-		received := 0
-		receiveFetchTestBatch(t, fetch, client, func() *sentryproto.InboundMessage {
-			if received == messageCount {
-				// Processing progress is observable; retained buffer references are not.
-				require.Positive(t, parses(), "the stream must flush before reading every packet body")
-				return nil
-			}
-			received++
-			return &sentryproto.InboundMessage{
-				Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: bytes.Clone(body), PeerId: peerID,
-			}
-		})
-		require.Equal(t, messageCount, received)
-		require.Equal(t, int64(transactionsPerPacket), parses())
-		require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-		require.NoError(t, pool.processRemoteTxns(ctx))
-		hash := signed.Hash()
-		require.Contains(t, pool.byHash, string(hash[:]))
-		require.Empty(t, sent)
-		require.Empty(t, penalties)
-	})
-}
-
 func TestFetchRetriesPacketWithPreviouslyKnownTransaction(t *testing.T) {
 	ctx := t.Context()
 	pool, db, signed, change := newFetchTestTransactions(t, 66, 2, 0, 1)

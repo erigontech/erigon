@@ -392,44 +392,6 @@ func (c *MockPoolP2PRetryCall) DoAndReturn(f func(context.Context, Hashes, uint6
 	return c
 }
 
-// PinP2PHashes mocks base method.
-func (m *MockPool) PinP2PHashes(hashes Hashes) func() {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PinP2PHashes", hashes)
-	ret0, _ := ret[0].(func())
-	return ret0
-}
-
-// PinP2PHashes indicates an expected call of PinP2PHashes.
-func (mr *MockPoolMockRecorder) PinP2PHashes(hashes any) *MockPoolPinP2PHashesCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PinP2PHashes", reflect.TypeOf((*MockPool)(nil).PinP2PHashes), hashes)
-	return &MockPoolPinP2PHashesCall{Call: call}
-}
-
-// MockPoolPinP2PHashesCall wrap *gomock.Call
-type MockPoolPinP2PHashesCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockPoolPinP2PHashesCall) Return(arg0 func()) *MockPoolPinP2PHashesCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockPoolPinP2PHashesCall) Do(f func(Hashes) func()) *MockPoolPinP2PHashesCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolPinP2PHashesCall) DoAndReturn(f func(Hashes) func()) *MockPoolPinP2PHashesCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // Started mocks base method.
 func (m *MockPool) Started() bool {
 	m.ctrl.T.Helper()

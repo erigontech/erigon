@@ -84,7 +84,6 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	P2PRetry(ctx context.Context, hashes Hashes, seenRevision uint64) (revision uint64, retry bool, err error)
-	PinP2PHashes(hashes Hashes) func()
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
@@ -123,12 +122,6 @@ type nonceGapState struct {
 	progressRevision  uint64
 }
 
-type pinnedDiscard struct {
-	record discardRecord
-	found  bool
-	refs   int
-}
-
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
 //
@@ -152,7 +145,6 @@ type TxPool struct {
 	unprocessedRemoteByHash map[string]*TxnSlot                   // to reject duplicates
 	byHash                  map[string]*metaTxn                   // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, discardRecord] // txn_hash => discard_reason : non-persisted
-	pinnedDiscards          map[string]*pinnedDiscard
 	pending                 *PendingPool
 	baseFee                 *SubPool
 	queued                  *SubPool
@@ -263,7 +255,6 @@ func New(
 		byHash:                  map[string]*metaTxn{},
 		isLocalLRU:              localsHistory,
 		discardReasonsLRU:       discardHistory,
-		pinnedDiscards:          make(map[string]*pinnedDiscard),
 		all:                     byNonce,
 		recentlyConnectedPeers:  &recentlyConnectedPeers{},
 		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
@@ -650,12 +641,6 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 		// A nonce gap can close before the discarded pool row is removed.
 		return record.reason != txpoolcfg.NonceTooDistant, nil
 	}
-	if !found {
-		if pinned := p.pinnedDiscards[hashS]; pinned != nil && pinned.found &&
-			!pinned.record.precheck && pinned.record.reason == txpoolcfg.NonceTooDistant {
-			return false, nil
-		}
-	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
 
@@ -753,67 +738,16 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 	return retry, needsView, nil
 }
 
-// PinP2PHashes retains cached packet outcomes until the returned release is called.
-func (p *TxPool) PinP2PHashes(hashes Hashes) func() {
-	if len(hashes) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(hashes)/32)
-	p.lock.Lock()
-	for i := 0; i < len(hashes); i += 32 {
-		key := string(hashes[i : i+32])
-		keys = append(keys, key)
-		pinned := p.pinnedDiscards[key]
-		if pinned == nil {
-			record, found := p.discardReasonsLRU.Peek(key)
-			pinned = &pinnedDiscard{record: record, found: found}
-			p.pinnedDiscards[key] = pinned
-		}
-		pinned.refs++
-	}
-	p.lock.Unlock()
-	released := false
-	return func() {
-		p.lock.Lock()
-		defer p.lock.Unlock()
-		if released {
-			return
-		}
-		released = true
-		for _, key := range keys {
-			pinned := p.pinnedDiscards[key]
-			pinned.refs--
-			if pinned.refs == 0 {
-				delete(p.pinnedDiscards, key)
-			}
-		}
-	}
-}
-
 func (p *TxPool) getDiscard(hash string) (discardRecord, bool) {
-	if record, found := p.discardReasonsLRU.Get(hash); found {
-		return record, true
-	}
-	if pinned := p.pinnedDiscards[hash]; pinned != nil {
-		return pinned.record, pinned.found
-	}
-	return discardRecord{}, false
+	return p.discardReasonsLRU.Get(hash)
 }
 
 func (p *TxPool) setDiscard(hash string, record discardRecord) {
 	p.discardReasonsLRU.Add(hash, record)
-	if pinned := p.pinnedDiscards[hash]; pinned != nil {
-		pinned.record = record
-		pinned.found = true
-	}
 }
 
 func (p *TxPool) clearDiscard(hash string) {
 	p.discardReasonsLRU.Remove(hash)
-	if pinned := p.pinnedDiscards[hash]; pinned != nil {
-		pinned.record = discardRecord{}
-		pinned.found = false
-	}
 }
 
 func (p *TxPool) recordPrecheck(hash [32]byte, reason txpoolcfg.DiscardReason) {
@@ -1376,11 +1310,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(blobs) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
-	for i := range txn.BlobBundles {
-		if len(txn.BlobBundles[i].Blob) != params.BlobSize {
-			return txpoolcfg.UnmatchedBlobTxExt
-		}
-	}
 	blobs := txn.Blobs()
 	commitments := txn.Commitments()
 	proofs := txn.Proofs()
@@ -1408,9 +1337,9 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 
 	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
 		}
-		return txpoolcfg.BlobSlotsOverflow
+		return txpoolcfg.Spammer
 	}
 	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
 		if txn.Traced {
