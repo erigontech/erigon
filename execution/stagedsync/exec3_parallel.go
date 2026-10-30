@@ -1777,7 +1777,9 @@ type balTx struct {
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
 
+// goReused runs f on an idle task goroutine, or on a new one when none is idle.
 func (pe *parallelExecutor) goReused(f func()) {
+	// The unbuffered send succeeds only while a goroutine waits in `f = <-idle` below.
 	select {
 	case pe.idleGo <- f:
 		return
@@ -1787,6 +1789,7 @@ func (pe *parallelExecutor) goReused(f func()) {
 	pe.runWG.Go(func() {
 		for {
 			f()
+			// Wait for the next task, keeping the grown stack, until the exec loop ends.
 			select {
 			case f = <-idle:
 			case <-done:
