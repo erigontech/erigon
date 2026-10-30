@@ -177,6 +177,25 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	mu.Lock()
 	defer mu.Unlock()
 	newSize := len(key) + c.sizeFunc(value)
+	if c.mode != ModeNoOp {
+		e := entry[T]{key: string(key), val: value, size: uint32(min(newSize, math.MaxUint32)), txNum: txNum, epoch: c.coh.Epoch()}
+		if overwrite {
+			if !c.data.Add(h, e) {
+				c.data.Remove(h) // too big for the cache: the superseded value must not stay live
+				return
+			}
+			c.inserts.Add(1)
+			return
+		}
+		existing, inserted := c.data.addIfAbsent(h, e)
+		if inserted {
+			c.inserts.Add(1)
+			return
+		}
+		if existing.key == string(key) && !c.coh.IsStale(existing.txNum, existing.epoch) {
+			return
+		}
+	}
 	c.data.compute(h, func(existing entry[T], found bool) (entry[T], otter.ComputeOp) {
 		sameKey := found && existing.key == string(key)
 		if sameKey && !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {

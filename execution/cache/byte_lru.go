@@ -155,6 +155,21 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	return true
 }
 
+// addIfAbsent stores value only when key is absent and returns the present value
+// otherwise. It is the cheap path for a fill: no callback under the bucket lock.
+func (b *ByteLRU[V]) addIfAbsent(key uint64, value V) (V, bool) {
+	w := b.weigh(key, value)
+	if w > b.maxBytes {
+		var zero V
+		return zero, false
+	}
+	prev, inserted := b.c.SetIfAbsent(key, value)
+	if inserted {
+		b.charge(w)
+	}
+	return prev, inserted
+}
+
 // compute is Add for a write that depends on the key's current value: fn runs
 // under otter's bucket lock, so its check and its write are one step against
 // other writers of key. fn must not call the cache.
