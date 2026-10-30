@@ -68,7 +68,10 @@ type taskPool struct {
 	closed bool
 }
 
-var poolRoTxOpens atomic.Int64
+var (
+	poolRoTxOpens atomic.Int64
+	poolMaxRuns   atomic.Int64
+)
 
 func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
 	p := &taskPool{pe: pe}
@@ -198,7 +201,9 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 		case psRecheck:
 			valid, _, _ := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
-				pt.next = psReexec
+				if !pt.waitThen(tv.index-1, psReexec) {
+					return
+				}
 				continue
 			}
 			pt.send(p, pt.result)
@@ -208,6 +213,9 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 			if pt.pending {
 				pt.pending = false
 				pt.mu.Unlock()
+				if !pt.waitThen(tv.index-1, psReexec) {
+					return
+				}
 				continue
 			}
 			pt.parked = true
@@ -238,6 +246,12 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 			break
 		}
 	}
+	for runs := int64(tv.version.Incarnation) + 1; ; {
+		m := poolMaxRuns.Load()
+		if runs <= m || poolMaxRuns.CompareAndSwap(m, runs) {
+			break
+		}
+	}
 	result := wk.w.RunTxTask(tv)
 	if pt.aborted {
 		return false
@@ -259,13 +273,9 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
 	pt.prevWrites = result.TxOut
 
-	valid, target, blocker := be.selfLoopEvaluate(tv, result)
+	valid, target, _ := be.selfLoopEvaluate(tv, result)
 	if !valid {
-		if blocker > be.frontier() {
-			return pt.waitThen(blocker, psReexec)
-		}
-		pt.next = psReexec
-		return true
+		return pt.waitThen(tv.index-1, psReexec)
 	}
 	pt.result = result
 	if !be.versionMap.HasBAL {

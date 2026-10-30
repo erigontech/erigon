@@ -3,6 +3,8 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -94,6 +96,7 @@ func runPoolReplay(t *testing.T, ctx context.Context, fx *blockreplay.Fixture, w
 
 func resetPoolCounters() {
 	poolRoTxOpens.Store(0)
+	poolMaxRuns.Store(0)
 }
 
 func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
@@ -110,14 +113,16 @@ func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
 	require.LessOrEqual(t, opens, int64(workers+1), "pool opened more read txs than it has workers (%d txs in the block)", len(b.Transactions()))
 }
 
-// A dependency re-abort loop spins to the incarnation limit (tasks+8) and fails the
-// block, so a clean run of a fully dependent chain proves the task waits for its predecessor.
-func TestPoolDependencyChainDoesNotReabortLoop(t *testing.T) {
+// Every re-run waits for the predecessor to commit and so reads committed state: a tx
+// runs once speculatively and at most once more, however long the dependent chain. A
+// re-run that does not wait spins towards the incarnation limit (tasks+8) and fails the block.
+func TestPoolDependencyChainRunsEachTxAtMostTwice(t *testing.T) {
 	fx := counterChainFixture(t, poolTestTxs)
 	for _, workers := range []string{"4", "16"} {
 		resetPoolCounters()
 		require.NoError(t, runPoolReplay(t, context.Background(), fx, workers))
 		require.Positive(t, poolRoTxOpens.Load(), "no pool worker ran: the run measured nothing")
+		require.LessOrEqual(t, poolMaxRuns.Load(), int64(2), "a tx in a %d-call chain ran more than twice with %s workers", poolTestTxs, workers)
 	}
 }
 
@@ -151,13 +156,13 @@ func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 	resetPoolCounters()
 	t.Setenv("EPHEMERAL_WORKERS", "4")
 	r, closeFn := setupEphemeralReplay(t, fx)
-	defer closeFn()
+	t.Cleanup(closeFn)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	r.ctx = ctx
 	tx, doms := r.newDomains(t, fx)
-	defer tx.Rollback()
-	defer doms.Close()
+	t.Cleanup(tx.Rollback)
+	t.Cleanup(doms.Close)
 	go func() {
 		for poolRoTxOpens.Load() == 0 {
 			time.Sleep(50 * time.Microsecond)
@@ -169,7 +174,8 @@ func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
-		t.Fatal("ExecV3 did not return within 30s after workersCtx was cancelled mid-block")
+		fmt.Fprintln(os.Stderr, "FAIL: ExecV3 did not return within 30s after workersCtx was cancelled mid-block")
+		os.Exit(1)
 	}
 	require.Positive(t, poolRoTxOpens.Load(), "no pool worker ran before the cancel: the run measured nothing")
 }
