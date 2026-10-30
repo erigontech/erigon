@@ -834,3 +834,44 @@ func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
 	announce(peerB)
 	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
 }
+
+func TestAnnouncedHashRequestedFromAlternateAfterTimeout(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true).AnyTimes()
+	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, nil }).AnyTimes()
+	var requestedFrom [][64]byte
+	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			requestedFrom = append(requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
+			return nil, nil
+		}).AnyTimes()
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+	now := time.Unix(1_000_000, 0)
+	fetch.now = func() time.Time { return now }
+
+	hash := [32]byte{0xaa}
+	buf := make([]byte, announcementsLen([]byte{types.BlobTxType}, []uint32{100}, hash[:]))
+	announcement := buf[:encodeAnnouncements([]byte{types.BlobTxType}, []uint32{100}, hash[:], buf)]
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	for _, peer := range [][64]byte{peerA, peerB} {
+		require.NoError(t, fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peer),
+		}, sentryClient))
+	}
+
+	fetch.requestFromAlternates(ctx, nil)
+	require.Equal(t, [][64]byte{peerA}, requestedFrom, "no retry before the timeout")
+	now = now.Add(txFetchTimeout)
+	fetch.requestFromAlternates(ctx, nil)
+	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
+	now = now.Add(txFetchTimeout)
+	fetch.requestFromAlternates(ctx, nil)
+	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom, "no announcers left")
+}
