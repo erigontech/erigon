@@ -194,11 +194,14 @@ type HexPatriciaHashed struct {
 	hadToLoadL map[uint64]skipStat
 }
 
-var hphPool sync.Pool
+// hphFree keeps released tries across GC cycles; sync.Pool drops them on every GC.
+var hphFree = make(chan *HexPatriciaHashed, 128)
 
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConfig) *HexPatriciaHashed {
-	hph, ok := hphPool.Get().(*HexPatriciaHashed)
-	if !ok {
+	var hph *HexPatriciaHashed
+	select {
+	case hph = <-hphFree:
+	default:
 		hph = newHexPatriciaHashed()
 	}
 	// No resetForReuse() needed — Release() already cleaned the object,
@@ -311,7 +314,10 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 // not use the struct.
 func (hph *HexPatriciaHashed) Release() {
 	hph.resetForReuse()
-	hphPool.Put(hph)
+	select {
+	case hphFree <- hph:
+	default:
+	}
 }
 
 type cell struct {
