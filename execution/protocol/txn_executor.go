@@ -446,21 +446,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, gasBailout, nil)
 	}
 	coinbase := st.evm.Context.Coinbase
-	var senderInitBalance uint256.Int
-	if !st.chargeSenderAtValidation {
-		senderInitBalance, err = st.state.GetBalance(st.msg.From())
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	var coinbaseInitBalance uint256.Int
-	if !st.noFeeBurnAndTip {
-		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
@@ -696,15 +681,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			BlockStateGasUsed:     st.blockStateGasUsed,
 			GasRefund:             refund,
 		},
-		ReceiptGasUsed:      st.txnGasUsed,
-		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		Err:                 vmerr,
-		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:          ret,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           tipAmount,
-		FeeBurnt:            burnAmount,
+		ReceiptGasUsed: st.txnGasUsed,
+		MaxGasUsed:     max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		Err:            vmerr,
+		Reverted:       errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:     ret,
+		FeeTipped:      tipAmount,
+		FeeBurnt:       burnAmount,
 	}
 
 	result.BurntContractAddress = burntContractAddress

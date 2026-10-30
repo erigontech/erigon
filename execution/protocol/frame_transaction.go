@@ -103,17 +103,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if overflow {
 		return nil, ErrInsufficientFunds
 	}
-	senderBalance, err := st.state.GetBalance(sender)
-	if err != nil {
-		return nil, err
-	}
-	var coinbaseBalance uint256.Int
-	if !st.noFeeBurnAndTip {
-		coinbaseBalance, err = st.state.GetBalance(st.evm.Context.Coinbase)
-		if err != nil {
-			return nil, err
-		}
-	}
 	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
@@ -294,8 +283,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		TxnGasUsage:    mdgas.TxnGasUsage{BlockExecutionGasUsed: blockExecution, BlockStateGasUsed: used.State, GasRefund: refund},
 		ReceiptGasUsed: paid, MaxGasUsed: blockExecution + used.State,
 		Payer: &payer, FrameReceipts: ctx.Receipts, Err: lastErr,
-		SenderInitBalance: senderBalance, CoinbaseInitBalance: coinbaseBalance, FeeTipped: tipped,
-		FeeBurnt: burned, BurntContractAddress: burnAddress,
+		FeeTipped: tipped, FeeBurnt: burned, BurntContractAddress: burnAddress,
 	}
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, sender, st.evm.Context.Coinbase, result, rules)
