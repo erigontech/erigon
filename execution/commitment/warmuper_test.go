@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -264,6 +265,53 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 	}
 }
 
+// countingBranchCtx holds BranchNoCopy to its contract: each call poisons what
+// the previous one returned.
+type countingBranchCtx struct {
+	src      []byte
+	last     []byte
+	owned    atomic.Int64
+	borrowed atomic.Int64
+}
+
+func (c *countingBranchCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	c.owned.Add(1)
+	return bytes.Clone(c.src), 0, nil
+}
+
+func (c *countingBranchCtx) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	c.borrowed.Add(1)
+	for i := range c.last {
+		c.last[i] = 0xff
+	}
+	c.last = bytes.Clone(c.src)
+	return c.last, 0, nil
+}
+
+func (c *countingBranchCtx) PutBranch(prefix, data, prevData []byte) error { return nil }
+func (c *countingBranchCtx) Account(plainKey []byte) (*Update, error)      { return nil, nil }
+func (c *countingBranchCtx) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
+
+func TestWarmuperUsesBranchNoCopy(t *testing.T) {
+	t.Parallel()
+	// touchMap, afterMap with nibble 0 set, then one cell with no fields.
+	ctx := &countingBranchCtx{src: []byte{0x00, 0x01, 0x00, 0x01, 0x00}}
+	w := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func(context.Context) (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	w.Start()
+	w.WarmKey([]byte{0, 0, 0, 0}, 0, 0)
+	require.NoError(t, w.WaitBufferFree(0))
+	w.CloseAndWait()
+
+	require.Zero(t, ctx.owned.Load(), "warmup still copies branch bytes it drops immediately")
+	// One read per nibble, then one that stops at the key's end.
+	require.Equal(t, int64(5), ctx.borrowed.Load(), "warmup descent read the wrong number of branches")
+}
+
 type branchReadRecorder struct {
 	*MockState
 	read map[string]bool
@@ -272,6 +320,11 @@ type branchReadRecorder struct {
 func (r *branchReadRecorder) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	r.read[string(prefix)] = true
 	return r.MockState.Branch(prefix)
+}
+
+func (r *branchReadRecorder) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	r.read[string(prefix)] = true
+	return r.MockState.BranchNoCopy(prefix)
 }
 
 func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
