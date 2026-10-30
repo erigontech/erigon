@@ -38,6 +38,7 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	for i := range uint64(64) {
 		b.Add(i, make([]byte, 512))
 	}
+	b.c.CleanUp()
 	require.Equal(t, used, cachebudget.Global.Used())
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()
@@ -277,4 +278,77 @@ func TestByteLRUPurgeRacingAddKeepsResidencyReserved(t *testing.T) {
 		b.c.CleanUp()
 		require.LessOrEqual(t, b.resident.Load(), b.limit.Load(), "round %d: resident bytes outgrew the reservation", round)
 	}
+}
+
+// A refused envelope pins the cache at its limit; Purge reopens it to maxBytes.
+func TestByteLRURefusedEnvelopePinsLimitUntilPurge(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(byteLRUFloorBytes) // room for the floor only
+
+	val := make([]byte, 64*1024)
+	b := newByteLRU(256*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	for key := range uint64(64) { // 4 MB: past the floor, so growth asks the envelope
+		b.Add(key, val)
+	}
+	b.c.CleanUp()
+	require.Equal(t, byteLRUFloorBytes, b.limit.Load())
+	require.Equal(t, byteLRUFloorBytes, b.ceiling.Load(), "a refused chunk must pin the ceiling")
+	require.LessOrEqual(t, b.resident.Load(), byteLRUFloorBytes)
+
+	cachebudget.Global = cachebudget.New(1 << 40)
+	b.Purge()
+	require.Equal(t, b.maxBytes, b.ceiling.Load())
+	for key := range uint64(64) {
+		b.Add(key, val)
+	}
+	b.c.CleanUp()
+	require.Greater(t, b.resident.Load(), byteLRUFloorBytes, "Purge must lift otter's maximum back to maxBytes")
+}
+
+// A full cache returns its grown reservation on Clear and everything on Close.
+func TestGenericCacheBudgetBackToBaselineAfterClearAndClose(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+	base := cachebudget.Global.Used()
+
+	val := make([]byte, 64*1024)
+	c := NewGenericCache[[]byte](128*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	k := make([]byte, 8)
+	for i := range uint64(1024) { // 64 MB
+		k[0], k[1] = byte(i), byte(i>>8)
+		c.Put(k, val, 1)
+	}
+	c.data.c.CleanUp()
+	require.Greater(t, cachebudget.Global.Used(), base+byteLRUFloorBytes)
+
+	c.Clear()
+	require.Equal(t, base+byteLRUFloorBytes, cachebudget.Global.Used())
+	c.Close()
+	require.Equal(t, base, cachebudget.Global.Used())
+}
+
+// Close racing writers leaves no reservation behind.
+func TestByteLRUCloseRacingWritersReturnsBudget(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+	base := cachebudget.Global.Used()
+
+	val := make([]byte, 64*1024)
+	b := newByteLRU(256*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	var wg sync.WaitGroup
+	for w := range uint64(4) {
+		wg.Go(func() {
+			for key := range uint64(1024) {
+				b.Add(w<<32|key, val)
+			}
+		})
+	}
+	b.Close()
+	wg.Wait()
+	b.c.CleanUp()
+	require.Equal(t, base, cachebudget.Global.Used())
 }

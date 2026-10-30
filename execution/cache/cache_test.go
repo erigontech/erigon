@@ -190,6 +190,7 @@ func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
 	for i := 1; i <= 64; i++ {
 		c.Put(makeAddr(i), makeValue(i), 0)
 	}
+	c.data.c.CleanUp()
 	// Residency stays bounded without collapsing. Which keys survive is
 	// W-TinyLFU's choice, not recency, so their identity is not asserted.
 	assert.Positive(t, c.Len())
@@ -382,6 +383,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
 	c.Put(makeAddr(3), makeCode(3), 0)
+	c.codeHashToCode.c.CleanUp()
 
 	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
@@ -1586,6 +1588,7 @@ func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
 		sizes[uint64(i)] = n
 		b.Add(uint64(i), make([]byte, n))
 	}
+	b.c.CleanUp()
 
 	var resident int64
 	survivors := map[uint64]bool{}
