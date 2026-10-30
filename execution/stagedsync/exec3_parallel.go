@@ -1018,6 +1018,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// applyResults, draining the calculator and apply loop. It owns the workers'
 	// inner context too — whatever exit path it takes, the workers must not outlive it.
 	defer pe.cancelWorkers()
+	defer func() {
+		log.Warn("[dbg] goReused", "created", goCreatedCnt.Swap(0), "reused", goReusedCnt.Swap(0))
+	}()
 	defer pe.closeApplyChannels()
 	defer func() {
 		// Close the exec loop's own RO tx — prevents leak across batches.
@@ -1777,12 +1780,16 @@ type balTx struct {
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
 
+var goCreatedCnt, goReusedCnt atomic.Int64
+
 func (pe *parallelExecutor) goReused(f func()) {
 	select {
 	case pe.idleGo <- f:
+		goReusedCnt.Add(1)
 		return
 	default:
 	}
+	goCreatedCnt.Add(1)
 	idle, done := pe.idleGo, pe.workersCtx.Done()
 	pe.runWG.Go(func() {
 		for {
