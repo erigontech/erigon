@@ -57,6 +57,42 @@ func TestPBinVerifyStreamsRowsWithoutPointLookups(t *testing.T) {
 	require.LessOrEqual(t, stats.PeakRows.Load(), stats.TaskWorkers.Load()*stats.MaxTaskRows.Load(), "verification row memory exceeded the worker bound")
 }
 
+func TestPBinVerifyDataKeepsOnlyUpperRows(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 1024)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	convertPBinAt(t, db, agg, 7)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	iter, err := at.DebugRangeLatestFromFiles(kv.CommitmentDomain, nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	bucketRows := 0
+	for iter.HasNext() {
+		key, _, nextErr := iter.Next()
+		require.NoError(t, nextErr)
+		if path, decodeErr := eip8297.DecodeBitPath(key); decodeErr == nil && path.BitLen == 264 {
+			bucketRows++
+		}
+	}
+	iter.Close()
+	require.Positive(t, bucketRows)
+	_, _, upperRows, err := at.DebugRangeLatestVerifyData(tx, kv.CommitmentDomain, pbt.GlobalRootKey(), 16)
+	require.NoError(t, err)
+	for key := range upperRows {
+		if key == string(pbt.GlobalRootKey()) {
+			continue
+		}
+		path, decodeErr := eip8297.DecodeBitPath([]byte(key))
+		require.NoError(t, decodeErr)
+		require.Less(t, path.BitLen, int16(16), "row %x must be read by its task, not preloaded", key)
+	}
+}
+
 func TestPBinVerifySerialManyStorageSlots(t *testing.T) {
 	selectPBinBinOnlyHash(t)
 	db, agg := temporal.Open(t, 8)

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -52,10 +51,10 @@ type pbinLatestCursor struct {
 }
 
 func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {
-	return ForEachPBinLeafWithWorkers(context.Background(), at, roTx, filesOnly, 1, nil, emit)
+	return ForEachPBinLeafWithWorkers(context.Background(), at, roTx, filesOnly, 1, emit)
 }
 
-func ForEachPBinLeafWithWorkers(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, workerRuns *atomic.Int32, emit func(PBinLeaf) error) error {
+func ForEachPBinLeafWithWorkers(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, emit func(PBinLeaf) error) error {
 	if at == nil {
 		return fmt.Errorf("pbin leaf stream: nil aggregator transaction")
 	}
@@ -67,12 +66,12 @@ func ForEachPBinLeafWithWorkers(ctx context.Context, at *AggregatorRoTx, roTx kv
 	}
 	workers = max(workers, 1)
 	if workers > 1 && filesOnly {
-		return pbinForEachLeafParallel(ctx, at, roTx, filesOnly, workers, workerRuns, emit)
+		return pbinForEachLeafParallel(ctx, at, roTx, filesOnly, workers, emit)
 	}
 	return pbinForEachLeafSerial(ctx, at, roTx, filesOnly, emit)
 }
 
-func VerifyPBinSourceStamps(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, endTxNum uint64, workers int, workerRuns *atomic.Int32, report func(uint64)) error {
+func VerifyPBinSourceStamps(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, endTxNum uint64, workers int, report func(uint64)) error {
 	if at == nil {
 		return fmt.Errorf("pbin stamp walk: nil aggregator transaction")
 	}
@@ -86,41 +85,18 @@ func VerifyPBinSourceStamps(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx,
 	ranges := pbinStampAddressRanges(workers)
 	pin := at.Pin()
 	defer pin.Close()
-	walkCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var errorMu sync.Mutex
-	var firstErr error
-	recordError := func(err error) {
-		errorMu.Lock()
-		if firstErr == nil || errors.Is(firstErr, context.Canceled) && !errors.Is(err, context.Canceled) {
-			firstErr = err
-		}
-		errorMu.Unlock()
-		cancel()
-	}
-	var wg sync.WaitGroup
+	g, walkCtx := errgroup.WithContext(ctx)
 	for worker := range workers {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
-			if workerRuns != nil {
-				workerRuns.Add(1)
-			}
+		g.Go(func() error {
 			for rangeIndex := worker; rangeIndex < len(ranges); rangeIndex += workers {
 				if err := verifyPBinSourceStampRange(walkCtx, pin, roTx, filesOnly, ranges[rangeIndex], endTxNum, report); err != nil {
-					recordError(err)
-					return
+					return err
 				}
 			}
-		}(worker)
+			return nil
+		})
 	}
-	wg.Wait()
-	errorMu.Lock()
-	defer errorMu.Unlock()
-	if firstErr != nil {
-		return firstErr
-	}
-	return nil
+	return g.Wait()
 }
 
 func verifyPBinSourceStampRange(ctx context.Context, pin *AggregatorFilesPin, roTx kv.Tx, filesOnly bool, addressRange pbinLeafAddressRange, endTxNum uint64, report func(uint64)) error {
@@ -276,7 +252,7 @@ func pbinLeafWorkerBuffer(workers int) datasize.ByteSize {
 	return (pbinLeafBufferBytes / datasize.ByteSize(workers)) * 7 / 8
 }
 
-func pbinForEachLeafParallel(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, workerRuns *atomic.Int32, emit func(PBinLeaf) error) error {
+func pbinForEachLeafParallel(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, workers int, emit func(PBinLeaf) error) error {
 	ranges := pbinLeafAddressRanges(workers)
 	collectors := make([]*etl.Collector, workers)
 	for i := range collectors {
@@ -301,9 +277,6 @@ func pbinForEachLeafParallel(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx
 		g.Go(func() error {
 			workerAt := pin.BeginFilesRo()
 			defer workerAt.Close()
-			if workerRuns != nil {
-				workerRuns.Add(1)
-			}
 			collector := collectors[worker]
 			report := func(n uint64) {
 				current := uint64(collector.InMemoryCapacity())

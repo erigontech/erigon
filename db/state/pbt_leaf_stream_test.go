@@ -319,7 +319,7 @@ func TestPBinLeafProgressAllocatedBytes(t *testing.T) {
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	leaves := 0
-	require.NoError(t, state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, 16, nil, func(state.PBinLeaf) error {
+	require.NoError(t, state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, 16, func(state.PBinLeaf) error {
 		leaves++
 		return nil
 	}))

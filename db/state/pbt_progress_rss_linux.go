@@ -29,7 +29,7 @@ func pbtRSSAnon() any {
 	if err != nil {
 		return "n/a"
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 3 || fields[0] != "RssAnon:" || fields[2] != "kB" {
 			continue

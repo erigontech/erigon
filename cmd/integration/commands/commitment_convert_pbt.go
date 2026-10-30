@@ -69,8 +69,6 @@ type pbtConvertHooks struct {
 	standalone           func(datadir.Dirs) error
 	rangeWriterLimits    *dbstate.PBinRangeWriterLimits
 	sequentialCommitment bool
-	workerViews          *atomic.Int32
-	sourceWorkerRuns     *atomic.Int32
 	workers              int
 	resume               bool
 	skipVerify           bool
@@ -492,9 +490,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		EndTxNum:          point.TxNum,
 		Hash:              eip8297.HashBytes,
 		RangeWriterLimits: hooks.rangeWriterLimits,
-		WorkerViews:       hooks.workerViews,
 		Workers:           hooks.workers,
-		SourceWorkerRuns:  hooks.sourceWorkerRuns,
 		Resume:            resumeOptions,
 	})
 	targetTx.Rollback()
@@ -512,7 +508,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	targetAgg.Close()
 	if resume && !hooks.skipVerify {
-		if err := verifyPBTResumeStreamRoot(sourceWalkAgg, root); err != nil {
+		if err := verifyPBTResumeStreamRoot(ctx, sourceWalkAgg, root, hooks.workers); err != nil {
 			return err
 		}
 	}
@@ -1339,20 +1335,22 @@ func pbtResumeSourceFilesEnd(dirs datadir.Dirs, stepSize uint64) (uint64, error)
 	if err != nil {
 		return 0, err
 	}
-	var end uint64
+	ends := make(map[kv.Domain]uint64, 3)
 	for _, file := range pbtAttachVisibleFiles(files) {
 		if !file.data || filepath.Ext(file.path) != ".kv" || !pbtAttachStateDomain(file.domain) {
 			continue
 		}
-		fileEnd := file.to * stepSize
-		if fileEnd > 0 {
-			end = max(end, fileEnd-1)
-		}
+		ends[file.domain] = max(ends[file.domain], file.to)
 	}
-	if end == 0 {
+	accounts, storage, code := ends[kv.AccountsDomain], ends[kv.StorageDomain], ends[kv.CodeDomain]
+	if accounts != storage || accounts != code {
+		return 0, fmt.Errorf("commitment convert-pbt: source state domain file ends differ: accounts step %d, storage step %d, code step %d", accounts, storage, code)
+	}
+	end := accounts * stepSize
+	if end <= 1 {
 		return 0, errors.New("commitment convert-pbt: source state file end is missing")
 	}
-	return end, nil
+	return end - 1, nil
 }
 
 func pbtResumeRejectMDBXState(tx kv.TemporalTx, stepSize, sourceEnd uint64) error {
@@ -1507,11 +1505,19 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	return err
 }
 
-func verifyPBTResumeStreamRoot(aggregator *dbstate.Aggregator, want common.Hash) error {
+func verifyPBTResumeStreamRoot(ctx context.Context, aggregator *dbstate.Aggregator, want common.Hash, workers int) error {
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
-	got, err := dbstate.PBinStateRoot(at, nil, true, eip8297.HashBytes)
+	workers = max(workers, 1)
+	builder, err := eip8297.NewParallelStreamRoot(eip8297.HashBytes, workers)
 	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: C-e stream root: %w", err)
+	}
+	walkErr := dbstate.ForEachPBinLeafWithWorkers(ctx, at, nil, true, workers, func(leaf dbstate.PBinLeaf) error {
+		return builder.AddContext(ctx, leaf.Key, leaf.Value)
+	})
+	got, rootErr := builder.RootHash()
+	if err := errors.Join(walkErr, rootErr); err != nil {
 		return fmt.Errorf("commitment convert-pbt: C-e stream root: %w", err)
 	}
 	if got != want {
@@ -1681,7 +1687,7 @@ func requirePBinSourceEndWithWorkers(ctx context.Context, agg *dbstate.Aggregato
 	defer at.Close()
 	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "source end verify", TempDir: agg.Dirs().Tmp})
 	defer progress.Done()
-	return dbstate.VerifyPBinSourceStamps(ctx, at, nil, true, endTxNum, workers, nil, progress.Add)
+	return dbstate.VerifyPBinSourceStamps(ctx, at, nil, true, endTxNum, workers, progress.Add)
 }
 
 func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) error {

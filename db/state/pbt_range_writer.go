@@ -60,7 +60,6 @@ type PBinRangeWriter struct {
 	stateInFiles       bool
 	resume             bool
 	resumeSourceLayout bool
-	workerViews        atomic.Int32
 	stampTracker       func() pbinStampTracker
 	pipelineHook       func(string, int) error
 	absentProbe        PBinAbsentProbeFunc
@@ -153,7 +152,6 @@ type pbinRangeWriterDetached struct {
 type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
 	writes   map[string]pbinRangeWriterWrite
-	views    *atomic.Int32
 	base     bool
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
@@ -379,7 +377,6 @@ func (o *pbinRangeWriterOverlay) Absent(key []byte) bool {
 }
 
 func (o *pbinRangeWriterOverlay) DecorateWorkerContext(worker commitment.PatriciaContext) commitment.PatriciaContext {
-	o.views.Add(1)
 	return &pbinRangeWriterView{PatriciaContext: worker, overlay: o}
 }
 
@@ -950,7 +947,6 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}
 	overlay = &pbinRangeWriterOverlay{
 		writes: make(map[string]pbinRangeWriterWrite),
-		views:  &w.workerViews,
 		base:   w.resume,
 		write: func(key, data, _ []byte) error {
 			return onRow(tracker, key, data)
@@ -1304,10 +1300,8 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		cleanup()
 		return waitErr
 	}
-	w.aggregator.dirtyFilesLock.Lock()
-	defer w.aggregator.dirtyFilesLock.Unlock()
-	for i := range plans {
-		if w.resumeSourceLayout {
+	if w.resumeSourceLayout {
+		for i := range plans {
 			if w.pipelineHook != nil {
 				if err := w.pipelineHook("resume-merge", i); err != nil {
 					cleanup()
@@ -1321,6 +1315,10 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 			}
 			plans[i].static = merged
 		}
+	}
+	w.aggregator.dirtyFilesLock.Lock()
+	defer w.aggregator.dirtyFilesLock.Unlock()
+	for i := range plans {
 		domain.integrateDirtyFiles(plans[i].static, w.ranges[i].start, w.ranges[i].end)
 	}
 	w.aggregator.recalcVisibleFiles(nil)

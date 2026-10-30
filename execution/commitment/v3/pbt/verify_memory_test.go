@@ -141,7 +141,7 @@ func TestPBinLiveRowsDuringLoad(t *testing.T) {
 	root, err := verifier.loadRoot()
 	require.NoError(t, err)
 	var paths []eip8297.Bitpath
-	require.NoError(t, verifier.collectChainPaths(root.row, &paths))
+	require.NoError(t, verifier.collectChainPaths(root.row, &paths, make(map[string]struct{})))
 	require.NotEmpty(t, paths)
 	stats := new(VerifyStats)
 	verifier.SetVerifyStats(stats)

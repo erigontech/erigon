@@ -43,8 +43,12 @@ func VerifyPBinDomainRootWithStats(ctx context.Context, tx kv.TemporalTx, aggreg
 	return verifyPBinDomainRoot(ctx, tx, aggregator, domain, stats)
 }
 
-func (w *PBinRangeWriter) WorkerViewsForTest() int32 {
-	return w.workerViews.Load()
+func (a *Aggregator) DirtyFilesLockFreeForTest() bool {
+	if !a.dirtyFilesLock.TryLock() {
+		return false
+	}
+	a.dirtyFilesLock.Unlock()
+	return true
 }
 
 func (w *PBinRangeWriter) CheckRowStampsForTest() func() int {

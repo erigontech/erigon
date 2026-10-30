@@ -54,32 +54,26 @@ type parallelStreamRootBatch struct {
 }
 
 type ParallelStreamRoot struct {
-	sum           HashFn
-	workers       int
-	inputs        []chan *parallelStreamRootBatch
-	queueTokens   chan struct{}
-	stopped       chan struct{}
-	stopOnce      sync.Once
-	parts         []map[int]streamRootSubtree
-	workerErrs    []error
-	workerErrMu   sync.Mutex
-	workerFailed  atomic.Bool
-	wg            sync.WaitGroup
-	closed        bool
-	lastShard     int
-	hasShard      bool
-	prevKey       []byte
-	prevBits      []byte
-	err           error
-	root          common.Hash
-	rootReady     bool
-	current       *parallelStreamRootBatch
-	buildActive   *atomic.Int32
-	buildMax      *atomic.Int32
-	buildStart    func()
-	resident      atomic.Int64
-	peakResident  atomic.Uint64
-	residentLimit uint64
+	sum          HashFn
+	workers      int
+	inputs       []chan *parallelStreamRootBatch
+	queueTokens  chan struct{}
+	stopped      chan struct{}
+	stopOnce     sync.Once
+	parts        []map[int]streamRootSubtree
+	workerErrs   []error
+	workerErrMu  sync.Mutex
+	workerFailed atomic.Bool
+	wg           sync.WaitGroup
+	closed       bool
+	lastShard    int
+	hasShard     bool
+	prevKey      []byte
+	prevBits     []byte
+	err          error
+	root         common.Hash
+	rootReady    bool
+	current      *parallelStreamRootBatch
 }
 
 func NewParallelStreamRoot(sum HashFn, workers int) (*ParallelStreamRoot, error) {
@@ -97,16 +91,14 @@ func newParallelStreamRoot(sum HashFn, workers int, queueBytes uint64) (*Paralle
 	if queueTokenCount == 0 {
 		return nil, errors.New("eip8297: parallel stream root queue budget is too small")
 	}
-	queueBytes = uint64(queueTokenCount) * parallelStreamRootQueueTokenBytes
 	b := &ParallelStreamRoot{
-		sum:           sum,
-		workers:       workers,
-		inputs:        make([]chan *parallelStreamRootBatch, workers),
-		queueTokens:   make(chan struct{}, queueTokenCount),
-		stopped:       make(chan struct{}),
-		parts:         make([]map[int]streamRootSubtree, workers),
-		workerErrs:    make([]error, workers),
-		residentLimit: queueBytes + uint64(workers+1)*parallelStreamRootBatchResidentBytes,
+		sum:         sum,
+		workers:     workers,
+		inputs:      make([]chan *parallelStreamRootBatch, workers),
+		queueTokens: make(chan struct{}, queueTokenCount),
+		stopped:     make(chan struct{}),
+		parts:       make([]map[int]streamRootSubtree, workers),
+		workerErrs:  make([]error, workers),
 	}
 	for range cap(b.queueTokens) {
 		b.queueTokens <- struct{}{}
@@ -159,18 +151,13 @@ func (b *ParallelStreamRoot) AddContext(ctx context.Context, key, value []byte) 
 		}
 		b.current = newParallelStreamRootBatch(shard)
 		b.current.residentBytes = b.current.capacityBytes()
-		b.adjustResident(int64(b.current.residentBytes))
 	}
 	keyStart := len(b.current.arena)
 	b.current.arena = append(b.current.arena, key...)
 	valueStart := len(b.current.arena)
 	b.current.arena = append(b.current.arena, value...)
 	b.current.leaves = append(b.current.leaves, parallelStreamRootLeaf{keyStart: keyStart, keyLength: len(key), valueStart: valueStart, valueLength: len(value)})
-	residentBytes := b.current.capacityBytes()
-	if residentBytes > b.current.residentBytes {
-		b.adjustResident(int64(residentBytes - b.current.residentBytes))
-		b.current.residentBytes = residentBytes
-	}
+	b.current.residentBytes = max(b.current.residentBytes, b.current.capacityBytes())
 	b.prevKey = append(b.prevKey[:0], key...)
 	b.prevBits = append(b.prevBits[:0], bits...)
 	b.lastShard = shard
@@ -278,17 +265,6 @@ func (b *ParallelStreamRoot) run(worker int) {
 			b.releaseBatch(batch)
 			return
 		}
-		active := int32(0)
-		if b.buildActive != nil {
-			active = b.buildActive.Add(1)
-			if b.buildMax != nil {
-				for max := b.buildMax.Load(); active > max && !b.buildMax.CompareAndSwap(max, active); max = b.buildMax.Load() {
-				}
-			}
-		}
-		if b.buildStart != nil {
-			b.buildStart()
-		}
 		var err error
 		if builder == nil || currentShard != batch.shard {
 			if builder != nil {
@@ -308,9 +284,6 @@ func (b *ParallelStreamRoot) run(worker int) {
 		}
 		if err != nil {
 			b.releaseBatch(batch)
-			if b.buildActive != nil {
-				b.buildActive.Add(-1)
-			}
 			b.workerErrMu.Lock()
 			b.workerErrs[worker] = err
 			b.workerErrMu.Unlock()
@@ -318,16 +291,7 @@ func (b *ParallelStreamRoot) run(worker int) {
 			b.stopOnce.Do(func() { close(b.stopped) })
 			return
 		}
-		if b.buildActive != nil {
-			b.buildActive.Add(-1)
-		}
 		b.releaseBatch(batch)
-	}
-}
-
-func (b *ParallelStreamRoot) adjustResident(delta int64) {
-	resident := uint64(b.resident.Add(delta))
-	for peak := b.peakResident.Load(); resident > peak && !b.peakResident.CompareAndSwap(peak, resident); peak = b.peakResident.Load() {
 	}
 }
 
@@ -336,7 +300,6 @@ func (b *ParallelStreamRoot) releaseBatch(batch *parallelStreamRootBatch) {
 		b.queueTokens <- struct{}{}
 	}
 	batch.queueTokens = 0
-	b.adjustResident(-int64(batch.residentBytes))
 }
 
 func (b *parallelStreamRootBatch) capacityBytes() uint64 {

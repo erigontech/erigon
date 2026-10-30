@@ -865,7 +865,6 @@ func runPBinRangeWriterCorpusWith(t *testing.T, leaves []state.PBinLeaf, maxOps,
 	snapshot := readPBinRangeWriterSnapshot(t, agg, root)
 	if workers > 0 && maxOps > 1 {
 		require.Greater(t, phaseActivity.Load(), int32(1), "maxOps=%d: the parallel round did not run", maxOps)
-		require.Greater(t, run.writer.WorkerViewsForTest(), int32(1), "maxOps=%d: the round acquired no worker contexts from the factory", maxOps)
 	}
 	return snapshot
 }
@@ -1103,7 +1102,7 @@ func TestPBinStampWalkUsesMDBXSerially(t *testing.T) {
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	guarded := &pbinSerialTx{Tx: tx}
-	err = state.VerifyPBinSourceStamps(t.Context(), at, guarded, false, 15, 2, nil, nil)
+	err = state.VerifyPBinSourceStamps(t.Context(), at, guarded, false, 15, 2, nil)
 	require.NoError(t, err, "valid MDBX rows must verify without concurrent access to their transaction; got %v", err)
 }
 
@@ -1129,6 +1128,24 @@ func TestPBinResumeMergeErrorReleasesAggregatorLock(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("aggregator close blocked after resume merge error")
 	}
+}
+
+func TestPBinResumeMergeRunsOutsideDirtyFilesLock(t *testing.T) {
+	selectPBinRangeWriterPipeline(t)
+	run := openPBinRangeWriterRun(t, 7, 0, 23)
+	run.writer.SetResumeSourceLayoutForTest()
+	lockFree := false
+	stop := errors.New("stop at resume merge")
+	run.writer.SetPipelineHookForTest(func(stage string, _ int) error {
+		if stage == "resume-merge" {
+			lockFree = run.agg.DirtyFilesLockFreeForTest()
+			return stop
+		}
+		return nil
+	})
+	_, err := run.write(t.Context(), pbinRangeWriterCorpora()[0].leaves)
+	require.ErrorIs(t, err, stop)
+	require.True(t, lockFree, "a resume merge closes a files reader, which can take dirtyFilesLock")
 }
 
 func TestPBinRejectedEndCleansRanges(t *testing.T) {

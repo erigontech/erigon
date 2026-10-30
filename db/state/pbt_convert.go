@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -44,9 +43,7 @@ type PBinConvertOptions struct {
 	EndTxNum          uint64
 	Hash              eip8297.HashFn
 	RangeWriterLimits *PBinRangeWriterLimits
-	WorkerViews       *atomic.Int32
 	Workers           int
-	SourceWorkerRuns  *atomic.Int32
 	Resume            *PBinResumeOptions
 }
 
@@ -108,12 +105,6 @@ func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) e
 		return common.Hash{}, err
 	}
 	return builder.RootHash()
-}
-
-func PBinStateRoot(at *AggregatorRoTx, tx kv.Tx, filesOnly bool, hash eip8297.HashFn) (common.Hash, error) {
-	return PBinRootFromStream(hash, func(emit func(PBinLeaf) error) error {
-		return ForEachPBinLeaf(at, tx, filesOnly, emit)
-	})
 }
 
 func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, error) {
@@ -190,7 +181,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		if rootErr != nil {
 			return rootErr
 		}
-		returnErr := ForEachPBinLeafWithWorkers(ctx, sourceFiles, opts.SourceTx, true, workers, opts.SourceWorkerRuns, func(leaf PBinLeaf) error {
+		returnErr := ForEachPBinLeafWithWorkers(ctx, sourceFiles, opts.SourceTx, true, workers, func(leaf PBinLeaf) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -223,9 +214,6 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	}
 	writer.absentProbe = limits.AbsentProbe
 	root, err := writer.WriteAtBlock(ctx, opts.TargetTx, domains, leaves, opts.BlockNum)
-	if opts.WorkerViews != nil {
-		opts.WorkerViews.Add(writer.workerViews.Load())
-	}
 	if err != nil {
 		return common.Hash{}, err
 	}

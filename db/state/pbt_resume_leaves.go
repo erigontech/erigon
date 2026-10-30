@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"golang.org/x/sync/errgroup"
 )
 
 type PBinResumeOptions struct {
@@ -74,38 +74,22 @@ func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOp
 
 	pin := at.Pin()
 	defer pin.Close()
-	walkCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	ranges := pbinLeafAddressRanges(workers)
-	errs := make(chan error, workers)
-	var wg sync.WaitGroup
+	g, walkCtx := errgroup.WithContext(ctx)
 	for worker := range workers {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
+		g.Go(func() error {
 			workerAt := pin.BeginFilesRo()
 			defer workerAt.Close()
 			for rangeIndex := worker; rangeIndex < len(ranges); rangeIndex += workers {
-				select {
-				case <-walkCtx.Done():
-					errs <- walkCtx.Err()
-					return
-				default:
-				}
 				if err := pbinResumeWalkRange(walkCtx, workerAt, ranges[rangeIndex], opts, collectors[worker]); err != nil {
-					errs <- err
-					cancel()
-					return
+					return err
 				}
 			}
-		}(worker)
+			return nil
+		})
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	select {
 	case <-ctx.Done():

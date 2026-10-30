@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -401,6 +402,42 @@ func TestPBTResumeEmptyOutputStraddleRefusedBeforeGapWalk(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "base bin file range 1-4 straddles source commitment ranges 1-2 and 2-3")
 	require.False(t, outputPrepared, "straddle refusal must happen before the output is prepared for the gap walk")
+}
+
+func TestVerifyPBTResumeStreamRootHonorsCancelledContext(t *testing.T) {
+	source, _ := pbtResumeFixture(t, 1, false, false)
+	settings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	agg, err := openPBTState(t.Context(), source.Tester.Dirs, settings, nil, log.New())
+	require.NoError(t, err)
+	defer agg.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, verifyPBTResumeStreamRoot(ctx, agg, common.Hash{}, 2), context.Canceled)
+}
+
+func TestPBTResumeRefusesUnequalStateDomainEnds(t *testing.T) {
+	source, output := pbtResumeFixture(t, 1, false, false)
+	files, err := pbtAttachFiles(source.Tester.Dirs)
+	require.NoError(t, err)
+	var last uint64
+	for _, file := range files {
+		if file.domain == kv.StorageDomain && filepath.Dir(file.path) == source.Tester.Dirs.SnapDomain {
+			last = max(last, file.to)
+		}
+	}
+	removed := 0
+	for _, file := range files {
+		if file.domain == kv.StorageDomain && filepath.Dir(file.path) == source.Tester.Dirs.SnapDomain && file.to == last {
+			require.NoError(t, dir.RemoveFile(file.path))
+			removed++
+		}
+	}
+	require.Positive(t, removed)
+	before := snapshotTreeDigest(t, output)
+	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
+	require.ErrorContains(t, err, "state domain file ends differ")
+	require.Equal(t, before, snapshotTreeDigest(t, output), "the refusal must leave the output intact")
 }
 
 func TestPBTResumeZeroStartSpanningRangeMatchesFresh(t *testing.T) {

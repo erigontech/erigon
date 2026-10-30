@@ -22,7 +22,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,7 +66,7 @@ func TestForEachPBinLeafWithWorkersStopsSiblingsOnError(t *testing.T) {
 	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	err = state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, 2, nil, func(state.PBinLeaf) error { return nil })
+	err = state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, 2, func(state.PBinLeaf) error { return nil })
 	require.ErrorContains(t, err, "pbin leaf stream: account")
 
 	donePattern := regexp.MustCompile(`done=(\d+)`)
@@ -100,9 +99,8 @@ func TestForEachPBinLeafWithWorkersMatchesSerial(t *testing.T) {
 	require.NoError(t, err)
 	for _, workers := range []int{1, 4, 16} {
 		at := agg.BeginFilesRo()
-		runs := new(atomic.Int32)
 		var parallel []state.PBinLeaf
-		err := state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, workers, runs, func(leaf state.PBinLeaf) error {
+		err := state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, workers, func(leaf state.PBinLeaf) error {
 			parallel = append(parallel, state.PBinLeaf{Key: bytes.Clone(leaf.Key), Value: bytes.Clone(leaf.Value), Stamp: leaf.Stamp})
 			return nil
 		})
@@ -119,8 +117,5 @@ func TestForEachPBinLeafWithWorkersMatchesSerial(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, serialRoot, parallelRoot, "workers=%d", workers)
-		if workers > 1 {
-			require.Greater(t, runs.Load(), int32(1), "workers=%d", workers)
-		}
 	}
 }

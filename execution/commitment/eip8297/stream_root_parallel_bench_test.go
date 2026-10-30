@@ -27,7 +27,6 @@ func BenchmarkParallelStreamRootSkewed(b *testing.B) {
 	for _, workers := range []int{1, 4, 16} {
 		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
 			b.ReportAllocs()
-			var residentTotal uint64
 			b.ResetTimer()
 			for range b.N {
 				parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), workers)
@@ -42,10 +41,7 @@ func BenchmarkParallelStreamRootSkewed(b *testing.B) {
 				if _, err := parallel.RootHash(); err != nil {
 					b.Fatal(err)
 				}
-				residentTotal += parallel.peakResident.Load()
 			}
-			b.StopTimer()
-			b.ReportMetric(float64(residentTotal)/float64(b.N), "resident-bytes/op")
 		})
 	}
 }

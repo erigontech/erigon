@@ -234,7 +234,8 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 		return nil
 	}
 	var paths []eip8297.Bitpath
-	if err := t.collectChainPaths(root.row, &paths); err != nil {
+	upperBuckets := make(map[string]struct{})
+	if err := t.collectChainPaths(root.row, &paths, upperBuckets); err != nil {
 		return nil
 	}
 	if len(paths) < 2 {
@@ -265,9 +266,17 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 		starts[i] = start
 	}
 	if preparer, ok := t.ctx.(verifyRangeTaskPreparer); ok {
-		if err := preparer.PrepareVerifyRanges(starts); err != nil {
+		rangeStarts := make([][]byte, 0, len(starts)+len(upperBuckets))
+		rangeStarts = append(rangeStarts, starts...)
+		for key := range upperBuckets {
+			rangeStarts = append(rangeStarts, []byte(key))
+		}
+		if err := preparer.PrepareVerifyRanges(rangeStarts); err != nil {
 			return err
 		}
+	}
+	if err := t.loadUpperBucketRows(upperBuckets); err != nil {
+		return err
 	}
 	if factory == nil || workers <= 1 {
 		if t.verifyStats != nil {
@@ -548,9 +557,12 @@ func verifyRangeBounds(path *eip8297.Bitpath) ([]byte, []byte) {
 	return from, to
 }
 
-func (t *Trie) collectChainPaths(row *rowNode, paths *[]eip8297.Bitpath) error {
+func (t *Trie) collectChainPaths(row *rowNode, paths *[]eip8297.Bitpath, upperBuckets map[string]struct{}) error {
 	for slot := range row.cells {
 		cell := row.cell(slot)
+		if err := collectUpperBucketKey(row, slot, cell, upperBuckets); err != nil {
+			return err
+		}
 		if cell.Kind != BranchCell {
 			continue
 		}
@@ -566,7 +578,63 @@ func (t *Trie) collectChainPaths(row *rowNode, paths *[]eip8297.Bitpath) error {
 		if err != nil {
 			return err
 		}
-		if err := t.collectChainPaths(child, paths); err != nil {
+		if err := t.collectChainPaths(child, paths, upperBuckets); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func collectUpperBucketKey(row *rowNode, slot int, cell *rowCell, upperBuckets map[string]struct{}) error {
+	var path eip8297.Bitpath
+	switch cell.Kind {
+	case LeafCell:
+		if cell.Key[0] != eip8297.StorageZone {
+			return nil
+		}
+		var err error
+		if path, err = keyPath(cell.Key); err != nil {
+			return err
+		}
+	case BranchCell:
+		path = branchPath(row, slot, cell)
+		if path.BitLen < 264 || pathByte(&path) != eip8297.StorageZone {
+			return nil
+		}
+	default:
+		return nil
+	}
+	bucketPath := path.Slice(0, 264)
+	key, err := EncodeRowKey(&bucketPath)
+	if err != nil {
+		return err
+	}
+	upperBuckets[string(key)] = struct{}{}
+	return nil
+}
+
+func (t *Trie) loadUpperBucketRows(upperBuckets map[string]struct{}) error {
+	reader, ok := t.verifyRangeReader()
+	if !ok || t.verifyUpperRows == nil {
+		return nil
+	}
+	for bucketKey := range upperBuckets {
+		key := []byte(bucketKey)
+		if t.verifyStats != nil {
+			t.verifyStats.RangeTasks.Add(1)
+			t.verifyStats.RangeTaskReads.Add(1)
+		}
+		count, err := reader.ReadVerifyRange(key, append(bytes.Clone(key), 0), func(rowKey, value []byte) error {
+			if bytes.Equal(rowKey, key) {
+				t.verifyUpperRows[bucketKey] = bytes.Clone(value)
+			}
+			return nil
+		})
+		if t.verifyStats != nil {
+			t.verifyStats.RangeReads.Add(1)
+			t.verifyStats.RangeRows.Add(count)
+		}
+		if err != nil {
 			return err
 		}
 	}

@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -271,6 +272,23 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	require.Equal(t, wantRoot[:], root)
 }
 
+type pbtLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *pbtLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *pbtLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
@@ -278,7 +296,7 @@ func TestPBTProgressCoversConvertAndAttach(t *testing.T) {
 	statecfg.BinCommitmentHash = ""
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	previousHandler := log.Root().GetHandler()
-	var logs bytes.Buffer
+	var logs pbtLogBuffer
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
 	previousInterval := state.PBTProgressInterval

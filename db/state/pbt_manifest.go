@@ -63,27 +63,6 @@ type PBTManifestFileSource struct {
 
 type PBTManifestProgressFunc func(done, total, bytes uint64)
 
-type pbtManifestWire struct {
-	Format     *int                   `toml:"format"`
-	Point      *pbtManifestPointWire  `toml:"point"`
-	PBTRoot    *string                `toml:"pbt_root"`
-	HexRoot    *string                `toml:"hex_root"`
-	TrieHash   *string                `toml:"trie_hash"`
-	SkipVerify *bool                  `toml:"skip_verify"`
-	Files      *[]pbtManifestFileWire `toml:"files"`
-}
-
-type pbtManifestPointWire struct {
-	Block *uint64 `toml:"block"`
-	TxNum *uint64 `toml:"tx_num"`
-}
-
-type pbtManifestFileWire struct {
-	Name   *string `toml:"name"`
-	Size   *uint64 `toml:"size"`
-	Blake3 *string `toml:"blake3"`
-}
-
 func BuildPBTManifest(ctx context.Context, point PBTManifestPoint, pbtRoot, hexRoot, trieHash string, skipVerify bool, sources []PBTManifestFileSource, workers int, progress PBTManifestProgressFunc) (PBTManifest, error) {
 	files, err := digestPBTManifestFiles(ctx, sources, workers, progress)
 	if err != nil {
@@ -121,11 +100,14 @@ func ReadPBTManifest(path string) (PBTManifest, error) {
 	if err != nil {
 		return PBTManifest{}, fmt.Errorf("pbt manifest: read: %w", err)
 	}
-	var wire pbtManifestWire
-	if decodeErr := toml.Unmarshal(data, &wire); decodeErr != nil {
+	var manifest PBTManifest
+	if decodeErr := toml.Unmarshal(data, &manifest); decodeErr != nil {
 		return PBTManifest{}, fmt.Errorf("pbt manifest: decode: %w", decodeErr)
 	}
-	return pbtManifestFromWire(wire)
+	if manifest.Format != PBTManifestFormat {
+		return PBTManifest{}, fmt.Errorf("pbt manifest: unknown format %d", manifest.Format)
+	}
+	return manifest, nil
 }
 
 func ValidatePBTManifestFiles(ctx context.Context, manifest PBTManifest, sources []PBTManifestFileSource, workers int, progress PBTManifestProgressFunc) error {
@@ -179,77 +161,9 @@ func ValidatePBTManifestFileSet(manifest PBTManifest, sources []PBTManifestFileS
 	return nil
 }
 
-func pbtManifestFromWire(wire pbtManifestWire) (PBTManifest, error) {
-	if wire.Format == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field format")
-	}
-	if *wire.Format != PBTManifestFormat {
-		return PBTManifest{}, fmt.Errorf("pbt manifest: unknown format %d", *wire.Format)
-	}
-	if wire.Point == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field point")
-	}
-	if wire.Point.Block == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field point.block")
-	}
-	if wire.Point.TxNum == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field point.tx_num")
-	}
-	if wire.PBTRoot == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field pbt_root")
-	}
-	if wire.HexRoot == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field hex_root")
-	}
-	if wire.TrieHash == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field trie_hash")
-	}
-	if wire.SkipVerify == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field skip_verify")
-	}
-	if wire.Files == nil {
-		return PBTManifest{}, errors.New("pbt manifest: missing field files")
-	}
-	manifest := PBTManifest{
-		Format:     *wire.Format,
-		Point:      PBTManifestPoint{Block: *wire.Point.Block, TxNum: *wire.Point.TxNum},
-		PBTRoot:    *wire.PBTRoot,
-		HexRoot:    *wire.HexRoot,
-		TrieHash:   *wire.TrieHash,
-		SkipVerify: *wire.SkipVerify,
-		Files:      make([]PBTManifestFile, len(*wire.Files)),
-	}
-	for i, file := range *wire.Files {
-		if file.Name == nil {
-			return PBTManifest{}, fmt.Errorf("pbt manifest: missing field files[%d].name", i)
-		}
-		if file.Size == nil {
-			return PBTManifest{}, fmt.Errorf("pbt manifest: missing field files[%d].size", i)
-		}
-		if file.Blake3 == nil {
-			return PBTManifest{}, fmt.Errorf("pbt manifest: missing field files[%d].blake3", i)
-		}
-		manifest.Files[i] = PBTManifestFile{Name: *file.Name, Size: *file.Size, Blake3: *file.Blake3}
-	}
-	for i := range manifest.Files {
-		for j := i + 1; j < len(manifest.Files); j++ {
-			if manifest.Files[i].Name == manifest.Files[j].Name {
-				return PBTManifest{}, fmt.Errorf("pbt manifest: duplicate file name %q", manifest.Files[i].Name)
-			}
-		}
-	}
-	sort.Slice(manifest.Files, func(i, j int) bool { return manifest.Files[i].Name < manifest.Files[j].Name })
-	return manifest, nil
-}
-
 func digestPBTManifestFiles(ctx context.Context, sources []PBTManifestFileSource, workers int, progress PBTManifestProgressFunc) ([]PBTManifestFile, error) {
 	ordered := append([]PBTManifestFileSource(nil), sources...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Name < ordered[j].Name })
-	for i := 1; i < len(ordered); i++ {
-		if ordered[i-1].Name == ordered[i].Name {
-			return nil, fmt.Errorf("pbt manifest: duplicate file name %q", ordered[i].Name)
-		}
-	}
 	files := make([]PBTManifestFile, len(ordered))
 	if len(ordered) == 0 {
 		return files, nil

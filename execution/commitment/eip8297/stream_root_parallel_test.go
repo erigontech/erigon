@@ -23,11 +23,14 @@ import (
 	"math/rand"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestParallelStreamRootMatchesSerial(t *testing.T) {
@@ -65,6 +68,34 @@ func TestParallelStreamRootMatchesSerial(t *testing.T) {
 	}
 }
 
+func parallelStreamRootGatedHash(t *testing.T, sum HashFn) (gated HashFn, concurrent <-chan struct{}, release func()) {
+	t.Helper()
+	gate := make(chan struct{})
+	second := make(chan struct{})
+	var calls atomic.Int32
+	var secondOnce, releaseOnce sync.Once
+	release = func() { releaseOnce.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	gated = func(data []byte) common.Hash {
+		if calls.Add(1) == 1 {
+			<-gate
+		} else {
+			secondOnce.Do(func() { close(second) })
+		}
+		return sum(data)
+	}
+	return gated, second, release
+}
+
+func awaitParallelStreamRootConcurrency(t *testing.T, concurrent <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-concurrent:
+	case <-time.After(2 * time.Minute):
+		t.Fatal(message)
+	}
+}
+
 func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 	for _, test := range []struct {
 		name          string
@@ -75,19 +106,9 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 		{name: "storage", zone: StorageZone, positionBytes: 64},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			sum := streamRootHash(HashKeccak)
+			sum, concurrent, release := parallelStreamRootGatedHash(t, streamRootHash(HashKeccak))
 			parallel, err := NewParallelStreamRoot(sum, 4)
 			require.NoError(t, err)
-			var active, maxActive atomic.Int32
-			parallel.buildActive = &active
-			parallel.buildMax = &maxActive
-			release := make(chan struct{})
-			var first atomic.Bool
-			parallel.buildStart = func() {
-				if first.CompareAndSwap(false, true) {
-					<-release
-				}
-			}
 			entries := make([]Entry, 0, 48)
 			for shard := range 16 {
 				for leaf := range 3 {
@@ -108,32 +129,19 @@ func TestParallelStreamRootBuildsShardsConcurrently(t *testing.T) {
 				}
 				done <- nil
 			}()
-			deadline := time.Now().Add(time.Second)
-			for maxActive.Load() < 2 && time.Now().Before(deadline) {
-				time.Sleep(time.Millisecond)
-			}
-			close(release)
+			awaitParallelStreamRootConcurrency(t, concurrent, "sorted stream must build at least two shards concurrently")
+			release()
 			require.NoError(t, <-done)
 			_, err = parallel.RootHash()
 			require.NoError(t, err)
-			require.GreaterOrEqual(t, maxActive.Load(), int32(2), "sorted stream must build at least two shards concurrently")
 		})
 	}
 }
 
 func TestParallelStreamRootProducerReachesNextShardBeforeFirstFinishes(t *testing.T) {
-	parallel, err := NewParallelStreamRoot(streamRootHash(HashKeccak), 2)
+	sum, concurrent, release := parallelStreamRootGatedHash(t, streamRootHash(HashKeccak))
+	parallel, err := NewParallelStreamRoot(sum, 2)
 	require.NoError(t, err)
-	var active, maxActive atomic.Int32
-	parallel.buildActive = &active
-	parallel.buildMax = &maxActive
-	release := make(chan struct{})
-	var first atomic.Bool
-	parallel.buildStart = func() {
-		if first.CompareAndSwap(false, true) {
-			<-release
-		}
-	}
 	entries := parallelStreamRootLongShardEntries(10)
 	done := make(chan error, 1)
 	go func() {
@@ -146,17 +154,8 @@ func TestParallelStreamRootProducerReachesNextShardBeforeFirstFinishes(t *testin
 		_, err := parallel.RootHash()
 		done <- err
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	reached := false
-	for time.Now().Before(deadline) {
-		if maxActive.Load() >= 2 {
-			reached = true
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	close(release)
-	require.True(t, reached, "producer must reach the second shard while the first shard is still building")
+	awaitParallelStreamRootConcurrency(t, concurrent, "producer must reach the second shard while the first shard is still building")
+	release()
 	require.NoError(t, <-done)
 }
 
@@ -177,7 +176,31 @@ func TestParallelStreamRootBoundsSkewedResidentBytes(t *testing.T) {
 	got, err := parallel.RootHash()
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-	require.LessOrEqual(t, parallel.peakResident.Load(), parallel.residentLimit)
+}
+
+func TestParallelStreamRootProducerStopsAtQueueBudget(t *testing.T) {
+	const entryBytes = StorageKeyLength + ValueLength
+	sum, _, release := parallelStreamRootGatedHash(t, streamRootHash(HashKeccak))
+	parallel, err := newParallelStreamRoot(sum, 4, 2*parallelStreamRootBatchResidentBytes)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	accepted := 0
+	var addErr error
+	for _, entry := range parallelStreamRootSkewedEntries(4 * parallelStreamRootBatchBytes / entryBytes) {
+		if len(parallel.queueTokens) == 0 {
+			cancel()
+		}
+		if addErr = parallel.AddContext(ctx, entry.Key, entry.Value); addErr != nil {
+			break
+		}
+		accepted++
+	}
+	require.ErrorIs(t, addErr, context.Canceled, "with its worker blocked, the producer must stall on the queue budget; accepted %d entries", accepted)
+	require.LessOrEqual(t, accepted*entryBytes, 3*parallelStreamRootBatchBytes, "the producer may hold the queued batches and one open batch")
+	release()
+	_, err = parallel.RootHash()
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func parallelStreamRootSkewedEntries(count int) []Entry {

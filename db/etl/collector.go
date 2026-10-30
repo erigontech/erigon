@@ -100,10 +100,8 @@ type Collector struct {
 
 	allocator *Allocator
 	fill      int
-	collected atomic.Uint64
+	collected uint64
 }
-
-var mergeBackgroundRuns atomic.Uint64
 
 // NewCollectorWithAllocator builds a collector that draws its buffer from the
 // allocator's pool lazily, on the first Collect — a collector that never
@@ -136,7 +134,7 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if len(v) > MaxValLen {
 		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
 	}
-	c.collected.Add(1)
+	c.collected++
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
@@ -152,7 +150,7 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 }
 
 func (c *Collector) Collected() uint64 {
-	return c.collected.Load()
+	return c.collected
 }
 
 // Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
@@ -385,7 +383,7 @@ func (c *Collector) Close() {
 		c.allocator.rememberFill(c.logPrefix, c.fill)
 	}
 	c.fill = 0
-	c.collected.Store(0)
+	c.collected = 0
 	c.allFlushed = false
 }
 
@@ -438,9 +436,6 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			if err := common.Stopped(args.Quit); err != nil {
 				return err
 			}
-		}
-		if args.MergeInputCount != nil {
-			args.MergeInputCount.Add(1)
 		}
 
 		element := heapPop(h)

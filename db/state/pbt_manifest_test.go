@@ -82,8 +82,9 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 		modified := manifest
 		modified.Files = append(modified.Files, manifest.Files[0])
 		require.NoError(t, state.WritePBTManifest(path, modified))
-		_, err := state.ReadPBTManifest(path)
-		require.ErrorContains(t, err, "duplicate file name")
+		read, err := state.ReadPBTManifest(path)
+		require.NoError(t, err)
+		require.ErrorContains(t, state.ValidatePBTManifestFileSet(read, sources), "duplicate file name")
 		require.NoError(t, state.WritePBTManifest(path, manifest))
 	})
 	t.Run("unknown format", func(t *testing.T) {
@@ -93,13 +94,13 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 		_, err := state.ReadPBTManifest(path)
 		require.ErrorContains(t, err, "unknown format")
 	})
-	t.Run("missing field", func(t *testing.T) {
+	t.Run("missing format", func(t *testing.T) {
 		require.NoError(t, state.WritePBTManifest(path, manifest))
 		data, readErr := os.ReadFile(path)
 		require.NoError(t, readErr)
 		data = []byte(strings.Replace(string(data), "format = 1\n", "", 1))
 		require.NoError(t, os.WriteFile(path, data, 0o644))
 		_, err := state.ReadPBTManifest(path)
-		require.ErrorContains(t, err, "missing field format")
+		require.ErrorContains(t, err, "unknown format 0")
 	})
 }

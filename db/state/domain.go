@@ -2054,7 +2054,7 @@ func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upp
 					result.prefixOffsets[prefix] = currentOffset
 				}
 			}
-			if bytes.Equal(key, rootKey) || err == nil && (path.BitLen < upperBits || path.BitLen == 264) {
+			if bytes.Equal(key, rootKey) || err == nil && path.BitLen < upperBits {
 				valueNeeded = true
 				result.upperRows[string(key)] = nil
 			}
@@ -2113,7 +2113,7 @@ func (dt *DomainRoTx) debugVerifyUpperRowsFromDB(roTx kv.Tx, rootKey []byte, upp
 			return true
 		}
 		path, err := eip8297.DecodeBitPath(key)
-		return err == nil && (path.BitLen < upperBits || path.BitLen == 264)
+		return err == nil && path.BitLen < upperBits
 	}
 	filesEndTxNum := dt.files.EndTxNum()
 	if dt.d.LargeValues {

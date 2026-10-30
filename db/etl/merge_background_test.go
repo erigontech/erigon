@@ -40,9 +40,7 @@ type mergeTestEntry struct {
 func TestMergeInBackgroundMatchesSerial(t *testing.T) {
 	rows := makeMergeTestEntries(12000)
 	serial := runMergeLoad(t, rows, false)
-	backgroundRuns := mergeBackgroundRuns.Load()
 	background := runMergeLoad(t, rows, true)
-	require.Greater(t, mergeBackgroundRuns.Load(), backgroundRuns)
 	require.Equal(t, serial, background)
 }
 

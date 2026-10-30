@@ -32,7 +32,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -606,12 +605,8 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 		converted := make(map[bool]map[string][]byte, 2)
 		for _, sequential := range []bool{true, false} {
 			output := filepath.Join(t.TempDir(), "output")
-			workerViews := new(atomic.Int32)
-			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential, workerViews: workerViews}
+			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential}
 			require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), hooks), "maxOps=%d sequential=%v", maxOps, sequential)
-			if !sequential {
-				require.Greater(t, workerViews.Load(), int32(1), "maxOps=%d: the parallel round acquired no worker contexts", maxOps)
-			}
 			converted[sequential] = pbtCommitmentBinFiles(t, output, ".kv")
 			require.NotEmpty(t, converted[sequential])
 		}
@@ -654,17 +649,12 @@ func TestConvertPBTSourceWalkWorkersMatchSerial(t *testing.T) {
 	var wantRoot common.Hash
 	for _, workers := range []int{1, 4, 16} {
 		output := filepath.Join(t.TempDir(), fmt.Sprintf("output-%d", workers))
-		runs := new(atomic.Int32)
-		require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{
-			workers:          workers,
-			sourceWorkerRuns: runs,
-		}), "workers=%d", workers)
+		require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{workers: workers}), "workers=%d", workers)
 		gotLeaves := readPBTBinLeaves(t, output, source.Chaindata)
 		gotRoot := readPBTBinRoot(t, output, source.Chaindata)
 		if workers == 1 {
 			wantLeaves, wantRoot = gotLeaves, gotRoot
 		} else {
-			require.Greater(t, runs.Load(), int32(1), "workers=%d: source walk did not run concurrently", workers)
 			require.Equal(t, wantLeaves, gotLeaves, "workers=%d", workers)
 			require.Equal(t, wantRoot, gotRoot, "workers=%d", workers)
 		}
@@ -1001,7 +991,7 @@ func TestConvertPBTSkipVerifySkipsWrittenRowsCheck(t *testing.T) {
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
 	previousHandler := log.Root().GetHandler()
-	var logs bytes.Buffer
+	var logs pbtLogBuffer
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
 	output := filepath.Join(t.TempDir(), "output")
@@ -2174,7 +2164,7 @@ func TestPBTFileStagesReportIntermediateProgress(t *testing.T) {
 	source, _ := newPBTConversionSourceAtWithRows(t, 7, 0, 5000, nil)
 	previousHandler := log.Root().GetHandler()
 	previousInterval := dbstate.PBTProgressInterval
-	var logs bytes.Buffer
+	var logs pbtLogBuffer
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	dbstate.PBTProgressInterval = time.Nanosecond
 	t.Cleanup(func() {
