@@ -3601,7 +3601,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Prune changesets")
-	if err := pruneChangeSets(ctx, db, finalityCtx.PruneToBlockNum(), logger); err != nil {
+	if err := pruneChangeSets(ctx, db, ethconfig.Defaults.MaxReorgDepth, txNumsReader, logger); err != nil {
 		return err
 	}
 
@@ -3618,9 +3618,13 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	return nil
 }
 
-func pruneChangeSets(ctx context.Context, db kv.RwDB, pruneTo uint64, logger log.Logger) error {
+func pruneChangeSets(ctx context.Context, db kv.RwDB, maxReorgDepth uint64, txNumsReader rawdbv3.TxNumsReader, logger log.Logger) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.PruneTable(tx, kv.ChangeSets3, pruneTo, ctx, math.MaxInt, 12*time.Hour, logger, "retire")
+		finalityCtx, err := execfinality.Resolve(tx, maxReorgDepth, false, txNumsReader)
+		if err != nil {
+			return err
+		}
+		return rawdb.PruneTable(tx, kv.ChangeSets3, finalityCtx.PruneToBlockNum(), ctx, math.MaxInt, 12*time.Hour, logger, "retire")
 	})
 }
 
