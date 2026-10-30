@@ -26,6 +26,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -193,17 +194,24 @@ func (idx *Index) init() (err error) {
 	idx.bytesPerRec = int(idx.data[16])
 	idx.recMask = (uint64(1) << (8 * idx.bytesPerRec)) - 1
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
+	// A cold lookup touches the filter, bucket Elias-Fano and golomb-rice parts at
+	// random; on the heap they never fault, only the record page does.
+	recEnd := offset
+	tail := idx.data[recEnd:]
+	if dbg.KviTailInHeap && strings.HasSuffix(idx.fileName, ".kvi") {
+		tail = bytes.Clone(tail)
+	}
 
 	if offset < 0 {
 		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, ErrIncompatible, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
-	idx.bucketCount = binary.BigEndian.Uint64(idx.data[offset:])
+	idx.bucketCount = binary.BigEndian.Uint64(tail[offset-recEnd:])
 	offset += 8
-	idx.bucketSize = int(binary.BigEndian.Uint16(idx.data[offset:]))
+	idx.bucketSize = int(binary.BigEndian.Uint16(tail[offset-recEnd:]))
 	offset += 2
-	idx.leafSize = binary.BigEndian.Uint16(idx.data[offset:])
+	idx.leafSize = binary.BigEndian.Uint16(tail[offset-recEnd:])
 	offset += 2
 	idx.primaryAggrBound = idx.leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(idx.leafSize)+1./2.)))
 	if idx.leafSize < 7 {
@@ -212,17 +220,17 @@ func (idx *Index) init() (err error) {
 		idx.secondaryAggrBound = idx.primaryAggrBound * uint16(math.Ceil(0.21*float64(idx.leafSize)+9./10.))
 	}
 	// Salt
-	idx.salt = binary.BigEndian.Uint32(idx.data[offset:])
+	idx.salt = binary.BigEndian.Uint32(tail[offset-recEnd:])
 	offset += 4
 	// Start seed
-	startSeedLen := int(idx.data[offset])
+	startSeedLen := int(tail[offset-recEnd])
 	offset++
 	idx.startSeed = make([]uint64, startSeedLen)
 	for i := range startSeedLen {
-		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
+		idx.startSeed[i] = binary.BigEndian.Uint64(tail[offset-recEnd:])
 		offset += 8
 	}
-	features := Features(idx.data[offset])
+	features := Features(tail[offset-recEnd])
 	if err := onlyKnownFeatures(features); err != nil {
 		return fmt.Errorf("file %s %w", idx.fileName, err)
 	}
@@ -232,16 +240,16 @@ func (idx *Index) init() (err error) {
 	offset++
 	if idx.enums && idx.keyCount > 0 {
 		var size int
-		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
+		idx.offsetEf, size = eliasfano32.ReadEliasFano(tail[offset-recEnd:])
 		offset += size
 	}
 	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
-		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
+		arrSz := binary.BigEndian.Uint64(tail[offset-recEnd:])
 		offset += 8
 		if arrSz != idx.keyCount {
 			return fmt.Errorf("%w. size of existence filter %d != keys count %d", ErrIncompatible, arrSz, idx.keyCount)
 		}
-		idx.existenceV0 = idx.data[offset : offset+int(arrSz)]
+		idx.existenceV0 = tail[offset-recEnd : offset-recEnd+int(arrSz)]
 		offset += int(arrSz)
 	}
 
@@ -250,7 +258,7 @@ func (idx *Index) init() (err error) {
 		case 0: // parsed above
 		case 1:
 			var sz int
-			idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
+			idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(tail[offset-recEnd:], idx.fileName)
 			if err != nil {
 				return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
 			}
@@ -263,7 +271,7 @@ func (idx *Index) init() (err error) {
 			offset += sz
 		case 2:
 			var sz int
-			idx.existenceV2, sz, err = fusefilter.NewReaderShardedOnBytes(idx.data[offset:], idx.fileName)
+			idx.existenceV2, sz, err = fusefilter.NewReaderShardedOnBytes(tail[offset-recEnd:], idx.fileName)
 			if err != nil {
 				return fmt.Errorf("NewReaderShardedOnBytes: %w, %s", err, idx.fileName)
 			}
@@ -280,7 +288,7 @@ func (idx *Index) init() (err error) {
 	}
 
 	// Size of golomb rice params
-	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
+	golombParamSize := binary.BigEndian.Uint16(tail[offset-recEnd:])
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
 	for i := range golombParamSize {
@@ -294,11 +302,11 @@ func (idx *Index) init() (err error) {
 		}
 	}
 
-	l := binary.BigEndian.Uint64(idx.data[offset:])
+	l := binary.BigEndian.Uint64(tail[offset-recEnd:])
 	offset += 8
-	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&tail[offset-recEnd])), l)
 	offset += 8 * int(l)
-	idx.ef.Read(idx.data[offset:])
+	idx.ef.Read(tail[offset-recEnd:])
 	validationPassed = true
 	return nil
 }
