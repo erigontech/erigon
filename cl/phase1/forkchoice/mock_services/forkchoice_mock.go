@@ -95,6 +95,7 @@ type ForkChoiceStorageMock struct {
 	Blocks                                             map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                                          map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	envelopesMu                                        sync.RWMutex
+	executionPayloadMu                                 sync.RWMutex
 	HasEnvelopeFunc                                    func(common.Hash) bool
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
@@ -291,6 +292,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Blocks:                      make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		Envelopes:                   make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
 		ExecutionPayloadReceivedAt:  make(map[common.Hash]time.Time),
+		PendingEnvelopeRoots:        make(map[common.Hash]struct{}),
 		GetBeaconCommitteeMock:      nil,
 		Eth1Hashes:                  make(map[common.Hash]common.Hash),
 		ShouldExtendPayloadVal:      true,
@@ -560,6 +562,26 @@ func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(envelo
 	return f.ValidateExecutionPayloadEnvelopeForGossipErr
 }
 
+func (f *ForkChoiceStorageMock) QueuePendingExecutionPayloadEnvelope(envelope *cltypes.SignedExecutionPayloadEnvelope, _ time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.PendingEnvelopeRoots == nil {
+		f.PendingEnvelopeRoots = make(map[common.Hash]struct{})
+	}
+	f.PendingEnvelopeRoots[envelope.Message.BeaconBlockRoot] = struct{}{}
+}
+
+func (f *ForkChoiceStorageMock) RecordExecutionPayloadArrival(blockRoot common.Hash, _ uint64, receivedAt time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.ExecutionPayloadReceivedAt == nil {
+		f.ExecutionPayloadReceivedAt = make(map[common.Hash]time.Time)
+	}
+	if _, ok := f.ExecutionPayloadReceivedAt[blockRoot]; !ok {
+		f.ExecutionPayloadReceivedAt[blockRoot] = receivedAt
+	}
+}
+
 func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 	ctx context.Context,
 	beaconBlockRoot common.Hash,
@@ -739,6 +761,8 @@ func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) b
 }
 
 func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
 	_, ok := f.PendingEnvelopeRoots[blockRoot]
 	return ok
 }
@@ -761,6 +785,8 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
 	receivedAt, ok := f.ExecutionPayloadReceivedAt[blockRoot]
 	return ok && receivedAt.Before(deadline)
 }

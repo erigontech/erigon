@@ -169,6 +169,14 @@ jobs:
         name: fd-leak-analysis-${{ env.CHAIN }}-exec-from-zero
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
+    - name: Upload goroutine stacks
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: goroutine-stacks-${{ env.CHAIN }}-exec-from-zero
+        path: ${{ github.workspace }}/goroutine-stacks.txt
+        if-no-files-found: ignore
+
     - name: List the files in the Erigon data directory
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       run: |

@@ -779,7 +779,7 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 }
 
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
-	t.Run("peer-fetched unavailable parent does not gate full child", func(t *testing.T) {
+	t.Run("peer-fetched unavailable parent leaves full child unpersisted", func(t *testing.T) {
 		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
 		fullRoot, err := fullChild.Block.HashSSZ()
 		require.NoError(t, err)
@@ -798,8 +798,9 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 			storedSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, common.Hash(fullRoot))
 			return err
 		}))
-		require.NotNil(t, storedSlot)
-		require.Equal(t, fullChild.Block.Slot, *storedSlot)
+		require.Nil(t, storedSlot)
+		require.Zero(t, graph.added[common.Hash(fullRoot)])
+		require.NotContains(t, seen, common.Hash(fullRoot))
 	})
 
 	t.Run("valid replay processes full child", func(t *testing.T) {
