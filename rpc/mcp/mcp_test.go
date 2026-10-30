@@ -89,6 +89,18 @@ func TestServerCatalog(t *testing.T) {
 	require.NotEmpty(t, resourceTemplateURIs(t, e.mcpServer))
 }
 
+// A tool whose namespace the node does not serve would only return "method not found".
+func TestServerListsOnlyServedNamespaces(t *testing.T) {
+	e := NewErigonMCPServer(nil, "", false)
+	e.KeepNamespaces(map[string]string{"eth": "1.0", "rpc": "1.0"})
+
+	tools := e.mcpServer.ListTools()
+	require.Contains(t, tools, "eth_blockNumber")
+	require.Contains(t, tools, "logs_tail")
+	require.NotContains(t, tools, "erigon_nodeInfo")
+	require.NotContains(t, tools, "ots_traceTransaction")
+}
+
 // Every tool is a read-only query; declaring it lets MCP clients skip
 // per-call approval prompts for them.
 func TestAllToolsDeclareReadOnlyHint(t *testing.T) {

@@ -1040,6 +1040,81 @@ func TestStopWakesBuilderWaitingForMoreTransactions(t *testing.T) {
 	})
 }
 
+// orderedTxnProvider serves txns in a fixed priority order like the txpool's best(), skipping and
+// recording yielded IDs, and reports when it serves want.
+type orderedTxnProvider struct {
+	ordered []types.Transaction
+	want    types.Transaction
+	served  chan struct{}
+}
+
+func (p *orderedTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	o := txnprovider.ApplyProvideOptions(opts...)
+	var out []types.Transaction
+	for _, txn := range p.ordered {
+		if len(out) == o.Amount {
+			break
+		}
+		if o.TxnIdsFilter.Contains(txn.Hash()) {
+			continue
+		}
+		out = append(out, txn)
+		o.TxnIdsFilter.Add(txn.Hash())
+		if txn == p.want {
+			close(p.served)
+		}
+	}
+	return out, nil
+}
+
+func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+
+	signTxn := func(nonce uint64) types.Transaction {
+		txn, err := types.SignTx(
+			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(2*parent.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, err)
+		txn.SetSender(accounts.InternAddress(m.Address))
+		return txn
+	}
+	var ordered []types.Transaction
+	for nonce := uint64(1); nonce <= 150; nonce++ {
+		ordered = append(ordered, signTxn(nonce))
+	}
+	executable := signTxn(0)
+	ordered = append(ordered, executable)
+
+	synctest.Test(t, func(t *testing.T) {
+		provider := &orderedTxnProvider{ordered: ordered, want: executable, served: make(chan struct{})}
+		beaconRoot := randomHash()
+		started := time.Now()
+		payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			PrevRandao:            parent.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     provider,
+		}, time.Minute, time.Minute)
+
+		<-provider.served
+		waited := time.Since(started)
+		result, err := payloadBuilder.Stop(t.Context())
+		require.Zero(t, waited, "the build waited before it asked for the next full batch")
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Block.Transactions())
+		require.Equal(t, executable.Hash(), result.Block.Transactions()[0].Hash())
+	})
+}
+
 // Start building a block, then accept a competing block with the same parent.
 // The original build must still produce a valid block. Also run without the
 // competing commit as a control.

@@ -227,12 +227,7 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["latest_execution_payload_bid"] = b.latestExecutionPayloadBid
 		obj["builders"] = b.builders
 		obj["next_withdrawal_builder_index"] = strconv.FormatInt(int64(b.nextWithdrawalBuilderIndex), 10)
-		// Serialize as raw bytes so Go's JSON encoder emits base64
-		// (the standard Go encoding for []byte), matching what assertoor and
-		// other Go-based Eth2 tooling expect for Bitvector fields.
-		epaBuf := make([]byte, b.executionPayloadAvailability.EncodingSizeSSZ())
-		epaBuf, _ = b.executionPayloadAvailability.EncodeSSZ(epaBuf)
-		obj["execution_payload_availability"] = epaBuf
+		obj["execution_payload_availability"] = b.executionPayloadAvailability
 		obj["builder_pending_payments"] = b.builderPendingPayments
 		obj["builder_pending_withdrawals"] = b.builderPendingWithdrawals
 		obj["latest_block_hash"] = b.latestBlockHash

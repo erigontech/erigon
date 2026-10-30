@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -1333,7 +1334,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		switch {
 		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
-				executor.execTasks.addDependency(depTxIndex+1, i)
+				executor.execTasks.addDependency(depTxIndex+1, i, true)
 			}
 			executor.execTasks.clearPending(i)
 		case len(execRequest.accessList) != 0:
@@ -1350,7 +1351,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			if !sender.IsNil() {
 				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i)
+					executor.execTasks.addDependency(tx, i, true)
 					executor.execTasks.clearPending(i)
 				}
 
@@ -2948,12 +2949,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				l := len(be.estimateDeps[tx])
 				for l > 0 && be.estimateDeps[tx][l-1] > dependency {
-					be.execTasks.removeDependency(be.estimateDeps[tx][l-1])
+					be.execTasks.removeDependency(be.estimateDeps[tx][l-1], false)
 					be.estimateDeps[tx] = be.estimateDeps[tx][:l-1]
 					l--
 				}
 
-				addedDependencies := be.execTasks.addDependency(dependency, tx)
+				addedDependencies := be.execTasks.addDependency(dependency, tx, false)
 				be.execAborted[tx]++
 
 				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
@@ -3028,7 +3029,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.execTasks.markComplete(tx)
 		be.cntSuccess++
 
-		be.execTasks.removeDependency(tx)
+		be.execTasks.removeDependency(tx, false)
 	}
 
 	// do validations ...
@@ -3136,6 +3137,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
+				be.execTasks.removeDependency(tx, true)
 
 				be.finalizedResults[tx] = txResult
 
@@ -3291,6 +3293,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.txIncarnations[tx]++
 			if r := be.retryLimitResult(tx, txVersion.TxIndex, be.txIncarnations[tx], "validator-invalid retries", nil); r != nil {
 				return r, nil
+			}
+			if cntInvalid == 1 && i+1 < len(toValidate) && tx == be.validateTasks.maxComplete()+1 {
+				be.scheduleExecutionUpTo(ctx, pe, tx)
 			}
 		}
 	}
@@ -3571,6 +3576,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+	be.scheduleExecutionUpTo(ctx, pe, math.MaxInt)
+}
+
+func (be *blockExecutor) scheduleExecutionUpTo(ctx context.Context, pe *parallelExecutor, maxTx int) {
 	// Drain deferred tx N when its predecessor is validated AND no worker
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
@@ -3594,6 +3603,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 		budget := pe.in.Capacity() - pe.in.NewTasksLen()
 		be.execTasks.dispatchPending(func(nextTx int) dispatchAction {
+			if nextTx > maxTx {
+				return dispatchStop
+			}
 			incarnation := be.txIncarnations[nextTx]
 			// A fresh tx needs a free input-channel slot. With none, stop: it is
 			// the lowest pending, so nothing after it dispatches this pass either.
@@ -3663,7 +3675,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// dispatched, pending is empty, and nothing is in flight. Guarded on empty
 	// pending because the next-to-validate tx is never gate-rejected, so non-empty
 	// pending is always dispatchable — the net must not force-drain past it.
-	if dispatch() == 0 && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
+	if dispatch() == 0 && maxTx == math.MaxInt && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
 		be.execTasks.drainDeferred()
 		dispatch()
 	}

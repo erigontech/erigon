@@ -277,6 +277,9 @@ var cmdRunMigrations = &cobra.Command{
 func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
 	logger.Info("Opening DB", "label", label, "path", path)
 	cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
+	if err := checkExistingDB(cfg); err != nil {
+		return err
+	}
 	db, err := openRawDB(cfg, true, logger)
 	if err != nil {
 		return err

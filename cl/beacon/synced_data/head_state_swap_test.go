@@ -18,6 +18,8 @@ package synced_data
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -315,4 +317,148 @@ func TestOnHeadStateWithBlockRootConcurrentReadWrite(t *testing.T) {
 	}
 	wg.Wait()
 	require.NoError(t, writeErr)
+}
+
+func TestOnOwnedHeadStateWithBlockRootColdStart(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	owned := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, owned.SetSlot(42))
+	root := common.Hash{0x42}
+
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(owned, root))
+
+	require.NoError(t, manager.ViewHeadState(func(head *state.CachingBeaconState) error {
+		require.Same(t, owned, head)
+		return nil
+	}))
+	require.ErrorIs(t, manager.ViewPreviousHeadState(func(*state.CachingBeaconState) error {
+		return nil
+	}), ErrPreviousStateNotAvailable)
+	actualRoot, actualSlot, ok := manager.StateHead()
+	require.True(t, ok)
+	require.Equal(t, root, actualRoot)
+	require.Equal(t, uint64(42), actualSlot)
+}
+
+func TestOnOwnedHeadStateWithBlockRootCopyOwnedCopyRotation(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	for i := range 3 {
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{byte(i + 1)}))
+	}
+	formerHead := manager.headState
+
+	owned := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(owned, common.Hash{0x04}))
+	require.Same(t, owned, manager.headState)
+	require.Same(t, formerHead, manager.previousHeadState)
+
+	copyInput := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(copyInput, common.Hash{0x05}))
+	require.NotSame(t, copyInput, manager.headState)
+	require.Same(t, owned, manager.previousHeadState)
+}
+
+func TestOnOwnedHeadStateWithBlockRootDemotesOwnedHead(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	first := state.New(&clparams.MainnetBeaconConfig)
+	second := state.New(&clparams.MainnetBeaconConfig)
+
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(first, common.Hash{0x01}))
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(second, common.Hash{0x02}))
+
+	require.Same(t, second, manager.headState)
+	require.Same(t, first, manager.previousHeadState)
+}
+
+func TestOnOwnedHeadStateWithBlockRootRejectsManagedStates(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	for i := range 3 {
+		s := state.New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, s.SetSlot(uint64(i+1)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(s, common.Hash{byte(i + 1)}))
+	}
+
+	head := manager.headState
+	previous := manager.previousHeadState
+	root, slot, ok := manager.StateHead()
+
+	for name, rejected := range map[string]*state.CachingBeaconState{
+		"nil":      nil,
+		"head":     head,
+		"previous": previous,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, manager.OnOwnedHeadStateWithBlockRoot(rejected, common.Hash{0xff}))
+			require.Same(t, head, manager.headState)
+			require.Same(t, previous, manager.previousHeadState)
+			actualRoot, actualSlot, actualOK := manager.StateHead()
+			require.Equal(t, root, actualRoot)
+			require.Equal(t, slot, actualSlot)
+			require.Equal(t, ok, actualOK)
+		})
+	}
+}
+
+func TestOnOwnedHeadStateWithBlockRootDisabled(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, false)
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(nil, common.Hash{0x01}))
+	require.Nil(t, manager.headState)
+}
+
+func TestOnOwnedHeadStateWithBlockRootConcurrentAccess(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{}))
+
+	const iterations = 50
+	errs := make(chan error, iterations*2)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range iterations {
+			s := state.New(&clparams.MainnetBeaconConfig)
+			if err := s.SetSlot(uint64(i)); err != nil {
+				errs <- err
+				return
+			}
+			if err := manager.OnHeadStateWithBlockRoot(s, common.Hash{byte(i)}); err != nil {
+				errs <- err
+				return
+			}
+		}
+	})
+	wg.Go(func() {
+		for i := range iterations {
+			s := state.New(&clparams.MainnetBeaconConfig)
+			if err := s.SetSlot(uint64(i)); err != nil {
+				errs <- err
+				return
+			}
+			if err := manager.OnOwnedHeadStateWithBlockRoot(s, common.Hash{byte(i), 0x01}); err != nil {
+				errs <- err
+				return
+			}
+		}
+	})
+	wg.Go(func() {
+		for range iterations {
+			manager.UnsetHeadState()
+		}
+	})
+	wg.Go(func() {
+		for range iterations {
+			if err := manager.ViewHeadState(func(*state.CachingBeaconState) error { return nil }); err != nil && !errors.Is(err, ErrNotSynced) {
+				errs <- fmt.Errorf("view head state: %w", err)
+				return
+			}
+			if err := manager.ViewPreviousHeadState(func(*state.CachingBeaconState) error { return nil }); err != nil && !errors.Is(err, ErrPreviousStateNotAvailable) {
+				errs <- fmt.Errorf("view previous head state: %w", err)
+				return
+			}
+			manager.CommitteeCount(0)
+		}
+	})
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 }

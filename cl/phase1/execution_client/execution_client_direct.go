@@ -81,7 +81,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
+	txs, err := DecodePayloadTransactions(payload)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
@@ -129,17 +129,20 @@ func (cc *ExecutionClientDirect) NewPayload(
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
-	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
+	result, err := cc.chainRW.UpdateForkChoiceResult(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == execmodule.ExecutionStatusInvalidForkchoice {
+	if result.Status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == execmodule.ExecutionStatusBadBlock {
+	if result.Status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+			return nil, ErrForkChoiceUpdateBusy
+		}
 		return nil, nil
 	}
 	// The forkchoice update answers before its commit releases the execution semaphore, so the

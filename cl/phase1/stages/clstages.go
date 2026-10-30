@@ -89,7 +89,7 @@ type Cfg struct {
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
 	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
-	// EL adoption. Tolerated FCU timeouts still update it.
+	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
 	executionHead      common.Hash
 	chainTipRejections *chainTipRejections
 }

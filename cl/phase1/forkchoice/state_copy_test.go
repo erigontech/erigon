@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -159,4 +160,64 @@ func TestLockedStateReadersDoNotRelock(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetOwnedStateAtBlockRootCopiesReplayedState(t *testing.T) {
+	root := common.Hash{0x01}
+	replayed := state.New(&clparams.MainnetBeaconConfig)
+	replayed.SetVersion(clparams.GloasVersion)
+	blockEth1Data := &cltypes.Eth1Data{
+		Root:         common.Hash{0x11},
+		DepositCount: 22,
+		BlockHash:    common.Hash{0x33},
+	}
+	replayed.SetEth1Data(blockEth1Data)
+	require.NoError(t, replayed.AddEth1DataVote(blockEth1Data))
+	blockBid := &cltypes.ExecutionPayloadBid{
+		BlockHash:          common.Hash{0x44},
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+	}
+	replayed.SetLatestExecutionPayloadBid(blockBid)
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: replayed},
+		currentStateRoot: common.Hash{0xff},
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+
+	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	require.NoError(t, err)
+	require.NotSame(t, replayed, owned)
+
+	blockEth1Data.Root = common.Hash{0xaa}
+	blockEth1Data.DepositCount = 0xbb
+	blockEth1Data.BlockHash = common.Hash{0xcc}
+	blockBid.BlockHash = common.Hash{0xdd}
+
+	require.Equal(t, common.Hash{0x11}, owned.Eth1Data().Root)
+	require.Equal(t, uint64(22), owned.Eth1Data().DepositCount)
+	require.Equal(t, common.Hash{0x33}, owned.Eth1Data().BlockHash)
+	require.Equal(t, common.Hash{0x11}, owned.Eth1DataVotes().Get(0).Root)
+	require.Equal(t, uint64(22), owned.Eth1DataVotes().Get(0).DepositCount)
+	require.Equal(t, common.Hash{0x33}, owned.Eth1DataVotes().Get(0).BlockHash)
+	require.Equal(t, common.Hash{0x44}, owned.GetLatestExecutionPayloadBid().BlockHash)
+}
+
+func TestGetOwnedStateAtBlockRootCopiesCurrentState(t *testing.T) {
+	root := common.Hash{0x01}
+	current := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, current.SetSlot(42))
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: current},
+		currentStateRoot: root,
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+	expectedRoot, err := current.HashSSZ()
+	require.NoError(t, err)
+
+	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	require.NoError(t, err)
+	require.NotSame(t, current, owned)
+	actualRoot, err := owned.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expectedRoot, actualRoot)
 }

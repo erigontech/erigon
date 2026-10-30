@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
@@ -1099,34 +1100,23 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
 	}
 
-	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
-	apiCfg := httpRpcCfg
-	if config.MCPAddress != "" {
-		apiCfg.API = slices.Clone(httpRpcCfg.API)
-		for _, ns := range mcpNamespaces {
-			if !slices.Contains(apiCfg.API, ns) {
-				apiCfg.API = append(apiCfg.API, ns)
-			}
-		}
-	}
-	// One APIList call even when MCP widens the namespace set, so the HTTP
-	// RPC server and MCP share the BaseApi block/receipt caches instead of
-	// each holding their own.
-	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
-	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
+	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, testingEntry, witnessCache)
 
 	if config.MCPAddress != "" {
-		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
-		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
-			if err := mcpSrv.RegisterAPI(api); err != nil {
-				return err
-			}
+		mcpSrv, err := newMCPRPCServer(s.apiList, &httpRpcCfg, s.logger)
+		if err != nil {
+			return err
 		}
 		// NonBlockingAcquire on the in-process connection so BeginRo fails
 		// fast (ErrServerOverloaded) instead of blocking MCP handlers when
 		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
 		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
 		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
+		modules, err := mcpClient.SupportedModules()
+		if err != nil {
+			return err
+		}
+		s.mcpRPC.KeepNamespaces(modules)
 		s.bgComponentsEg.Go(func() error {
 			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
 			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
@@ -1620,12 +1610,16 @@ func setDefaultMinerGasLimit(config *ethconfig.Config, chainConfig *chain.Config
 	}
 }
 
-func apisForNamespaces(apis []rpc.API, namespaces []string) []rpc.API {
-	out := make([]rpc.API, 0, len(apis))
+func newMCPRPCServer(apis []rpc.API, cfg *httpcfg.HttpCfg, logger log.Logger) (*rpc.Server, error) {
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
 	for _, api := range apis {
-		if slices.Contains(namespaces, api.Namespace) {
-			out = append(out, api)
+		if !slices.Contains(mcpNamespaces, api.Namespace) {
+			continue
+		}
+		if err := srv.RegisterAPI(api); err != nil {
+			return nil, err
 		}
 	}
-	return out
+	return srv, nil
 }

@@ -47,6 +47,7 @@ type ForkChoiceStorageMock struct {
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	AttestationDataFn                     func(common.Hash, uint64) (solid.AttestationData, bool)
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
+	AncestorFn                            func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode
 	AncestorCalls                         atomic.Int64
 	AnchorSlotVal                         uint64
 	AnchorRootVal                         common.Hash
@@ -117,6 +118,8 @@ type ForkChoiceStorageMock struct {
 	EnvelopeGossipAdmissions                           forkchoice.ExecutionPayloadEnvelopeAdmissions
 	ReadEnvelopeFromDiskFunc                           func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetBeaconCommitteeMock                             func(slot, committeeIndex uint64) ([]uint64, error)
+	HeadLacksTargetShuffling                           bool
+	TargetBeaconCommitteeFn                            func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error)
 
 	Pool pool.OperationsPool
 
@@ -305,6 +308,9 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
 	f.AncestorCalls.Add(1)
+	if f.AncestorFn != nil {
+		return f.AncestorFn(root, slot)
+	}
 	return f.Ancestors[slot]
 }
 
@@ -354,6 +360,17 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
+func (f *ForkChoiceStorageMock) HeadStateHasTargetShuffling(*state.CachingBeaconState, common.Hash, solid.Checkpoint) bool {
+	return !f.HeadLacksTargetShuffling
+}
+
+func (f *ForkChoiceStorageMock) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+	if f.TargetBeaconCommitteeFn == nil {
+		return nil, 0, errors.New("target beacon committee not implemented")
+	}
+	return f.TargetBeaconCommitteeFn(target, slot, committeeIndex, claimBuild)
+}
+
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
 }
@@ -390,6 +407,10 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash) (*sta
 		return nil, nil
 	}
 	return st.Copy()
+}
+
+func (f *ForkChoiceStorageMock) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	return f.GetStateAtBlockRoot(blockRoot)
 }
 
 func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {

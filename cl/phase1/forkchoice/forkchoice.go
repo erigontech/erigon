@@ -67,12 +67,14 @@ type ForkNode struct {
 }
 
 const (
-	checkpointsPerCache        = 1024
-	maxCheckpointStates        = 10
-	allowedCachedStates        = 8
-	queueCacheSize             = 128
-	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
-	maxPendingELPayloads       = 1024
+	checkpointsPerCache                = 1024
+	maxCheckpointStates                = 10
+	maxConcurrentTargetCommitteeBuilds = 2
+	maxTargetCheckpointBlockAge        = 4
+	allowedCachedStates                = 8
+	queueCacheSize                     = 128
+	pendingELPayloadsShrinkCap         = 256 // drain releases the backing array when cap exceeds this
+	maxPendingELPayloads               = 1024
 )
 
 type randaoDelta struct {
@@ -153,6 +155,8 @@ type ForkChoiceStore struct {
 	localValidators    *validator_params.ValidatorParams
 
 	checkpointStateBuilds singleflight.Group
+	targetStateBuildsMu   sync.Mutex
+	targetStateBuilds     map[solid.Checkpoint]*targetStateBuild
 
 	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
@@ -843,6 +847,12 @@ func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.
 	return copied, true, err
 }
 
+func (f *ForkChoiceStore) copyCurrentState(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.copyCurrentStateLocked(blockRoot)
+}
+
 func (f *ForkChoiceStore) copyStateAtBlockRootLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	copied, current, err := f.copyCurrentStateLocked(blockRoot)
 	if current || err != nil {
@@ -859,18 +869,25 @@ func (f *ForkChoiceStore) getStateLocked(blockRoot common.Hash) (*state.CachingB
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	var copied *state.CachingBeaconState
-	var current bool
-	var err error
-	func() {
-		f.mu.RLock()
-		defer f.mu.RUnlock()
-		copied, current, err = f.copyCurrentStateLocked(blockRoot)
-	}()
+	copied, current, err := f.copyCurrentState(blockRoot)
 	if current || err != nil {
 		return copied, err
 	}
 	return f.forkGraph.ReplayState(blockRoot)
+}
+
+// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies a replayed
+// state, because replay leaves pointers to stored block objects in it.
+func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentState(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	replayed, err := f.forkGraph.ReplayState(blockRoot)
+	if replayed == nil || err != nil {
+		return replayed, err
+	}
+	return replayed.Copy()
 }
 
 func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {

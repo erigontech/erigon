@@ -82,6 +82,10 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		subscribeTopics.Add(topic)
 	}
 	log.Info("Subscribed to event stream topics", "topics", subscribeTopics)
+	if subscribeTopics.Contains(event.StatePayloadAttributes) {
+		release := a.emitters.TrackPayloadAttributesSubscriber()
+		defer release()
+	}
 
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
