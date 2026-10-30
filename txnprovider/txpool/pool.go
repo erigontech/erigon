@@ -425,7 +425,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
@@ -2106,7 +2106,7 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs in the finalized block and older, loop through all entries
 	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
@@ -2121,16 +2121,19 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 	}
 
 	// Add mined blobs
-	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	minedBlobs := p.minedBlobTxnsByBlock[minedBlock]
 	for _, txn := range minedTxns {
 		if txn.TxType() == BlobTxnType {
-			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
-			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
-			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
+			// Mined txns arrive without blobs; only the pooled copy still has them.
+			if pooled, ok := p.byHash[string(txn.IDHash[:])]; ok {
+				txn = pooled.TxnSlot
+			}
+			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(minedBlobs)}
+			minedBlobs = append(minedBlobs, mt)
 			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
 		}
 	}
+	p.minedBlobTxnsByBlock[minedBlock] = minedBlobs
 	return nil
 }
 

@@ -17,9 +17,24 @@
 package txpool
 
 import (
+	"context"
+	"math"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/execution/tests/testforks"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 func TestDeleteMinedBlobTxnUpdatesMovedIndex(t *testing.T) {
@@ -55,14 +70,12 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 	for i := range txns {
 		txns[i] = newTestBlobTxnSlot(uint64(i), 1, 1, 1, 21000)
 		txns[i].IDHash[0] = byte(i + 1)
-		pool.lastSeenBlock.Store(uint64(i + 1))
-		require.NoError(t, pool.processMinedFinalizedBlobs(txns[i:i+1], 0))
+		require.NoError(t, pool.processMinedFinalizedBlobs(txns[i:i+1], uint64(i+1), 0))
 	}
 
 	pool.deleteMinedBlobTxn(string(txns[1].IDHash[:]))
 	pool.deleteMinedBlobTxn(string(txns[2].IDHash[:]))
-	pool.lastSeenBlock.Store(5)
-	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 3))
+	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 5, 3))
 
 	for i := range 3 {
 		require.NotContains(t, pool.minedBlobTxnsByBlock, uint64(i+1))
@@ -72,4 +85,64 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 	require.Len(t, pool.minedBlobTxnsByHash, 1)
 	require.Same(t, txns[3], pool.minedBlobTxnsByBlock[4][0].TxnSlot)
 	require.Same(t, pool.minedBlobTxnsByBlock[4][0], pool.minedBlobTxnsByHash[string(txns[3].IDHash[:])])
+}
+
+// Mined txns come from the state-change stream without blobs, so only the pooled
+// copy can bring the blobs back after an unwind.
+func TestMinedBlobTxnReturnsWithBlobsAfterUnwind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(t, err)
+
+	sender := common.Address{1}
+	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+		return &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee:  200_000,
+			PendingBlobFeePerGas: 100_000,
+			BlockGasLimit:        math.MaxUint64,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: uint64(height),
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{height}),
+				Direction:   direction,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT,
+					Address: gointerfaces.ConvertAddressToH160(sender),
+					Data:    accounts.SerialiseV3(&account),
+				}},
+			}},
+		}
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	blobTxn := makeBlobTxn()
+	blobTxn.Nonce = 2
+	streamed := func() *TxnSlot {
+		txn := blobTxn
+		txn.BlobBundles = nil
+		return &txn
+	}
+	var local TxnSlots
+	local.Append(&blobTxn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	hash := string(blobTxn.IDHash[:])
+
+	var mined TxnSlots
+	mined.Append(streamed(), sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
+	require.NotContains(t, pool.byHash, hash)
+	require.Equal(t, uint64(1), pool.minedBlobTxnsByHash[hash].minedBlockNum)
+
+	var unwound TxnSlots
+	unwound.Append(streamed(), sender[:], false)
+	reorg := block(0, 2, remoteproto.Direction_UNWIND)
+	reorg.ChangeBatch = append(reorg.ChangeBatch, &remoteproto.StateChange{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{0x11})})
+	require.NoError(t, pool.OnNewBlock(ctx, reorg, TxnSlots{}, unwound, TxnSlots{}))
+	require.Contains(t, pool.byHash, hash)
+	require.Len(t, pool.byHash[hash].TxnSlot.BlobBundles, 2)
 }
