@@ -177,6 +177,24 @@ func BenchmarkIncompleteStructure_Stream(b *testing.B) {
 	benchmarkIncompleteStructure(b, newStream(nil, InitialBufferSize))
 }
 
+// BenchmarkWriteHex writes one hex value per op through a stream with a writer, as a response
+// does; bufcap is the stream buffer's capacity afterwards.
+func BenchmarkWriteHex(b *testing.B) {
+	for _, n := range []int{32, 1 << 10, 64 << 10, 128 << 10} {
+		b.Run(fmt.Sprintf("%dB", n), func(b *testing.B) {
+			v := make([]byte, n)
+			s := newStream(io.Discard, InitialBufferSize)
+			b.SetBytes(int64(n))
+			b.ReportAllocs()
+			for b.Loop() {
+				s.WriteHex(v)
+				_ = s.Flush()
+			}
+			b.ReportMetric(float64(cap(s.Buffer())), "bufcap")
+		})
+	}
+}
+
 // BenchmarkHexesField covers the two shapes the field serves on hot paths: a block's
 // transaction hashes and a log's topics, with the writer a served response has and without one.
 func BenchmarkHexesField(b *testing.B) {
