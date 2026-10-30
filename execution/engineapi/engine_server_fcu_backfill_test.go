@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -104,4 +105,29 @@ func TestForkchoiceMissingSegmentOfBadBlockIsInvalid(t *testing.T) {
 	require.Equal(t, lastValidHash, *status.LatestValidHash)
 	require.Equal(t, engine_block_downloader.Idle, downloader.Status())
 	require.Empty(t, fetcher.requested)
+}
+
+func TestForkchoiceMissingSegmentOfBadBlockWithUnknownAncestor(t *testing.T) {
+	t.Parallel()
+
+	missingHash := common.Hash{0x42}
+	srv, downloader, _, head := newMissingSegmentServer(t, missingHash)
+	downloader.ReportBadHeader(missingHash, common.Hash{}, "invalid block")
+
+	status, err := srv.HandleForkChoice(t.Context(), "test", &engine_types.ForkChoiceState{HeadHash: head.Hash()})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
+}
+
+func TestForkchoiceKnownBadHeadWithUnknownAncestor(t *testing.T) {
+	t.Parallel()
+
+	srv, downloader, _, head := newMissingSegmentServer(t, common.Hash{0x42})
+	downloader.ReportBadHeader(head.Hash(), common.Hash{}, "invalid block")
+
+	resp, err := srv.forkchoiceUpdated(t.Context(), &engine_types.ForkChoiceState{HeadHash: head.Hash()}, nil, clparams.CapellaVersion)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, resp.PayloadStatus.Status)
+	require.Nil(t, resp.PayloadStatus.LatestValidHash)
 }
