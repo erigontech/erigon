@@ -212,7 +212,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			if !(strings.Contains(name, "goodbye") &&
 				(strings.Contains(err.Error(), "session shut down") ||
 					strings.Contains(err.Error(), "stream reset"))) {
-				log.Trace("[pubsubhandler] close stream", l)
+				log.Trace("[pubsubhandler] close stream", l) //nolint:loggercheck // a single log.Ctx is expanded into pairs
 			}
 		}
 	}
