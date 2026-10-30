@@ -202,6 +202,15 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	return nil
 }
 
+// StampVersion refuses a DB from a newer schema, then marks it with this binary's schema.
+// It runs on every open: applied migrations are recorded outside chaindata, so a re-created chaindata has no pending ones.
+func (m *Migrator) StampVersion(db kv.RwDB, chaindata string) error {
+	if err := m.VerifyVersion(db, chaindata); err != nil {
+		return err
+	}
+	return db.Update(context.Background(), rawdb.WriteDBSchemaVersion)
+}
+
 // Apply runs all pending migrations in order.
 //
 //   - db is the target database being migrated (e.g. chaindata).

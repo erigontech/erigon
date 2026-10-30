@@ -264,6 +264,11 @@ func TableScanningPrune(
 	stat.KeyProgress = Done
 	stat.LastPrunedKey = nil
 
+	if valDelCursor == nil { // the caller prunes values and owns their progress
+		stat.ValueProgress, stat.LastPrunedValue = prevStat.ValueProgress, prevStat.LastPrunedValue
+		return stat, nil
+	}
+
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
