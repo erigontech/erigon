@@ -1216,7 +1216,7 @@ func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 		{phase: "before_merge", existingOutput: true},
 	} {
 		t.Run(fmt.Sprintf("%s/existing_output=%t", tc.phase, tc.existingOutput), func(t *testing.T) {
-			db, h := filledHistoryValues(t, false, map[string][]upd{
+			db, h := filledHistoryValues(t, map[string][]upd{
 				"key": {{txNum: 1}, {txNum: 17, value: []byte("value")}},
 			}, log.New())
 			ps := background.NewProgressSet()

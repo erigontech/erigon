@@ -24,7 +24,7 @@ func TestHistoryRangeAsOfDBCloseClosesDupSortCursor(t *testing.T) {
 	require.Equal(t, 1, c.closed)
 }
 
-func TestHistoryRangeAsOfDBAdvanceSmallValsReturnsSeekError(t *testing.T) {
+func TestHistoryRangeAsOfDBAdvanceReturnsSeekError(t *testing.T) {
 	seekErr := errors.New("cursor seek failed")
 	seekCalls := 0
 	c := &testCursorDupSort{}
@@ -43,7 +43,7 @@ func TestHistoryRangeAsOfDBAdvanceSmallValsReturnsSeekError(t *testing.T) {
 	}
 	defer hi.Close()
 
-	err := hi.advanceSmallVals()
+	err := hi.advance()
 
 	require.ErrorIs(t, err, seekErr)
 	require.Equal(t, 2, seekCalls)
