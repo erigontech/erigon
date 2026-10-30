@@ -39,6 +39,10 @@ import (
 // - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
 const defaultGoMemLimitShare = 0.8
 
+// gcPercentUnderMemLimit replaces GOGC=100 when a memory limit caps the heap: GC
+// runs 4x less often, and the limit still forces a collection before memory runs out.
+const gcPercentUnderMemLimit = 400
+
 func goMemLimitIsSet() (set, off bool, limit datasize.ByteSize) {
 	current := debug.SetMemoryLimit(-1)
 	if current != math.MaxInt64 {
@@ -63,6 +67,7 @@ func SetGoMemLimit(logger log.Logger) {
 			logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
 		} else {
 			logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", limit.HR())
+			raiseGCPercentUnderMemLimit(logger)
 		}
 		return
 	}
@@ -78,4 +83,13 @@ func SetGoMemLimit(logger log.Logger) {
 		"available", datasize.ByteSize(total).HR(),
 		"GOMEMLIMIT", datasize.ByteSize(uint64(limit)).HR(),
 		"share", defaultGoMemLimitShare)
+	raiseGCPercentUnderMemLimit(logger)
+}
+
+func raiseGCPercentUnderMemLimit(logger log.Logger) {
+	if v, ok := os.LookupEnv("GOGC"); ok && v != "" {
+		return
+	}
+	debug.SetGCPercent(gcPercentUnderMemLimit)
+	logger.Info("[mem] GOGC raised under the memory limit", "GOGC", gcPercentUnderMemLimit)
 }

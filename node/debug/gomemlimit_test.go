@@ -104,3 +104,26 @@ func TestSetGoMemLimitInstallsDerivedLimit(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, want, debug.SetMemoryLimit(-1))
 }
+
+func TestSetGoMemLimitRaisesGCPercentUnderTheLimit(t *testing.T) {
+	prevGC := debug.SetGCPercent(100)
+	t.Cleanup(func() { debug.SetGCPercent(prevGC) })
+	t.Setenv("GOGC", "")
+	os.Unsetenv("GOGC")
+	setProcessGoMemLimit(t, 1<<40)
+
+	SetGoMemLimit(log.New())
+
+	require.Equal(t, gcPercentUnderMemLimit, debug.SetGCPercent(100))
+}
+
+func TestSetGoMemLimitKeepsExplicitGOGC(t *testing.T) {
+	prevGC := debug.SetGCPercent(100)
+	t.Cleanup(func() { debug.SetGCPercent(prevGC) })
+	t.Setenv("GOGC", "100")
+	setProcessGoMemLimit(t, 1<<40)
+
+	SetGoMemLimit(log.New())
+
+	require.Equal(t, 100, debug.SetGCPercent(100))
+}
