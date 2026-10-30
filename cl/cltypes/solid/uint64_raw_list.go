@@ -157,6 +157,7 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 	}
 
 	arr.hahsBuffer = arr.hahsBuffer[:arr.hashBufLength()]
+	clear(arr.hahsBuffer)
 	for i, v := range arr.u {
 		binary.LittleEndian.PutUint64(arr.hahsBuffer[i*8:], v)
 	}
