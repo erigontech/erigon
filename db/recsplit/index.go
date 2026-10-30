@@ -26,6 +26,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -145,6 +146,9 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
+	if dbg.KviWillNeed && strings.HasSuffix(indexFilePath, ".kvi") {
+		_ = mmap.MadviseWillNeed(idx.mmapHandle1)
+	}
 
 	if err := idx.init(); err != nil {
 		return nil, err
