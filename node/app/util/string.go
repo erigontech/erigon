@@ -52,7 +52,7 @@ func CallerPackageName(skip ...int) string {
 	if pl < 2 {
 		return fn.Name()
 	}
-	packageName := ""
+	var packageName string
 
 	if parts[pl-2][0] == '(' || parts[pl-2] == "init" {
 		packageName = strings.Join(parts[0:pl-2], ".")

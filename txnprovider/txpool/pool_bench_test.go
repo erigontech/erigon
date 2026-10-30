@@ -47,7 +47,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 
 	// Start the transaction pool
 	err = pool.start(ctx)

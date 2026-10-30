@@ -302,7 +302,6 @@ func TestOnExecutionPayloadDoesNotReplayUnavailableStateUnderForkChoiceLock(t *t
 	done := make(chan error, 1)
 	go func() { done <- store.OnExecutionPayload(t.Context(), envelope, false, true) }()
 
-	err = nil
 	select {
 	case err = <-done:
 	case <-time.After(lockScopeTimeout):
