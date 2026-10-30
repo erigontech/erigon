@@ -18,8 +18,11 @@ package envelope_history
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -36,6 +39,8 @@ import (
 
 const MaxRebuildsPerRequest = 32
 
+var ErrRebuildBusy = errors.New("execution payload envelope rebuild is busy")
+
 type ExecutionEngine interface {
 	GetHeaderByHash(context.Context, common.Hash) (*types.Header, error)
 	GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error)
@@ -45,7 +50,7 @@ type Rebuilder struct {
 	beaconCfg   *clparams.BeaconChainConfig
 	beaconDB    freezeblocks.BeaconSnapshotReader
 	engine      ExecutionEngine
-	rebuildSlot chan struct{}
+	rebuildSlot *semaphore.Weighted
 }
 
 type PreparedRebuild struct {
@@ -57,7 +62,7 @@ type PreparedRebuild struct {
 }
 
 func NewRebuilder(beaconCfg *clparams.BeaconChainConfig, beaconDB freezeblocks.BeaconSnapshotReader, engine ExecutionEngine) *Rebuilder {
-	return &Rebuilder{beaconCfg: beaconCfg, beaconDB: beaconDB, engine: engine, rebuildSlot: make(chan struct{}, 1)}
+	return &Rebuilder{beaconCfg: beaconCfg, beaconDB: beaconDB, engine: engine, rebuildSlot: semaphore.NewWeighted(1)}
 }
 
 func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoot common.Hash) (*PreparedRebuild, error) {
@@ -134,17 +139,25 @@ func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 }
 
 func (r *Rebuilder) Rebuild(ctx context.Context, prepared *PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	select {
-	case r.rebuildSlot <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if err := r.rebuildSlot.Acquire(ctx, 1); err != nil {
+		return nil, err
 	}
-	if ctx.Err() != nil {
-		<-r.rebuildSlot
-		return nil, ctx.Err()
-	}
-	defer func() { <-r.rebuildSlot }()
+	defer r.rebuildSlot.Release(1)
+	return r.rebuild(ctx, prepared)
+}
 
+func (r *Rebuilder) TryRebuild(ctx context.Context, prepared *PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !r.rebuildSlot.TryAcquire(1) {
+		return nil, ErrRebuildBusy
+	}
+	defer r.rebuildSlot.Release(1)
+	return r.rebuild(ctx, prepared)
+}
+
+func (r *Rebuilder) rebuild(ctx context.Context, prepared *PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	header, err := r.engine.GetHeaderByHash(ctx, prepared.bid.BlockHash)
 	if err != nil {
 		return nil, err

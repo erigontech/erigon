@@ -19,6 +19,8 @@ package envelope_history
 import (
 	"context"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -234,7 +236,7 @@ func TestRebuildDoesNotCacheMissingBlockAccessList(t *testing.T) {
 
 func TestRebuildReturnsContextErrorWhenSlotIsUnavailable(t *testing.T) {
 	fixture := newRebuildFixture(t)
-	fixture.rebuilder.rebuildSlot <- struct{}{}
+	require.NoError(t, fixture.rebuilder.rebuildSlot.Acquire(t.Context(), 1))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -273,6 +275,65 @@ func TestRebuildDoesNotAcquireSlotAfterContextEnds(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	}
 	require.Zero(t, fixture.engine.headerCalls)
+}
+
+func TestTryRebuildReturnsBusyWithoutCallingEL(t *testing.T) {
+	fixture := newRebuildFixture(t)
+	prepared := fixture.prepare(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		rebuilder := NewRebuilder(fixture.rebuilder.beaconCfg, fixture.reader, fixture.engine)
+		require.NoError(t, rebuilder.rebuildSlot.Acquire(t.Context(), 1))
+		defer rebuilder.rebuildSlot.Release(1)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+
+		rebuilt, err := rebuilder.TryRebuild(ctx, prepared)
+		require.Nil(t, rebuilt)
+		require.ErrorIs(t, err, ErrRebuildBusy)
+		require.Zero(t, fixture.engine.headerCalls)
+		require.Zero(t, fixture.engine.bodyCalls)
+	})
+}
+
+func TestTryRebuildReturnsCanceledBeforeBusy(t *testing.T) {
+	fixture := newRebuildFixture(t)
+	prepared := fixture.prepare(t)
+	require.NoError(t, fixture.rebuilder.rebuildSlot.Acquire(t.Context(), 1))
+	defer fixture.rebuilder.rebuildSlot.Release(1)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	rebuilt, err := fixture.rebuilder.TryRebuild(ctx, prepared)
+	require.Nil(t, rebuilt)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, fixture.engine.headerCalls)
+	require.Zero(t, fixture.engine.bodyCalls)
+}
+
+func TestRebuildWaitsForHeldSlot(t *testing.T) {
+	fixture := newRebuildFixture(t)
+	prepared := fixture.prepare(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		rebuilder := NewRebuilder(fixture.rebuilder.beaconCfg, fixture.reader, fixture.engine)
+		require.NoError(t, rebuilder.rebuildSlot.Acquire(t.Context(), 1))
+		var rebuilt *cltypes.SignedExecutionPayloadEnvelope
+		var rebuildErr error
+		go func() {
+			rebuilt, rebuildErr = rebuilder.Rebuild(t.Context(), prepared)
+		}()
+
+		synctest.Wait()
+		require.Zero(t, fixture.engine.headerCalls)
+		require.Zero(t, fixture.engine.bodyCalls)
+		rebuilder.rebuildSlot.Release(1)
+		synctest.Wait()
+		require.NoError(t, rebuildErr)
+		require.NotNil(t, rebuilt)
+		require.Equal(t, 1, fixture.engine.headerCalls)
+		require.Equal(t, 1, fixture.engine.bodyCalls)
+	})
 }
 
 func TestRebuildPassesCallerContextToEL(t *testing.T) {
@@ -397,4 +458,16 @@ func (f *rebuildFixture) rebuild(t *testing.T, ctx context.Context) (*cltypes.Si
 		return nil, err
 	}
 	return f.rebuilder.Rebuild(ctx, prepared)
+}
+
+func (f *rebuildFixture) prepare(t *testing.T) *PreparedRebuild {
+	t.Helper()
+	var prepared *PreparedRebuild
+	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		prepared, err = f.rebuilder.Prepare(t.Context(), tx, f.block.Block.Slot, f.root)
+		return err
+	}))
+	require.NotNil(t, prepared)
+	return prepared
 }

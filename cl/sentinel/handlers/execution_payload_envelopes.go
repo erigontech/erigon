@@ -236,7 +236,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.root)
 			err = prepareErr
 			if err == nil && prepared != nil {
-				envelope, err = c.envelopeRebuilder.Rebuild(requestCtx, prepared)
+				envelope, err = c.envelopeRebuilder.TryRebuild(requestCtx, prepared)
 			}
 		}
 		if err != nil || envelope == nil {
@@ -402,7 +402,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		}
 
 		rebuilds++
-		envelope, err := c.envelopeRebuilder.Rebuild(requestCtx, prepared)
+		envelope, err := c.envelopeRebuilder.TryRebuild(requestCtx, prepared)
 		if err != nil {
 			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
 			break

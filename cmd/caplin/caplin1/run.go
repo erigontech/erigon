@@ -441,7 +441,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, emitters)
-	var envelopeRebuilder handlers.EnvelopeRebuilder
+	var envelopeRebuilder interface {
+		handlers.EnvelopeRebuilder
+		Rebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	}
 	if engine != nil {
 		envelopeRebuilder = envelope_history.NewRebuilder(beaconConfig, rcsn, engine)
 	}

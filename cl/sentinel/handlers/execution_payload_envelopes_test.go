@@ -77,7 +77,7 @@ func (r *testEnvelopeRebuilder) Prepare(_ context.Context, _ kv.Tx, _ uint64, bl
 	return prepared, nil
 }
 
-func (r *testEnvelopeRebuilder) Rebuild(_ context.Context, prepared *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+func (r *testEnvelopeRebuilder) TryRebuild(_ context.Context, prepared *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	blockRoot := r.prepared[prepared]
 	r.calls++
 	r.called = append(r.called, blockRoot)
@@ -802,36 +802,47 @@ func TestExecutionPayloadEnvelopesByRootCapIgnoresCheapRejections(t *testing.T) 
 }
 
 func TestExecutionPayloadEnvelopesByRootContinuesAfterRebuildError(t *testing.T) {
-	ctx := t.Context()
-	_, indiciesDB := setupStore(t)
-	store := tests.NewMockBlockReader()
-	ethClock, cfg := getGloasEthClockAndConfig(t)
-	tx, err := indiciesDB.BeginRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	blocks := populateDatabaseWithBlocks(t, store, tx, ethClock.GetCurrentSlot()-2, 1)
-	require.NoError(t, tx.Commit())
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "EL error", err: errors.New("EL unavailable")},
+		{name: "busy", err: envelope_history.ErrRebuildBusy},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			_, indiciesDB := setupStore(t)
+			store := tests.NewMockBlockReader()
+			ethClock, cfg := getGloasEthClockAndConfig(t)
+			tx, err := indiciesDB.BeginRw(ctx)
+			require.NoError(t, err)
+			t.Cleanup(tx.Rollback)
+			blocks := populateDatabaseWithBlocks(t, store, tx, ethClock.GetCurrentSlot()-3, 2)
+			require.NoError(t, tx.Commit())
 
-	roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
-	for _, block := range blocks {
-		root, err := block.Block.HashSSZ()
-		require.NoError(t, err)
-		roots.Append(root)
+			roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+			for _, block := range blocks {
+				root, err := block.Block.HashSSZ()
+				require.NoError(t, err)
+				roots.Append(root)
+			}
+			storedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+			storedEnvelope.Message.BuilderIndex = 99
+			fc := mock_services.NewForkChoiceStorageMock(t)
+			fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+			fc.SetEnvelope(roots.Get(1), storedEnvelope)
+			rebuilder := &testEnvelopeRebuilder{err: test.err}
+			c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+			var request bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
+			stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
+
+			require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
+			require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
+			require.Equal(t, 1, rebuilder.calls)
+			require.Equal(t, []common.Hash{roots.Get(0)}, rebuilder.called)
+		})
 	}
-	storedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
-	storedEnvelope.Message.BuilderIndex = 99
-	fc := mock_services.NewForkChoiceStorageMock(t)
-	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
-	fc.SetEnvelope(roots.Get(1), storedEnvelope)
-	rebuilder := &testEnvelopeRebuilder{err: errors.New("EL unavailable")}
-	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-	var request bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
-
-	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-	require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
-	require.Equal(t, 1, rebuilder.calls)
 }
 
 func TestExecutionPayloadEnvelopesByRootSkipsOutsideServeWindow(t *testing.T) {
@@ -969,18 +980,28 @@ func TestExecutionPayloadEnvelopesByRangeStopsAtUnavailableEnvelope(t *testing.T
 	for _, test := range []struct {
 		name        string
 		firstStored bool
+		busy        bool
 		wantIndices []uint64
 		wantPrefix  byte
 	}{
 		{name: "first unavailable", wantPrefix: ResourceUnavailablePrefix},
 		{name: "unavailable after write", firstStored: true, wantIndices: []uint64{0}},
+		{name: "busy first", busy: true, wantPrefix: ResourceUnavailablePrefix},
+		{name: "busy after write", firstStored: true, busy: true, wantIndices: []uint64{0}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			c, cfg, roots, envelopes, rebuilder, stream := newRangeHistoryHandler(t, 4, 3)
 			delete(rebuilder.envelopes, roots[0])
 			delete(rebuilder.envelopes, roots[1])
 			if test.firstStored {
-				rebuilder.envelopes[roots[0]] = envelopes[roots[0]]
+				if test.busy {
+					c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock).SetEnvelope(roots[0], envelopes[roots[0]])
+				} else {
+					rebuilder.envelopes[roots[0]] = envelopes[roots[0]]
+				}
+			}
+			if test.busy {
+				rebuilder.err = envelope_history.ErrRebuildBusy
 			}
 			data := stream.run(t, c)
 			if test.wantPrefix != 0 {
