@@ -34,7 +34,7 @@ func decodeGossipSSZ(obj gossipSSZObject, data []byte, version clparams.StateVer
 	if err := obj.DecodeSSZ(data, int(version)); err != nil {
 		return err
 	}
-	canonical, err := obj.EncodeSSZ(nil)
+	canonical, err := obj.EncodeSSZ(make([]byte, 0, len(data)))
 	if err != nil {
 		return err
 	}
