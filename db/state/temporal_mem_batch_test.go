@@ -65,7 +65,9 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
 	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
+		for sh := range sd.domains[d] {
+			sd.domains[d][sh] = map[string][]dataWithTxNum{}
+		}
 	}
 
 	const keysPerDomain = 200
@@ -118,7 +120,9 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
 	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
+		for sh := range sd.domains[d] {
+			sd.domains[d][sh] = map[string][]dataWithTxNum{}
+		}
 	}
 	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
 
@@ -173,7 +177,9 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				inMemHistoryReads: inMemHistoryReads,
 			}
 			for d := range sd.domains {
-				sd.domains[d] = map[string][]dataWithTxNum{}
+				for sh := range sd.domains[d] {
+					sd.domains[d][sh] = map[string][]dataWithTxNum{}
+				}
 			}
 
 			// Each case is the FIRST write after the borrow, so the slot still holds
