@@ -662,6 +662,82 @@ func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
 	}
 }
 
+func TestDecodeBlockBodiesResponseMatchesHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		body *types.Body
+	}{
+		{
+			name: "uncles",
+			body: &types.Body{Uncles: []*types.Header{newMockBlockHeaders(1)[0]}},
+		},
+		{
+			name: "withdrawals",
+			body: &types.Body{Withdrawals: []*types.Withdrawal{
+				{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4},
+			}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			header := newMockHeaderForBody(1, test.body)
+			encoded, err := rlp.EncodeToBytes(test.body)
+			require.NoError(t, err)
+
+			bodies, err := decodeBlockBodiesResponse(encoded, []*types.Header{header})
+			require.NoError(t, err)
+			require.Len(t, bodies, 1)
+			require.NoError(t, bodies[0].MatchesHeader(header))
+		})
+	}
+}
+
+func TestDecodeBlockBodiesResponseStopsAtFirstMismatch(t *testing.T) {
+	headers := newMockBlockHeaders(2)
+	mismatching, err := rlp.EncodeToBytes(&types.Body{Withdrawals: []*types.Withdrawal{}})
+	require.NoError(t, err)
+	// One invalid empty transaction, followed by an empty uncle list.
+	malformed := rlp.RawValue{0xc3, 0xc1, 0x80, 0xc0}
+
+	decoded, err := decodeBlockBodiesResponse(append(mismatching, malformed...), headers)
+	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+	require.Nil(t, decoded)
+}
+
+func TestDecodeBlockBodiesResponseRejectsMalformedTransactionBeforeMismatch(t *testing.T) {
+	// One invalid empty transaction, followed by an empty uncle list.
+	body := rlp.RawValue{0xc3, 0xc1, 0x80, 0xc0}
+	header := newMockHeaderForBody(1, &types.Body{})
+
+	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
+	require.ErrorContains(t, err, "short input: 0")
+	require.NotErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+	require.Nil(t, decoded)
+}
+
+func TestDecodeBlockBodiesResponseRejectsWithdrawalPresenceMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		expected []*types.Withdrawal
+		actual   []*types.Withdrawal
+	}{
+		{name: "unexpected", actual: []*types.Withdrawal{}},
+		{name: "missing", expected: []*types.Withdrawal{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := newMockHeaderForBody(1, &types.Body{Withdrawals: test.expected})
+			encoded, err := rlp.EncodeToBytes(&types.Body{Withdrawals: test.actual})
+			require.NoError(t, err)
+
+			decoded, err := decodeBlockBodiesResponse(encoded, []*types.Header{header})
+			require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+			require.False(t, rlp.IsInvalidRLPError(err))
+			require.Nil(t, decoded)
+		})
+	}
+}
+
 func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
 	t.Parallel()
 

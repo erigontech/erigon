@@ -424,16 +424,8 @@ func newMockBlockHeaders(numHeaders int) []*types.Header {
 }
 
 func newMockHeaderForBody(number uint64, body *types.Body) *types.Header {
-	header := &types.Header{
-		Number:    *uint256.NewInt(number),
-		TxHash:    types.DeriveSha(types.Transactions(body.Transactions)),
-		UncleHash: types.CalcUncleHash(body.Uncles),
-	}
-	if body.Withdrawals != nil {
-		withdrawalsHash := types.DeriveSha(types.Withdrawals(body.Withdrawals))
-		header.WithdrawalsHash = &withdrawalsHash
-	}
-	return header
+	header := &types.Header{Number: *uint256.NewInt(number)}
+	return types.NewBlock(header, body.Transactions, body.Uncles, nil, body.Withdrawals, nil).HeaderNoCopy()
 }
 
 func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.Header) []byte {
