@@ -94,7 +94,7 @@ var (
 	numWorkers    = runtime.NumCPU()
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 	// ExecSkipFinalValidation: a self-loop task that ran with every lower task committed skips its read-set validation.
-	ExecSkipFinalValidation = EnvBool("EXEC_SKIP_FINAL_VALIDATION", false)
+	ExecSkipFinalValidation = EnvBool("EXEC_SKIP_FINAL_VALIDATION", true)
 	ExecTerseLoggerLevel    = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers         = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
 	MergeWorkers            = EnvInt("MERGE_WORKERS", 1)
