@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -58,6 +59,7 @@ type fetchPeer struct {
 
 type fetchRequest struct {
 	at         time.Time
+	peer       fetchPeer
 	alternates []fetchPeer
 }
 
@@ -172,16 +174,23 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
 	now := f.now()
+	peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(peerID)}
 	var toRequest Hashes
 	for i := 0; i < len(hashes); i += 32 {
 		h := hashes[i : i+32]
-		if r, ok := f.requested.Get(h); ok && now.Sub(r.at) < txFetchTimeout {
-			if len(r.alternates) < maxFetchAlternates {
-				r.alternates = append(r.alternates, fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(peerID)})
+		r, ok := f.requested.Get(h)
+		if ok && now.Sub(r.at) < txFetchTimeout {
+			if peer != r.peer && !slices.Contains(r.alternates, peer) && len(r.alternates) < maxFetchAlternates {
+				r.alternates = append(r.alternates, peer)
 			}
 			continue
 		}
-		f.requested.Set(h, &fetchRequest{at: now})
+		if ok {
+			r.alternates = slices.DeleteFunc(r.alternates, func(a fetchPeer) bool { return a == peer })
+			r.at, r.peer = now, peer
+		} else {
+			f.requested.Set(h, &fetchRequest{at: now, peer: peer})
+		}
 		f.pending = append(f.pending, pendingFetch{[32]byte(h), now})
 		toRequest = append(toRequest, h...)
 	}
@@ -214,7 +223,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		}
 		next := r.alternates[0]
 		r.alternates = r.alternates[1:]
-		r.at = now
+		r.at, r.peer = now, next
 		f.pending = append(f.pending, pendingFetch{p.hash, now})
 		retries[next] = append(retries[next], p.hash[:]...)
 	}
@@ -620,11 +629,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
-		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
 		// won't come back for already-known txs, so entries for them would
 		// just sit unused in the LRU until evicted.
 		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, unknownHashes)
+		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 
 		if len(unknownHashes) > 0 {
 			if err = f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {

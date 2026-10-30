@@ -835,8 +835,15 @@ func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
 	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
 }
 
-func TestAnnouncedHashRequestedFromAlternateAfterTimeout(t *testing.T) {
-	t.Parallel()
+type announceFetchTest struct {
+	ctx           context.Context
+	fetch         *Fetch
+	sentryClient  sentryproto.SentryClient
+	now           *time.Time
+	requestedFrom [][64]byte
+}
+
+func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 	ctx := t.Context()
 	ctrl := gomock.NewController(t)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
@@ -844,34 +851,86 @@ func TestAnnouncedHashRequestedFromAlternateAfterTimeout(t *testing.T) {
 	pool.EXPECT().Started().Return(true).AnyTimes()
 	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, nil }).AnyTimes()
-	var requestedFrom [][64]byte
+	a := &announceFetchTest{ctx: ctx}
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
-			requestedFrom = append(requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
+			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
 			return nil, nil
 		}).AnyTimes()
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
 	require.NoError(t, err)
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+	a.sentryClient = sentryClient
+	a.fetch = NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 	now := time.Unix(1_000_000, 0)
-	fetch.now = func() time.Time { return now }
+	a.now = &now
+	a.fetch.now = func() time.Time { return *a.now }
+	return a
+}
 
-	hash := [32]byte{0xaa}
-	buf := make([]byte, announcementsLen([]byte{types.BlobTxType}, []uint32{100}, hash[:]))
-	announcement := buf[:encodeAnnouncements([]byte{types.BlobTxType}, []uint32{100}, hash[:], buf)]
-	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
-	for _, peer := range [][64]byte{peerA, peerB} {
-		require.NoError(t, fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peer),
-		}, sentryClient))
+func (a *announceFetchTest) announce(t *testing.T, peer [64]byte, hashes ...[32]byte) {
+	var txTypes []byte
+	var sizes []uint32
+	var concat []byte
+	for _, h := range hashes {
+		txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
 	}
+	buf := make([]byte, announcementsLen(txTypes, sizes, concat))
+	announcement := buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
+	require.NoError(t, a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
+		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peer),
+	}, a.sentryClient))
+}
 
-	fetch.requestFromAlternates(ctx, nil)
-	require.Equal(t, [][64]byte{peerA}, requestedFrom, "no retry before the timeout")
-	now = now.Add(txFetchTimeout)
-	fetch.requestFromAlternates(ctx, nil)
-	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
-	now = now.Add(txFetchTimeout)
-	fetch.requestFromAlternates(ctx, nil)
-	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom, "no announcers left")
+func (a *announceFetchTest) timeoutSweep() {
+	*a.now = a.now.Add(txFetchTimeout)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+}
+
+func TestAnnouncedHashRequestedFromAlternateAfterTimeout(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerA}, a.requestedFrom, "no retry before the timeout")
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "no announcers left")
+}
+
+func TestRepeatedAnnouncementsDoNotCrowdOutAlternates(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	for range maxFetchAlternates + 1 {
+		a.announce(t, peerA, hash)
+	}
+	a.announce(t, peerB, hash)
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
+}
+
+func TestLateAnnouncementKeepsAlternates(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB, peerC := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	*a.now = a.now.Add(txFetchTimeout)
+	a.announce(t, peerC, hash)
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerC, peerB}, a.requestedFrom)
+}
+
+func TestAlternateAnnouncementIsRecorded(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash, [32]byte{0xbb})
+	slot := &TxnSlot{IDHash: hash, Size: 100, Txn: &types.DynamicFeeTransaction{}}
+	require.Error(t, a.fetch.checkPooledTxnAnnouncement(gointerfaces.ConvertHashToH512(peerB), slot))
 }
