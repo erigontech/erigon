@@ -59,6 +59,7 @@ var migrations = map[kv.Label][]Migration{
 		dropLegacyE2Tables,
 		createPtcWindowEpochTable,
 		createExecutionPayloadEnvelopeSignaturesTable,
+		dropCodeCacheTable,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},
@@ -179,19 +180,14 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 		}
 		if ok {
 			switch {
-			case major > kv.DBSchemaVersion.Major:
-				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
-			case major == kv.DBSchemaVersion.Major:
-				if minor > kv.DBSchemaVersion.Minor {
-					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
-				}
-			default:
-				if kv.DBSchemaVersion.Major != major {
-					return fmt.Errorf(
-						"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
-						major, kv.DBSchemaVersion.Major, chaindata,
-					)
-				}
+			case major > kv.DBSchemaVersion.Major || major == kv.DBSchemaVersion.Major && minor > kv.DBSchemaVersion.Minor:
+				return fmt.Errorf("%s was written by a newer Erigon (DB schema %d.%d), this Erigon supports %d.%d: run the newer Erigon, or remove %s to rebuild it from snapshots",
+					chaindata, major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, chaindata)
+			case major < kv.DBSchemaVersion.Major:
+				return fmt.Errorf(
+					"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
+					major, kv.DBSchemaVersion.Major, chaindata,
+				)
 			}
 		}
 		return nil

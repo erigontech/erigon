@@ -276,6 +276,9 @@ func NewExecModule(
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
+	if pipelineExecutor != nil {
+		pipelineExecutor.stateCache = domainCache
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, syncCfg.SlowBlockThreshold)
 
 	em := &ExecModule{
@@ -774,8 +777,6 @@ func isInitialSyncPublicationError(err error) bool {
 	return errors.As(err, &publicationErr)
 }
 
-// processFrozenBlocks binds the state cache after the startup sync: its commit
-// advances the state version without publishing to the cache.
 func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
 	err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart)
 	if e.stateCache != nil {
