@@ -124,10 +124,26 @@ func (s *syncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []b
 
 // ProcessMessage processes a sync committee message
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SyncCommitteeMessageForGossip) error {
+	aggregateVerificationData, err := s.checkMessage(subnet, msg)
+	if err != nil || aggregateVerificationData == nil {
+		return err
+	}
+	// The verdict is awaited without the service or head-state lock, so a gossip message is accepted, and forwarded,
+	// only once its signature is verified, while other messages and head-state writes go on.
+	if msg.ImmediateVerification {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+	return s.batchSignatureVerifier.VerifySyncCommitteeMessage(ctx, aggregateVerificationData)
+}
+
+// checkMessage runs the gossip checks that need no signature and returns the signature to verify, or nil for a
+// duplicate of an already verified message that has not been published yet.
+func (s *syncCommitteeMessagesService) checkMessage(subnet *uint64, msg *SyncCommitteeMessageForGossip) (*AggregateVerificationData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	var aggregateVerificationData *AggregateVerificationData
+	err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
 		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot) {
 			return ErrIgnore
@@ -173,7 +189,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		if !s.test && err != nil {
 			return err
 		}
-		aggregateVerificationData := &AggregateVerificationData{
+		aggregateVerificationData = &AggregateVerificationData{
 			Signatures:  [][]byte{signature},
 			SignRoots:   [][]byte{signingRoot},
 			Pks:         [][]byte{pubKey},
@@ -184,35 +200,17 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 					signature:       msg.SyncCommitteeMessage.Signature,
 				})
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-				// ImmediateVerification is sequential so using the headState directly is safe
-				if msg.ImmediateVerification {
-					if err := s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage); err != nil {
-						log.Debug("failed to add sync committee message to pool", "err", err)
-					}
-				} else {
-					// ImmediateVerification=false is parallel so using the headState directly is unsafe
-					if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-						return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
-					}); err != nil {
-						log.Debug("failed to add sync committee message to pool", "err", err)
-					}
+				// Runs after the locks of checkMessage are released, so it reads the head state again.
+				if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+					return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+				}); err != nil {
+					log.Debug("failed to add sync committee message to pool", "err", err)
 				}
 			},
 		}
-
-		if msg.ImmediateVerification {
-			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-		} else {
-			// push the signatures to verify asynchronously and run final functions after that.
-			s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
-		}
-
-		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-		// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-		// gossip ourselves or ban the peer which sent that particular invalid signature.
 		return nil
 	})
+	return aggregateVerificationData, err
 }
 
 // MarkPublished records that content ProcessMessage already verified for

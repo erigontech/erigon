@@ -308,3 +308,50 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 		})
 	}
 }
+
+// A gossip message is accepted, and so forwarded, only once its signature is verified.
+func TestSyncCommitteesGossipRejectsInvalidSignatureBeforeAccepting(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockFuncs := &mockFuncs{ctrl: ctrl}
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	state, msg := getObjectsForSyncCommitteesServiceTest()
+	msg.ImmediateVerification = false
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	require.NoError(t, synced.OnHeadState(state))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), msg), ErrInvalidBlsSignature)
+}
+
+// Waiting for the signature verdict holds no service or head-state lock, so a head-state publication is not blocked.
+func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		close(entered)
+		<-release
+		return true, nil
+	}
+	state, msg := getObjectsForSyncCommitteesServiceTest()
+	msg.ImmediateVerification = false
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	require.NoError(t, synced.OnHeadState(state))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	<-entered
+	published := make(chan error, 1)
+	go func() { published <- synced.OnHeadState(state) }()
+	select {
+	case err := <-published:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("head-state publication waited for a sync committee signature verification")
+	}
+	close(release)
+	require.NoError(t, <-done)
+}
