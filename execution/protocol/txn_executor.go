@@ -91,6 +91,7 @@ type TxnExecutor struct {
 	gasPrice              *uint256.Int
 	feeCap                *uint256.Int
 	tipCap                *uint256.Int
+	isFree                bool
 	value                 uint256.Int
 	data                  []byte
 	state                 *state.IntraBlockState
@@ -142,6 +143,7 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		gasPrice: msg.GasPrice(),
 		feeCap:   msg.FeeCap(),
 		tipCap:   msg.TipCap(),
+		isFree:   msg.IsFree(),
 		value:    *msg.Value(),
 		data:     msg.Data(),
 		state:    evm.IntraBlockState(),
@@ -165,17 +167,17 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, chargeSenderAtValidation bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error,
 ) {
+	st := NewTxnExecutor(evm, msg, gp)
 	// Only zero-gas transactions may be service ones
-	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
+	if msg.FeeCap().IsZero() && !st.isFree && engine != nil {
 		blockContext := evm.Context
 		blockContext.Coinbase = params.SystemAddress
 		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		st.isFree = engine.IsServiceTransaction(msg.From(), syscall)
 	}
-	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
 	st.chargeSenderAtValidation = chargeSenderAtValidation
 	return st.Execute(refunds, gasBailout)
@@ -305,7 +307,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
-			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.isFree); err != nil {
 				return upfrontTxnFees{}, err
 			}
 		}
@@ -772,7 +774,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	var burnAmount uint256.Int
 	var burntContractAddress accounts.Address
 
-	if !msg.IsFree() && rules.IsLondon {
+	if !st.isFree && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if !burntContractAddress.IsNil() {
 			burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
