@@ -1565,13 +1565,13 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		if !found || size == 0 {
 			return 0, false, nil
 		}
-		if len(fillHash) == len(common.Hash{}) {
+		if len(fillHash) == len(common.Hash{}) && !sd.uncommittedCodeInMem(addr) {
 			view.FillCodeSize(fillHash, size, txNum)
 		}
 		return size, true, nil
 	}
 
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, hashFromMem: len(fillHash) == 0 && len(codeHash) > 0})
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash})
 	if err != nil {
 		return 0, false, err
 	}
