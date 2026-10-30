@@ -3,8 +3,10 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,8 +15,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/blockreplay"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -178,4 +183,165 @@ func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 		os.Exit(1)
 	}
 	require.Positive(t, poolRoTxOpens.Load(), "no pool worker ran before the cancel: the run measured nothing")
+}
+
+func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
+	t.Helper()
+	pe := &parallelExecutor{}
+	pe.workersCtx = t.Context()
+	pe.results = make(chan *exec.TxResult, 8)
+	pe.pool = newTaskPool(pe, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
+	be.pool = pe.pool
+	be.versionMap = state.NewVersionMap(nil)
+	be.wakeAt = map[int][]*poolTask{}
+	be.committedFrontier.Store(-1)
+	be.poolTasks = make([]*poolTask, tasks)
+	be.runInc = make([]atomic.Int64, tasks)
+	for i := range tasks {
+		be.tasks = append(be.tasks, &execTask{Task: &exec.TxTask{TxIndex: i}, index: i})
+	}
+	return pe, be
+}
+
+func newPoolUnitTask(be *blockExecutor, i int) *poolTask {
+	pt := &poolTask{be: be, tv: &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i}}}
+	be.poolTasks[i] = pt
+	return pt
+}
+
+func requireOperational(t *testing.T, pe *parallelExecutor, msg string) *exec.TxResult {
+	t.Helper()
+	select {
+	case r := <-pe.results:
+		require.True(t, r.Operational, "result is not operational: %v", r.Err)
+		require.ErrorContains(t, r.Err, msg)
+		return r
+	default:
+		require.FailNow(t, "no operational result was sent", "want an error containing %q", msg)
+		return nil
+	}
+}
+
+func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
+	for _, pending := range []bool{true, false} {
+		pe, be := newPoolUnit(t, 3)
+		pt := newPoolUnitTask(be, 2)
+		pt.next = psRecheck
+		pt.result = &exec.TxResult{}
+		pt.pending = pending
+
+		pt.step(pe.pool, nil)
+
+		require.Len(t, pe.results, 1, "the validated result was not sent")
+		if pending {
+			require.False(t, pt.parked, "a task parked although a re-exec signal arrived before it parked")
+			require.False(t, pt.pending, "the latched signal was not consumed")
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "the task was not queued to re-run after its predecessor commits")
+		} else {
+			require.True(t, pt.parked, "a task with no signal must park")
+			require.Empty(t, be.wakeAt)
+		}
+	}
+}
+
+func TestPoolSignalWaitsForPredecessorCommit(t *testing.T) {
+	pe, be := newPoolUnit(t, 3)
+	pt := newPoolUnitTask(be, 2)
+	pt.next = psReexec
+	pt.parked = true
+
+	be.signalSelfLoopReexec(2)
+	require.Equal(t, 0, pe.pool.queue.Len(), "a re-exec signal queued the task before its predecessor committed")
+	require.Equal(t, []*poolTask{pt}, be.wakeAt[1])
+
+	be.committedFrontier.Store(1)
+	be.signalCommitted(1)
+	require.Equal(t, 1, pe.pool.queue.Len(), "the predecessor's commit did not queue the task")
+}
+
+func TestPoolIncarnationLimitIsOperational(t *testing.T) {
+	pe, be := newPoolUnit(t, 3)
+	pt := newPoolUnitTask(be, 1)
+	limit := len(be.tasks) + 8
+	pt.tv.version.Incarnation = state.Incarnation(limit - 1)
+
+	require.True(t, pt.bumpInc(pe.pool), "incarnation %d is within the limit %d", limit, limit)
+	require.Empty(t, pe.results)
+
+	require.False(t, pt.bumpInc(pe.pool), "incarnation %d is past the limit %d", limit+1, limit)
+	requireOperational(t, pe, "exceeded the self-loop incarnation limit")
+	require.True(t, pt.aborted)
+}
+
+type failingRoDB struct {
+	kv.TemporalRwDB
+	err error
+}
+
+func (d failingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) { return nil, d.err }
+
+func TestPoolRoTxOpenFailureIsOperational(t *testing.T) {
+	pe, be := newPoolUnit(t, 3)
+	boom := errors.New("read tx limit")
+	pe.cfg.db = failingRoDB{err: boom}
+	pt := newPoolUnitTask(be, 1)
+
+	require.False(t, pt.run(pe.pool, &poolWorker{}))
+	r := requireOperational(t, pe, "open roTx")
+	require.ErrorIs(t, r.Err, boom)
+}
+
+func TestPoolStepPanicIsOperational(t *testing.T) {
+	pe, be := newPoolUnit(t, 3)
+	pt := newPoolUnitTask(be, 1)
+	pt.next = psRecheck
+
+	pt.step(pe.pool, nil)
+	requireOperational(t, pe, "self-loop worker panic (block 1 tx 1)")
+}
+
+func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
+	fx := loadPoolFixture(t)
+	require.NotNil(t, fx.Outputs)
+	t.Setenv("EPHEMERAL_WORKERS", "4")
+	r, closeFn := setupEphemeralReplay(t, fx)
+	t.Cleanup(closeFn)
+	r.cfg.experimentalBAL = true
+	var captured types.BlockAccessList
+	r.cfg.SetBALSink(func(_ uint64, bal types.BlockAccessList) { captured = bal })
+
+	derive := func(seed types.BlockAccessList) types.BlockAccessList {
+		captured = nil
+		tx, doms := r.newDomains(t, fx)
+		defer tx.Rollback()
+		defer doms.Close()
+		require.NoError(t, r.execSeeded(tx, doms, seed))
+		require.NoError(t, r.verify(tx, doms, fx.Outputs))
+		require.NotNil(t, captured, "no BAL derived")
+		return captured
+	}
+	unseeded := derive(nil)
+	seeded := derive(unseeded)
+	require.Equal(t, unseeded.Hash(), seeded.Hash(), "executing against a seeded versionMap changed the derived BAL")
+}
+
+func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
+	for _, hasBAL := range []bool{false, true} {
+		pe, be := newPoolUnit(t, 3)
+		be.versionMap.HasBAL = hasBAL
+		pt := newPoolUnitTask(be, 2)
+
+		proceed := pt.settle(&exec.TxResult{}, 0)
+
+		require.Equal(t, psRecheck, pt.next)
+		require.Empty(t, pe.results)
+		if hasBAL {
+			require.True(t, proceed, "a BAL block must re-check at once, not wait for the read target")
+			require.Empty(t, be.wakeAt)
+		} else {
+			require.False(t, proceed, "a non-BAL block must wait for the read target to commit")
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[0])
+		}
+	}
 }

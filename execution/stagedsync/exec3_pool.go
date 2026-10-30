@@ -277,8 +277,12 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if !valid {
 		return pt.waitThen(tv.index-1, psReexec)
 	}
+	return pt.settle(result, target)
+}
+
+func (pt *poolTask) settle(result *exec.TxResult, target int) bool {
 	pt.result = result
-	if !be.versionMap.HasBAL {
+	if !pt.be.versionMap.HasBAL {
 		return pt.waitThen(target, psRecheck)
 	}
 	pt.next = psRecheck
