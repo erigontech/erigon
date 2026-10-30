@@ -588,6 +588,19 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
+	t.Run("truncatedAfterPatternDictionary", func(t *testing.T) {
+		aux := make([]byte, 32)
+		binary.BigEndian.PutUint64(aux[16:24], 1) // pattern dict size in bytes
+		aux[24] = 1
+
+		fpath := filepath.Join(tmpDir, "truncatedAfterPatternDictionary")
+		err := os.WriteFile(fpath, aux, 0o644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{}, "got error %v", err)
+		require.Nil(t, d)
+	})
 }
 
 const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et

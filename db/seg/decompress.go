@@ -224,9 +224,8 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	return NewDecompressorWithMetadata(compressedFilePath, false)
 }
 
-func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
+func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_ *Decompressor, err error) {
 	_, fName := filepath.Split(compressedFilePath)
-	var err error
 	validationPassed := false
 	d := &Decompressor{
 		filePath:    compressedFilePath,
@@ -236,11 +235,10 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
+			err = &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("incomplete file: %+v, trace: %s", rec, dbg.Stack())}
 		}
 		if err != nil || !validationPassed {
 			d.Close()
-			d = nil
 		}
 	}()
 
