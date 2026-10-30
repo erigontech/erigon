@@ -123,7 +123,7 @@ exec3 block execution
   → RecentReceipts.Add(receipts, txs, header)   stores native types
 
 Dispatcher.Dispatch()
-  → RecentReceipts.NotifyLogs(events, from, to, isUnwind)
+  → RecentReceipts.NotifyLogs(events, from, to)
     → Events.OnLogs([]*LogNotification)          native types
 ```
 
@@ -166,7 +166,7 @@ exec3 block execution
   → RecentReceipts.Add(receipts, txs, header)   stores native types
 
 Dispatcher.Dispatch()
-  → RecentReceipts.NotifyReceipts(events, from, to, isUnwind)
+  → RecentReceipts.NotifyReceipts(events, from, to)
     → Events.OnReceipts([]*ReceiptNotification)  native types
 ```
 

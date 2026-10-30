@@ -85,6 +85,39 @@ func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
 	require.ErrorContains(t, err, "accounts and commitment files differ below txNum 80")
 }
 
+func TestStepAlignedMergesPlanEveryGroupOfEveryList(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	split := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}
+	generateAccountsFile(t, dirs, split)
+	generateStorageFile(t, dirs, split)
+	generatePlainCommitmentFile(t, dirs, split)
+	require.NoError(t, agg.OpenFolder(db))
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	end, err := at.stepAlignedEnd(20)
+	require.NoError(t, err)
+	require.Equal(t, uint64(40), end)
+	merges, err := at.stepAlignedMerges(20, end)
+	require.NoError(t, err)
+	got := make(map[kv.Domain][][2]uint64)
+	valueMerges := 0
+	for _, m := range merges {
+		if m.r.anyDomainValues() {
+			valueMerges++
+		}
+		for id, dr := range m.r.domain {
+			if dr.values.needMerge {
+				got[kv.Domain(id)] = append(got[kv.Domain(id)], [2]uint64{dr.values.from, dr.values.to})
+			}
+		}
+	}
+	want := [][2]uint64{{0, 20}, {20, 40}}
+	require.Equal(t, map[kv.Domain][][2]uint64{kv.AccountsDomain: want, kv.StorageDomain: want, kv.CommitmentDomain: want}, got)
+	require.Equal(t, len(want), valueMerges)
+}
+
 func generatePlainCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	generateCommitmentFile(t, dirs, ranges)

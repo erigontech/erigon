@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -285,7 +286,7 @@ func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, b
 	return b.Transactions[i], true, nil
 }
 
-func (r *RemoteBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
+func (r *RemoteBlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, _ uint64, i int) (common.Hash, bool, error) {
 	txn, ok, err := r.TxnByIdxInBlock(ctx, tx, blockNum, i)
 	if err != nil || !ok {
 		return common.Hash{}, false, err
@@ -1319,17 +1320,21 @@ func frozenTxns(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSe
 }
 
 // txnRlpByID returns the sender and the stored encoding of a frozen transaction, or nils when it is missing.
-func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (sender, txnRlp []byte) {
+// Both alias grown, the buffer after gg.Next.
+func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (sender, txnRlp, grown []byte) {
 	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.Src().MakeGetter()
 	gg.Reset(offset)
 	if !gg.HasNext() {
-		return nil, nil
+		return nil, nil, buf
 	}
 	buf, _ = gg.Next(buf[:0])
-	return buf[1 : 1+20], buf[1+20:]
+	if len(buf) < 1+20 { // a system transaction without data is an empty word
+		return nil, nil, buf
+	}
+	return buf[1 : 1+20], buf[1+20:], buf
 }
 
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
@@ -1396,14 +1401,52 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	return txn, true, nil
 }
 
+var txnRlpBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 16*1024); return &b }}
+
+// maxPooledTxnRlp bounds what one pooled buffer keeps alive after an outlier transaction.
+const maxPooledTxnRlp = 256 * 1024
+
 // TxnHashByIdxInBlock is TxnByIdxInBlock that hashes the stored encoding instead of decoding it.
-func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
-	_, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false)
-	if err != nil || txnRlp == nil {
-		return common.Hash{}, false, err
+// txNum must be the txNum of the i-th transaction: for a block in files it alone selects the transaction.
+func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
+	var txnRlp []byte
+	if seg, ok := r.frozenTxnSegment(tx, blockNum, txNum, txIdxInBlock); ok {
+		buf := txnRlpBufPool.Get().(*[]byte)
+		defer func() {
+			if cap(*buf) <= maxPooledTxnRlp {
+				txnRlpBufPool.Put(buf)
+			}
+		}()
+		_, txnRlp, *buf = txnRlpByID(txNum, seg, *buf)
+	} else {
+		var err error
+		if _, txnRlp, err = r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false); err != nil {
+			return common.Hash{}, false, err
+		}
+	}
+	if txnRlp == nil {
+		return common.Hash{}, false, nil
 	}
 	hash, err := types.TransactionHashFromEncoding(txnRlp)
 	return hash, err == nil, err
+}
+
+// frozenTxnSegment returns the transactions file holding txNum of a frozen block. Block files use
+// the canonical txNum as transaction id, so the transaction is found without reading the body.
+// A negative index (system transaction) keeps the body path.
+func (r *BlockReader) frozenTxnSegment(tx kv.Getter, blockNum, txNum uint64, txIdxInBlock int) (*snapshotsync.VisibleSegment, bool) {
+	if txIdxInBlock < 0 || blockNum == 0 || blockNum > r.FrozenBlocksInView(tx) {
+		return nil, false
+	}
+	seg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockNum)
+	if !ok {
+		return nil, false
+	}
+	idx := seg.Src().Index(snaptype2.Indexes.TxnHash)
+	if idx == nil || txNum < idx.BaseDataID() || txNum >= idx.BaseDataID()+idx.KeyCount() {
+		return nil, false
+	}
+	return seg, true
 }
 
 // txnRlpByIdxInBlock returns the stored sender, nil when there is none, and the stored encoding
@@ -1445,7 +1488,7 @@ func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	if !ok {
 		return nil, nil, nil
 	}
-	sender, txnRlp := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
+	sender, txnRlp, _ := txnRlpByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
 	return sender, txnRlp, nil
 }
 

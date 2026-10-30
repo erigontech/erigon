@@ -1110,6 +1110,81 @@ func TestStopWakesBuilderWaitingForMoreTransactions(t *testing.T) {
 	})
 }
 
+// orderedTxnProvider serves txns in a fixed priority order like the txpool's best(), skipping and
+// recording yielded IDs, and reports when it serves want.
+type orderedTxnProvider struct {
+	ordered []types.Transaction
+	want    types.Transaction
+	served  chan struct{}
+}
+
+func (p *orderedTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	o := txnprovider.ApplyProvideOptions(opts...)
+	var out []types.Transaction
+	for _, txn := range p.ordered {
+		if len(out) == o.Amount {
+			break
+		}
+		if o.TxnIdsFilter.Contains(txn.Hash()) {
+			continue
+		}
+		out = append(out, txn)
+		o.TxnIdsFilter.Add(txn.Hash())
+		if txn == p.want {
+			close(p.served)
+		}
+	}
+	return out, nil
+}
+
+func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+
+	signTxn := func(nonce uint64) types.Transaction {
+		txn, err := types.SignTx(
+			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(2*parent.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, err)
+		txn.SetSender(accounts.InternAddress(m.Address))
+		return txn
+	}
+	var ordered []types.Transaction
+	for nonce := uint64(1); nonce <= 150; nonce++ {
+		ordered = append(ordered, signTxn(nonce))
+	}
+	executable := signTxn(0)
+	ordered = append(ordered, executable)
+
+	synctest.Test(t, func(t *testing.T) {
+		provider := &orderedTxnProvider{ordered: ordered, want: executable, served: make(chan struct{})}
+		beaconRoot := randomHash()
+		started := time.Now()
+		payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			PrevRandao:            parent.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     provider,
+		}, time.Minute, time.Minute)
+
+		<-provider.served
+		waited := time.Since(started)
+		result, err := payloadBuilder.Stop(t.Context())
+		require.Zero(t, waited, "the build waited before it asked for the next full batch")
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Block.Transactions())
+		require.Equal(t, executable.Hash(), result.Block.Transactions()[0].Hash())
+	})
+}
+
 // Start building a block, then accept a competing block with the same parent.
 // The original build must still produce a valid block. Also run without the
 // competing commit as a control.
@@ -1247,6 +1322,8 @@ func txPoolBehindParentFixture(t *testing.T) (
 	require.NoError(t, m.InsertChain(chainPack))
 
 	parent = chainPack.TopBlock
+	// A synctest bubble would fast-forward this wait past the txpool catching up in real time.
+	require.NoError(t, m.WaitForTxPool(t.Context(), parent.Hash()))
 	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
 	provider = &rewindingTxnProvider{
 		pool:  m.TxPool,
@@ -4007,8 +4084,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 }
 
 // Same-sender txs that send value, revert with value and read the sender's
-// balance must reach the state root of serial execution when parallel exec
-// charges the sender at validation.
+// balance must reach the state root of serial execution, whether parallel exec
+// charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true
@@ -4067,6 +4144,7 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
 		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
 		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas above balance", feeCap: *uint256.NewInt(100_000 * common.GWei), wantErr: protocol.ErrInsufficientFunds},
 		{name: "gas limit times fee cap overflows", feeCap: *new(uint256.Int).SetAllOne(), wantErr: protocol.ErrInsufficientFunds},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4091,4 +4169,25 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 			require.ErrorContains(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks), tc.wantErr.Error())
 		})
 	}
+}
+
+func TestValidateChainAnswersTooFarAwayWhenStateIsAheadOfTxNums(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(11, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:10]))
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := rawdbv3.TxNums.Truncate(tx, 6); err != nil {
+			return err
+		}
+		return rawdb.TruncateCanonicalHash(tx, 6, false)
+	}))
+	next := chainPack.Blocks[10]
+	_, err = m.InsertBlocks(ctx, []*types.Block{next})
+	require.NoError(t, err)
+
+	validation, err := m.ValidateChain(ctx, next.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, validation.ValidationStatus)
 }

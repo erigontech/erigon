@@ -775,7 +775,6 @@ func (s *simulator) simulateBlock(
 		}
 		intraBlockState = state.New(stateReader)
 		intraBlockState.SetVersionMap(state.NewVersionMap(nil))
-		intraBlockState.SetForkRules(rules)
 		intraBlockState.SetTxContext(blockNumber, -1)
 	} else {
 		intraBlockState = state.New(stateReader)
@@ -801,25 +800,16 @@ func (s *simulator) simulateBlock(
 	recordPhase := func() error { return nil }
 	if balMode {
 		balIO = &state.VersionedIO{}
-		committedStorageKeys := state.CommittedStorageKeysFn(sharedDomains, tx)
-		emptyRemoval := blockNumber != 0 && s.chainConfig.IsEIP161Enabled(blockNumber)
 		recordPhase = func() error {
-			writes := intraBlockState.FinalizedWrites(rules)
+			// The finalized writes carry the EIP-161 removals, so the next call reads them from the version map.
+			writes, err := intraBlockState.FinalizedWrites(rules)
+			if err != nil {
+				return err
+			}
 			intraBlockState.MergeTxIOInto(balIO, writes)
 			intraBlockState.FlushWritesToVersionMap(writes)
-			normalized, err := writes.Normalize(intraBlockState.VersionMap(), intraBlockState.TxnIndex(), 0, stateReader, committedStorageKeys, emptyRemoval, s.chainConfig.Aura != nil, rules.IsAmsterdam)
-			if err != nil {
-				return fmt.Errorf("normalize simulated writes: %w", err)
-			}
-			// A touched empty account produces no write of its own, so the EIP-161 removal that
-			// Normalize derives must reach the version map before the next call reads it.
-			for addr, removal := range normalized.SelfDestructs() {
-				if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
-					intraBlockState.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
-				}
-			}
-			stateWriter.trackWrites(normalized)
-			if err := normalized.Apply(sharedDomains, tx, blockNumber, minTxNum, nil, rules, nil, false); err != nil {
+			stateWriter.trackWrites(writes)
+			if err := state.ApplyWrites(writes, sharedDomains, tx, blockNumber, minTxNum, nil, rules, false); err != nil {
 				return fmt.Errorf("apply simulated writes: %w", err)
 			}
 			intraBlockState.ResetVersionedIO()
