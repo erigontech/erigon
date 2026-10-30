@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -877,5 +878,29 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		if !bytes.Equal(e, want) {
 			t.Errorf("result[%d] mismatch: have %x, want %x", i, e, want)
 		}
+	}
+}
+
+type countingBodyReader struct {
+	dbservices.HeaderAndBodyReader
+	lookups int
+}
+
+func (r *countingBodyReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	r.lookups++
+	return nil, nil
+}
+
+func TestAnswerGetBlockBodiesQuery_StopsAtUnknownHash(t *testing.T) {
+	reader := &countingBodyReader{}
+	query := make(GetBlockBodiesPacket, 2*MaxBodiesServe)
+	for i := range query {
+		query[i] = common.Hash{byte(i), byte(i >> 8), 1}
+	}
+	if bodies := AnswerGetBlockBodiesQuery(nil, query, reader); len(bodies) != 0 {
+		t.Fatalf("expected no bodies, got %d", len(bodies))
+	}
+	if reader.lookups != 1 {
+		t.Fatalf("expected 1 header lookup, got %d", reader.lookups)
 	}
 }
