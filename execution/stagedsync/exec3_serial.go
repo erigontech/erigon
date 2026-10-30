@@ -40,6 +40,7 @@ type serialExecutor struct {
 	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
 	blobGasUsed       uint64
 	worker            *exec.WorkerContext
+	denseBAL          bool
 
 	// commitProgress holds the most recent CommitProgress the trie reported,
 	// so the caller can log real commitment counters instead of a zero value.
@@ -124,7 +125,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		if se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
+		if !se.denseBAL && se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
 			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}

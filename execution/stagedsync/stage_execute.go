@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -468,7 +469,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
+	rng.denseBAL = blockNum == to && denseBALBlock(rwTx, blockNum, maxTxNum-inputTxNum)
+	if !(dbg.Exec3Parallel || cfg.experimentalBAL) || rng.denseBAL {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
@@ -786,4 +788,51 @@ func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader dbs
 		return 0, nil
 	}
 	return blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
+}
+
+const (
+	denseBALMaxTxs            = 32
+	denseBALMinEntriesPerMgas = 20
+)
+
+// denseBALBlock reports a BAL block of few txs whose BAL lists many accounts and slots per gas: its txs are bound by
+// state reads, so the parallel executor's per-read bookkeeping costs more than the overlap it gains.
+func denseBALBlock(tx kv.Getter, blockNum, txNums uint64) bool {
+	if txNums > denseBALMaxTxs {
+		return false
+	}
+	h := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if h == nil || h.BlockAccessListHash == nil || h.GasUsed == 0 {
+		return false
+	}
+	raw, err := rawdb.ReadBlockAccessListBytes(tx, h.Hash(), blockNum)
+	return err == nil && balEntries(raw)*1_000_000/h.GasUsed >= denseBALMinEntriesPerMgas
+}
+
+// balEntries counts accounts plus storage slots of an RLP-encoded BAL without decoding it.
+func balEntries(raw []byte) uint64 {
+	accs, _, err := rlp.SplitList(raw)
+	if err != nil {
+		return 0
+	}
+	var n uint64
+	for len(accs) > 0 {
+		var acc []byte
+		if acc, accs, err = rlp.SplitList(accs); err != nil {
+			return n
+		}
+		n++
+		if _, _, acc, err = rlp.Split(acc); err != nil {
+			return n
+		}
+		for range 2 {
+			var slots []byte
+			if slots, acc, err = rlp.SplitList(acc); err != nil {
+				return n
+			}
+			c, _ := rlp.CountValues(slots)
+			n += uint64(c)
+		}
+	}
+	return n
 }

@@ -119,6 +119,7 @@ type execRange struct {
 	inputTxNum               uint64
 	offsetFromBlockBeginning uint64
 	maxBlockNum              uint64
+	denseBAL                 bool // a lone BAL block routed to the serial executor by denseBALBlock
 }
 
 // execV3Outcome carries what the stage wrapper needs after the parallel executor
@@ -377,6 +378,7 @@ func execV3Serial(ctx context.Context,
 			enableChaosMonkey: initialCycle,
 			hooks:             hooks,
 		},
+		denseBAL: rng.denseBAL,
 	}
 	se.lastCommittedTxNum.Store(inputTxNum)
 	se.lastCommittedBlockNum.Store(blockNum)

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -250,4 +251,22 @@ func TestWriteSendersRecoveredByExec(t *testing.T) {
 	senders, err := rawdb.ReadSenders(tx, hash, 1)
 	require.NoError(t, err)
 	require.Equal(t, []common.Address{crypto.PubkeyToAddress(key.PublicKey)}, senders)
+}
+
+func TestBalEntriesCountsAccountsAndSlots(t *testing.T) {
+	bal := types.BlockAccessList{{
+		Address: common.Address{1},
+		StorageChanges: []types.SlotChanges{
+			{Slot: accounts.InternKey(common.Hash{2}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(3)}}},
+			{Slot: accounts.InternKey(common.Hash{3}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(4)}}},
+		},
+		StorageReads: []common.Hash{{4}, {5}, {6}},
+		CodeChanges:  []*types.CodeChange{{Index: 4, Bytecode: make([]byte, 24*1024)}},
+	}, {
+		Address:        common.Address{2},
+		BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(5)}},
+	}}
+	raw, err := types.EncodeBlockAccessListBytes(bal)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2+2+3), balEntries(raw))
 }
