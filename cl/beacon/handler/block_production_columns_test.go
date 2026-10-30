@@ -67,6 +67,7 @@ type publishedColumnsFixture struct {
 	// that goroutine and, through the test goroutine, order the store's writes before later gossip,
 	// which hides a store/gossip race from -race.
 	columnsGossiped chan struct{}
+	jobs            sync.WaitGroup
 	block           *cltypes.SignedBeaconBlock
 	root            common.Hash
 	store           func(context.Context) error
@@ -113,6 +114,7 @@ func newPublishedColumnsFixture(t *testing.T, version clparams.StateVersion) *pu
 		published:       &publishedGossip{topics: map[string][]byte{}},
 		columnsGossiped: make(chan struct{}),
 	}
+	t.Cleanup(f.jobs.Wait)
 	ctrl := gomock.NewController(t)
 
 	b := newTestBlob(t, 1, clparams.FuluVersion)
@@ -171,10 +173,10 @@ func newPublishedColumnsFixture(t *testing.T, version clparams.StateVersion) *pu
 		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
 			f.store = store
 			job := &runningPublishedBlockJob{done: make(chan struct{})}
-			go func() {
+			f.jobs.Go(func() {
 				defer close(job.done)
 				job.err = store(context.Background())
-			}()
+			})
 			return job
 		},
 	).AnyTimes()
@@ -392,13 +394,14 @@ func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
 }
 
 // TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
-// does not wait for the store job: a stateful envelope POST that follows must find the custody columns.
+// skips the integration wait: a stateful envelope POST that follows must find the custody columns.
 func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
-	imported := make(chan struct{})
-	f.forkchoice.afterOnBlock = func() { close(imported) }
+	release := make(chan struct{})
+	releaseWrites := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseWrites)
 	f.columns.hook = func(write func() error) error {
-		time.Sleep(50 * time.Millisecond)
+		<-release
 		return write()
 	}
 	f.forkchoice.ForkChoiceStorage.(*forkchoice_mock.ForkChoiceStorageMock).OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
@@ -412,10 +415,20 @@ func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testi
 		return nil
 	}
 
-	require.NoError(t, f.handler.broadcastBlockWithIntegrationWait(t.Context(), f.block, BlockPublishingValidationGossip, false))
-	requireClosed(t, imported, "the block was not imported")
+	done := make(chan error, 1)
+	f.jobs.Go(func() {
+		done <- f.handler.broadcastBlockWithIntegrationWait(t.Context(), f.block, BlockPublishingValidationGossip, false)
+	})
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	select {
+	case <-done:
+		t.Fatal("the response must not overtake the column writes")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseWrites()
+	require.NoError(t, <-done)
 
-	body := fmt.Sprintf(`{"message":{"beacon_block_root":"%s","builder_index":"%d"}}`, f.root.Hex(), uint64(clparams.BuilderIndexSelfBuild))
+	body := fmt.Sprintf(`{"message":{"beacon_block_root":%q,"builder_index":"%d"}}`, f.root.Hex(), uint64(clparams.BuilderIndexSelfBuild))
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())

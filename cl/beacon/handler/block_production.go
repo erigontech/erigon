@@ -3077,8 +3077,8 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 				return err
 			}
 		}
-		// A stateful envelope POST checks the custody columns, so a response without the integration
-		// wait must not overtake their writes.
+		// A stateful envelope POST checks the custody columns, so without the integration wait the
+		// response still waits for the store job until the deadline.
 		if storeDone != nil && !waitForIntegration {
 			<-storeDone
 		}
