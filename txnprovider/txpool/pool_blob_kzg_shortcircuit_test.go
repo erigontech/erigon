@@ -230,9 +230,13 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
+	badPeerFrame := framePoolSlot(t, common.Address(a0), 300_000, 300_000)
+	fromAttacker.Append(badPeerFrame, a0[:], false)
 	pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient)
 
 	var fromHonest TxnSlots
+	honestFrame := framePoolSlot(t, common.Address(a1), 300_000, 300_000)
+	fromHonest.Append(honestFrame, a1[:], false)
 	fromHonest.Append(&good, a1[:], false)
 	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient)
 
@@ -241,6 +245,11 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient)
 
 	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Len(t, pool.remoteFrames.ready, 1, "do not simulate frames from a peer whose KZG proof failed")
+	queued := <-pool.remoteFrames.ready
+	require.Same(t, honestFrame, queued.txn)
+	require.Equal(t, PeerID(honestPeerID), queued.source.peerID)
+	require.NotContains(t, pool.remoteFrames.pending, string(badPeerFrame.IDHash[:]))
 
 	select {
 	case <-kicked:
@@ -284,7 +293,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	fromHonest.Append(replacement, a2[:], false)
 	pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil)
 
-	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
@@ -313,7 +322,7 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 			slots.Append(&bad, a0[:], false)
 			pool.AddRemoteTxns(ctx, slots, nil, nil)
 
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 		})

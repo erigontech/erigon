@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -381,6 +382,10 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	for i := range oversizedTxns {
 		oversizedTxns[i] = txn
 	}
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
+	var invalidFrame bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&invalidFrame))
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -397,6 +402,16 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "malformed PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "invalid frame signature Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions([][]byte{invalidFrame.Bytes()}, nil),
+		},
+		{
+			name: "invalid frame signature PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
 		},
 		{
 			name: "oversized Transactions66",
@@ -433,6 +448,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			sentryServer := sentryproto.NewMockSentryServer(ctrl)
 			pool := NewMockPool(ctrl)
 			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 
 			// Expect PenalizePeer to be called exactly once with a Kick penalty.
 			sentryServer.EXPECT().

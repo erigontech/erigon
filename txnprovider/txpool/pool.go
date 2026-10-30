@@ -95,8 +95,7 @@ var (
 	_ txnprovider.TxnProvider = (*TxPool)(nil)
 )
 
-// remoteSource carries the peer that delivered a remote txn slot so
-// processRemoteTxns can kick that peer on KZG-verify failure.
+// remoteSource keeps peer attribution when remote admission splits a batch.
 type remoteSource struct {
 	peerID PeerID
 	sentry sentryproto.SentryClient
@@ -105,7 +104,7 @@ type remoteSource struct {
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
 //
-// txpool doesn't start any goroutines - "leave concurrency to user" design
+// Run owns the remote frame worker and stops it before closing the pool database
 // txpool has no DB-TX fields - "leave db transactions management to user" design
 // txpool has _chainDB field - but it must maximize local state cache hit-rate - and perform minimum _chainDB transactions
 type TxPool struct {
@@ -121,7 +120,7 @@ type TxPool struct {
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
-	unprocessedRemotePeers  []remoteSource                                  // per-slot peer source for KZG-fail kick
+	unprocessedRemotePeers  []remoteSource                                  // index-aligned with unprocessedRemoteTxns
 	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
@@ -167,6 +166,7 @@ type TxPool struct {
 	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
 	blobs                   *blobStore
 	frameValidationGate     chan struct{}
+	remoteFrames            remoteFrameQueue
 	frameReservations       map[common.Address]frameReservation
 	frameBalanceChanges     map[common.Address]struct{}
 	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
@@ -213,6 +213,10 @@ func New(
 		return nil, err
 	}
 	frameRejections, err := simplelru.NewLRU[string, uint64](10_000, nil)
+	if err != nil {
+		return nil, err
+	}
+	remoteFrames, err := newRemoteFrameQueue()
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +268,7 @@ func New(
 		auths:                   make(map[AuthAndNonce]*metaTxn),
 		blobs:                   newBlobStore(),
 		frameValidationGate:     make(chan struct{}, 1),
+		remoteFrames:            remoteFrames,
 		frameBalanceChanges:     make(map[common.Address]struct{}),
 		frameRejections:         frameRejections,
 		senderLastActivity:      make(map[uint64]uint64),
@@ -357,7 +362,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 	if len(frames.unwound.Txns) > 0 {
-		_, err = p.addNewTxns(ctx, frames.unwound, false)
+		_, err = p.addNewTxns(ctx, frames.unwound, nil)
 	}
 	return err
 }
@@ -543,13 +548,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}()
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
-	p.lock.Lock()
-	batch := *p.unprocessedRemoteTxns
-	p.lock.Unlock()
-
-	// The main loop is the only consumer. Keep this prefix in the queue during
-	// recovery so duplicate detection still covers it and new arrivals can append.
-	_, err = p.addNewTxns(ctx, batch, true)
+	_, err = p.processRemoteBatch(ctx)
 	return err
 }
 
@@ -571,17 +570,10 @@ func (p *TxPool) removeProcessedRemoteTxns(n int) {
 // kickKZGOffenders drops the devp2p peer that delivered each KZG-failed blob txn.
 // Called with p.lock held; the actual PenalizePeer RPC is dispatched off-lock to
 // avoid blocking the pool on sentry I/O.
-func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.DiscardReason) {
+func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.DiscardReason, sources []remoteSource) {
 	var offenders []remoteSource
-	for i, r := range reasons {
-		if r != txpoolcfg.UnmatchedBlobTxExt {
-			continue
-		}
-		if i >= len(p.unprocessedRemotePeers) {
-			continue
-		}
-		src := p.unprocessedRemotePeers[i]
-		if src.peerID == nil || src.sentry == nil {
+	for i, src := range sources {
+		if reasons[i] != txpoolcfg.UnmatchedBlobTxExt || src.peerID == nil || src.sentry == nil {
 			continue
 		}
 		offenders = append(offenders, src)
@@ -633,6 +625,9 @@ func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []b
 		hashes = append(hashes, hash...)
 	}
 	for hash, txnSlot := range p.unprocessedRemoteByHash {
+		if txnSlot.TxType() == FrameTxnType {
+			continue
+		}
 		types = append(types, txnSlot.TxType())
 		sizes = append(sizes, txnSlot.Size)
 		hashes = append(hashes, hash...)
@@ -641,6 +636,9 @@ func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []b
 }
 
 func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) {
+	if _, ok := p.remoteFrames.pending[hashS]; ok {
+		return true, nil
+	}
 	if _, ok := p.unprocessedRemoteByHash[hashS]; ok {
 		return true, nil
 	}
@@ -1024,10 +1022,17 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	src := remoteSource{peerID: peerID, sentry: sentry}
+	now := time.Now()
 	for i, txn := range newTxns.Txns {
 		hashS := string(txn.IDHash[:])
+		if _, ok := p.remoteFrames.pending[hashS]; ok {
+			continue
+		}
 		_, ok := p.unprocessedRemoteByHash[hashS]
 		if ok {
+			continue
+		}
+		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
 			continue
 		}
 		p.unprocessedRemoteByHash[hashS] = txn
@@ -1609,10 +1614,37 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	return p.addNewTxns(ctx, newTxns, false)
+	if err := newTxns.Valid(); err != nil {
+		return nil, err
+	}
+	var batches [2]TxnSlots
+	var indices [2][]int
+	for i, txn := range newTxns.Txns {
+		group := 0
+		if txn.TxType() == FrameTxnType {
+			group = 1
+		}
+		batches[group].Append(txn, newTxns.Senders.At(i), newTxns.IsLocal[i])
+		indices[group] = append(indices[group], i)
+	}
+
+	reasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
+	for group, batch := range batches {
+		if len(batch.Txns) == 0 {
+			continue
+		}
+		batchReasons, err := p.addNewTxns(ctx, batch, nil)
+		if err != nil {
+			return nil, err
+		}
+		for i, reason := range batchReasons {
+			reasons[indices[group][i]] = reason
+		}
+	}
+	return reasons, nil
 }
 
-func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQueue bool) ([]txpoolcfg.DiscardReason, error) {
+func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
 	reasons, err := p.prepareAuthorizations(ctx, newTxns)
 	if err != nil {
 		return nil, err
@@ -1632,18 +1664,12 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 				return err
 			}
 			reasons = preparedReasons
-			var sources []remoteSource
-			if fromRemoteQueue {
-				sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
-			}
 			validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
 			if err != nil {
 				return err
 			}
 			reasons = validatedReasons
-			if fromRemoteQueue {
-				p.kickKZGOffenders(ctx, reasons)
-			}
+			p.kickKZGOffenders(ctx, reasons, sources)
 
 			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
 				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
@@ -1661,9 +1687,6 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 			}
 			reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 			p.notifyPendingTxns(announcements)
-			if fromRemoteQueue {
-				p.removeProcessedRemoteTxns(len(newTxns.Txns))
-			}
 			return nil
 		})
 		if !errors.Is(err, errFrameStateChanged) {
@@ -2540,10 +2563,18 @@ func (p *TxPool) Run(ctx context.Context) error {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return err
 	}
+	frameCtx, cancelFrames := context.WithCancel(ctx)
+	var frames sync.WaitGroup
+	frames.Go(func() { p.runRemoteFrames(frameCtx) })
+	defer func() {
+		cancelFrames()
+		frames.Wait()
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
+			frames.Wait()
 			err := ctx.Err()
 			_, flushErr := p.flush(context.Background()) // need background ctx since the other one is cancelled
 			if flushErr != nil {
@@ -2853,7 +2884,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 	// Validation results and payer reservations are not persisted. Restored
 	// frames must pass admission against the current head, outside the pool lock.
 	if err == nil && len(frames.Txns) > 0 {
-		_, err = p.addNewTxns(ctx, frames, false)
+		_, err = p.addNewTxns(ctx, frames, nil)
 	}
 	return err
 }

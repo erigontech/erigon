@@ -957,7 +957,7 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 					reasons, err = pool.AddLocalTxns(ctx, txns)
 				} else {
 					pool.AddRemoteTxns(ctx, txns, nil, nil)
-					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err = pool.processRemoteBatch(ctx)
 				}
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
