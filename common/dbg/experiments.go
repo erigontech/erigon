@@ -149,6 +149,7 @@ var (
 	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
 	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
 	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
+	FilesPreadPrefault            = EnvBool("FILES_PREAD_PREFAULT", true)
 
 	TraceDeletion = EnvBool("TRACE_DELETION", false)
 

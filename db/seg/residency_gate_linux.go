@@ -79,7 +79,13 @@ func (g *Getter) ensureResident(offset uint64) {
 	if rb.residentRange(first, last) {
 		return // believed resident — go straight to the mapping (a stale bit just faults)
 	}
-	g.d.blockingAsyncRead(fileOffset, length)
+	if dbg.FilesPreadPrefault && length <= pageSize {
+		// A 1-byte pread faults the page in through a syscall, which releases the P.
+		var b [1]byte
+		_, _ = g.d.f.ReadAt(b[:], fileOffset)
+	} else {
+		g.d.blockingAsyncRead(fileOffset, length)
+	}
 	rb.markRange(first, last)
 }
 
@@ -99,6 +105,9 @@ func (d *Decompressor) residencyBitmap() *residencyBitmap {
 	rb := newResidencyBitmap((len(d._mmapHandle) + pageSize - 1) / pageSize)
 	if !d.residency.CompareAndSwap(nil, rb) {
 		return d.residency.Load() // lost the race; the winner owns the scan goroutine
+	}
+	if dbg.FilesPreadPrefault {
+		_ = unix.Fadvise(int(d.f.Fd()), 0, 0, unix.FADV_RANDOM)
 	}
 	go d.refreshResidencyLoop(rb)
 	return rb
