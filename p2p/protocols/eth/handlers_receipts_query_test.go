@@ -103,6 +103,16 @@ func TestAnswerGetReceiptsQuery_TruncatesResponseOnDeadline(t *testing.T) {
 	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
 }
 
+func TestAnswerGetReceiptsQuery_StopsAfterDeadlineOnStoredReceipts(t *testing.T) {
+	f := newReceiptsQueryFixture(t, 3)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	resp, lastBlockIncomplete, err := answerQueryCtx(ctx, t, f)
+	require.NoError(t, err)
+	require.False(t, lastBlockIncomplete)
+	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
+}
+
 func answerQuery(t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
 	t.Helper()
 	return answerQueryCtx(context.Background(), t, f)

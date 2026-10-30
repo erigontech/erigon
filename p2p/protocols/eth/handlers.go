@@ -487,6 +487,9 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		if !complete {
 			return receipts, true, nil
 		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return receipts, false, nil
+		}
 	}
 	return receipts, false, nil
 }
