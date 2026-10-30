@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -90,14 +91,31 @@ func TestAnswerGetReceiptsQuery_EndsResponseWhenBlockUnreadable(t *testing.T) {
 	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
 }
 
+// A deadline hit while producing receipts truncates the response instead of dropping it.
+func TestAnswerGetReceiptsQuery_TruncatesResponseOnDeadline(t *testing.T) {
+	f := newReceiptsQueryFixture(t, 3)
+	f.getter.errs[f.blocks[1].Hash()] = context.DeadlineExceeded
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	resp, lastBlockIncomplete, err := answerQueryCtx(ctx, t, f)
+	require.NoError(t, err)
+	require.False(t, lastBlockIncomplete)
+	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
+}
+
 func answerQuery(t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
+	t.Helper()
+	return answerQueryCtx(context.Background(), t, f)
+}
+
+func answerQueryCtx(ctx context.Context, t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
 	t.Helper()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	opts := ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit}
-	return AnswerGetReceiptsQuery(context.Background(), chain.TestChainBerlinConfig, f.getter, f.br, tx, f.query, nil, opts)
+	return AnswerGetReceiptsQuery(ctx, chain.TestChainBerlinConfig, f.getter, f.br, tx, f.query, nil, opts)
 }
 
 type receiptsQueryFixture struct {

@@ -266,8 +266,9 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 // Limit aggregate replay work even when requests come from different peers or
 // sentries. The time budget is shared by all blocks in one request.
 const (
-	balReplayInterval = time.Second
-	balReplayTimeout  = 500 * time.Millisecond
+	balReplayInterval     = time.Second
+	balReplayTimeout      = 500 * time.Millisecond
+	receiptsReplayTimeout = 500 * time.Millisecond
 )
 
 type balReplayRequest struct {
@@ -463,7 +464,9 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 			return err
 		}
 		defer tx.Rollback()
-		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, p.query, cached, opts)
+		queryCtx, cancel := context.WithTimeout(ctx, receiptsReplayTimeout)
+		defer cancel()
+		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery(queryCtx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, p.query, cached, opts)
 		if err != nil {
 			return err
 		}

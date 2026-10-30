@@ -458,6 +458,10 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		}
 		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
+			// Re-execution may surface the deadline as a non-context error, so check ctx itself.
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return receipts, false, nil
+			}
 			return nil, false, err
 		}
 		if results == nil && b.HeaderNoCopy().ReceiptHash != empty.RootHash {
