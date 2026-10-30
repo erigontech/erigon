@@ -90,7 +90,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	return columns, nil
 }
 
-// rowRecoverySlots bounds the blob rows recovered or extended at once across all callers.
+// rowRecoverySlots bounds the blob rows recovered at once across all callers.
 var rowRecoverySlots = make(chan struct{}, runtime.GOMAXPROCS(0))
 
 // ComputeCells returns the cells of the extended blob.
@@ -114,11 +114,11 @@ func ComputeBlobsCells(blobs [][]byte) ([][]cltypes.Cell, error) {
 		}
 	}
 	cells := make([][]cltypes.Cell, len(blobs))
+	// A separate bound from rowRecoverySlots: a head block's columns must not queue behind a recovery backlog.
 	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
 	for i, blob := range blobs {
-		rowRecoverySlots <- struct{}{}
 		g.Go(func() error {
-			defer func() { <-rowRecoverySlots }()
 			blobCells, err := ComputeCells((*cltypes.Blob)(blob))
 			if err != nil {
 				return fmt.Errorf("blob %d: %w", i, err)
