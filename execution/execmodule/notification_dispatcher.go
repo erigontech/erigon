@@ -80,7 +80,7 @@ func NewDispatcher(
 //   - recentReceipts: receipt/log cache (may be nil)
 //   - finishProgressBefore: Finish stage progress before the sync run
 //   - finishProgressAfter: Finish stage progress after the sync run
-//   - prevUnwindPoint: previous unwind point from the pipeline (may be nil)
+//   - prevUnwindPoint: unwind point of this run, from the FCU or pipeline (may be nil)
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	tx kv.Tx,
@@ -96,19 +96,19 @@ func (d *Dispatcher) Dispatch(
 	}
 
 	if d.events != nil {
+		base := finishProgressBefore
+		if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
+			base = *prevUnwindPoint
+		}
 		var notifyFrom uint64
-		var isUnwind bool
 		switch {
-		case prevUnwindPoint != nil && *prevUnwindPoint != 0 && (*prevUnwindPoint) < finishProgressBefore:
-			notifyFrom = *prevUnwindPoint + 1 // +1: unwind already reverted *prevUnwindPoint; notify starting from the block after
-			isUnwind = true
 		case finishProgressAfter == 0:
 			// Genesis (block 0): notify from block 0.
 			notifyFrom = 0
 		default:
 			// finishProgressAfter can trail finishProgressBefore, and a wrapped
 			// span would clamp to 1024 and notify over a range that never ran.
-			span, underflow := math.SafeSub(finishProgressAfter, finishProgressBefore)
+			span, underflow := math.SafeSub(finishProgressAfter, base)
 			if underflow {
 				span = 0
 			}
@@ -120,8 +120,8 @@ func (d *Dispatcher) Dispatch(
 			return err
 		}
 		if recentReceipts != nil {
-			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo, isUnwind)
-			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo, isUnwind)
+			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo)
+			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo)
 		}
 	}
 

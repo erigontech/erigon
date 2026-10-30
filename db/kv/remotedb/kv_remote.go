@@ -985,6 +985,10 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	}), nil
 }
 
+func (tx *tx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return kv.JoinIndexRanges(q, tx.IndexRange)
+}
+
 func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
