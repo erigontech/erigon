@@ -538,7 +538,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.AccountsDomain)
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
-	domains.SetInMemHistoryReads(false)
 	domains.EnableParaTrieDB(rwDb)
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
@@ -644,7 +643,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
-		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
 		return nil
 	}

@@ -322,7 +322,57 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 	return nil
 }
 
+// probedWrites is the optional probe surface on the mem batch. Declared here rather than imported so
+// execctx keeps no dependency on db/state (which already depends on execctx).
+type probedWrites interface {
+	ProbedWriteKeys() map[kv.Domain][][]byte
+}
+
+// PendingWriteCheckpoint snapshots, for every key this SD is about to flush, the value the SD itself
+// currently holds. Taken immediately BEFORE a commit, it is the expectation a read-back immediately
+// AFTER that commit must satisfy for the DB to be a faithful checkpoint of this SD.
+//
+// Deliberately NOT a correctness model: it asserts only that what was held survives the commit. The
+// torn block defeats every derived check (body, receipts, txNum index all follow the receipts and
+// agree with each other) — only the committed state dissents, and nothing has yet read it at the
+// instant of commit rather than minutes later over RPC.
+//
+// Probe-only. Returns nil when ERIGON_WRITER_KEY_PROBE is off. `limit` caps the keys per domain so
+// the post-commit read stays bounded; the caller is told how many were skipped.
+func (sd *SharedDomains) PendingWriteCheckpoint(tx kv.TemporalTx, limit int) (map[kv.Domain]map[string][]byte, int, error) {
+	pw, ok := sd.mem.(probedWrites)
+	if !ok {
+		return nil, 0, nil
+	}
+	keys := pw.ProbedWriteKeys()
+	if len(keys) == 0 {
+		return nil, 0, nil
+	}
+	out := make(map[kv.Domain]map[string][]byte, len(keys))
+	skipped := 0
+	for d, ks := range keys {
+		vals := make(map[string][]byte, len(ks))
+		for _, k := range ks {
+			if limit > 0 && len(vals) >= limit {
+				skipped++
+				continue
+			}
+			if _, seen := vals[string(k)]; seen {
+				continue
+			}
+			v, _, err := sd.GetLatest(d, tx, k)
+			if err != nil {
+				return nil, 0, fmt.Errorf("pending-write checkpoint: %s: %w", d.String(), err)
+			}
+			vals[string(k)] = append([]byte(nil), v...)
+		}
+		out[d] = vals
+	}
+	return out, skipped, nil
+}
+
 // ResetPendingUpdates clears all pending commitment updates; safe on a nil receiver.
+
 func (sd *SharedDomains) ResetPendingUpdates() {
 	if sd != nil && sd.sdCtx != nil {
 		sd.sdCtx.ResetPendingUpdates()
@@ -581,8 +631,6 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
-func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
-func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before

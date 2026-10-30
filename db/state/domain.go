@@ -427,6 +427,14 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
+// ProbedKeys returns the keys this writer has written, or nil when the probe is off.
+func (w *DomainBufferedWriter) ProbedKeys() map[string]struct{} {
+	if w == nil {
+		return nil
+	}
+	return w.probedKeys
+}
+
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
@@ -437,20 +445,41 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
+	w.collectorName = dt.d.Name.String() + "domain.flush"
+	w.tmpdir = tmpdir
+	w.logger = dt.d.logger
 	if !discard {
-		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+		w.values = etl.NewCollectorWithAllocator(w.collectorName, tmpdir, etl.SmallSortableBuffers, dt.d.logger).
 			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
 
+// writerKeyProbe records, per buffered writer, the KEYS it has written. It exists for one
+// measurement: flushWriters flushes this batch's OWN writer AFTER the newer writers a Merge put into
+// pastDomainWriters, so the older write lands on top — but only where the two touch the SAME KEY.
+// That overlap is the difference between an ordering quirk that never bites and a block that commits
+// as if only its first round had run. Off by default; it allocates a map per writer.
+var writerKeyProbe = dbg.EnvBool("WRITER_KEY_PROBE", false)
+
 type DomainBufferedWriter struct {
 	values *etl.Collector
+
+	// probedKeys is the set of keys this writer wrote, populated only when writerKeyProbe is on. The
+	// commit CHECKPOINT assertion reads it to learn which keys a flush is about to touch, so it can
+	// read them back on a fresh RoTx afterwards.
+	probedKeys map[string]struct{}
 
 	discard bool
 
 	valsTable string
 	largeVals bool
+
+	// collectorName/tmpdir are kept so the values collector can be REBUILT. The values flush is
+	// driven from the batch's merged maps, not from what was collected during execution, and the
+	// entries gathered on the way have to be dropped first.
+	collectorName string
+	tmpdir        string
 
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
@@ -458,6 +487,31 @@ type DomainBufferedWriter struct {
 	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
+
+	logger log.Logger
+}
+
+// ResetValues drops everything collected into the values stream so far and starts a fresh collector.
+// Used by the values-from-maps flush: the entries gathered during execution are the ones that carry
+// the ordering hazard, and the maps already hold the merged final value for every key.
+func (w *DomainBufferedWriter) ResetValues() {
+	if w == nil || w.discard {
+		return
+	}
+	if w.values != nil {
+		w.values.Close()
+	}
+	w.values = etl.NewCollectorWithAllocator(w.collectorName, w.tmpdir, etl.SmallSortableBuffers, w.logger).
+		LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+}
+
+// AddValue collects one key's FINAL value at its txNum. The exported entry point for the
+// values-from-maps flush.
+func (w *DomainBufferedWriter) AddValue(k, v []byte, txNum uint64) error {
+	if w == nil || w.discard {
+		return nil
+	}
+	return w.addValue(k, v, kv.Step(txNum/w.h.ii.stepSize))
 }
 
 func (w *DomainBufferedWriter) Close() {
@@ -470,6 +524,24 @@ func (w *DomainBufferedWriter) Close() {
 	}
 }
 
+// FlushHistory writes only the history half. History is keyed by txNum, so several writers'
+// histories can be applied in any order without one overwriting another — unlike the values half,
+// where only the latest value per (key, step) survives.
+func (w *DomainBufferedWriter) FlushHistory(ctx context.Context, tx kv.RwTx) error {
+	if w == nil || w.discard {
+		return nil
+	}
+	return w.h.Flush(ctx, tx)
+}
+
+// FlushValues writes only the values half and closes the writer.
+func (w *DomainBufferedWriter) FlushValues(ctx context.Context, tx kv.RwTx) error {
+	if w == nil || w.discard {
+		return nil
+	}
+	return w.flushValues(ctx, tx)
+}
+
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -477,6 +549,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	return w.flushValues(ctx, tx)
+}
+
+func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) error {
 
 	if w.largeVals {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
@@ -511,6 +587,12 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	if w.discard {
 		return nil
+	}
+	if writerKeyProbe {
+		if w.probedKeys == nil {
+			w.probedKeys = make(map[string]struct{}, 64)
+		}
+		w.probedKeys[string(k)] = struct{}{}
 	}
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^uint64(step))
 

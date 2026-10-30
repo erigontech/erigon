@@ -170,7 +170,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		return err
 	}
 	defer func() { sd.Close() }() // closes whichever SD is current after the commit loop swaps it
-	sd.SetInMemHistoryReads(false)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -296,7 +295,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 			if sd, err = execctx.NewSharedDomains(ctx, tx, logger1); err != nil {
 				return err
 			}
-			sd.SetInMemHistoryReads(false)
 		}
 
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
@@ -394,7 +392,6 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 			return err
 		}
 		defer sd.Close()
-		sd.SetInMemHistoryReads(false)
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
 		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {

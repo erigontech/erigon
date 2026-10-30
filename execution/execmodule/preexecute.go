@@ -142,7 +142,6 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 	doms := flashUpdate.SD
 	tx := doms.BlockOverlay()
 	tx.UpdateTxn(roTx)
-	doms.SetInMemHistoryReads(true)
 	doms.SetFlashblockAccumulating(false)
 	// The block's Min txNum resolves through the block OVERLAY: on a frontier block the predecessor's MaxTxNum entry
 	// lives only there. minTxNum is the block-START system txNum, and the resume point is the LAST already-executed
@@ -295,16 +294,12 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		// overruns its budget or fails is dropped by closing the child, and the block is exactly what it was
 		// before the round started.
 		//
-		// ⚠ KNOWN LIMITATION, not a design boundary. prefixLen==0 is the block's FIRST CONTENT ROUND — the
-		// atomic open creates the successor as an empty block at the close, and the first round carries into
-		// it with nothing executed yet (see CheckUpdate). A body that does not extend what this SD executed
-		// returns IsUpdate=false and never reaches here at all.
+		// EVERY round is staged, the first content round included: there is no prefixLen==0 exemption.
+		// A body that does not extend what this SD executed returns IsUpdate=false and never reaches here.
 		//
-		// So this excludes the commonest round in the system from staging, which is exactly the round the
-		// valve most needs to cover. Staging it currently fails three marker/tail-drain tests on the driver's
-		// sealed-hold accounting (inFlight.FilterFeed re-offers a sealed body tx) — receipts and body agree at
-		// the seal, so it is not the receipt fold. UNDIAGNOSED. Remove this guard once it is understood; do
-		// not treat it as correct.
+		// ⚠ A comment here used to describe such an exemption as a KNOWN LIMITATION. It had already been
+		// removed from the code and the comment outlived it, which cost a whole wrong hypothesis about
+		// round 1 writing straight into the staging base. Trust the branch below, not this paragraph.
 		stagingBase = flashUpdate.SD
 		if stagingBase != nil {
 			// The round's commitment is parented like the rest of its state: its own context, restored from the
@@ -327,12 +322,9 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		} else {
 			doms = flashUpdate.SD
 		}
-		// Resuming mid-block re-derives any needed prior state via in-memory history reads (GetAsOf). Enable
-		// them on the BLOCK's SD as well as the round's: a staged round's reads fall THROUGH to the block's mem
-		// batch, and a history read that lands there fails outright if the flag is only set on the child
-		// ("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled").
-		flashUpdate.SD.SetInMemHistoryReads(true)
-		doms.SetInMemHistoryReads(true)
+		// Resuming mid-block re-derives any needed prior state via in-memory history reads (GetAsOf), which
+		// work on every mem batch: writes are always kept with their txNums. A staged round's reads fall
+		// THROUGH to the block's mem batch, so both have to be able to answer them.
 		// PRE-EXEC start: tell exec to resume PAST the already-executed prefix instead of at the block
 		// start (which SeekCommitment would report, since fork-validation never commits). resume =
 		// block-min txNum + PrefixLen — skips the start-system tx and the PrefixLen executed REGULAR
@@ -369,7 +361,6 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithParent(parent)); err != nil {
 			return ValidationResult{}, err
 		}
-		doms.SetInMemHistoryReads(false)
 
 		if err = doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 			doms.Close()

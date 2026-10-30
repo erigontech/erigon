@@ -20,9 +20,15 @@ type roundSpec struct {
 
 // The producer seals a block of two rounds, then its successor of one round. Two independent nodes check both: one
 // validates block 1, runs its fork choice, then validates block 2 (as a follower would); the other inserts both
-// before validating either. Both reject block 2 with a wrong trie root in about one run in two — the producer's
-// successor root is wrong, not the checkers. Present at 63bcb69999 and every commit since; unseen live because a
-// producer accepts its own sealed blocks without re-executing them.
+// before validating either.
+//
+// This used to reject block 2 with a wrong trie root in about one run in two. It now passes 15/15.
+//
+// ⚠ Passing does NOT mean a multi-round block commits correctly: the last clause below is the reason.
+// A producer accepts its own sealed blocks without re-executing them, so these checkers never read the
+// producer's committed state, and a block whose commit lost writes still passes here. That is how the
+// torn block hid. To check the commit itself, run with ERIGON_WRITER_KEY_PROBE=true and -v and watch
+// the [checkpoint] assertion — see multi_round_commit_test.go.
 func TestKeptRoundsSealTheRealRoot(t *testing.T) {
 	checkScenario(t, [][]roundSpec{{{0, 0}, {0, 1}}, {{1, 0}}})
 }

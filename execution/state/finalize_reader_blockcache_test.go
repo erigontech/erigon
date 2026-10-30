@@ -59,7 +59,6 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 	t.Parallel()
 
 	_, tx, domains := NewTestRwTx(t)
-	domains.SetInMemHistoryReads(true)
 
 	addr := accounts.InternAddress(common.HexToAddress("0x6be457e04092b28865e0cba84e3b2cfa0f871e67"))
 	addrValue := addr.Value()

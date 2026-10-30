@@ -684,7 +684,6 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
 	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
 	// We Close explicitly only on the early-return error paths below.
-	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 		doms.Close()

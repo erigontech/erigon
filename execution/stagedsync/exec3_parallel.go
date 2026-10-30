@@ -263,24 +263,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			pe.rs.Domains().SetDisableInlineTouchKey(false)
 		}
 	}()
-	// Parallel exec needs in-mem history reads enabled for the calculator
-	// goroutine. Capture the caller's setting first and restore it on exit
-	// — the previous defer-to-false (b72aa7b4f7 #20805) hardcoded the
-	// post-exec value to false regardless of what the caller had set,
-	// which broke post-exec callers (engine API forkchoice_updated's
-	// GetAsOf, post-batch trie-root computation, RPC reads) with
-	// "GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled"
-	// or with partial-state reads. Repro: EEST
-	// test_gas_limit_below_minimum[gas_limit_5000] in parallel mode; same
-	// root cause likely behind mainnet from-0 parallel wrong-trie-root at
-	// block 131578.
-	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
-	pe.rs.Domains().SetInMemHistoryReads(true)
+	// Writes are always kept with their txNums now, so the calculator goroutine's GetAsOf reads work
+	// here with nothing to enable and nothing to restore. This used to save and restore the caller's
+	// inMemHistoryReads, after an earlier version hardcoded it to false on exit and broke every
+	// post-exec reader (forkchoice_updated's GetAsOf, post-batch trie-root computation, RPC) —
+	// suspected behind the mainnet from-0 parallel wrong-trie-root at block 131578.
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
 	defer func() {
 		if !detached {
-			pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 			pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
 		}
 	}()
@@ -1218,7 +1209,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// accumulation rounds are marked isPartial (see nextResult) so the
 				// calculator computes WITHOUT the root check (computeWithoutCheck) while
 				// still folding — the authoritative seal is checked once at the CLOSE.
-				switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
+				// [exec-exit] NAMES WHY A BATCH LEFT EARLY, because the consequences differ sharply and the
+				// caller cannot tell them apart from the error alone. `sizeEst > batchLimit` outranks
+				// `BlockNum >= maxBlockNum`, so a batch can leave on size having never scheduled the block it
+				// was ASKED for; on a fork-validation / pre-exec batch that is fatal — the caller gets
+				// ErrLoopExhausted and the seal fails. live461 measured 1,344 identical
+				// `last=643 max=644 missingResults=0` and the chain was permanently dead nine minutes later.
+				// Logged only for the size-limit exit and for any non-continue on a fork-validation batch, so
+				// it is quiet in normal operation.
+				decision := execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock)
+				if decision == execLoopExitSizeLimit || (pe.isForkValidation && decision != execLoopContinue) {
+					pe.logger.Warn("[exec-exit]", "decision", decision, "blockNum", blockResult.BlockNum,
+						"maxBlockNum", pe.maxBlockNum, "sizeEst", sizeEst, "batchLimit", batchLimit,
+						"forkValidation", pe.isForkValidation, "overBy", int64(sizeEst)-int64(batchLimit))
+				}
+				switch decision {
 				case execLoopExitMaxReached:
 					pe.reachedMaxBlock.Store(true)
 					pe.triggerBatchCommitment(ctx)
@@ -1438,13 +1443,31 @@ const (
 	execLoopExitStopAfter
 )
 
+// String names the decision so a log says WHICH exit was taken rather than an integer.
+func (d execLoopExitDecision) String() string {
+	switch d {
+	case execLoopContinue:
+		return "continue"
+	case execLoopExitSizeLimit:
+		return "size-limit"
+	case execLoopExitMaxReached:
+		return "max-reached"
+	case execLoopExitExhausted:
+		return "exhausted"
+	case execLoopExitStopAfter:
+		return "stop-after"
+	}
+	return "unknown"
+}
+
 // execLoopShouldExit evaluates the exec-loop's per-blockResult exit
 // decision in priority order. Pure function so the precedence is
 // unit-testable; the production code at exec3_parallel.go around line
 // 864 calls this and dispatches based on the returned decision.
 //
 // Priority order (matches production):
-//  1. sizeEst > batchLimit         (size-limit batch flush — most urgent)
+//  1. sizeEst > batchLimit         (size-limit batch flush — most urgent; SKIPPED when batchLimit==0,
+//     which means no budget: the limit is for multi-block recovery)
 //  2. blockResult.BlockNum >= max  (clean end — flip reachedMaxBlock)
 //  3. blockResult.Exhausted != nil (per-cycle dispatch limit hit)
 //  4. dbg.StopAfterBlock crossed   (debug-only halt)
@@ -1455,7 +1478,16 @@ const (
 // the size limit), which is why the test pins the exact precedence.
 // See TestExecLoopShouldExitPriority.
 func execLoopShouldExit(blockResult *blockResult, sizeEst, batchLimit, maxBlockNum, stopAfterBlock uint64) execLoopExitDecision {
-	if sizeEst > batchLimit {
+	// A ZERO BUDGET IS NO BUDGET, NOT A BUDGET OF ZERO. The size limit exists to flush a MULTI-BLOCK
+	// recovery batch; a config that sets no batch size wants no size-based flush at all. Taking the
+	// comparison literally made `sizeEst > 0` true for any block that writes anything, and because this
+	// check outranks "reached the block I was asked for", every batch left after its FIRST block. A
+	// two-block batch then never scheduled the second and returned ErrLoopExhausted, the pre-seal failed
+	// and the slot was lost. Measured on live461: batchLimit=0 on 104 of 107 exits, then 1,344 identical
+	// `last=643 max=644 missingResults=0`, and nine minutes later the chain was permanently dead — the
+	// missed slots had drifted it past the proposer-duties lookahead, which only a proposal can close.
+	// ethconfig.Defaults never sets BatchSize, so every embedder that does not parse CLI flags ran here.
+	if batchLimit > 0 && sizeEst > batchLimit {
 		return execLoopExitSizeLimit
 	}
 	if blockResult.BlockNum >= maxBlockNum {

@@ -48,6 +48,16 @@ import (
 )
 
 type Cfg struct {
+	// lastAttrsHeadRoot is the head the payload_attributes event was last emitted for.
+	//
+	// ⚠ THE EVENT IS PER HEAD, NOT PER LOOP PASS. doForkchoiceRoutine is a stage ActionFunc, so it runs
+	// every iteration and used to re-emit attributes for headSlot+1 unconditionally. While the CL has not
+	// yet imported the block the EL just sealed, the head is unchanged and those re-emissions are
+	// byte-identical, naming the ALREADY-SEALED block's parent. The EL reads that as a parent change,
+	// abandons its in-flight block and orphans its own sealed one — on a single-producer chain, where
+	// there is nothing to re-anchor to. Measured live467/live468: 6 and 9 orphans, each followed by an
+	// empty competing block, a retreating txNum index, and the chain dying.
+	lastAttrsHeadRoot common.Hash
 	rpc                     *rpc.BeaconRpcP2P
 	ethClock                eth_clock.EthereumClock
 	beaconCfg               *clparams.BeaconChainConfig

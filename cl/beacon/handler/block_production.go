@@ -787,6 +787,15 @@ func (a *ApiHandler) produceBeaconBody(
 	}
 	bodyStart := time.Now()
 	var wg sync.WaitGroup
+	// [body-goroutines] MEASUREMENT: wg.Wait() covers EVERY body goroutine, not just the payload one, so
+	// attributing waitMs to the payload is wrong — measured live461: fcu<100ms and poll~680ms against a
+	// 2,927ms wait, so ~2.1s sits in one of the others. Each already times itself at log.Debug, which is
+	// invisible at info verbosity; these carry the same durations out to the one line that names them.
+	// Safe to read after wg.Wait(): the WaitGroup establishes happens-before.
+	var payloadMs, syncAggMs, opsMs, payloadAttMs int64
+	// Inside the payload goroutine: the FCU is <100ms and the poll ~590ms of a 2,929ms payloadMs
+	// (min 2911, max 2944 — a 33ms band, so a FIXED wait, not variable work). These split the rest.
+	var preFcuMs, fcuMsOut, pollMs int64
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(
 		targetSlot / a.beaconChainCfg.SlotsPerEpoch,
 	)
@@ -909,6 +918,7 @@ func (a *ApiHandler) produceBeaconBody(
 		defer wg.Done()
 		start := time.Now()
 		defer func() {
+			payloadMs = time.Since(start).Milliseconds()
 			log.Debug("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
@@ -991,6 +1001,7 @@ func (a *ApiHandler) produceBeaconBody(
 			stateVersion,
 		)
 		fcuMs := time.Since(builderStartedAt).Milliseconds()
+		preFcuMs, fcuMsOut = builderStartedAt.Sub(start).Milliseconds(), fcuMs
 		if fcuMs > 100 {
 			// ⚠ THE FCU-WITH-ATTRIBUTES IS THE EXECUTION LAYER'S AssembleBlock. body-phases showed slot 392
 			// spending 3,383ms waiting on this goroutine while its own poll was only 559ms of that, so ~2.8s
@@ -1007,9 +1018,11 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
+		pollStartedAt := time.Now()
 		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
+		pollMs = time.Since(pollStartedAt).Milliseconds()
 		if !ok {
 			return
 		}
@@ -1199,6 +1212,7 @@ func (a *ApiHandler) produceBeaconBody(
 		defer wg.Done()
 		start := time.Now()
 		defer func() {
+			syncAggMs = time.Since(start).Milliseconds()
 			log.Debug("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
 		}()
 		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
@@ -1217,6 +1231,7 @@ func (a *ApiHandler) produceBeaconBody(
 			if beaconBody.Attestations != nil {
 				attCount = beaconBody.Attestations.Len()
 			}
+			opsMs = time.Since(start).Milliseconds()
 			log.Debug("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "selectedAtts", attCount)
 		}()
 		beaconBody.AttesterSlashings, beaconBody.ProposerSlashings, beaconBody.VoluntaryExits, beaconBody.ExecutionChanges = a.getBlockOperations(
@@ -1239,20 +1254,30 @@ func (a *ApiHandler) produceBeaconBody(
 				if beaconBody.PayloadAttestations != nil {
 					paCount = beaconBody.PayloadAttestations.Len()
 				}
+				payloadAttMs = time.Since(start).Milliseconds()
 				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 			}()
 			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
 		}()
 	}
 	// ⚠ WHERE THE BODY'S TIME GOES. templateMs reached 7,869ms on a 2,000ms slot while the payload poll
-	// accounted for at most 3,224ms of it. This splits the rest: the work this function does itself before
-	// it waits, versus the wait for the payload goroutine.
+	// accounted for at most 3,224ms of it. beforeWaitMs is the work this function does itself; waitMs is
+	// wg.Wait(), which covers EVERY body goroutine — so the per-goroutine figures beside it are what
+	// actually attribute the wait. Reading waitMs as "the payload" was wrong: live461 measured
+	// fcu<100ms and poll~680ms against a 2,927ms wait — payloadMs then showed the payload goroutine IS
+	// the whole wait (siblings 0.5ms and 15.5ms), so the gap is INSIDE it: see preFcuMs/fcuMs/pollMs.
+	// ⚠ This line only fires above 1,000ms, so it samples the SLOW TAIL (~11%), never the norm.
 	beforeWaitMs := time.Since(bodyStart).Milliseconds()
 	waitStart := time.Now()
 	wg.Wait()
 	if total := time.Since(bodyStart); total > 1000*time.Millisecond {
-		log.Warn("[body-phases] produceBeaconBody", "slot", targetSlot, "totalMs", total.Milliseconds(),
-			"beforeWaitMs", beforeWaitMs, "waitMs", time.Since(waitStart).Milliseconds())
+		// ⚠ secondsPerSlot IS THE CHAIN. This log has no chain tag and three chains share one log, so a
+		// 2,898ms wait on the 12s-slot chain (its window opens at 2,900ms, correctly) reads as a 2s-slot
+		// chain overrun. Pooling them cost a whole line of enquiry — split by this before drawing anything.
+		log.Warn("[body-phases] produceBeaconBody", "secondsPerSlot", a.beaconChainCfg.SecondsPerSlot, "slot", targetSlot, "totalMs", total.Milliseconds(),
+			"beforeWaitMs", beforeWaitMs, "waitMs", time.Since(waitStart).Milliseconds(),
+			"payloadMs", payloadMs, "syncAggMs", syncAggMs, "opsMs", opsMs, "payloadAttMs", payloadAttMs,
+			"preFcuMs", preFcuMs, "fcuMs", fcuMsOut, "pollMs", pollMs)
 	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")

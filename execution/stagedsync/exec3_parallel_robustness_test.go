@@ -1202,3 +1202,41 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 		})
 	}
 }
+
+// TestExecLoopShouldExitZeroBatchLimitIsNoLimit pins the meaning of batchLimit==0: NO budget, so the
+// size test is skipped entirely. The size limit exists to flush a MULTI-BLOCK recovery batch, and a
+// config that sets no batch size wants no size-based flush.
+//
+// Read literally, `sizeEst > 0` is true for any block that writes anything, and since the size check
+// outranks "reached the block I was asked for", every batch left after its FIRST block. A two-block
+// batch then never scheduled the second and the apply loop returned ErrLoopExhausted
+// (`last=643 max=644 missingResults=0`), the pre-seal failed, and the slot was lost. Measured on
+// live461: batchLimit=0 on 104 of 107 exits, 1,344 identical exhaustions, and nine minutes later the
+// chain was dead for good — the missed slots had drifted it past the proposer-duties lookahead, which
+// only a proposal can close. ethconfig.Defaults never sets BatchSize, so any embedder that does not
+// parse CLI flags lands here; a multi-chain node had it on two of its three chains.
+func TestExecLoopShouldExitZeroBatchLimitIsNoLimit(t *testing.T) {
+	const huge = uint64(1) << 40
+
+	t.Run("zero limit does not fire on a mid-batch block", func(t *testing.T) {
+		br := &blockResult{BlockNum: 643}
+		// The exact shape that killed the chain: block 643 done, 644 still wanted.
+		if got := execLoopShouldExit(br, huge, 0, 644, 0); got != execLoopContinue {
+			t.Fatalf("batchLimit=0 must impose no limit, so the loop continues to 644; got %v", got)
+		}
+	})
+
+	t.Run("zero limit still lets maxBlockNum win", func(t *testing.T) {
+		br := &blockResult{BlockNum: 644}
+		if got := execLoopShouldExit(br, huge, 0, 644, 0); got != execLoopExitMaxReached {
+			t.Fatalf("want max-reached at the asked-for block, got %v", got)
+		}
+	})
+
+	t.Run("a real limit still fires", func(t *testing.T) {
+		br := &blockResult{BlockNum: 643}
+		if got := execLoopShouldExit(br, huge, 1<<30, 644, 0); got != execLoopExitSizeLimit {
+			t.Fatalf("a configured budget must still flush; got %v", got)
+		}
+	})
+}

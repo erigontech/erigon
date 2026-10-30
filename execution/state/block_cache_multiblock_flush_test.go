@@ -56,7 +56,6 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	t.Parallel()
 
 	_, tx, domains := NewTestRwTx(t)
-	domains.SetInMemHistoryReads(true)
 
 	addr := accounts.InternAddress([20]byte{0x00, 0x00, 0x09, 0x61, 0xef, 0x48})
 	slot := accounts.InternKey([32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01})
@@ -142,7 +141,6 @@ func TestBlockStateCacheFlushPreservesPerTxHistory(t *testing.T) {
 	t.Parallel()
 
 	_, tx, domains := NewTestRwTx(t)
-	domains.SetInMemHistoryReads(true)
 
 	addr := accounts.InternAddress([20]byte{0xc0, 0x1b, 0xa5, 0xeb, 0xeb, 0xeb})
 	addrVal := addr.Value()

@@ -808,7 +808,6 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 		return 0, err
 	}
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {

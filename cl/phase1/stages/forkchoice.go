@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -272,8 +273,8 @@ func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint6
 	// contradicted, forcing a re-open — which re-executes the accumulated body, the one thing the DAG-L2
 	// seal exists to avoid.
 	payloadAttributes := engine_types.PayloadAttributes{
-		Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(s, nextSlot)),
-		PrevRandao:            randaoMix,
+		Timestamp:  hexutil.Uint64(state.ComputeTimestampAtSlot(s, nextSlot)),
+		PrevRandao: randaoMix,
 		// The chain's fee recipient, which every client reads from the same config — so the block
 		// a follower opens has the same coinbase as the one the proposer builds. Zero when the
 		// chain does not configure one, which is the pre-existing behaviour (fees to address(0)).
@@ -312,7 +313,13 @@ func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint6
 	// derive it.
 	if cfg.executionClient != nil {
 		if err := cfg.executionClient.NewPayloadAttrs(ctx, headPayloadHeader.BlockHash, &payloadAttributes); err != nil {
+			// RETURNED, not just logged: the caller records the head as emitted only on success, so a
+			// failed delivery is retried on the next pass. This is an in-process synchronous call — it
+			// cannot be dropped by a queue — but swallowing the error here used to rely on the caller
+			// re-emitting every loop pass, and that unconditional re-emission is exactly what orphaned
+			// sealed blocks. Keeping the retry narrow keeps both properties.
 			log.Warn("failed to deliver payload attributes to execution", "err", err)
+			return fmt.Errorf("%w: %w", errAttrsDelivery, err)
 		}
 	}
 	return nil
@@ -348,6 +355,22 @@ func saveHeadStateOnDisk(cfg *Cfg, headState *state.CachingBeaconState) error {
 // state, so the cheap 40-slot cadence is right. Physical (state-size) gate, not a mode flag. 128 to start
 // (dev runs 64 validators); tune as needed.
 const smallValidatorSetForPerSlotSave = 128
+
+// errAttrsDelivery marks a failure to hand the next block's payload attributes to the execution layer,
+// as opposed to a failure to COMPUTE them. The two want opposite handling, so they must be told apart.
+//
+// An IN-PROCESS execution client is a direct function call: it cannot fail for transport reasons, so a
+// failure means the EL did not open the block and the chain cannot proceed — fatal, surface it. A REMOTE
+// CL only ever sees transport failures (and the wire engine API has no method for this at all, so its
+// NewPayloadAttrs is a no-op), which are retried by simply not recording the head as emitted.
+var errAttrsDelivery = errors.New("payload attributes delivery to execution")
+
+// isInProcessExecution reports whether the execution layer is this same process. Only then is a delivery
+// failure fatal rather than retryable.
+func isInProcessExecution(cfg *Cfg) bool {
+	_, direct := cfg.executionClient.(*execution_client.ExecutionClientDirect)
+	return direct
+}
 
 // saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint
 // sync — every slot for a small (dev/single-node) validator set, else every 40 slots. See the constant.
@@ -390,7 +413,24 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
 	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(ctx, cfg, headSlot, headRoot, headState)
+	// ONE EMISSION PER HEAD. Re-emitting for an unchanged head sends the EL attributes for a block it has
+	// ALREADY SEALED — it cannot tell that from a re-anchor, abandons its in-flight block and orphans the
+	// sealed one. See Cfg.lastAttrsHeadRoot. Single-threaded here: doForkchoiceRoutine is one stage action.
+	if cfg.lastAttrsHeadRoot != headRoot {
+		switch err := emitNextPaylodAttributesEvent(ctx, cfg, headSlot, headRoot, headState); {
+		case err == nil:
+			cfg.lastAttrsHeadRoot = headRoot
+		case errors.Is(err, errAttrsDelivery) && isInProcessExecution(cfg):
+			// FATAL. A direct call cannot fail in transport, so the execution layer did not open the
+			// block: there is nothing to propose and nothing will advance the head. Surfacing it stops
+			// the routine loudly instead of leaving a chain that silently never produces again.
+			return fmt.Errorf("in-process %w", err)
+		default:
+			// Transport to a remote CL, or the attributes could not be COMPUTED. Leave lastAttrsHeadRoot
+			// unset so the next pass retries this head — the retry is the handling.
+			log.Warn("payload attributes not emitted for this head — will retry", "headSlot", headSlot, "err", err)
+		}
+	}
 
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)

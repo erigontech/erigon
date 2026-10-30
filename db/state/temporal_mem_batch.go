@@ -19,9 +19,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -56,11 +54,10 @@ type TemporalMemBatch struct {
 
 	getCacheSize int
 
-	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
-	// queries from in-flight state (needed for RPC reads during live chain-tip execution).
-	// Distinct from DomainBufferedWriter which also holds history in mem but only for writing.
-	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
-	inMemHistoryReads bool
+	// Every write is kept with its txNum: GetAsOf answers time-travel reads from in-flight state by
+	// walking these versions, and the values flush needs the newest write in each STEP. This used to be
+	// optional (inMemHistoryReads, off for the integration and squeeze tooling) — but commit
+	// correctness cannot depend on a tooling switch, so it is unconditional.
 
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
@@ -106,9 +103,8 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           ioMetrics.(*changeset.DomainMetrics),
-		inMemHistoryReads: true,
+		storage: btree2.NewMap[string, []dataWithTxNum](128),
+		metrics: ioMetrics.(*changeset.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -131,9 +127,6 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 
 	return sd
 }
-
-func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads = v }
-func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	// CHECKED BEFORE ANYTHING IS MUTATED. putLatest would otherwise write the in-memory latest value
@@ -197,7 +190,77 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 	return w.PutWithPrev(k, v, txNum, preval)
 }
 
-func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
+// historyStepsRetained is how many of the newest STEPS keep their full per-transaction version list.
+// Older steps are aged down to a single version — their newest write.
+//
+// Both halves are load-bearing:
+//   - the newest write IN EACH STEP must survive, for every step the batch touched: the values table
+//     is keyed by (key, STEP), so dropping a step's representative deletes its entry at flush. That
+//     is what broke the commitment file-conversion tests when a key was emitted only once.
+//   - per-TRANSACTION versions are what GetAsOf walks to answer time-travel reads from in-flight
+//     state. Only recent state is asked for that way; anything older is served from history files on
+//     disk, so keeping full granularity for every step a long batch ever touched buys nothing.
+//
+// Without this a key written across many steps grew without bound in RAM. The maps are now the source
+// for the values flush, and unlike the ETL collectors they used to share that job with, they do not
+// spill — so the growth has to be bounded here.
+//
+// ⚠ THIS BOUND IS AN INTERIM, NOT THE DESIGN. The right model bounds the in-RAM history on BOTH axes
+// — steps AND mem-batch size — while preserving values, so that it can serve transaction-level
+// granularity for the steps still in the DB (not yet collated into files) and let a consistent
+// history be produced from it. A fixed step count does neither: it is blind to batch size, and a
+// batch spanning more steps than this loses per-transaction detail for in-DB steps.
+//
+// It is safe as an interim because DURABLE history does not come from here. Every write still goes
+// through putHistory to the history writer and the history tables with full per-transaction
+// granularity — untouched by any of this. These maps serve in-flight GetAsOf reads and, now, the
+// values flush. So the bound can only cost resolution on in-RAM reads of a long batch's older
+// steps, which is the catchup/tooling case.
+//
+// Sizing this properly is separate Erigon maintenance, not part of the torn-block fix.
+const historyStepsRetained = 2
+
+// appendVersion records one more version of a key, ageing the list out when the write crosses into a
+// new step — the only moment anything can fall outside the retained window, so the scan is rare.
+func (sd *TemporalMemBatch) appendVersion(versions []dataWithTxNum, v dataWithTxNum) []dataWithTxNum {
+	crossedStep := sd.stepSize > 0 && len(versions) > 0 &&
+		versions[len(versions)-1].txNum/sd.stepSize != v.txNum/sd.stepSize
+	versions = append(versions, v)
+	if crossedStep {
+		return ageOutVersions(versions, sd.stepSize)
+	}
+	return versions
+}
+
+// ageOutVersions drops per-transaction detail for steps older than the retained window, keeping each
+// such step's newest write. Versions arrive in txNum order, so one pass in place is enough.
+func ageOutVersions(versions []dataWithTxNum, stepSize uint64) []dataWithTxNum {
+	if stepSize == 0 || len(versions) < 2 {
+		return versions
+	}
+	newestStep := versions[len(versions)-1].txNum / stepSize
+	if newestStep < historyStepsRetained {
+		return versions
+	}
+	cutoff := newestStep - historyStepsRetained
+	kept := versions[:0]
+	for i := range versions {
+		step := versions[i].txNum / stepSize
+		if step > cutoff {
+			kept = append(kept, versions[i]) // inside the window: keep every version
+			continue
+		}
+		if i+1 < len(versions) && versions[i+1].txNum/stepSize == step {
+			continue // superseded within its own step
+		}
+		kept = append(kept, versions[i]) // the step's newest write, its representative
+	}
+	return kept
+}
+
+func (sd *TemporalMemBatch) putLatest(
+
+	domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 
@@ -230,14 +293,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	putValueSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
-			if sd.inMemHistoryReads {
-				sd.storage.Set(key, append(old, valWithStep))
-				putValueSize += len(val)
-			} else {
-				putValueSize += len(val) - len(old[len(old)-1].data)
-				old[0] = valWithStep
-				sd.storage.Set(key, old[:1])
-			}
+			sd.storage.Set(key, sd.appendVersion(old, valWithStep))
+			putValueSize += len(val)
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
@@ -249,14 +306,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		if sd.inMemHistoryReads {
-			sd.domains[domain][key] = append(old, valWithStep)
-			putValueSize += len(val)
-		} else {
-			putValueSize += len(val) - len(old[len(old)-1].data)
-			old[0] = valWithStep
-			sd.domains[domain][key] = old[:1]
-		}
+		sd.domains[domain][key] = sd.appendVersion(old, valWithStep)
+		putValueSize += len(val)
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
@@ -316,9 +367,6 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	if !sd.inMemHistoryReads {
-		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
-	}
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
@@ -783,7 +831,39 @@ func (sd *TemporalMemBatch) takeWritersFrom(other *TemporalMemBatch) {
 	other.pastForkableWriters = nil
 }
 
+// ProbedWriteKeys returns, per domain, the keys every writer in this batch is about to flush — its
+// own and each one taken in by a Merge. Probe-only (ERIGON_WRITER_KEY_PROBE); nil when off.
+//
+// It exists so a commit can be checked as a CHECKPOINT: whatever this batch held at commit must be
+// readable from the DB immediately afterwards, on a fresh RoTx. That is a fidelity question, not a
+// correctness one — it needs no model of what the values SHOULD be, only that they survive.
+func (sd *TemporalMemBatch) ProbedWriteKeys() map[kv.Domain][][]byte {
+	if !writerKeyProbe {
+		return nil
+	}
+	out := make(map[kv.Domain][][]byte, kv.DomainLen)
+	add := func(d kv.Domain, w *DomainBufferedWriter) {
+		for k := range w.ProbedKeys() {
+			out[d] = append(out[d], []byte(k))
+		}
+	}
+	for di, w := range sd.domainWriters {
+		if w != nil {
+			add(kv.Domain(di), w)
+		}
+	}
+	for di, ws := range sd.pastDomainWriters {
+		for _, w := range ws {
+			if w != nil {
+				add(kv.Domain(di), w)
+			}
+		}
+	}
+	return out
+}
+
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error {
+
 	other, ok := o.(*TemporalMemBatch)
 	if !ok {
 		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
@@ -813,23 +893,42 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 		other.latestStateLock.RLock()
 		defer other.latestStateLock.RUnlock()
 
+		// UNION THE VERSIONS, DO NOT REPLACE THEM. maps.Copy would set dst[k] = src[k], dropping every
+		// version THIS batch holds for a key the source also wrote. That loses real state in two ways:
+		//
+		//   - the values table is keyed by (key, STEP), so a key this batch wrote in one step and the
+		//     source wrote in the next owes an entry in BOTH; replacing leaves only the source's, and
+		//     the earlier step's entry is never written.
+		//   - GetAsOf answers time-travel reads by walking these versions, so after a merge it could no
+		//     longer see writes this batch had made itself.
+		//
+		// `other` is newer than everything here by construction (Merge refuses sdTxNum > otherTxNum),
+		// so appending keeps each key's versions in txNum order.
 		for domain, otherEntries := range other.domains {
 			entries := sd.domains[domain]
-			maps.Copy(entries, otherEntries)
+			for k, otherVersions := range otherEntries {
+				if existing, ok := entries[k]; ok && len(existing) > 0 {
+					entries[k] = append(existing, otherVersions...)
+					continue
+				}
+				entries[k] = otherVersions
+			}
 		}
 
 		other.storage.Scan(func(key string, value []dataWithTxNum) bool {
+			if existing, ok := sd.storage.Get(key); ok && len(existing) > 0 {
+				sd.storage.Set(key, append(existing, value...))
+				return true
+			}
 			sd.storage.Set(key, value)
 			return true
 		})
 	}()
 
-	// pastDomainWriters is ordered NEWEST FIRST — flushWriters walks it backwards so the writers land
-	// oldest-to-newest and the newest write to a key is the one that survives. `other` is newer than
-	// everything already here, so its writers go in FRONT, not on the end. Appending instead puts the
-	// oldest writer last, which makes the FIRST round of a multi-round block the one that wins: the block
-	// commits as if only its first round had run, while its root — advanced cumulatively through the shared
-	// commitment context — says otherwise, so nothing catches it.
+	// pastDomainWriters is ordered NEWEST FIRST and flushWriters walks it backwards, so `other`'s
+	// writers go in FRONT. That order no longer decides which write survives — values are flushed from
+	// the maps, one entry per (key, step), and these writers carry HISTORY only, which is keyed by
+	// txNum and cannot overwrite itself. The order is kept because it is the truthful one.
 	//
 	// ⚠ TAKING THE WRITERS IS DESTRUCTIVE, SO IT OBEYS closeOther LIKE EVERY OTHER DESTRUCTIVE STEP
 	// HERE. closeOther=false means the source is a frontier block kept alive as its successor's
@@ -936,6 +1035,24 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 // flushLocked is the body of Flush, factored so the callback path can run it
 // inside latestStateLock without re-acquiring.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
+	// [flush-audit] A MERGED-AWAY BATCH FLUSHES NOTHING, SILENTLY. Merge hands this batch's six domain
+	// writers to another batch and nils them here; flushWriters below then has nothing to write and
+	// returns nil. READS still succeed — sd.domains keeps the values — so every check that reads the
+	// SharedDomains agrees with the body while the COMMITTED state silently loses those writes.
+	//
+	// That is the measured shape: live475 block 1334 passed the seal audit (SD state matched the body)
+	// and the committed chain is 27 transactions short, stranding the sponsor at nonce 12584 with
+	// 18,000 pending. Same on live472 block 1318 and live454 block 2789.
+	if sd.mergedAway.Load() {
+		var present int
+		for _, w := range sd.domainWriters {
+			if w != nil {
+				present++
+			}
+		}
+		log.Warn("[flush-audit] flushing a batch whose writers were handed away by Merge — its writes cannot land",
+			"writersPresent", present, "pastWriterSets", len(sd.pastDomainWriters), "domainsHeld", len(sd.domains))
+	}
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
 			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
@@ -1000,27 +1117,109 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
+	// Writer ORDER no longer decides anything here. It used to: values were replayed from the writer
+	// stack, only the latest value per (key, step) survives, and the writer applied last won — which was
+	// not always the writer holding the newest write, because a batch keeps writing to its own writer
+	// across a merge and its txNum range straddles the merged round's. That committed a two-round block
+	// as if only its first round had run (live477 block 364: sealed 223, committed 128).
+	//
+	// Values now come from the maps, below, one entry per (key, step). The writers carry HISTORY only,
+	// which is keyed by txNum and cannot overwrite itself, so these writers may be flushed in any order.
+	// VALUES COME FROM THE MAPS, NOT FROM THE WRITER STACK.
+	//
+	// Only the latest value per (key, step) survives in the values table, so when several writers hold
+	// the same key the one applied LAST wins. That made correctness depend on the writers being in
+	// txNum order — which a merge cannot guarantee, because a batch keeps writing to its own writer
+	// across one (block-start at tx3, a round merged at tx4, block-end at tx5), so its range straddles
+	// the round's and no ordering of the two is right. A two-round block committed the coinbase as of
+	// tx3 while the batch held tx4; a single-round block never lost anything.
+	//
+	// The maps have no such problem. Every write goes through DomainPut/DomainDel, which record the
+	// value in `domains`/`storage` AND the history in the writer; Merge folds a child's maps in with
+	// maps.Copy, newest winning. That is why reads are right — the parent chain is already in txNum
+	// order — and it means that by flush time this batch's maps hold the merged FINAL value for every
+	// key it wrote. So emit each key ONCE, from the maps, through one collector per domain. There is
+	// no ordering left to get wrong.
+	//
+	// History still comes from the writers: it is keyed by txNum, so no history write can overwrite
+	// another and the order they are applied in does not matter.
 	for _, ws := range sd.pastDomainWriters {
-		for i := len(ws) - 1; i >= 0; i-- {
-			if ws[i] == nil { // defensive: mirror the domainWriters nil guard below (empty-block merge)
+		for i := range ws {
+			if ws[i] == nil {
 				continue
 			}
-			if err := ws[i].Flush(ctx, tx); err != nil {
+			if err := ws[i].FlushHistory(ctx, tx); err != nil {
 				return err
 			}
-			ws[i].Close()
 		}
 	}
-	for di, w := range sd.domainWriters {
+	for _, w := range sd.domainWriters {
 		if w == nil {
 			continue
 		}
-		if err := w.Flush(ctx, tx); err != nil {
+		if err := w.FlushHistory(ctx, tx); err != nil {
 			return err
 		}
-		aggTx.d[di].closeValsCursor() //TODO: why?
+	}
+
+	for di := range sd.domainWriters {
+		w := sd.domainWriters[di]
+		if w == nil {
+			continue
+		}
+		// Drop what execution collected into this writer: it is the per-writer stream the maps replace.
+		w.ResetValues()
+		domain := kv.Domain(di)
+		var err error
+		// ONE ENTRY PER (KEY, STEP), not one per key. The values table is keyed by key AND step, so a
+		// batch spanning a step boundary legitimately leaves an entry in each step it touched, and
+		// collapsing to the final value alone would delete the earlier steps' entries. Within a step
+		// only the newest write survives anyway, so emit the last version in each step, oldest step
+		// first — which is also the order the writers produced them in.
+		emit := func(key string, versions []dataWithTxNum) error {
+			if len(versions) == 0 {
+				return nil
+			}
+			k := common.ToBytesZeroCopy(key)
+			for i, v := range versions {
+				// Keep only the last version within its step.
+				if i+1 < len(versions) && versions[i+1].txNum/sd.stepSize == v.txNum/sd.stepSize {
+					continue
+				}
+				if werr := w.AddValue(k, v.data, v.txNum); werr != nil {
+					return werr
+				}
+			}
+			return nil
+		}
+		if domain == kv.StorageDomain {
+			sd.storage.Scan(func(key string, versions []dataWithTxNum) bool {
+				err = emit(key, versions)
+				return err == nil
+			})
+		} else {
+			for key, versions := range sd.domains[di] {
+				if err = emit(key, versions); err != nil {
+					break
+				}
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if err := w.FlushValues(ctx, tx); err != nil {
+			return err
+		}
+		aggTx.d[di].closeValsCursor()
 		w.Close()
 	}
+	// The past writers' value collectors were never loaded — release them.
+	for _, ws := range sd.pastDomainWriters {
+		for i := range ws {
+			ws[i].Close()
+		}
+	}
+
 	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
 		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
 			return err

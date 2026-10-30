@@ -17,6 +17,7 @@
 package execmodule
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -220,7 +221,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}
 	if currentContext != nil {
-		currentContext.SetInMemHistoryReads(inMemHistoryReads)
 		// Wire the state cache so canonical execution reads benefit from
 		// the per-execution Account/Storage/Code cache. Previously only
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
@@ -585,7 +585,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				roTx.Rollback()
 				return nil, nil, fmt.Errorf("updateForkChoice: new sd after hasMore: %w", err)
 			}
-			freshSD.SetInMemHistoryReads(inMemHistoryReads)
 			freshSD.SetStateCache(e.stateCache)
 			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()
@@ -886,11 +885,32 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	if roTxToCloseBeforeCommit != nil {
 		roTxToCloseBeforeCommit.Rollback()
 	}
+	// [checkpoint] IS THE DB A FAITHFUL CHECKPOINT OF WHAT WE JUST COMMITTED?
+	//
+	// Everything measured so far reads one of two things: the in-memory SD at the close (the seal
+	// audit — it PASSES on a torn block), or committed state minutes later over RPC. Nothing has read
+	// the DB at the INSTANT of commit, on its own transaction. That is the gap the torn block lives
+	// in: body, receipts and the txNum index all derive from the receipts, so they agree with each
+	// other and stay silent, and only committed state can dissent.
+	//
+	// So: snapshot what the SD holds for every key it is about to flush, commit, then open a FRESH
+	// RoTx and read the same keys back. No model of what the values ought to be — just whether they
+	// survived. A mismatch is the commit losing a write, named with the domain, the key and both
+	// values, at the moment it happens.
+	checkpoint, skipped, cpErr := sd.PendingWriteCheckpoint(rwTx, checkpointKeysPerDomain)
+	if cpErr != nil {
+		e.logger.Warn("[checkpoint] could not snapshot pending writes — assertion skipped this commit", "err", cpErr)
+	}
+
 	flushStart := time.Now()
 	if err := sd.Commit(e.bacgroundCtx, rwTx); err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush+commit", common.Round(time.Since(flushStart), 0))
+
+	if len(checkpoint) > 0 {
+		e.assertCommittedCheckpoint(checkpoint, skipped)
+	}
 
 	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {
@@ -909,7 +929,51 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	return timings, nil
 }
 
+// checkpointKeysPerDomain bounds the post-commit read-back. A tear loses a contiguous round's worth
+// of writes, so a cap this size still catches it while keeping the extra read off the slot budget.
+const checkpointKeysPerDomain = 2048
+
+// assertCommittedCheckpoint re-reads, on a FRESH RoTx, every key the SD held at commit, and reports
+// any that did not survive. See the [checkpoint] comment in runForkchoiceFlushCommit.
+//
+// The RoTx is opened AFTER the commit on purpose: a snapshot taken before it would not see the
+// commit at all, and would report every key as missing.
+func (e *ExecModule) assertCommittedCheckpoint(expected map[kv.Domain]map[string][]byte, skipped int) {
+	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx)
+	if err != nil {
+		e.logger.Warn("[checkpoint] could not open a read-back tx — assertion skipped", "err", err)
+		return
+	}
+	defer roTx.Rollback()
+
+	checked, mismatched := 0, 0
+	for d, vals := range expected {
+		for k, want := range vals {
+			got, _, gerr := roTx.GetLatest(d, []byte(k))
+			if gerr != nil {
+				e.logger.Warn("[checkpoint] read-back failed", "domain", d.String(), "key", fmt.Sprintf("%x", k), "err", gerr)
+				continue
+			}
+			checked++
+			if !bytes.Equal(got, want) {
+				mismatched++
+				if mismatched <= 8 { // name the first few; the count carries the rest
+					e.logger.Warn("[checkpoint] NOT A FAITHFUL CHECKPOINT — a write the SD held did not survive the commit",
+						"domain", d.String(), "key", fmt.Sprintf("%x", k),
+						"heldAtCommit", fmt.Sprintf("%x", want), "inDBAfterCommit", fmt.Sprintf("%x", got))
+				}
+			}
+		}
+	}
+	if mismatched > 0 {
+		e.logger.Warn("[checkpoint] COMMIT LOST WRITES", "checked", checked, "mismatched", mismatched, "skippedOverCap", skipped)
+	} else {
+		e.logger.Info("[checkpoint] faithful", "checked", checked, "skippedOverCap", skipped)
+	}
+}
+
 func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
+
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)

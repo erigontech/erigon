@@ -215,7 +215,6 @@ func newReusedDomains(ctx context.Context, emt *ExecModuleTester, logger log.Log
 	if err != nil {
 		return nil, err
 	}
-	doms.SetInMemHistoryReads(false)
 	return doms, nil
 }
 

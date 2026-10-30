@@ -95,10 +95,9 @@ func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 // getAsOf chains blockCache (in-flight parallel block writes, per-field)
 // before sd.GetAsOf (in-batch memory) and ttx.GetAsOf (DB history +
 // snapshot files). Callers requesting only persisted history construct the
-// reader with sd=nil and blockCache=nil. If sd.mem has inMemHistoryReads
-// disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
-// we silently fall through to ttx so the same reader type is usable in
-// both modes.
+// reader with sd=nil and blockCache=nil. An error from sd.GetAsOf falls
+// through to ttx, so the same reader type serves callers that have an
+// in-batch SD and those that do not.
 //
 // blockCache is consulted for the AccountsDomain and StorageDomain only;
 // CodeDomain is not currently cached per block, so for code reads we fall
