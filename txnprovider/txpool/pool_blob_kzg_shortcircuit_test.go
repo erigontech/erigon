@@ -298,7 +298,7 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 		reason txpoolcfg.DiscardReason
 	}{
 		{"total", func(cfg *txpoolcfg.Config) { cfg.TotalBlobPoolLimit = 0 }, txpoolcfg.BlobPoolOverflow},
-		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.Spammer},
+		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.BlobSlotsOverflow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
