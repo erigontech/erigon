@@ -220,7 +220,6 @@ type failOnceEnvelopeForkGraph struct {
 
 type prunedAfterDumpEnvelopeForkGraph struct {
 	*persistingEnvelopeForkGraph
-	dumped bool
 }
 
 type hasEnvelopeCountdownForkGraph struct {
@@ -429,16 +428,12 @@ func (g *failOnceEnvelopeForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelop
 	return g.persistingEnvelopeForkGraph.DumpEnvelopeOnDisk(root, envelope)
 }
 
-func (g *prunedAfterDumpEnvelopeForkGraph) HasEnvelope(root common.Hash) bool {
-	return !g.dumped && g.persistingEnvelopeForkGraph.HasEnvelope(root)
+func (*prunedAfterDumpEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
+	return false
 }
 
-func (g *prunedAfterDumpEnvelopeForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if err := g.persistingEnvelopeForkGraph.DumpEnvelopeOnDisk(root, envelope); err != nil {
-		return err
-	}
-	g.dumped = true
-	return nil
+func (*prunedAfterDumpEnvelopeForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return nil, errors.New("envelope pruned after dump")
 }
 
 func (g *hasEnvelopeCountdownForkGraph) HasEnvelope(root common.Hash) bool {
@@ -1783,6 +1778,25 @@ func TestIndexRepairRewritesWellShapedWrongIndices(t *testing.T) {
 	}))
 }
 
+func requireEnvelopeIndexRows(t *testing.T, db kv.RoDB, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	t.Helper()
+	root := common.Hash(envelope.Message.BeaconBlockRoot)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, blockNumber)
+		require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
+		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+		require.NoError(t, err)
+		require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, envelope.Message.Payload.SlotNumber, root)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, envelope.Signature, signature)
+		return nil
+	}))
+}
+
 func TestIndexRepairSurvivesEnvelopePruning(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234")
 	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
@@ -1812,19 +1826,7 @@ func TestIndexRepairSurvivesEnvelopePruning(t *testing.T) {
 	f.RetryPendingExecutionPayloadEnvelopeIndices(context.Background(), 1)
 
 	require.Empty(t, f.envelopeIndexRepairs.repairs())
-	require.NoError(t, rwdb.View(context.Background(), func(tx kv.Tx) error {
-		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
-		require.NoError(t, err)
-		require.Equal(t, persisted.Message.Payload.BlockNumber, *blockNumber)
-		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
-		require.NoError(t, err)
-		require.Equal(t, persisted.Message.Payload.BlockHash, blockHash)
-		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, persisted.Signature, signature)
-		return nil
-	}))
+	requireEnvelopeIndexRows(t, rwdb, persisted)
 }
 
 func TestIndexRepairReadsPersistedEnvelopeWithoutHeader(t *testing.T) {
@@ -1860,8 +1862,6 @@ func TestIndexRepairReadsPersistedEnvelopeWithoutHeader(t *testing.T) {
 
 func TestIndexRepairSurvivesIndexWritePanic(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	slot := block.Block.Slot
-	signature := envelope.Signature
 	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
 	db := &panickingUpdateDB{
 		RwDB:    mdbxtest.NewTestDB(t, dbcfg.ChainDB),
@@ -1913,19 +1913,7 @@ func TestIndexRepairSurvivesIndexWritePanic(t *testing.T) {
 	f.RetryPendingExecutionPayloadEnvelopeIndices(context.Background(), 1)
 
 	require.Empty(t, f.envelopeIndexRepairs.repairs())
-	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
-		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, envelope.Message.BeaconBlockRoot)
-		require.NoError(t, err)
-		require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
-		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, envelope.Message.BeaconBlockRoot)
-		require.NoError(t, err)
-		require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
-		storedSignature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slot, envelope.Message.BeaconBlockRoot)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, signature, storedSignature)
-		return nil
-	}))
+	requireEnvelopeIndexRows(t, db, envelope)
 }
 
 func TestOnExecutionPayloadIndexesEnvelopePrunedBeforeIndexWrite(t *testing.T) {
@@ -1937,20 +1925,7 @@ func TestOnExecutionPayloadIndexesEnvelopePrunedBeforeIndexWrite(t *testing.T) {
 
 	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
 	require.Empty(t, f.envelopeIndexRepairs.repairs())
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, envelope.Message.BeaconBlockRoot)
-		require.NoError(t, err)
-		require.NotNil(t, blockNumber)
-		require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
-		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, envelope.Message.BeaconBlockRoot)
-		require.NoError(t, err)
-		require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
-		storedSignature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, envelope.Message.BeaconBlockRoot)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, envelope.Signature, storedSignature)
-		return nil
-	}))
+	requireEnvelopeIndexRows(t, db, envelope)
 }
 
 func TestDuplicateDeliveryKeepsKnownIndexValuesAcrossPrune(t *testing.T) {
