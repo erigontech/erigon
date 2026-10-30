@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -36,6 +37,8 @@ import (
 const MetadataApi = "rpc"
 
 const minBatchConcurrency uint = 1
+
+const defaultBatchResponseLimit = int(25 * datasize.MB)
 
 // CodecOption specifies which type of messages a codec supports.
 //
@@ -63,6 +66,7 @@ type Server struct {
 	traceRequests       bool // Whether to print requests at INFO level
 	debugSingleRequest  bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
+	batchResponseLimit  int  // Answer bytes in a batch past which the remaining calls are refused; 0 = unlimited
 	subscriptionLimit   int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
@@ -77,8 +81,9 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	server := &Server{
 		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
-		subscriptionLimit: rpccfg.DefaultSubscriptionLimit,
-		ingress:           ingressBudget{limit: defaultIngressBudget},
+		subscriptionLimit:  rpccfg.DefaultSubscriptionLimit,
+		ingress:            ingressBudget{limit: defaultIngressBudget},
+		batchResponseLimit: defaultBatchResponseLimit,
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -163,7 +168,9 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h.batchResponseLimit = s.batchResponseLimit
+	return h
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
