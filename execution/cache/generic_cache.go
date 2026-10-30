@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"github.com/erigontech/erigon/common/dbg"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -67,6 +68,30 @@ type GenericCache[T any] struct {
 	// in it keeps the retired epoch, and an unwind before the reset would be
 	// lifted with the floor, reviving a dead-fork entry.
 	putStripes [putStripeCount]sync.Mutex
+
+	// door admits a fill only on its key's second fill, so one-shot cold reads never pay an insert.
+	door     [doorBits / 64]atomic.Uint64
+	doorSets atomic.Int64
+}
+
+const doorBits = 1 << 20
+
+// doorPass reports whether h was seen before; it marks h seen otherwise. The set is
+// cleared once half full, so it keeps tracking recent keys only.
+func (c *GenericCache[T]) doorPass(h uint64) bool {
+	i := h & (doorBits - 1)
+	w, bit := &c.door[i/64], uint64(1)<<(i%64)
+	if w.Load()&bit != 0 {
+		return true
+	}
+	w.Or(bit)
+	if c.doorSets.Add(1) > doorBits/2 {
+		c.doorSets.Store(0)
+		for j := range c.door {
+			c.door[j].Store(0)
+		}
+	}
+	return false
 }
 
 const putStripeCount = 256
@@ -173,6 +198,9 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
+	if !overwrite && dbg.CacheDoorkeeper && !c.doorPass(h) {
+		return
+	}
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()

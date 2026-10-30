@@ -37,7 +37,8 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
+	CacheDoorkeeper = EnvBool("CACHE_DOORKEEPER", true)
+	MaxReorgDepth   = EnvUint("MAX_REORG_DEPTH", 96)
 
 	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling
 
