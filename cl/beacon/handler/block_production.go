@@ -101,8 +101,8 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
-	// A published block is normally imported within one block service tick (50 ms) plus OnBlock; the bound only caps
-	// how long a stalled import can delay the block's data columns.
+	// A published block is normally imported within one block service tick (50 ms) plus OnBlock; the bound caps how
+	// long a stalled store can delay the block's data columns and a publish response without the integration wait.
 	publishedBlockStoreWaitBeforeColumns = time.Second
 )
 
@@ -3057,19 +3057,26 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
 		// A Gloas column has no signed block header. Lighthouse requests an unknown block from the column's peer
 		// and penalizes that peer if it cannot serve the block.
+		var storeCtx context.Context
 		if blk.Version() >= clparams.GloasVersion && job != nil {
-			servableCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			var cancel context.CancelFunc
+			storeCtx, cancel = context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			defer cancel()
 			select {
 			case <-servable:
-			case <-servableCtx.Done(): // a failed or slow import must not hold back the columns of an already gossiped block
+			case <-storeCtx.Done(): // a failed or slow import must not hold back the columns of an already gossiped block
 			}
-			cancel()
 		}
 		for i, column := range columnsSidecars {
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
 			if err := a.publishGossip(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnsSidecarsSSZ[i]); err != nil {
 				return err
 			}
+		}
+		// A stateful envelope POST checks the custody columns, so a response without the integration
+		// wait must not overtake their writes.
+		if storeCtx != nil && !waitForIntegration {
+			_ = job.Wait(storeCtx)
 		}
 	}
 

@@ -19,7 +19,10 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -39,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
@@ -373,4 +378,40 @@ func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
 			require.Equal(t, int(f.handler.beaconChainCfg.NumberOfColumns), f.published.columnCount(), "every column is gossiped")
 		})
 	}
+}
+
+// TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
+// does not wait for the store job: a stateful envelope POST that follows must find the custody columns.
+func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	f.handler.sentinel = &nonNilSentinelClient{}
+	imported := make(chan struct{})
+	f.forkchoice.afterOnBlock = func() { close(imported) }
+	f.columns.hook = func(write func() error) error {
+		time.Sleep(50 * time.Millisecond)
+		return write()
+	}
+	f.forkchoice.ForkChoiceStorage.(*forkchoice_mock.ForkChoiceStorageMock).OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		available, err := f.handler.peerDas.IsDataAvailable(f.block.Block.Slot, envelope.Message.BeaconBlockRoot)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return forkchoice.ErrEIP7594ColumnDataNotAvailable
+		}
+		return nil
+	}
+
+	require.NoError(t, f.handler.broadcastBlockWithIntegrationWait(t.Context(), f.block, BlockPublishingValidationGossip, false))
+	requireClosed(t, imported, "the block was not imported")
+
+	body := fmt.Sprintf(`{"message":{"beacon_block_root":"%s","builder_index":"%d"}}`, f.root.Hex(), uint64(clparams.BuilderIndexSelfBuild))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+	f.handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
