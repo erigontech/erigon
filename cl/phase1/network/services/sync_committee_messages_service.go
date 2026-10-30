@@ -131,9 +131,41 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 	// The verdict is awaited without the service or head-state lock, so a gossip message is accepted, and forwarded,
 	// only once its signature is verified, while other messages and head-state writes go on.
 	if msg.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		err = s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	} else {
+		err = s.batchSignatureVerifier.VerifySyncCommitteeMessage(ctx, aggregateVerificationData)
 	}
-	return s.batchSignatureVerifier.VerifySyncCommitteeMessage(ctx, aggregateVerificationData)
+	if err != nil {
+		return err
+	}
+	return s.storeVerifiedMessage(*subnet, msg.SyncCommitteeMessage)
+}
+
+// storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
+// if another message for them was verified at the same time and recorded first.
+func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
+	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok {
+		v := verified.(verifiedSyncCommitteeMessage)
+		if v.beaconBlockRoot != msg.BeaconBlockRoot || v.signature != msg.Signature {
+			return ErrIgnore
+		}
+		return nil
+	}
+	s.seenSyncCommitteeMessages.Store(key, verifiedSyncCommitteeMessage{
+		beaconBlockRoot: msg.BeaconBlockRoot,
+		signature:       msg.Signature,
+	})
+	s.cleanupOldSyncCommitteeMessages()
+	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
+	}); err != nil {
+		log.Debug("failed to add sync committee message to pool", "err", err)
+	}
+	return nil
 }
 
 // checkMessage runs the gossip checks that need no signature and returns the signature to verify, or nil for a
@@ -194,19 +226,7 @@ func (s *syncCommitteeMessagesService) checkMessage(subnet *uint64, msg *SyncCom
 			SignRoots:   [][]byte{signingRoot},
 			Pks:         [][]byte{pubKey},
 			SendingPeer: msg.Receiver,
-			F: func() {
-				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, verifiedSyncCommitteeMessage{
-					beaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
-					signature:       msg.SyncCommitteeMessage.Signature,
-				})
-				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-				// Runs after the locks of checkMessage are released, so it reads the head state again.
-				if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-					return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
-				}); err != nil {
-					log.Debug("failed to add sync committee message to pool", "err", err)
-				}
-			},
+			F:           func() {},
 		}
 		return nil
 	})

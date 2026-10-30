@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -354,4 +355,45 @@ func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.
 	}
 	close(release)
 	require.NoError(t, <-done)
+}
+
+// Of two different valid messages for one validator and slot verified at the same time, only the first is accepted.
+func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidator(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	var entered sync.WaitGroup
+	entered.Add(2)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		entered.Done()
+		entered.Wait()
+		return true, nil
+	}
+	state, msg := getObjectsForSyncCommitteesServiceTest()
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	require.NoError(t, synced.OnHeadState(state))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: common.Hash{0xff},
+			ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
+		},
+		ImmediateVerification: true,
+	}
+
+	results := make(chan error, 2)
+	for _, m := range []*SyncCommitteeMessageForGossip{msg, other} {
+		go func() { results <- s.ProcessMessage(t.Context(), new(uint64), m) }()
+	}
+	var accepted, ignored int
+	for range 2 {
+		if err := <-results; err == nil {
+			accepted++
+		} else {
+			require.ErrorIs(t, err, ErrIgnore)
+			ignored++
+		}
+	}
+	require.Equal(t, 1, accepted)
+	require.Equal(t, 1, ignored)
 }
