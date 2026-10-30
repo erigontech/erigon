@@ -37,8 +37,9 @@ import (
 )
 
 var (
-	KviTailInHeap = EnvBool("KVI_TAIL_IN_HEAP", true)
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
+	KviTailInHeap      = EnvBool("KVI_TAIL_IN_HEAP", true)
+	KviTailInHeapMatch = EnvString("KVI_TAIL_IN_HEAP_MATCH", "")
+	MaxReorgDepth      = EnvUint("MAX_REORG_DEPTH", 96)
 
 	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling
 

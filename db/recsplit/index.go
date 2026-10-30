@@ -198,7 +198,7 @@ func (idx *Index) init() (err error) {
 	// random; on the heap they never fault, only the record page does.
 	recEnd := offset
 	tail := idx.data[recEnd:]
-	if dbg.KviTailInHeap && strings.HasSuffix(idx.fileName, ".kvi") {
+	if dbg.KviTailInHeap && strings.HasSuffix(idx.fileName, ".kvi") && strings.Contains(idx.fileName, dbg.KviTailInHeapMatch) {
 		tail = bytes.Clone(tail)
 	}
 
