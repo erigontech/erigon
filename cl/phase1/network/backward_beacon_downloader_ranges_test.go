@@ -62,6 +62,7 @@ type slowRangeServer struct {
 	held        func(start uint64) bool
 	badPeer     string
 	badStart    uint64
+	emptyStart  uint64
 	sent        atomic.Int32
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
@@ -94,6 +95,9 @@ func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count
 	s.mu.Unlock()
 	if firstCall && s.badPeer != "" && start == s.badStart {
 		return nil, s.badPeer, errors.New("bad response")
+	}
+	if firstCall && s.emptyStart != 0 && start == s.emptyStart {
+		return nil, "peer", nil
 	}
 	served := s.blocks
 	if firstCall && start < s.forkBelow {
@@ -422,4 +426,47 @@ func TestBlockWithRootReturnsFirstMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Same(t, first, blockWithRoot([]*cltypes.SignedBeaconBlock{first, second}, root))
+}
+
+func TestBackwardBeaconDownloaderRetriesFailedPrefetch(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, badPeer: "bad", badStart: 512, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	require.Len(t, downloader.prefetched, 1)
+	require.Equal(t, uint64(512), downloader.prefetched[0].lo)
+	require.Len(t, <-downloader.prefetched[0].blocks, 64)
+}
+
+func TestBackwardBeaconDownloaderRetriesEmptyPrefetch(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, emptyStart: 512, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	require.Len(t, <-downloader.prefetched[0].blocks, 64)
+}
+
+func TestBackwardBeaconDownloaderPrefetchAttemptHasDeadline(t *testing.T) {
+	previousAttemptTimeout := prefetchAttemptTimeout
+	prefetchAttemptTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { prefetchAttemptTimeout = previousAttemptTimeout })
+
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	var heldCalls atomic.Int32
+	server := &slowRangeServer{
+		blocks: blocks,
+		held:   func(start uint64) bool { return start == 512 && heldCalls.Add(1) == 1 },
+		calls:  map[uint64]int{},
+	}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	select {
+	case got := <-downloader.prefetched[0].blocks:
+		require.Len(t, got, 64)
+	case <-time.After(2 * time.Second):
+		t.Fatal("prefetch attempt held by a silent peer outlived its deadline")
+	}
 }
