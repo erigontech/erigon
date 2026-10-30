@@ -65,6 +65,8 @@ var FrameExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c5
 
 var FrameNonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
 
+var FrameRecentRootVerifier = common.HexToAddress("0x8272D9679689Ea2f307140CdF9002D27dC00Ffff")
+
 // Frame is a call with its own caller mode, approval scope and gas budgets.
 // A nil target denotes the transaction sender; creation happens inside a frame call.
 type Frame struct {
@@ -119,6 +121,10 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 
 func (frame *Frame) IsExpiryVerifier() bool {
 	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameExpiryVerifier
+}
+
+func (frame *Frame) IsRecentRootVerifier() bool {
+	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameRecentRootVerifier
 }
 
 func (sig *FrameSignature) VerificationGas() uint64 {

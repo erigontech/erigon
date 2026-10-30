@@ -153,6 +153,7 @@ message StateChange {
   repeated AccountChange changes = 4;
   repeated bytes txs = 5;     // enable by withTransactions=true
   uint64 block_time = 6;
+  optional uint64 slot_number = 7;
 }
 
 message StateChangeRequest {

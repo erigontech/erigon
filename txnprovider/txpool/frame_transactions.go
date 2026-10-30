@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"time"
 
@@ -247,6 +248,12 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
 		})
 	}
+	// Root storage references are derived locally from frame calldata. The RPC
+	// reply supplies the verifier's account dependency.
+	v.RecentRoots, err = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
+	if err != nil {
+		return nil, err
+	}
 	return v, nil
 }
 
@@ -361,11 +368,13 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
-	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
+	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
+	blockTime := head.BlockTime
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
+	rootSlots := make(map[common.Hash]struct{})
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
@@ -382,12 +391,39 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 				}
 			}
+			if address == types.FrameRecentRootVerifier {
+				for _, storage := range change.StorageChanges {
+					rootSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
+				}
+			}
 		}
 	}
 	var pending []*metaTxn
 	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		// Blob costs can change with the block context even when none
+		// of the validation's account dependencies changed.
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
+		if len(previous.RecentRoots) > 0 {
+			valid := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
+			if valid {
+				for _, ref := range previous.RecentRoots {
+					if !ref.ValidAt(*head.SlotNumber + 1) {
+						valid = false
+						break
+					}
+				}
+			}
+			if !valid {
+				p.removeFromSubPool(mt, "recent root outside slot window")
+				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+				continue
+			}
+			// A pre-fork head may still produce a post-fork payload. Recheck
+			// activation through simulation using the same rules as admission.
+			affected = affected || !p.chainConfig.IsBogota(blockTime)
+		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
 		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < blockTime {
@@ -396,11 +432,9 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			continue
 		}
 		keyedNonce := !frame.UsesLegacyNonce()
-		// Blob costs can change with the block context even when none
-		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
-		// Helpers depend only on code. Sender and payer state can also change
-		// approval or funding; creation nonces are checked separately below.
+		// Helper account changes matter only when code changes. Sender and payer
+		// state can also affect approval or funding. Storage slots and creation
+		// nonces are checked separately below.
 		for _, dependency := range previous.Dependencies {
 			changed := codeChanged
 			if dependency == frame.SenderAddress || dependency == previous.Payer {
@@ -427,6 +461,14 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
 			for _, key := range frame.NonceKeys {
 				if _, ok := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]; ok {
+					affected = true
+					break
+				}
+			}
+		}
+		if !affected && len(rootSlots) > 0 {
+			for _, ref := range previous.RecentRoots {
+				if _, ok := rootSlots[ref.StorageKey]; ok {
 					affected = true
 					break
 				}
