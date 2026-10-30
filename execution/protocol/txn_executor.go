@@ -640,8 +640,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	st.gasRemaining, gasUsed.auth, vmerr = st.verifyAuthorities(auths, rules.ChainID, st.gasRemaining)
 	if vmerr == nil {
 		if contractCreation {
-			createNonce, vmerr = st.state.GetNonce(sender)
-			if vmerr != nil {
+			if st.chargeSenderAtValidation {
+				createNonce = st.msg.Nonce()
+			} else if createNonce, vmerr = st.state.GetNonce(sender); vmerr != nil {
 				vmerr = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, vmerr)
 			}
 			if vmerr == nil && createNonce+1 >= createNonce {
