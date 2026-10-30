@@ -286,9 +286,9 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 	}
 }
 
-// A value transfer debits the sender during execution, so charging the sender at
-// validation cannot let it run before its predecessor; only a zero-value call can.
-func TestChargesSenderAtValidationSkipsValueTransfer(t *testing.T) {
+// A value call is charged at validation like a zero-value call: its run does not debit
+// the sender.
+func TestChargesSenderAtValidationIncludesValueCall(t *testing.T) {
 	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
 	to := common.HexToAddress("0xbb")
 	task := func(value uint64) *TxTask {
@@ -297,7 +297,7 @@ func TestChargesSenderAtValidationSkipsValueTransfer(t *testing.T) {
 		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
 	}
 	require.True(t, task(0).ChargesSenderAtValidation(0))
-	require.False(t, task(1).ChargesSenderAtValidation(0))
+	require.True(t, task(1).ChargesSenderAtValidation(0))
 }
 
 // A signature the workers cannot recover makes the block invalid, not the node failed.

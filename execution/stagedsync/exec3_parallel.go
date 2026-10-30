@@ -1338,10 +1338,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				return err
 			}
 			addresses := make([]common.Address, 0, 2)
-			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
-				sender = accounts.NilAddress
-			}
-			if !sender.IsNil() {
+			txTask, ok := t.Task.(*exec.TxTask)
+			chargedAtValidation := ok && txTask.ChargesSenderAtValidation(0)
+			if !sender.IsNil() && !chargedAtValidation {
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
@@ -1352,6 +1351,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 					executor.execTasks.clearPending(i)
 				}
 				prevAccountTx[address] = i
+			}
+			// A sender charged at validation does not wait for its previous tx, but a later
+			// transfer to it still waits for its charge.
+			if chargedAtValidation && !sender.IsNil() {
+				prevAccountTx[sender.Value()] = i
 			}
 		}
 
