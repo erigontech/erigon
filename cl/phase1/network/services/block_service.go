@@ -147,13 +147,21 @@ func newBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Context) e
 
 func newFailedBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Context) error, err error) *blockJob {
 	job := newBlockJob(block, store)
+	job.terminateLocked(err)
+	return job
+}
+
+// The caller must hold job.mu once the job is shared with other goroutines.
+func (job *blockJob) terminateLocked(err error) {
+	if job.terminal {
+		return
+	}
 	job.attempt.err = err
 	job.attempt.generation = job.storeGeneration
 	job.lastAttempt = job.attempt
 	job.completedGeneration = job.storeGeneration
 	job.terminal = true
 	close(job.attempt.done)
-	return job
 }
 
 func (job *blockJob) logStorageErrorOnce(err error) {
@@ -1055,7 +1063,7 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	existing.storeGeneration++
 	existing.scheduleSequence = job.scheduleSequence
 	existing.creationTime = time.Now()
-	// Retry backoff belongs to the store generation that failed.
+	// Execution retry backoff belongs to the store generation that failed.
 	existing.retryAfter = time.Time{}
 	existing.retryDelay = 0
 	if existing.terminal {
@@ -1097,8 +1105,6 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 			return false, err
 		}
-		// OnBlock can return nil for old blocks it ignores. Require acceptance before
-		// writing indices: an unvalidated state root can overwrite another block's mapping.
 		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); !accepted {
 			return false, nil
 		}
@@ -1113,6 +1119,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 			}
 			return true, fmt.Errorf("%w: write block: %w", errBlockStorage, err)
 		}
+		b.emitter.NotifyBlockIndicesChanged()
 	}
 
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
@@ -1146,6 +1153,8 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 func (b *blockService) loop(ctx context.Context) {
 	ticker := time.NewTicker(blockJobsIntervalTick)
 	defer ticker.Stop()
+	var storageRetryAfter time.Time
+	var storageRetryDelay time.Duration
 	for {
 		select {
 		case <-ctx.Done():
@@ -1153,8 +1162,32 @@ func (b *blockService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
+		if time.Now().Before(storageRetryAfter) {
+			continue
+		}
 		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			b.processScheduledBlock(ctx, key.([32]byte), value.(*blockJob), time.Now())
+			root := key.([32]byte)
+			job := value.(*blockJob)
+			now := time.Now()
+			if now.Before(storageRetryAfter) {
+				job.mu.Lock()
+				b.expireScheduledBlockLocked(root, job, now)
+				job.mu.Unlock()
+				return true
+			}
+			attempt := b.processScheduledBlock(ctx, root, job, now)
+			if attempt == nil {
+				return true
+			}
+			if errors.Is(attempt.err, errBlockStorage) {
+				// Storage failures delay further attempts for scheduled jobs, but expiry
+				// checks must still run for the remaining jobs in this scan.
+				storageRetryDelay = min(max(2*storageRetryDelay, blockRetryInitialDelay), blockRetryMaxDelay)
+				storageRetryAfter = time.Now().Add(storageRetryDelay)
+			}
+			if attempt.err == nil {
+				storageRetryDelay = 0
+			}
 			return true
 		})
 	}
@@ -1179,14 +1212,7 @@ func (b *blockService) stopPublishedBlockJobs() {
 		job.mu.Lock()
 		current, ok := b.blocksScheduledForLaterExecution.Load(key)
 		if ok && current == job {
-			if !job.terminal {
-				job.attempt.err = ErrPublishedBlockJobStopped
-				job.attempt.generation = job.storeGeneration
-				job.lastAttempt = job.attempt
-				job.completedGeneration = job.storeGeneration
-				job.terminal = true
-				close(job.attempt.done)
-			}
+			job.terminateLocked(ErrPublishedBlockJobStopped)
 			b.removeScheduledBlock(key.([32]byte), job)
 		}
 		job.mu.Unlock()
@@ -1194,30 +1220,22 @@ func (b *blockService) stopPublishedBlockJobs() {
 	})
 }
 
-func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, job *blockJob, now time.Time) {
-	job.mu.Lock()
-	if job.running {
-		job.mu.Unlock()
-		return
-	}
+func (b *blockService) expireScheduledBlockLocked(key [32]byte, job *blockJob, now time.Time) {
 	// A pending write for an accepted block must survive job expiry until storage succeeds,
 	// even if fork choice has since pruned the block's header.
-	if job.pendingBlockWrite == nil && now.Sub(job.creationTime) > blockJobExpiry {
-		if !job.terminal {
-			job.attempt.err = ErrPublishedBlockJobExpired
-			job.attempt.generation = job.storeGeneration
-			job.lastAttempt = job.attempt
-			job.completedGeneration = job.storeGeneration
-			job.terminal = true
-			close(job.attempt.done)
-		}
-		b.removeScheduledBlock(key, job)
-		job.mu.Unlock()
+	if job.running || job.pendingBlockWrite != nil || now.Sub(job.creationTime) <= blockJobExpiry {
 		return
 	}
-	if job.terminal || now.Before(job.retryAfter) {
+	job.terminateLocked(ErrPublishedBlockJobExpired)
+	b.removeScheduledBlock(key, job)
+}
+
+func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, job *blockJob, now time.Time) *blockJobAttempt {
+	job.mu.Lock()
+	b.expireScheduledBlockLocked(key, job, now)
+	if job.running || job.terminal || now.Before(job.retryAfter) {
 		job.mu.Unlock()
-		return
+		return nil
 	}
 	job.running = true
 	store := job.store
@@ -1274,7 +1292,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
 		job.mu.Unlock()
-		return
+		return attempt
 	}
 	if accepted {
 		if blockErr == nil {
@@ -1288,9 +1306,9 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	close(attempt.done)
 	job.lastAttempt = attempt
 	latest := generation == job.storeGeneration
-	// Preserve the accumulated delay across other errors so alternating failures
+	// Preserve the accumulated execution delay across other errors so alternating failures
 	// cannot bypass backoff.
-	if latest && shouldBackOffBlockRetry(err) {
+	if latest && errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
 		if job.retryDelay == 0 {
 			job.retryDelay = blockRetryInitialDelay
 		} else {
@@ -1317,8 +1335,8 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	job.mu.Unlock()
 	if err != nil {
 		log.Trace("Failed to process and store block", "block", job.block, "error", err)
-		return
 	}
+	return attempt
 }
 
 func (b *blockService) removeScheduledBlock(key [32]byte, job *blockJob) {
