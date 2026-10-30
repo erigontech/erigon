@@ -87,9 +87,10 @@ type blockRefreshForkGraph struct {
 
 type dataAvailabilityForkGraph struct {
 	fork_graph.ForkGraph
-	state    *state2.CachingBeaconState
-	stateErr *error
-	block    *cltypes.SignedBeaconBlock
+	state       *state2.CachingBeaconState
+	stateErr    *error
+	block       *cltypes.SignedBeaconBlock
+	replayCalls *atomic.Int32
 }
 
 type persistedEnvelopeForkGraph struct {
@@ -141,6 +142,18 @@ type boundedGossipValidationForkGraph struct {
 type panickingGossipValidationForkGraph struct {
 	dataAvailabilityForkGraph
 	panicIn string
+}
+
+type currentStateGossipValidationForkGraph struct {
+	dataAvailabilityForkGraph
+}
+
+func (g currentStateGossipValidationForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return g.state
+}
+
+func (currentStateGossipValidationForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
+	panic("unexpected state replay")
 }
 
 type concurrentPayloadValidationForkGraph struct {
@@ -287,6 +300,9 @@ func (g dataAvailabilityForkGraph) CurrentStateLocked(common.Hash) *state2.Cachi
 }
 
 func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
+	if g.replayCalls != nil {
+		g.replayCalls.Add(1)
+	}
 	if g.stateErr != nil && *g.stateErr != nil {
 		return nil, *g.stateErr
 	}
@@ -846,6 +862,17 @@ func TestExecutionPayloadFirstArrivalSurvivesUnrelatedRoots(t *testing.T) {
 	require.True(t, f.ExecutionPayloadReceivedBefore(timelyRoot, timelyArrival.Add(time.Nanosecond)))
 }
 
+func TestRecordExecutionPayloadArrivalKeepsFirstArrival(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.Hash{1}
+	first := time.Unix(1_700_000_000, 0)
+
+	f.RecordExecutionPayloadArrival(root, 10, first)
+	f.RecordExecutionPayloadArrival(root, 10, first.Add(time.Second))
+
+	require.True(t, f.ExecutionPayloadReceivedBefore(root, first.Add(time.Nanosecond)))
+}
+
 func TestExecutionPayloadFirstArrivalPrunesWithForkGraphSlot(t *testing.T) {
 	f := &ForkChoiceStore{}
 	oldRoot := common.Hash{1}
@@ -858,6 +885,23 @@ func TestExecutionPayloadFirstArrivalPrunesWithForkGraphSlot(t *testing.T) {
 
 	require.False(t, f.ExecutionPayloadReceivedBefore(oldRoot, arrival.Add(time.Nanosecond)))
 	require.True(t, f.ExecutionPayloadReceivedBefore(retainedRoot, arrival.Add(time.Nanosecond)))
+}
+
+func TestQueuePendingExecutionPayloadEnvelopeParksEnvelopeAndPreservesArrival(t *testing.T) {
+	_, _, _, envelope := validAdmissionCancellationFixture(t)
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{
+		forkGraph:        dataAvailabilityForkGraph{},
+		pendingEnvelopes: pending,
+	}
+	receivedAt := time.Unix(1_700_000_000, 250_000_000)
+
+	f.QueuePendingExecutionPayloadEnvelope(envelope, receivedAt)
+
+	root := envelope.Message.BeaconBlockRoot
+	require.True(t, f.HasPendingExecutionPayloadEnvelope(root))
+	require.Equal(t, receivedAt, f.pendingEnvelopeReceivedAt(envelope, time.Time{}))
 }
 
 func TestOnExecutionPayloadDoesNotRecordInvalidEarlyEnvelope(t *testing.T) {
@@ -2719,7 +2763,11 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
 	validationDone := make(chan error, 1)
 	go func() { validationDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
-	<-graph.stateRead
+	select {
+	case <-graph.stateRead:
+	case <-time.After(5 * time.Second):
+		t.Fatal("state replay did not start")
+	}
 
 	writerStarted := make(chan struct{})
 	writerDone := make(chan struct{})
@@ -2730,13 +2778,23 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 		store.mu.Unlock()
 		close(writerDone)
 	}()
-	<-writerStarted
-	for store.mu.TryRLock() {
-		store.mu.RUnlock()
+	select {
+	case <-writerStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("finality writer did not start")
+	}
+	select {
+	case <-writerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("finality writer did not finish")
 	}
 	close(releaseState)
-	<-writerDone
-	err := <-validationDone
+	var err error
+	select {
+	case err = <-validationDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("gossip validation did not finish")
+	}
 	require.ErrorIs(t, err, ErrIgnore)
 	require.ErrorContains(t, err, "before finalized slot")
 }
@@ -2751,6 +2809,7 @@ func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraph
 			}
 			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
 			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+			validation := store.envelopeValidationSemaphore()
 			var recovered any
 			func() {
 				defer func() { recovered = recover() }()
@@ -2761,8 +2820,8 @@ func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraph
 			require.True(t, store.mu.TryLock())
 			store.mu.Unlock()
 			select {
-			case store.executionPayloadValidation <- struct{}{}:
-				<-store.executionPayloadValidation
+			case validation <- struct{}{}:
+				<-validation
 			default:
 				t.Fatal("validation capacity leaked after panic")
 			}
@@ -2772,12 +2831,15 @@ func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraph
 
 func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	stateErr := errors.New("temporary state read failure")
 	for _, tc := range []struct {
-		name      string
-		graph     dataAvailabilityForkGraph
-		wantError string
+		name                 string
+		graph                dataAvailabilityForkGraph
+		wantError            string
+		wantStateUnavailable bool
 	}{
-		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state"},
+		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state", wantStateUnavailable: true},
+		{name: "state error", graph: dataAvailabilityForkGraph{block: block, stateErr: &stateErr}, wantError: "state"},
 		{name: "block", graph: dataAvailabilityForkGraph{state: blockState}, wantError: "block"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2787,11 +2849,38 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 			err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
 
 			require.ErrorIs(t, err, ErrIgnore)
+			if tc.wantStateUnavailable {
+				require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
+			} else {
+				require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
+			}
 			require.ErrorContains(t, err, tc.wantError)
 			require.True(t, store.mu.TryLock())
 			store.mu.Unlock()
 		})
 	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforeStateReplay(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	envelope.Message.Payload.BlockHash[0]++
+	var replayCalls atomic.Int32
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: dataAvailabilityForkGraph{
+			state:       blockState,
+			block:       block,
+			replayCalls: &replayCalls,
+		},
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "failed gossip validation")
+	require.Zero(t, replayCalls.Load())
 }
 
 func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {
@@ -2862,6 +2951,27 @@ func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWrit
 	require.True(t, limiterHeld)
 	require.Equal(t, int32(2), graph.stateCopies.Load())
 	require.Equal(t, int32(1), graph.peakCopies.Load())
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipVerifiesCurrentStateWithoutValidationCapacity(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	graph := currentStateGossipValidationForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+	}
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	validation := store.envelopeValidationSemaphore()
+	validation <- struct{}{}
+	defer func() { <-validation }()
+	done := make(chan error, 1)
+	go func() { done <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("current-state gossip validation waited for validation capacity")
+	}
 }
 
 func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) {

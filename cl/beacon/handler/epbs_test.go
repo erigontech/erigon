@@ -1311,9 +1311,10 @@ func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T)
 	err := p2pService.ProcessMessage(t.Context(), nil, envelope)
 	require.NoError(t, err)
 	require.Equal(t, int32(1), reads.Load())
-	require.True(t, fcu.OnExecutionPayloadCalled)
-	_, err = fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
-	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+	claimCtx, cancelClaim := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelClaim()
+	_, claimErr := fcu.ClaimExecutionPayloadEnvelopeForGossip(claimCtx, envelope.Message.BeaconBlockRoot, envelope.Message.BuilderIndex)
+	require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {

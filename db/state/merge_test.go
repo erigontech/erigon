@@ -1269,7 +1269,7 @@ func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 			case "index":
 				h.InvertedIndex._testBuildAccessorHook = cancelBuild
 			case "history":
-				h._testBuildVIHook = cancelBuild
+				h._testBuildVIHook = func() { cancelBuild(nil) }
 			}
 			index, history, err := ht.mergeFiles(ctx, indexFiles, historyFiles, r, ps)
 			require.ErrorIs(t, err, context.Canceled)

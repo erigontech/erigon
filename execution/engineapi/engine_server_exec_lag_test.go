@@ -68,7 +68,7 @@ func newExecLagEngineServer(t *testing.T, loopBlockLimit uint, lag int) (*Engine
 	}
 	peerTracker := p2p.NewPeerTracker(m.Log, nil)
 	peerTracker.PeerConnected(p2p.PeerIdFromUint64(1))
-	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, &p2p.PeerPenalizer{}, peerTracker, t.TempDir())
+	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, peerTracker, t.TempDir())
 	syncCfg := m.Cfg().Sync
 	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, m.BlockReader, m.DB, m.ChainConfig, syncCfg, bbd)
 	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, syncCfg.MaxReorgDepth)

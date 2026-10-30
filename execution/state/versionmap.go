@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -241,7 +242,7 @@ type VersionMap struct {
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
 	originAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = committed-absent)
-	originStorage  sync.Map // originStorageKey -> uint256.Int
+	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
@@ -276,15 +277,23 @@ func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Accoun
 
 // StoreOriginStorage records the committed base slot value write-once.
 func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	vm.originStorage.LoadOrStore(originStorageKey{addr, key}, val)
+	m := vm.originStorage.Load()
+	if m == nil {
+		m = xsync.NewMap[originStorageKey, uint256.Int]()
+		if !vm.originStorage.CompareAndSwap(nil, m) {
+			m = vm.originStorage.Load()
+		}
+	}
+	m.LoadOrStore(originStorageKey{addr, key}, val)
 }
 
 // LoadOriginStorage returns the committed base slot value and whether it was seeded.
 func (vm *VersionMap) LoadOriginStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	if v, ok := vm.originStorage.Load(originStorageKey{addr, key}); ok {
-		return v.(uint256.Int), true
+	m := vm.originStorage.Load()
+	if m == nil {
+		return uint256.Int{}, false
 	}
-	return uint256.Int{}, false
+	return m.Load(originStorageKey{addr, key})
 }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
