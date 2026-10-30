@@ -1791,6 +1791,7 @@ func (pe *parallelExecutor) goReused(f func()) {
 	pe.runWG.Go(func() {
 		for {
 			f()
+			f = nil
 			select {
 			case f = <-idle:
 			case <-done:
