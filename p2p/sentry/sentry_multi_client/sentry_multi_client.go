@@ -464,9 +464,8 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 			return err
 		}
 		defer tx.Rollback()
-		queryCtx, cancel := context.WithTimeout(ctx, receiptsReplayTimeout)
-		defer cancel()
-		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery(queryCtx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, p.query, cached, opts)
+		opts.Deadline = time.Now().Add(receiptsReplayTimeout)
+		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, p.query, cached, opts)
 		if err != nil {
 			return err
 		}

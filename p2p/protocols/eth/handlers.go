@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -338,6 +339,8 @@ type ReceiptQueryOpts struct {
 	// SizeLimit is the maximum encoded response size for per-receipt truncation.
 	// Use NoSizeLimit to disable truncation (eth/68, eth/69).
 	SizeLimit int
+	// Deadline ends the response after the block being served when it passes; zero means none.
+	Deadline time.Time
 }
 
 func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, opts ReceiptQueryOpts) (*CachedReceipts, bool, error) {
@@ -458,10 +461,6 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		}
 		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
-			// Re-execution may surface the deadline as a non-context error, so check ctx itself.
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return receipts, false, nil
-			}
 			return nil, false, err
 		}
 		if results == nil && b.HeaderNoCopy().ReceiptHash != empty.RootHash {
@@ -487,7 +486,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		if !complete {
 			return receipts, true, nil
 		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if !opts.Deadline.IsZero() && time.Now().After(opts.Deadline) {
 			return receipts, false, nil
 		}
 	}

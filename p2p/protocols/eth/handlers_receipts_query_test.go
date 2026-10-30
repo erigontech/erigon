@@ -91,23 +91,10 @@ func TestAnswerGetReceiptsQuery_EndsResponseWhenBlockUnreadable(t *testing.T) {
 	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
 }
 
-// A deadline hit while producing receipts truncates the response instead of dropping it.
-func TestAnswerGetReceiptsQuery_TruncatesResponseOnDeadline(t *testing.T) {
+// A passed deadline still serves the first block, then ends the response.
+func TestAnswerGetReceiptsQuery_StopsAfterDeadline(t *testing.T) {
 	f := newReceiptsQueryFixture(t, 3)
-	f.getter.errs[f.blocks[1].Hash()] = context.DeadlineExceeded
-	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
-	defer cancel()
-	resp, lastBlockIncomplete, err := answerQueryCtx(ctx, t, f)
-	require.NoError(t, err)
-	require.False(t, lastBlockIncomplete)
-	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
-}
-
-func TestAnswerGetReceiptsQuery_StopsAfterDeadlineOnStoredReceipts(t *testing.T) {
-	f := newReceiptsQueryFixture(t, 3)
-	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
-	defer cancel()
-	resp, lastBlockIncomplete, err := answerQueryCtx(ctx, t, f)
+	resp, lastBlockIncomplete, err := answerQueryOpts(t, f, ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit, Deadline: time.Unix(1, 0)})
 	require.NoError(t, err)
 	require.False(t, lastBlockIncomplete)
 	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
@@ -115,17 +102,16 @@ func TestAnswerGetReceiptsQuery_StopsAfterDeadlineOnStoredReceipts(t *testing.T)
 
 func answerQuery(t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
 	t.Helper()
-	return answerQueryCtx(context.Background(), t, f)
+	return answerQueryOpts(t, f, ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit})
 }
 
-func answerQueryCtx(ctx context.Context, t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
+func answerQueryOpts(t *testing.T, f *receiptsQueryFixture, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
 	t.Helper()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	opts := ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit}
-	return AnswerGetReceiptsQuery(ctx, chain.TestChainBerlinConfig, f.getter, f.br, tx, f.query, nil, opts)
+	return AnswerGetReceiptsQuery(context.Background(), chain.TestChainBerlinConfig, f.getter, f.br, tx, f.query, nil, opts)
 }
 
 type receiptsQueryFixture struct {
