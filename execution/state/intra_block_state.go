@@ -2896,7 +2896,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 		return
 	}
 	writes.assertNotArena("flush")
-	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
 // WriteFlushedTo hands the current tx's writes, already flushed to the versionMap, to
@@ -3680,6 +3680,7 @@ func (ibs *IntraBlockState) PublishOrigins() {
 			}
 		}
 	})
+	ws.ReleaseAndReset()
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
