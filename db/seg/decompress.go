@@ -788,6 +788,7 @@ type Getter struct {
 	multiPageReadThreshold     uint64
 	trace                      bool
 	residencyGate              bool
+	preadPrefault              bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {

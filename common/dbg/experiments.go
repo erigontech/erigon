@@ -150,6 +150,8 @@ var (
 	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
 	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 	FilesPreadPrefault            = EnvBool("FILES_PREAD_PREFAULT", true)
+	FilesPreadMinSteps            = EnvInt("FILES_PREAD_MIN_STEPS", 0)
+	FilesPreadFadviseRandom       = EnvBool("FILES_PREAD_FADVISE_RANDOM", true)
 
 	TraceDeletion = EnvBool("TRACE_DELETION", false)
 

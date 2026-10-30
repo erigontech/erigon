@@ -29,4 +29,6 @@ func (*residencyBitmap) stop() {}
 
 func (*Getter) EnableResidencyGate() {}
 
+func (*Getter) EnablePreadPrefault() {}
+
 func (*Getter) ensureResident(uint64) {}

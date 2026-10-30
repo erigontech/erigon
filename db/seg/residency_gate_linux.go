@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/iouring"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var pageSize = os.Getpagesize()
@@ -45,6 +46,11 @@ var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) *
 // EnableResidencyGate routes cold .kv page access through blocking async I/O so
 // the read does not hold the goroutine's P.
 func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
+
+// EnablePreadPrefault faults cold 1-page reads in with a 1-byte pread instead of io_uring.
+func (g *Getter) EnablePreadPrefault() { g.preadPrefault = true }
+
+var preadCount, preadUnseeded atomic.Int64
 
 // residencyRegion returns the page-aligned file extent covering the word at offset,
 // zero length when out of range. Works in file offsets, so a SequentialView reading
@@ -79,10 +85,16 @@ func (g *Getter) ensureResident(offset uint64) {
 	if rb.residentRange(first, last) {
 		return // believed resident — go straight to the mapping (a stale bit just faults)
 	}
-	if dbg.FilesPreadPrefault && length <= pageSize {
+	if g.preadPrefault && length <= pageSize {
 		// A 1-byte pread faults the page in through a syscall, which releases the P.
 		var b [1]byte
 		_, _ = g.d.f.ReadAt(b[:], fileOffset)
+		if !rb.seeded.Load() {
+			preadUnseeded.Add(1)
+		}
+		if n := preadCount.Add(1); n%100_000 == 0 {
+			log.Warn("[dbg] pread prefault", "preads", n, "beforeSeed", preadUnseeded.Load())
+		}
 	} else {
 		g.d.blockingAsyncRead(fileOffset, length)
 	}
@@ -106,7 +118,7 @@ func (d *Decompressor) residencyBitmap() *residencyBitmap {
 	if !d.residency.CompareAndSwap(nil, rb) {
 		return d.residency.Load() // lost the race; the winner owns the scan goroutine
 	}
-	if dbg.FilesPreadPrefault {
+	if dbg.FilesPreadPrefault && dbg.FilesPreadFadviseRandom {
 		_ = unix.Fadvise(int(d.f.Fd()), 0, 0, unix.FADV_RANDOM)
 	}
 	go d.refreshResidencyLoop(rb)
@@ -128,6 +140,7 @@ type residencyBitmap struct {
 
 	mu      sync.Mutex // serializes refresh scans against stop() so no mincore runs after munmap
 	stopped bool
+	seeded  atomic.Bool
 }
 
 func newResidencyBitmap(nPages int) *residencyBitmap {
@@ -156,6 +169,7 @@ func (rb *residencyBitmap) markRange(first, last int) {
 
 func (d *Decompressor) refreshResidencyLoop(rb *residencyBitmap) {
 	d.refreshResidency(rb) // seed
+	rb.seeded.Store(true)
 	t := time.NewTicker(residencyRefresh)
 	defer t.Stop()
 	for {

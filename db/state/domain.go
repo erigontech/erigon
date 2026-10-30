@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1855,8 +1856,12 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 		panic("assert: miss-use " + f.FileName())
 	}
 	g := f.MakeGetter()
-	if dbg.FilesBlockingAsyncIO || dbg.FilesPreadPrefault {
+	pread := dbg.FilesPreadPrefault && kvStepSpan(f.FileName()) >= dbg.FilesPreadMinSteps
+	if dbg.FilesBlockingAsyncIO || pread {
 		g.EnableResidencyGate()
+	}
+	if pread {
+		g.EnablePreadPrefault()
 	}
 	if dbg.FilesBlockingAsyncIOMultiPage {
 		g.EnableMultiPageBlockingAsyncIO()
@@ -2388,4 +2393,19 @@ func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endT
 		}
 		return txNum, v, nil
 	}), nil
+}
+
+// kvStepSpan returns to-from of a "<ver>-<name>.<from>-<to>.kv" file name, 0 when it does not parse.
+func kvStepSpan(name string) int {
+	name = strings.TrimSuffix(name, ".kv")
+	from, to, ok := strings.Cut(name[strings.LastIndexByte(name, '.')+1:], "-")
+	if !ok {
+		return 0
+	}
+	f, err1 := strconv.Atoi(from)
+	t, err2 := strconv.Atoi(to)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	return t - f
 }
