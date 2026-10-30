@@ -121,7 +121,11 @@ func (d *Decompressor) residencyBitmap() *residencyBitmap {
 	if dbg.FilesPreadPrefault && dbg.FilesPreadFadviseRandom {
 		_ = unix.Fadvise(int(d.f.Fd()), 0, 0, unix.FADV_RANDOM)
 	}
-	go d.refreshResidencyLoop(rb)
+	if dbg.FilesResidencyScan {
+		go d.refreshResidencyLoop(rb)
+	} else {
+		rb.seeded.Store(true)
+	}
 	return rb
 }
 

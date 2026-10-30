@@ -152,6 +152,7 @@ var (
 	FilesPreadPrefault            = EnvBool("FILES_PREAD_PREFAULT", true)
 	FilesPreadMinSteps            = EnvInt("FILES_PREAD_MIN_STEPS", 0)
 	FilesPreadFadviseRandom       = EnvBool("FILES_PREAD_FADVISE_RANDOM", true)
+	FilesResidencyScan            = EnvBool("FILES_RESIDENCY_SCAN", true)
 
 	TraceDeletion = EnvBool("TRACE_DELETION", false)
 
