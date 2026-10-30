@@ -308,15 +308,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	defer coreTx.Rollback()
 
-	var poolTx kv.Tx
-	if p.poolDB != nil {
-		poolTx, err = p.poolDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer poolTx.Rollback()
-	}
-
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 
@@ -354,6 +345,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 		p.lock.Unlock()
 	}()
+
+	// Opened under the lock, so the snapshot sees every flush, which commits under the same lock.
+	var poolTx kv.Tx
+	if p.poolDB != nil {
+		poolTx, err = p.poolDB.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer poolTx.Rollback()
+	}
 
 	pendingPre := p.pending.Len()
 	defer func() {
