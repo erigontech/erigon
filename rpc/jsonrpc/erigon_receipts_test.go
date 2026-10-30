@@ -794,3 +794,29 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 	}
 	require.NotZero(t, seen)
 }
+
+func TestErigonGetLogsFromLatest(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	latest := big.NewInt(rpc.LatestBlockNumber.Int64())
+	logs, err := NewErigonAPI(newBaseApiForTest(m), m.DB, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: latest, ToBlock: latest})
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, hexutil.Uint64(2), logs[0].BlockNumber)
+}
