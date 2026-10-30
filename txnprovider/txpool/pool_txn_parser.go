@@ -432,7 +432,8 @@ type PoolBlobBundle struct {
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues.
-// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce).
+// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce)
+// and the deletion records queued for rows rejected on reload (which only use IDHash and SenderID).
 type TxnSlot struct {
 	Txn      types.Transaction // The decoded standard transaction (BlobTx, not BlobTxWrapper, for blob txns)
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
