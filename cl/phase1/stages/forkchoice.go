@@ -572,12 +572,15 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	return nil
 }
 
-// publishHeadBeforeExecution reports whether the head can be served while the execution layer applies it. The block's
-// payload was validated on import, so the update only moves the execution head, and validators read the head as soon
-// as it changes.
+// publishHeadBeforeExecution reports whether the head can be served while the execution layer applies it: only when
+// newPayload already returned VALID for its payload, so the update just moves the execution head. A head imported
+// without newPayload, or not yet validated, waits for the update, which is then its first execution check.
 func publishHeadBeforeExecution(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, headRoot common.Hash, headSlot uint64) bool {
-	return beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) < clparams.GloasVersion &&
-		!store.IsRootOptimistic(headRoot)
+	if beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+		return false
+	}
+	status, ok := store.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	return ok && status == execution_client.PayloadStatusValidated
 }
 
 // we need to generate only one goroutine for pre-caching shuffled set

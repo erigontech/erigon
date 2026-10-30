@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
@@ -71,6 +72,7 @@ func TestForkchoiceRoutinePublishesValidatedHeadWhileExecutionAppliesIt(t *testi
 	entered, release := make(chan struct{}), make(chan struct{})
 	engine := &testExecutionEngine{forkChoiceFn: blockingForkChoice(entered, release)}
 	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false)
+	fixture.cfg.forkChoice.MarkPayloadStatus(fixture.headRoot, common.Hash{0xee}, execution_client.PayloadStatusValidated)
 	published := withForkchoiceRoutineDeps(t, fixture.cfg, fixture.syncedData)
 	done := make(chan error, 1)
 	go func() { done <- doForkchoiceRoutine(t.Context(), log.New(), fixture.cfg, Args{}) }()
@@ -82,10 +84,31 @@ func TestForkchoiceRoutinePublishesValidatedHeadWhileExecutionAppliesIt(t *testi
 	require.NoError(t, receiveWithin(t, done, "the routine did not finish"))
 }
 
+// A forward-synced head skipped newPayload, so the forkchoice update is its first execution check.
+func TestForkchoiceRoutineWaitsForExecutionOnHeadWithoutValidation(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	engine := &testExecutionEngine{forkChoiceFn: blockingForkChoice(entered, release)}
+	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false)
+	published := withForkchoiceRoutineDeps(t, fixture.cfg, fixture.syncedData)
+	done := make(chan error, 1)
+	go func() { done <- doForkchoiceRoutine(t.Context(), log.New(), fixture.cfg, Args{}) }()
+
+	receiveWithin(t, entered, "the forkchoice update was not sent")
+	select {
+	case <-published:
+		t.Fatal("a head without a validation verdict was published before the execution layer applied it")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	require.Equal(t, fixture.headRoot, receiveWithin(t, published, "the head was not published after the execution layer applied it"))
+	require.NoError(t, receiveWithin(t, done, "the routine did not finish"))
+}
+
 func TestForkchoiceRoutineReturnsExecutionErrorAfterPublishingValidatedHead(t *testing.T) {
 	wantErr := errors.New("execution layer rejected the head")
 	engine := &testExecutionEngine{forkChoiceErr: wantErr}
 	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false)
+	fixture.cfg.forkChoice.MarkPayloadStatus(fixture.headRoot, common.Hash{0xee}, execution_client.PayloadStatusValidated)
 	published := withForkchoiceRoutineDeps(t, fixture.cfg, fixture.syncedData)
 
 	err := doForkchoiceRoutine(t.Context(), log.New(), fixture.cfg, Args{})
@@ -107,17 +130,22 @@ func TestPublishHeadBeforeExecutionOnlyForValidatedPreGloasHeads(t *testing.T) {
 	beaconCfg.InitializeForkSchedule()
 	gloasSlot := beaconCfg.GloasForkEpoch * beaconCfg.SlotsPerEpoch
 	for name, tc := range map[string]struct {
-		slot       uint64
-		optimistic bool
-		want       bool
+		slot    uint64
+		status  execution_client.PayloadStatus
+		verdict bool
+		want    bool
 	}{
-		"validated pre-Gloas head":  {slot: gloasSlot - 1, want: true},
-		"optimistic pre-Gloas head": {slot: gloasSlot - 1, optimistic: true},
-		"Gloas head":                {slot: gloasSlot},
+		"validated pre-Gloas head":         {slot: gloasSlot - 1, status: execution_client.PayloadStatusValidated, verdict: true, want: true},
+		"optimistic pre-Gloas head":        {slot: gloasSlot - 1, status: execution_client.PayloadStatusNotValidated, verdict: true},
+		"invalidated pre-Gloas head":       {slot: gloasSlot - 1, status: execution_client.PayloadStatusInvalidated, verdict: true},
+		"pre-Gloas head without a verdict": {slot: gloasSlot - 1},
+		"Gloas head":                       {slot: gloasSlot, status: execution_client.PayloadStatusValidated, verdict: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := mock_services.NewForkChoiceStorageMock(t)
-			store.IsRootOptimisticVal = tc.optimistic
+			if tc.verdict {
+				store.PayloadStatusByRootMap[common.Hash{1}] = tc.status
+			}
 			require.Equal(t, tc.want, publishHeadBeforeExecution(&beaconCfg, store, common.Hash{1}, tc.slot))
 		})
 	}
