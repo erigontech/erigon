@@ -162,6 +162,9 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := sd.Commit(ctx, tx); err != nil {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
+	if e.accum != nil && e.accum.RecentReceipts != nil {
+		e.accum.RecentReceipts.Clear()
+	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)
 	return nil

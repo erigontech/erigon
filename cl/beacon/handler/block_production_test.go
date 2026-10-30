@@ -3105,6 +3105,7 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
 	busy := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
 	failure := errors.New("payload finalization failed")
+	laterFailure := errors.New("later payload failure")
 	for _, tc := range []struct {
 		name         string
 		responses    []error
@@ -3120,6 +3121,12 @@ func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
 		{
 			name:         "builder failure after busy",
 			responses:    []error{busy, failure, chainreader.ErrUnknownPayload},
+			want:         failure,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "first builder failure on equal priority",
+			responses:    []error{failure, laterFailure, chainreader.ErrUnknownPayload},
 			want:         failure,
 			wantLogLevel: "lvl=eror",
 		},
@@ -3151,6 +3158,7 @@ func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
 
 			require.ErrorIs(t, err, tc.want)
 			require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
+			require.NotErrorIs(t, err, laterFailure)
 			if errors.Is(tc.want, context.Canceled) {
 				require.ErrorContains(t, err, "canceled while request remained active")
 			}
@@ -5063,31 +5071,54 @@ func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
 			return nil, nil, nil, nil, context.Canceled
 		})
 
-	// A validator client that times out, or a node shutting down, takes the slot with it. Nothing
-	// failed that anyone can act on.
+	// Caller cancellation alone is not a production failure.
 	require.Error(t, err)
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
 func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "builder failure", err: errors.New("boom")},
+		{name: "builder cancellation", err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Second)}
 
-	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
-		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			calls++
-			if calls == 1 {
-				return nil, nil, nil, nil, errors.New("boom")
+			calls := 0
+			_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					calls++
+					if calls == 1 {
+						return nil, nil, nil, nil, tc.err
+					}
+					cancel()
+					return nil, nil, nil, nil, context.Canceled
+				})
+
+			// The caller may cancel because production is already failing. Reporting only the
+			// cancellation would hide the earlier failure.
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.Equal(t, 2, calls)
+			require.ErrorIs(t, err, tc.err)
+			if errors.Is(tc.err, context.Canceled) {
+				require.ErrorIs(t, err, errProductionOperationCanceled)
+			} else {
+				require.NotErrorIs(t, err, context.Canceled)
 			}
-			cancel()
-			return nil, nil, nil, nil, context.Canceled
-		})
+			require.ErrorContains(t, err, "2 attempts, 1 failed")
+			reportProductionFailure(err, 123)
 
-	// The client may well have given up because production was failing. Reporting only the
-	// cancellation would lose the only sign of it.
-	require.NotErrorIs(t, err, context.Canceled)
-	require.Contains(t, err.Error(), "boom")
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+			require.Contains(t, captured, err.Error())
+		})
+	}
 }
 
 func TestFeeRecipientForProposalUsesGenesisPreferences(t *testing.T) {
@@ -5274,7 +5305,7 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	require.Contains(t, captured, "boom")
 }
 
-func produceBlockWithForkChoiceResult(t *testing.T, forkChoiceErr error) error {
+func produceBlockWithForkChoiceResult(t *testing.T, ctx context.Context, forkChoiceErr error) error {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -5285,18 +5316,18 @@ func produceBlockWithForkChoiceResult(t *testing.T, forkChoiceErr error) error {
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, forkChoiceErr).AnyTimes()
+		Return(nil, forkChoiceErr)
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
 
-	_, err = handler.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 	return err
 }
 
 func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *testing.T) {
 	logs := captureProductionLogs(t)
-	err := produceBlockWithForkChoiceResult(t, context.Canceled)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), context.Canceled)
 	require.ErrorIs(t, err, context.Canceled)
 
 	captured := logs()
@@ -5304,9 +5335,27 @@ func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *tes
 	require.Contains(t, captured, "forkchoice update: canceled while request remained active")
 }
 
+func TestProductionReportsForkChoiceCallerCancellationAtDebug(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := produceBlockWithForkChoiceResult(t, ctx, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, errProductionOperationCanceled)
+	require.ErrorContains(t, err, "forkchoice update: context canceled")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "BlockProduction: abandoned by its caller"), "records:\n"+captured)
+	require.Contains(t, captured, `lvl=dbug msg="BlockProduction: abandoned by its caller"`)
+	require.NotContains(t, captured, "lvl=eror")
+	require.NotContains(t, captured, "lvl=warn")
+	require.NotContains(t, captured, "canceled while request remained active")
+}
+
 func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
 	logs := captureProductionLogs(t)
-	err := produceBlockWithForkChoiceResult(t, chainreader.ErrExecutionBusy)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), chainreader.ErrExecutionBusy)
 	require.ErrorIs(t, err, chainreader.ErrExecutionBusy)
 	require.ErrorContains(t, err, "forkchoice update: execution module is busy")
 
@@ -5317,7 +5366,7 @@ func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
 
 func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
-	err := produceBlockWithForkChoiceResult(t, nil)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), nil)
 	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
 
 	captured := logs()
@@ -5371,9 +5420,9 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	err := produceBlockWithFailingCollection(t, ctx, context.Canceled, nil)
 	require.Error(t, err)
 
-	// A validator client that disconnects, or a node shutting down, is routine. Nothing about it is
-	// actionable, at any layer. The unregistered fee recipient this fixture also warns about is a
-	// separate matter and not what this measures.
+	// Caller cancellation is logged at Debug. During node shutdown, the API drains
+	// active requests even if the builder has stopped, so builder cancellation can
+	// still log at Error. The fee-recipient warning is unrelated to this check.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
 }
 
