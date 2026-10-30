@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
@@ -540,17 +541,17 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			sd = nil
 		}
 	}
-	block, err := s.blockReader.CurrentBlock(tx)
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	header, err := s.blockReader.HeaderByHash(ctx, tx, headHash)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if header == nil {
 		return nil, errors.New("frame validation: no current block")
 	}
-	if expectedHash != (common.Hash{}) && expectedHash != block.Hash() {
+	if expectedHash != (common.Hash{}) && expectedHash != headHash {
 		return nil, status.Error(codes.Aborted, "frame validation head changed")
 	}
-	header := block.HeaderNoCopy()
 	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
