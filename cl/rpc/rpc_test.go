@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
@@ -30,6 +31,7 @@ type blockResponseSentinel struct {
 	sentinelproto.SentinelClient
 	response         []byte
 	bannedPeer       string
+	softBannedPeer   string
 	maxResponseBytes []uint64
 	requestData      [][]byte
 	calls            int
@@ -51,7 +53,11 @@ type emptyColumnResponseSentinel struct {
 	bannedPeer       string
 }
 
-func (s *emptyColumnResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+func (s *emptyColumnResponseSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *emptyColumnResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.bannedPeer = peer.Pid
 	return &sentinelproto.EmptyMessage{}, nil
 }
@@ -449,6 +455,11 @@ func (s *blockResponseSentinel) SendRequest(_ context.Context, req *sentinelprot
 }
 
 func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.softBannedPeer = peer.Pid
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *blockResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.bannedPeer = peer.Pid
 	return &sentinelproto.EmptyMessage{}, nil
 }
@@ -510,7 +521,7 @@ func TestExecutionPayloadEnvelopesByRangeCapsResponseBelowSlotSpan(t *testing.T)
 	require.ErrorContains(t, err, "more chunks than requested")
 	require.Len(t, envelopes, 1)
 	require.Equal(t, "malicious-peer", pid)
-	require.Equal(t, pid, sentinel.bannedPeer)
+	require.Equal(t, pid, sentinel.softBannedPeer)
 }
 
 func TestExecutionPayloadEnvelopesByRangeRejectsOnlyOverflowingRanges(t *testing.T) {
@@ -573,6 +584,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectPreGloasResponseVersion(t *testin
 		}
 		envelopes, pid, err := request(client)
 		require.ErrorContains(t, err, "unsupported execution payload envelope consensus version")
+		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
 		require.Equal(t, "malicious-peer", pid)
 	}
@@ -602,6 +614,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectConfiguredRequestLimit(t *testing
 		client := &BeaconRpcP2P{ctx: context.Background(), sentinel: &blockResponseSentinel{response: response.Bytes()}, beaconConfig: &cfg, ethClock: clock}
 		envelopes, pid, err := request(client)
 		require.ErrorContains(t, err, "builder deposits")
+		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
 		require.Equal(t, "malicious-peer", pid)
 	}
@@ -633,6 +646,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectOversizedDecompressedChunk(t *tes
 		}
 		envelopes, pid, err := request(client)
 		require.ErrorContains(t, err, "received message too big")
+		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
 		require.Equal(t, "malicious-peer", pid)
 	}
@@ -675,12 +689,13 @@ func TestParseResponseDataRejectsOversizedCompressedChunk(t *testing.T) {
 			}
 
 			client := &BeaconRpcP2P{ethClock: clock}
-			chunks, pid, err := client.parseResponseData(&sentinelproto.ResponseData{
+			chunks, pid, err := client.parseResponseData(t.Context(), &sentinelproto.ResponseData{
 				Data: response,
 				Peer: &sentinelproto.Peer{Pid: "malicious-peer"},
 			}, nil)
 			if tc.wantError {
 				require.ErrorContains(t, err, "read error")
+				require.ErrorIs(t, err, ErrInvalidResponse)
 				require.Empty(t, chunks)
 				require.Equal(t, "malicious-peer", pid)
 				return
@@ -707,7 +722,7 @@ func TestParseResponseDataAcceptsMaxPayloadSize(t *testing.T) {
 	var response bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZ(payload), digest[:]...))
 	client := &BeaconRpcP2P{ethClock: clock}
-	chunks, pid, err := client.parseResponseData(&sentinelproto.ResponseData{
+	chunks, pid, err := client.parseResponseData(t.Context(), &sentinelproto.ResponseData{
 		Data: response.Bytes(),
 		Peer: &sentinelproto.Peer{Pid: "peer"},
 	}, nil)
@@ -743,10 +758,11 @@ func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T
 		client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
 		envelopes, pid, err := request(client)
 		require.ErrorContains(t, err, "more chunks than requested")
+		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Len(t, envelopes, 1)
 		require.NotNil(t, envelopes[0].Message)
 		require.Equal(t, "malicious-peer", pid)
-		require.Equal(t, pid, sentinel.bannedPeer)
+		require.Equal(t, pid, sentinel.softBannedPeer)
 	}
 }
 
@@ -772,8 +788,9 @@ func TestExecutionPayloadEnvelopeRequestsRejectResponseForEmptyRequest(t *testin
 		client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
 		envelopes, pid, err := request(client)
 		require.ErrorContains(t, err, "more chunks than requested")
+		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
-		require.Equal(t, pid, sentinel.bannedPeer)
+		require.Equal(t, pid, sentinel.softBannedPeer)
 	}
 }
 
@@ -811,6 +828,44 @@ func TestSendExecutionPayloadEnvelopesByRootReqReturnsValidatedPrefixOnFramingEr
 	})
 }
 
+func TestExecutionPayloadEnvelopeRequestsPreservePrefixOnPeerError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	for _, request := range []struct {
+		name string
+		call func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error)
+	}{
+		{"by-root", func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+			return client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{{1}, {2}})
+		}},
+		{"by-range", func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+			return client.SendExecutionPayloadEnvelopesByRangeReq(t.Context(), 1, 2)
+		}},
+	} {
+		for _, code := range []httpreqresp.ResponseCode{httpreqresp.ResponseCodeInvalidRequest, httpreqresp.ResponseCodeServerError, httpreqresp.ResponseCodeResourceUnavailable} {
+			t.Run(request.name+"/"+code.String(), func(t *testing.T) {
+				var response bytes.Buffer
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&response, valid, digest[:]...))
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZ("unavailable"), byte(code)))
+				sentinel := &blockResponseSentinel{response: response.Bytes()}
+				client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+				envelopes, pid, err := request.call(client)
+				var peerErr *httpreqresp.PeerResponseError
+				require.ErrorAs(t, err, &peerErr)
+				require.Equal(t, code, peerErr.Code)
+				require.NotErrorIs(t, err, ErrInvalidResponse)
+				require.Equal(t, "malicious-peer", pid)
+				require.Len(t, envelopes, 1)
+				require.Empty(t, sentinel.bannedPeer)
+			})
+		}
+	}
+}
+
 func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(
 	t *testing.T,
 	request func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error),
@@ -844,7 +899,7 @@ func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(
 				ethClock:     clock,
 			}
 			envelopes, pid, err := request(client)
-			require.Error(t, err)
+			require.ErrorIs(t, err, ErrInvalidResponse)
 			require.Equal(t, "malicious-peer", pid)
 			require.Len(t, envelopes, 1)
 			require.Equal(t, valid.Message.BeaconBlockRoot, envelopes[0].Message.BeaconBlockRoot)
@@ -896,7 +951,7 @@ func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnError(
 				ethClock:     clock,
 			}
 			envelopes, pid, err := request(client)
-			require.Error(t, err)
+			require.ErrorIs(t, err, ErrInvalidResponse)
 			require.Equal(t, "malicious-peer", pid)
 			require.Len(t, envelopes, 1)
 			require.Equal(t, valid.Message.BeaconBlockRoot, envelopes[0].Message.BeaconBlockRoot)
