@@ -1780,7 +1780,8 @@ const elasticWorkerCap = 4096
 // goReused runs f on an idle task goroutine when there is one, so f starts on an
 // already grown stack instead of growing a new one.
 func (pe *parallelExecutor) goReused(f func()) {
-	// Never wait for a busy goroutine: it can be parked on a task that is not dispatched yet.
+	// If a goroutine is idle and waiting for a task, send f to it by this channel.
+	// If none is idle, start a new goroutine.
 	select {
 	case pe.idleGo <- f:
 		return
