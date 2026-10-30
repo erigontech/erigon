@@ -605,6 +605,13 @@ type createPreparation struct {
 	incrementCallerNonce bool
 }
 
+// CreateWithNonce is Create at the address of the caller's nonce, without reading or
+// incrementing that nonce: the caller is charged at validation.
+func (evm *EVM) CreateWithNonce(caller accounts.Address, code []byte, gas mdgas.MdGas, endowment uint256.Int, nonce uint64, bailout bool) (ret []byte, contractAddr accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
+	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, bailout)
+}
+
 func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address, value uint256.Int, incrementNonce bool, bailout bool, nested bool) (createPreparation, error) {
 	var preparation createPreparation
 	if evm.depth > int(params.CallCreateDepth) {

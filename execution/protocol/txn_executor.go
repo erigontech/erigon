@@ -675,7 +675,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		gasUsed = runtimeGasAccounting{frame: frameGasUsed}
 	} else {
 		frameGas := st.gasRemaining
-		if contractCreation {
+		if contractCreation && st.chargeSenderAtValidation {
+			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.CreateWithNonce(sender, st.data, st.gasRemaining, st.value, st.msg.Nonce(), bailout)
+		} else if contractCreation {
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 		} else {
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
