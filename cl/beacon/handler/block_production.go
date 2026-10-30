@@ -495,12 +495,11 @@ func (a *ApiHandler) feeRecipientForProposal(
 	return common.Address{}
 }
 
-// productionErrorSeverity ranks failures by diagnostic value, not log level.
-// A terminal unknown-payload response takes priority over transient contention.
-type productionErrorSeverity uint8
+type productionErrorPriority uint8
 
+// A terminal unknown-payload response takes priority over transient contention.
 const (
-	productionErrorNone productionErrorSeverity = iota
+	productionErrorNone productionErrorPriority = iota
 	productionErrorCanceled
 	productionErrorBusy
 	productionErrorUnknownPayload
@@ -510,7 +509,7 @@ const (
 
 var errProductionOperationCanceled = errors.New("canceled while request remained active")
 
-func classifyProductionError(err error) productionErrorSeverity {
+func classifyProductionError(err error) productionErrorPriority {
 	switch {
 	case err == nil:
 		return productionErrorNone
