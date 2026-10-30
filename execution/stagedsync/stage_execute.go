@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -795,7 +796,7 @@ func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
 	}
 	if dbg.Exec3SerialBALMinEntriesPerMgas > 0 && txNums <= uint64(dbg.Exec3SerialBALMaxTxs) {
 		if h := rawdb.ReadHeaderByNumber(tx, blockNum); h != nil && h.BlockAccessListHash != nil && h.GasUsed > 0 {
-			if bal, err := rawdb.ReadBlockAccessList(tx, h.Hash(), blockNum); err == nil && balEntries(bal)*1_000_000/h.GasUsed >= uint64(dbg.Exec3SerialBALMinEntriesPerMgas) {
+			if raw, err := rawdb.ReadBlockAccessListBytes(tx, h.Hash(), blockNum); err == nil && balEntries(raw)*1_000_000/h.GasUsed >= uint64(dbg.Exec3SerialBALMinEntriesPerMgas) {
 				return true
 			}
 		}
@@ -807,10 +808,30 @@ func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
 	return h != nil && (h.BlockAccessListHash == nil || dbg.Exec3SerialBAL) && h.GasUsed/txNums <= uint64(dbg.Exec3SerialMaxAvgGas)
 }
 
-func balEntries(bal types.BlockAccessList) uint64 {
-	n := uint64(len(bal))
-	for i := range bal {
-		n += uint64(len(bal[i].StorageChanges) + len(bal[i].StorageReads))
+// balEntries counts accounts plus storage slots of an RLP-encoded BAL without decoding it.
+func balEntries(raw []byte) uint64 {
+	accs, _, err := rlp.SplitList(raw)
+	if err != nil {
+		return 0
+	}
+	var n uint64
+	for len(accs) > 0 {
+		var acc []byte
+		if acc, accs, err = rlp.SplitList(accs); err != nil {
+			return n
+		}
+		n++
+		if _, _, acc, err = rlp.Split(acc); err != nil {
+			return n
+		}
+		for range 2 {
+			var slots []byte
+			if slots, acc, err = rlp.SplitList(acc); err != nil {
+				return n
+			}
+			c, _ := rlp.CountValues(slots)
+			n += uint64(c)
+		}
 	}
 	return n
 }
