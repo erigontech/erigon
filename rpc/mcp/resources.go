@@ -147,7 +147,9 @@ func (e *ErigonMCPServer) handleResourceNetworkStatus(ctx context.Context, req m
 
 	// eth_syncing returns false when fully synced, or a JSON object with progress.
 	var syncResult json.RawMessage
-	_ = e.client.CallContext(ctx, &syncResult, "eth_syncing")
+	if err := e.client.CallContext(ctx, &syncResult, "eth_syncing"); err != nil {
+		return nil, fmt.Errorf("eth_syncing: %w", err)
+	}
 	var syncStatus any = false
 	if syncResult != nil && string(syncResult) != "false" {
 		syncStatus = syncResult

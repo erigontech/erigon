@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -55,6 +56,21 @@ var (
 var publishedBlockJobSequence atomic.Uint64
 
 const maxConcurrentBlockValidationContexts = 4
+
+// AcceptedBlockWriteError carries the exact signed copy accepted by fork choice
+// so a failed database write can be retried even after its header is pruned.
+type AcceptedBlockWriteError struct {
+	Block *cltypes.SignedBeaconBlock
+	Err   error
+}
+
+func (e *AcceptedBlockWriteError) Error() string {
+	return fmt.Sprintf("%s: %v", errBlockStorage, e.Err)
+}
+
+func (e *AcceptedBlockWriteError) Unwrap() error { return e.Err }
+
+func (e *AcceptedBlockWriteError) Is(target error) bool { return target == errBlockStorage }
 
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
@@ -78,6 +94,10 @@ type blockJob struct {
 	retryDelay          time.Duration
 	storageErrorLogged  bool
 	finishPayloadImport func()
+	elColumnsStarted    atomic.Bool
+	// Block roots exclude the block signature, so different signed copies can share a job.
+	// Retain the accepted copy to preserve its validated signature on retries.
+	pendingBlockWrite *cltypes.SignedBeaconBlock
 }
 
 type blockJobAttempt struct {
@@ -180,10 +200,12 @@ type blockValidationContext struct {
 }
 
 type blockService struct {
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	syncedData      *synced_data.SyncedDataManager
-	ethClock        eth_clock.EthereumClock
-	beaconCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	engine               execution_client.ExecutionEngine
+	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
+	syncedData           *synced_data.SyncedDataManager
+	ethClock             eth_clock.EthereumClock
+	beaconCfg            *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, seenBlock]
@@ -208,12 +230,14 @@ func NewBlockService(
 	ctx context.Context,
 	db kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	engine execution_client.ExecutionEngine,
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
 	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	b.engine = engine
 	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
 	return b
@@ -235,7 +259,7 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
-	return &blockService{
+	b := &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
 		ethClock:        ethClock,
@@ -248,6 +272,10 @@ func newBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
+	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
+	}
+	return b
 }
 
 func (b *blockService) Names() []string {
@@ -274,19 +302,24 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg, nil, false) }, true); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg, nil, false, false) }, true); err != nil {
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
-	if err := b.processAndStoreBlock(ctx, msg); err != nil {
+	b.startELColumnsImport(ctx, msg)
+	accepted, err := b.processAndStoreBlock(ctx, msg, false)
+	if err != nil {
 		if waitsForBlockDependency(err) {
 			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}
 		// Retain canceled imports too: gossip validation has already marked the block as seen.
 		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
-			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true)
+			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true, accepted)
 			job.logStorageErrorOnce(err)
+			if accepted {
+				return nil
+			}
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		if errors.Is(err, forkchoice.ErrBlockInvalid) {
@@ -295,6 +328,45 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	return nil
+}
+
+// importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
+// (engine_getBlobsV2), so the block need not wait for them on gossip.
+func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments.Len() == 0 || b.engine == nil {
+		return
+	}
+	peerDas := b.forkchoiceStore.GetPeerDas()
+	if peerDas == nil {
+		return
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return
+	}
+	if available, err := peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || available {
+		return
+	}
+	versionedHashes := make([]common.Hash, 0, block.Block.Body.BlobKzgCommitments.Len())
+	for i := range block.Block.Body.BlobKzgCommitments.Len() {
+		hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i)))
+		if err != nil {
+			return
+		}
+		versionedHashes = append(versionedHashes, hash)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(b.beaconCfg.SecondsPerSlot)*time.Second)
+	defer cancel()
+	blobs, proofs, err := b.engine.GetBlobs(ctx, versionedHashes, block.Version())
+	if err != nil {
+		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
+		return
+	}
+	if err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs); err != nil {
+		log.Debug("[blockService] columns not built from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
+		return
+	}
+	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }
 
 func waitsForBlockDependency(err error) bool {
@@ -889,15 +961,15 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // ScheduleBlockForLaterProcessing schedules a block for later processing.
 func (b *blockService) ScheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	b.scheduleBlockForLaterProcessing(block, nil, true)
+	b.scheduleBlockForLaterProcessing(block, nil, true, false)
 }
 
 func (b *blockService) SchedulePublishedBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) PublishedBlockJob {
-	job, generation := b.scheduleBlockForLaterProcessing(block, store, true)
+	job, generation := b.scheduleBlockForLaterProcessing(block, store, true, false)
 	return &publishedBlockJobHandle{job: job, generation: generation}
 }
 
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error, holdImport bool) (*blockJob, uint64) {
+func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error, holdImport, accepted bool) (*blockJob, uint64) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -912,6 +984,9 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	}
 
 	job := newBlockJob(block, store)
+	if accepted {
+		job.pendingBlockWrite = block
+	}
 	jobGeneration := job.storeGeneration
 	b.blockJobsLifecycleMu.RLock()
 	defer b.blockJobsLifecycleMu.RUnlock()
@@ -952,6 +1027,9 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 		existing.finishPayloadImport = job.finishPayloadImport
 		job.finishPayloadImport = nil
 	}
+	if job.pendingBlockWrite != nil {
+		existing.pendingBlockWrite = job.pendingBlockWrite
+	}
 	if store == nil {
 		return existing, existing.storeGeneration
 	}
@@ -972,19 +1050,23 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	return existing, existing.storeGeneration
 }
 
-// processAndStoreBlock processes and stores a block
-func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+// processAndStoreBlock reports whether fork choice accepted the block, even if persistence fails.
+// If accepted is true, block must be the exact copy previously accepted by fork choice;
+// its header may already have been pruned.
+func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, accepted bool) (bool, error) {
 	finishImport := b.forkchoiceStore.BeginPayloadImport(block.Block.Slot)
 	defer finishImport()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
-		return err
+		return accepted, err
 	}
 
-	_, headerExists := b.forkchoiceStore.GetHeader(blockRoot)
+	if !accepted {
+		_, accepted = b.forkchoiceStore.GetHeader(blockRoot)
+	}
 
-	// A block the fork graph never took can be retried for 30s, so open the
-	// write tx only when the block is not already on disk.
+	// Fork choice may already contain a block whose database write failed.
+	// Check persistence separately so a retry can complete the write without reimporting it.
 	var persisted bool
 	if err := b.db.View(ctx, func(tx kv.Tx) error {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -992,34 +1074,39 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return err
 	}); err != nil {
 		if isCallerCancellation(ctx, err) {
-			return err
+			return accepted, err
 		}
-		return fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
+		return accepted, fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
+	}
+	if !accepted {
+		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+			return false, err
+		}
+		// OnBlock can return nil for old blocks it ignores. Require acceptance before
+		// writing indices: an unvalidated state root can overwrite another block's mapping.
+		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); !accepted {
+			return false, nil
+		}
+		go b.importBlockOperations(block)
 	}
 	if !persisted {
 		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 		}); err != nil {
 			if isCallerCancellation(ctx, err) {
-				return err
+				return true, err
 			}
-			return fmt.Errorf("%w: write block: %w", errBlockStorage, err)
+			return true, fmt.Errorf("%w: write block: %w", errBlockStorage, err)
 		}
 	}
 
-	if !headerExists {
-		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
-			return err
-		}
-		go b.importBlockOperations(block)
-	}
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil && !isCallerCancellation(ctx, err) {
 		// Import has succeeded; failure to update this local index is not a peer fault.
 		log.Warn("Failed to update highest finalized after block import", "slot", block.Block.Slot, "err", err)
 	}
-	return nil
+	return true, nil
 }
 
 // importBlockOperations imports block operations in parallel
@@ -1098,7 +1185,9 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.mu.Unlock()
 		return
 	}
-	if now.Sub(job.creationTime) > blockJobExpiry {
+	// A pending write for an accepted block must survive job expiry until storage succeeds,
+	// even if fork choice has since pruned the block's header.
+	if job.pendingBlockWrite == nil && now.Sub(job.creationTime) > blockJobExpiry {
 		if !job.terminal {
 			job.attempt.err = ErrPublishedBlockJobExpired
 			job.attempt.generation = job.storeGeneration
@@ -1120,11 +1209,18 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	generation := job.storeGeneration
 	attempt := job.attempt
 	needsImportClaim := job.finishPayloadImport == nil
+	block := job.block
+	hasPendingBlockWrite := job.pendingBlockWrite != nil
+	if hasPendingBlockWrite {
+		block = job.pendingBlockWrite
+	}
 	job.mu.Unlock()
 	authenticated := false
+	accepted := false
+	var blockErr error
 	if store == nil {
 		store = func(ctx context.Context) error {
-			if needsImportClaim {
+			if !hasPendingBlockWrite && needsImportClaim {
 				block := job.block.Block
 				parentHeader, ok := b.forkchoiceStore.GetHeader(block.ParentRoot)
 				if !ok {
@@ -1141,17 +1237,36 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
 				}
 				authenticated = true
+				if job.elColumnsStarted.CompareAndSwap(false, true) {
+					b.startELColumnsImport(ctx, job.block)
+				}
 			}
-			return b.processAndStoreBlock(ctx, job.block)
+			accepted, blockErr = b.processAndStoreBlock(ctx, block, hasPendingBlockWrite)
+			return blockErr
 		}
+	} else if hasPendingBlockWrite {
+		accepted, blockErr = b.processAndStoreBlock(ctx, block, true)
 	}
-	err := store(ctx)
+	err := blockErr
+	if err == nil {
+		err = store(ctx)
+	}
+	if writeErr, ok := errors.AsType[*AcceptedBlockWriteError](err); ok {
+		accepted, block, blockErr = true, writeErr.Block, err
+	}
 	job.logStorageErrorOnce(err)
 	job.mu.Lock()
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
 		job.mu.Unlock()
 		return
+	}
+	if accepted {
+		if blockErr == nil {
+			job.pendingBlockWrite = nil
+		} else if job.pendingBlockWrite == nil {
+			job.pendingBlockWrite = block
+		}
 	}
 	attempt.err = err
 	attempt.generation = generation
@@ -1168,7 +1283,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		}
 		job.retryAfter = time.Now().Add(job.retryDelay)
 	}
-	terminal := latest && (err == nil || errors.Is(err, forkchoice.ErrBlockInvalid))
+	terminal := latest && job.pendingBlockWrite == nil && (err == nil || errors.Is(err, forkchoice.ErrBlockInvalid))
 	if !terminal && authenticated && shouldRetainBlockImportClaim(err) && job.finishPayloadImport == nil {
 		current, ok := b.blocksScheduledForLaterExecution.Load(key)
 		if ok && current == job {

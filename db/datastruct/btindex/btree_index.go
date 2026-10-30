@@ -19,6 +19,7 @@ package btindex
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path"
@@ -381,15 +382,7 @@ type BtIndex struct {
 	filePath string
 	indexM   uint64
 	pool     sync.Pool
-}
-
-// CreateBtreeIndexWithDecompressor Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
-	if err != nil {
-		return nil, err
-	}
-	return OpenBtreeIndexWithDecompressor(indexPath, decompressor)
+	onClose  []func()
 }
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
@@ -478,7 +471,16 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	return nil
 }
 
-func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt *BtIndex, err error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (*BtIndex, error) {
+	return openBtreeIndex(indexPath, kvGetter, false)
+}
+
+// OpenBtreeIndexInMem reads the whole index into memory instead of mapping it, so lookups never wait for page cache misses.
+func OpenBtreeIndexInMem(indexPath string, kvGetter *seg.Reader) (*BtIndex, error) {
+	return openBtreeIndex(indexPath, kvGetter, true)
+}
+
+func openBtreeIndex(indexPath string, kvGetter *seg.Reader, inMem bool) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
 	}
@@ -511,15 +513,22 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		return idx, nil
 	}
 
-	idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
-	if err != nil {
-		return nil, err
+	if inMem {
+		idx.data = make([]byte, idx.size)
+		if _, err = io.ReadFull(idx.file, idx.data); err != nil {
+			return nil, err
+		}
+	} else {
+		idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
+		if err != nil {
+			return nil, err
+		}
+		// Decoding below walks the whole node blob, so readahead pays off once. Lookups
+		// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
+		_ = mmap.MadviseSequential(idx.m)
+		defer func() { _ = mmap.MadviseRandom(idx.m) }()
+		idx.data = idx.m[:idx.size]
 	}
-	// Decoding below walks the whole node blob, so readahead pays off once. Lookups
-	// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
-	_ = mmap.MadviseSequential(idx.m)
-	defer func() { _ = mmap.MadviseRandom(idx.m) }()
-	idx.data = idx.m[:idx.size]
 
 	var nd pivots
 	var keysBlob []byte
@@ -639,6 +648,12 @@ func (b *BtIndex) M() uint64 { return b.indexM }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 
+// OnClose registers fn to run once when the index is closed.
+func (b *BtIndex) OnClose(fn func()) { b.onClose = append(b.onClose, fn) }
+
+// InMem reports whether the index was read into memory by OpenBtreeIndexInMem.
+func (b *BtIndex) InMem() bool { return b != nil && b.m == nil && b.data != nil }
+
 func (b *BtIndex) KeyCount() uint64 {
 	if b.Empty() {
 		return 0
@@ -666,6 +681,11 @@ func (b *BtIndex) Close() {
 		b.bplus.Close()
 		b.bplus = nil
 	}
+	b.data, b.ef = nil, nil
+	for _, fn := range b.onClose {
+		fn()
+	}
+	b.onClose = nil
 }
 
 // Get - exact match of key. `k == nil` - means not found

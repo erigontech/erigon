@@ -17,11 +17,14 @@
 package integrity_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/integrity"
@@ -29,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -45,6 +49,20 @@ func enableHistoricalRCache(t *testing.T) {
 
 func newRCacheChain(t *testing.T, txsPerBlock []int, skip map[uint64]bool) (kv.TemporalRwDB, *freezeblocks.BlockReader) {
 	t.Helper()
+	blocks := make([]types.Receipts, len(txsPerBlock))
+	for b, n := range txsPerBlock {
+		blocks[b] = make(types.Receipts, n)
+		for i := range blocks[b] {
+			blocks[b][i] = &types.Receipt{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: uint64(21_000 * (i + 1))}
+		}
+	}
+	return newReceiptsChain(t, blocks, skip)
+}
+
+// newReceiptsChain writes every receipt to RCacheDomain and its metadata to ReceiptDomain,
+// with an empty system tx at both ends of each block.
+func newReceiptsChain(t *testing.T, blocks []types.Receipts, skip map[uint64]bool) (kv.TemporalRwDB, *freezeblocks.BlockReader) {
+	t.Helper()
 	ctx := t.Context()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
@@ -58,19 +76,22 @@ func newRCacheChain(t *testing.T, txsPerBlock []int, skip map[uint64]bool) (kv.T
 	putter := doms.AsPutDel(tx)
 
 	txNum := uint64(0)
-	for b, n := range txsPerBlock {
-		receipts := make(types.Receipts, n)
-		for i := range receipts {
-			receipts[i] = &types.Receipt{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: uint64(21_000 * (i + 1))}
-		}
+	for b, receipts := range blocks {
 		write := func(r *types.Receipt) {
 			if !skip[txNum] {
 				require.NoError(t, rawdb.WriteReceiptCacheV2(putter, r, txNum))
+				var logIdxAfterTx uint32
+				var cumGasUsed uint64
+				if r != nil {
+					logIdxAfterTx, cumGasUsed = r.FirstLogIndexWithinBlock+uint32(len(r.Logs)), r.CumulativeGasUsed
+				}
+				require.NoError(t, rawtemporaldb.AppendReceiptMetadata(putter, logIdxAfterTx, cumGasUsed, 0, txNum))
 			}
 			txNum++
 		}
 		write(nil)
 		for _, r := range receipts {
+			r.Bloom = types.CreateBloom(types.Receipts{r})
 			write(r)
 		}
 		write(nil)
@@ -211,4 +232,61 @@ func TestRCacheEndBlockNum_InexactVisibleEnd(t *testing.T) {
 	end, err := integrity.RCacheEndBlockNum(ctx, inexactRCacheTx{tx.(blockFilesTemporalTx)}, br.TxnumReader())
 	require.NoError(t, err)
 	require.Equal(t, uint64(5), end)
+}
+
+// receiptsResumedAt returns receipts of a block whose txs from resumeAt onwards were executed
+// as if the block started there: cumulativeGasUsed and log indexes restart from zero.
+func receiptsResumedAt(txs, resumeAt int) types.Receipts {
+	receipts := make(types.Receipts, txs)
+	for i := range receipts {
+		base := 0
+		if i >= resumeAt {
+			base = resumeAt
+		}
+		receipts[i] = &types.Receipt{
+			Status:                   types.ReceiptStatusSuccessful,
+			CumulativeGasUsed:        uint64(21_000 * (i - base + 1)),
+			FirstLogIndexWithinBlock: uint32(i - base),
+			Logs: types.Logs{{
+				Index:   hexutil.Uint(i - base),
+				Address: common.Address{byte(i % 2)},
+				Topics:  []common.Hash{{1}, {byte(i)}},
+			}},
+		}
+	}
+	return receipts
+}
+
+func TestReceiptsNoDups(t *testing.T) {
+	enableHistoricalRCache(t)
+
+	const blocks, txsPerBlock = 202, 3
+	for _, badBlock := range []uint64{0, 1, 50, 99, 100, 101, 200, 201} {
+		t.Run(fmt.Sprintf("restart in block %d", badBlock), func(t *testing.T) {
+			t.Parallel()
+			receipts := make([]types.Receipts, blocks)
+			for b := range receipts {
+				resumeAt := txsPerBlock
+				if uint64(b) == badBlock {
+					resumeAt = 2
+				}
+				receipts[b] = receiptsResumedAt(txsPerBlock, resumeAt)
+			}
+			db, br := newReceiptsChain(t, receipts, nil)
+			sc := integrity.SamplerCfg{Seed: 1, SampleRatio: 1}
+			require.NoError(t, integrity.CheckReceiptRootIntegrity(t.Context(), sc, db, br, chain.AllProtocolChanges, true, log.New()))
+
+			for _, failFast := range []bool{true, false} {
+				rcacheErr := integrity.CheckRCacheNoDups(t.Context(), sc, db, br, failFast)
+				receiptsErr := integrity.CheckReceiptsNoDups(t.Context(), sc, db, br, failFast)
+				if badBlock == 0 { // checks start at block 1
+					require.NoError(t, rcacheErr)
+					require.NoError(t, receiptsErr)
+					continue
+				}
+				require.ErrorIs(t, rcacheErr, integrity.ErrIntegrity, "failFast=%v", failFast)
+				require.ErrorIs(t, receiptsErr, integrity.ErrIntegrity, "failFast=%v", failFast)
+			}
+		})
+	}
 }

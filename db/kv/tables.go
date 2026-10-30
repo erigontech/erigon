@@ -29,7 +29,8 @@ import (
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
+// 7.1 - standalone InvertedIndex values tables store chunks of txNums per dup
+var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 1, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
 
@@ -43,6 +44,9 @@ const (
 	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
+
+	// CodeCacheDeprecated held decompressed contract code keyed by code hash.
+	CodeCacheDeprecated = "CodeCache"
 )
 
 const (
@@ -176,6 +180,8 @@ const (
 
 	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+	// [slot + block root] => [execution payload envelope signature]
+	ExecutionPayloadEnvelopeSignatures = "ExecutionPayloadEnvelopeSignature"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
 	BalancesDump          = "BalancesDump"
@@ -367,6 +373,7 @@ var ChaindataTables = []string{
 
 	// Beacon stuff
 	BeaconBlocks,
+	ExecutionPayloadEnvelopeSignatures,
 	CanonicalBlockRoots,
 	BlockRootToSlot,
 	BlockRootToStateRoot,
@@ -468,6 +475,7 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
+	CodeCacheDeprecated, // dropped by the drop_code_cache_table migration
 }
 
 // Diagnostics tables

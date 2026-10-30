@@ -135,8 +135,8 @@ func ZeroUnpricedBaseFee(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContex
 	return blockCtx
 }
 
-// NewEVM returns a new EVM. The returned EVM is not thread safe and should
-// only ever be used *once*.
+// NewEVM returns an EVM that can be reused with its reset methods.
+// Execution and resets require exclusive access. Cancel and Cancelled may run concurrently.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	evm := &EVM{
 		Context:         blockCtx,
@@ -152,17 +152,23 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 	return evm
 }
 
-// Reset resets the EVM with a new transaction context.Reset
-// This is not threadsafe and should only be done very cautiously.
+// Reset prepares the EVM for a new transaction and clears cancellation.
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
-	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
 }
 
+// ResetBetweenBlocks prepares the EVM for new work and clears cancellation.
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+	evm.ResetForSystemCall(blockCtx, txCtx, ibs, vmConfig, chainRules)
+	evm.abort.Store(false)
+}
+
+// ResetForSystemCall prepares the EVM for another system call while preserving
+// cancellation. System calls within a task share that task's cancellation state.
+func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
@@ -173,16 +179,13 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
 	evm.precompiles = Precompiles(chainRules)
-
-	// ensure the evm is reset to be used again
-	evm.abort.Store(false)
 }
 
-// Cancel cancels any running EVM operation. This may be called concurrently and
-// it's safe to be called multiple times.
+// Cancel requests cancellation without waiting for execution to stop.
+// It is safe to call concurrently and more than once.
 func (evm *EVM) Cancel() { evm.abort.Store(true) }
 
-// Cancelled returns true if Cancel has been called
+// Cancelled reports whether cancellation is currently requested.
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, err error, snapshot int, entryStateReservoir uint64) {

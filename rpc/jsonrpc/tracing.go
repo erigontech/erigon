@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -342,11 +343,19 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return err
 	}
 
+	var txIndex int
+	if config != nil && config.TxIndex != nil {
+		txIndex = int(min(*config.TxIndex, math.MaxInt))
+		if err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+			return err
+		}
+	}
+
 	var stateReader state.StateReader
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
+		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, txIndex, api._txNumReader)
 	}
 	if err != nil {
 		return fmt.Errorf("create state reader: %w", err)
@@ -469,6 +478,12 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
+	if simulateContext.TransactionIndex != nil {
+		if err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
+			return err
+		}
+	}
+
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
 	} else {
@@ -496,11 +511,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()
 
-	var precompiles vm.PrecompiledContracts
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		err = config.StateOverrides.Override(ibs, precompiles, rules)
+		err = config.StateOverrides.Override(ibs, vm.ActivePrecompiledContracts(rules), rules)
 		if err != nil {
 			return err
 		}
@@ -513,6 +526,10 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
+		precompiles, err := config.StateOverrides.ActivePrecompiles(blockCtx.Rules(chainConfig))
+		if err != nil {
+			return err
+		}
 		// A bundle is a block of its own, so its logs number from zero. Only the
 		// logs are reset: the overrides and state changes have to survive.
 		ibs.ResetLogs()

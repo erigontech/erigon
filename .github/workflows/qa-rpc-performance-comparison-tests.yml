@@ -18,15 +18,6 @@ on:
         type: boolean
         required: false
         default: false
-      commitment_mode:
-        description: 'Erigon commitment mode ("default" leaves ERIGON_COMMITMENT_PARALLEL unset)'
-        type: choice
-        required: false
-        default: default
-        options:
-          - default
-          - serial
-          - parallel
   schedule:
     - cron: '0 2 * * *'   # Run daily at 02:00 UTC
     - cron: '30 2 * * 0'  # Run on Sunday at 02:30 UTC, nethermind as peer
@@ -248,24 +239,9 @@ jobs:
         if: matrix.client == 'erigon'
         id: erigon_running_step
         working-directory: ${{ github.workspace }}/build/bin
-        env:
-          COMMITMENT_MODE: ${{ github.event.inputs.commitment_mode }}
         run: |
           set +e # Disable exit on error
           echo "Starting Erigon..."
-
-          # Only set ERIGON_COMMITMENT_PARALLEL on an explicit choice; otherwise ensure it's
-          # unset so erigon uses its built-in default (and doesn't inherit runner env).
-          if [ "$COMMITMENT_MODE" = "parallel" ]; then
-            export ERIGON_COMMITMENT_PARALLEL=true
-            echo "Set ERIGON_COMMITMENT_PARALLEL=true (parallel mode)"
-          elif [ "$COMMITMENT_MODE" = "serial" ]; then
-            export ERIGON_COMMITMENT_PARALLEL=false
-            echo "Set ERIGON_COMMITMENT_PARALLEL=false (serial mode)"
-          else
-            unset ERIGON_COMMITMENT_PARALLEL
-            echo "Leaving ERIGON_COMMITMENT_PARALLEL unset (default behavior)"
-          fi
 
           ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
@@ -541,7 +517,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}-$label \
+              --test_name rpc-performance-test-latest-$label \
               --chain $CHAIN \
               --runner "$RUNNER_NAME" \
               --db_version $db_version \
@@ -635,7 +611,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
 
       - name: Stop Erigon
@@ -655,7 +631,7 @@ jobs:
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: erigon-logs-${{ env.CHAIN }}${{ (github.event.inputs.commitment_mode == 'parallel' && '-parallel') || (github.event.inputs.commitment_mode == 'serial' && '-serial') || '' }}
+          name: erigon-logs-${{ env.CHAIN }}
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Delete Erigon Testbed Data Directory

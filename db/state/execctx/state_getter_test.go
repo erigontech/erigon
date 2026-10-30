@@ -136,6 +136,7 @@ type codeBufTx struct {
 	kv.TemporalTx
 	code              map[string][]byte
 	bufferedCodeReads int
+	lentCaps          *[]int
 }
 
 func (tx *codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
@@ -145,7 +146,76 @@ func (tx *codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOp
 	if cap(opts.Buf()) > 0 {
 		tx.bufferedCodeReads++
 	}
+	if tx.lentCaps != nil {
+		*tx.lentCaps = append(*tx.lentCaps, cap(opts.Buf()))
+	}
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
+}
+
+// commitCodeAccounts commits accounts whose code hashes match codes, so reads
+// resolve those hashes from committed state rather than from the batch.
+func commitCodeAccounts(t *testing.T, db kv.TemporalRwDB, addrs, codes [][]byte) {
+	t.Helper()
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	for i := range codes {
+		acc := accounts.SerialiseV3(&accounts.Account{
+			Nonce:    1,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
+		})
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addrs[i], acc, 5, nil))
+	}
+	require.NoError(t, sd.Commit(ctx, rwTx))
+}
+
+// A caller-owned buffer outlives each getter, so a later getter decodes into it
+// instead of growing its own.
+func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	codes := [][]byte{
+		bytes.Repeat([]byte{0x17}, 1024),
+		bytes.Repeat([]byte{0x28}, 1024),
+	}
+	addrs := make([][]byte, len(codes))
+	for i := range codes {
+		addrs[i] = make([]byte, 20)
+		addrs[i][0] = byte(i + 1)
+	}
+	commitCodeAccounts(t, db, addrs, codes)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := &codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	for i := range codes {
+		tx.code[string(addrs[i])] = codes[i]
+	}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	var buf []byte
+	opts := execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)
+	for i, addr := range addrs {
+		got, ok, err := sd.AsStateGetter(tx, opts).GetCode(addr, 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, codes[i], got)
+	}
+	require.Len(t, lentCaps, len(codes))
+	require.GreaterOrEqual(t, lentCaps[1], len(codes[1]), "the second getter must decode into the buffer the first one grew")
 }
 
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
@@ -162,22 +232,7 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
 	}
-	func() {
-		rwTx, err := db.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTx.Rollback()
-		seedSD, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(t, err)
-		defer seedSD.Close()
-		for i := range codes {
-			acc := accounts.SerialiseV3(&accounts.Account{
-				Nonce:    1,
-				CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
-			})
-			require.NoError(t, seedSD.DomainPut(kv.AccountsDomain, rwTx, addrs[i], acc, 5, nil))
-		}
-		require.NoError(t, seedSD.Commit(ctx, rwTx))
-	}()
+	commitCodeAccounts(t, db, addrs, codes)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -530,4 +585,41 @@ func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
 			require.Equal(t, encAccount(2), v)
 		})
 	}
+}
+
+type countingAsOfTx struct {
+	kv.TemporalTx
+	reads int
+}
+
+func (tx *countingAsOfTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	tx.reads++
+	return tx.TemporalTx.GetAsOf(domain, key, ts)
+}
+
+// The as-of read serves a value committed before ts from the state cache, and reads the tx for one written at ts.
+func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+
+	tx := &countingAsOfTx{TemporalTx: roTx}
+	asOf := sd.AsOfGetter(tx)
+	committed := make([]byte, 20)
+	committed[0] = 0xcc
+
+	v, ok, err := asOf.GetAsOf(kv.AccountsDomain, committed, 10)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, encAccount(1), v)
+	require.Zero(t, tx.reads, "a value committed at txNum 5 is the value as of 10")
+
+	_, _, err = asOf.GetAsOf(kv.AccountsDomain, committed, 5)
+	require.NoError(t, err)
+	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
 }

@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -468,8 +469,8 @@ func resolveFeeRecipient(preference *cltypes.ProposerPreferences, registeredReci
 	return registeredRecipient, registered
 }
 
-// feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
-// building with the zero address gives that block's fees away.
+// Falling back to the zero address gives the proposal's fees away. The bounded cache suppresses
+// duplicate warnings until their entries are evicted.
 func (a *ApiHandler) feeRecipientForProposal(
 	baseState *state.CachingBeaconState,
 	targetSlot, proposerIndex uint64,
@@ -481,10 +482,9 @@ func (a *ApiHandler) feeRecipientForProposal(
 	if found {
 		return feeRecipient
 	}
-	// Claimed in one step, so requests for the same slot arriving together do not each decide they
-	// are the first. Without somewhere to remember them, reporting every time beats reporting never.
 	firstTime := true
 	if a.unregisteredProposers != nil {
+		// Check and add atomically so matching requests cannot both claim the same absent entry.
 		alreadyWarned, _ := a.unregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
 		firstTime = !alreadyWarned
 	}
@@ -495,30 +495,77 @@ func (a *ApiHandler) feeRecipientForProposal(
 	return common.Address{}
 }
 
-// reportProductionFailure records a failed production once for every exit through produceBlock,
-// except a fork-choice head change, which GetEthV3ValidatorBlock retries and records. A caller that has already gone is not something anyone can
-// act on; an execution layer that stopped answering still is, and that arrives as a deadline.
-func reportProductionFailure(err error, targetSlot uint64) {
+type productionErrorPriority uint8
+
+// A terminal unknown-payload response takes priority over transient contention.
+const (
+	productionErrorNone productionErrorPriority = iota
+	productionErrorCanceled
+	productionErrorBusy
+	productionErrorUnknownPayload
+	productionErrorUnexpectedCancellation
+	productionErrorActionable
+)
+
+var errProductionOperationCanceled = errors.New("canceled while request remained active")
+
+func classifyProductionError(err error) productionErrorPriority {
 	switch {
 	case err == nil:
-	case errors.Is(err, errForkChoiceHeadChanged):
-		// GetEthV3ValidatorBlock retries it and records the outcome.
+		return productionErrorNone
+	case errors.Is(err, errProductionOperationCanceled):
+		return productionErrorUnexpectedCancellation
 	case errors.Is(err, context.Canceled):
-		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
+		return productionErrorCanceled
 	case execution_client.IsUnknownPayloadError(err):
-		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
+		return productionErrorUnknownPayload
+	case errors.Is(err, chainreader.ErrExecutionBusy):
+		return productionErrorBusy
 	default:
+		return productionErrorActionable
+	}
+}
+
+// mostActionableProductionError returns the higher-priority error, keeping the first argument on ties.
+func mostActionableProductionError(first, second error) error {
+	if classifyProductionError(second) > classifyProductionError(first) {
+		return second
+	}
+	return first
+}
+
+// The request handler owns retries and logging for fork-choice head changes.
+func reportProductionFailure(err error, targetSlot uint64) {
+	if errors.Is(err, errForkChoiceHeadChanged) {
+		return
+	}
+	switch classifyProductionError(err) {
+	case productionErrorNone:
+	case productionErrorCanceled:
+		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
+	case productionErrorUnknownPayload:
+		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
+	case productionErrorBusy, productionErrorUnexpectedCancellation, productionErrorActionable:
 		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
 	}
+}
+
+// preserveProductionCancellation marks an operation cancellation observed while the request was active.
+// The marker keeps it distinct from caller cancellation even if the request is canceled
+// before the failure is reported.
+func preserveProductionCancellation(requestErr, err error) error {
+	if requestErr == nil && errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%w: %w", errProductionOperationCanceled, err)
+	}
+	return err
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
 
-// pollAssembledPayload waits out the collection window and reports why no payload arrived rather
-// than logging it: the caller knows which slot it was for and is the one answering the validator
-// client. Contention that clears is invisible, and a caller that gave up produces no record at all.
+// pollAssembledPayload returns a payload or an error without logging; the caller owns reporting.
+// A successful collection discards earlier failures.
 func pollAssembledPayload(
 	ctx context.Context,
 	window blockBuilderWindow,
@@ -542,58 +589,52 @@ func pollAssembledPayload(
 	var (
 		attempts int
 		failures int
-		firstErr error
+		bestErr  error
 	)
 	for {
-		// Nothing is waiting for this payload any more, and starting another collection would stop
-		// the builder and could fail for reasons of its own - contention, most likely - which would
-		// then be reported against a slot nobody is waiting for.
+		// A collection attempt stops the builder; do not start one after the caller has gone.
 		if ctx.Err() != nil {
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		}
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		attempts++
-		if execution_client.IsUnknownPayloadError(err) || errors.Is(err, execution_client.ErrInvalidGetPayloadResponse) {
-			return nil, nil, nil, nil, err
-		}
 		if err != nil {
-			// The caller's own cancellation comes back through get. That is the slot ending, not
-			// the execution layer failing, and it is not worth reporting on a healthy node. A
-			// failure that happened before it still is.
-			if ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+			requestErr := ctx.Err()
+			if requestErr == nil || !errors.Is(err, requestErr) {
 				failures++
-				if firstErr == nil {
-					firstErr = err
-				}
+				failure := preserveProductionCancellation(requestErr, err)
+				bestErr = mostActionableProductionError(bestErr, failure)
+			}
+			if execution_client.IsUnknownPayloadError(err) || errors.Is(err, execution_client.ErrInvalidGetPayloadResponse) {
+				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 			}
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		case <-deadlineTimer.C:
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		case <-retryTicker.C:
 		}
 		// Re-check here, not before get(): the select may pick the ticker after
 		// deadlineTimer fired, and get() stops the builder, so it must not run past pollUntil.
 		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		}
 	}
 }
 
-// terminalCause says why the window ended without a payload. A caller that went away with nothing
-// having failed took the slot with it, and there is nothing anyone can act on; anything that did
-// fail is worth reporting however the window ended, since giving up is often the consequence of it.
-func terminalCause(ctx context.Context, attempts, failures int, firstErr error) error {
+// terminalCause returns the highest-priority failure, even if the request was later canceled.
+// Without a recorded failure, it returns the context error when present or a no-payload error.
+func terminalCause(ctx context.Context, attempts, failures int, bestErr error) error {
 	if failures == 0 && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if firstErr != nil {
-		return fmt.Errorf("no payload after %s, %d failed: %w", attemptsMade(attempts), failures, firstErr)
+	if bestErr != nil {
+		return fmt.Errorf("no payload after %s, %d failed: %w", attemptsMade(attempts), failures, bestErr)
 	}
 	return fmt.Errorf("no payload after %s", attemptsMade(attempts))
 }
@@ -605,30 +646,34 @@ func attemptsMade(attempts int) string {
 	return fmt.Sprintf("%d attempts", attempts)
 }
 
-func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	stopCh := time.After(time.Second)
+const (
+	defaultAttestationDataImportWait  = time.Second
+	attestationDataImportPollInterval = 5 * time.Millisecond
+)
+
+func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
+	waitedSlot := slot + 1
+	deadline := time.Now().Add(a.attestationDataImportWait)
 	for {
-		headSlot := a.syncedData.HeadSlot()
-		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
-			return
+		waitSpent := a.attestationDataWaitedSlot.Load() == waitedSlot
+		if !waitSpent && !time.Now().Before(deadline) {
+			a.attestationDataWaitedSlot.Store(waitedSlot)
+			waitSpent = true
 		}
-		_, ok, err := a.attestationProducer.CachedAttestationData(slot)
-		if err != nil {
-			log.Warn("Failed to get attestation data", "err", err)
+		importInProgress := a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
+		if !importInProgress || waitSpent {
+			if head, ok := a.forkchoiceStore.TryGetHeadNode(); ok {
+				return head, true
+			}
+			if waitSpent {
+				return forkchoice.ForkChoiceNode{}, false
+			}
 		}
-		if ok {
-			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
-			return
-		}
-
-		time.Sleep(1 * time.Millisecond)
 		select {
-		case <-stopCh:
-			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
-			return
-		default:
+		case <-ctx.Done():
+			return forkchoice.ForkChoiceNode{}, false
+		case <-time.After(attestationDataImportPollInterval):
 		}
-
 	}
 }
 
@@ -645,12 +690,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 	start := time.Now()
 
-	tx, err := a.indiciesDB.BeginRo(r.Context())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -664,12 +703,23 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
+	head, haveHead := a.waitForAttestationHead(r.Context(), *slot)
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
 
-	a.waitForHeadSlot(*slot)
-
-	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot)
-	if err != nil {
-		log.Warn("Failed to get attestation data", "err", err)
+	var attestationData solid.AttestationData
+	var ok, cached bool
+	if haveHead {
+		attestationData, ok = a.forkchoiceStore.AttestationData(head.Root, *slot)
+	}
+	forkChoiceData := ok
+	if !ok {
+		attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot)
+		cached = ok
+		if err != nil {
+			log.Warn("Failed to get attestation data", "err", err)
+		}
 	}
 
 	defer func() {
@@ -683,7 +733,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			a.beaconChainCfg.SlotsPerEpoch, 64,
 		)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
-			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
+			"committee_index", *committeeIndex, "subnet", subnet, "cached", cached, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
 	}()
 
@@ -700,6 +750,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	if !ok {
+		tx, err := a.indiciesDB.BeginRo(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
 		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 			attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 				tx,
@@ -725,7 +780,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	// The cached attestation data has CommitteeIndex=0 (shared across all committees for the same slot), but the VC
 	// expects it to match the requested committee_index. In Gloas the field signals payload presence instead.
 	if clversion.AfterOrEqual(clparams.GloasVersion) {
-		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot)
+		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, forkChoiceData)
 		if err != nil {
 			return nil, err
 		}
@@ -745,21 +800,26 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 // gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
 // slot, otherwise 1 if the head's chain has the block FULL and 0 if not. A FULL block whose payload is not verified
 // is optimistic, so it gets a 503 instead, as does a fork-choice head that cannot be read.
-func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint64, error) {
+func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash, head forkchoice.ForkChoiceNode, haveHead bool) (uint64, error) {
 	header, ok := a.forkchoiceStore.GetHeader(root)
 	if !ok || header.Slot == slot {
 		return 0, nil
 	}
-	node, _, err := a.forkchoiceStore.GetHeadNode()
-	if err != nil {
-		return 0, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	if !haveHead {
+		head, haveHead = a.forkchoiceStore.TryGetHeadNode()
+		if !haveHead {
+			return 0, beaconhttp.NewEndpointError(
+				http.StatusServiceUnavailable,
+				errors.New("fork-choice head unavailable"),
+			)
+		}
 	}
 	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
 	// the head's chain gives it.
-	if node.Root != root {
-		node = a.forkchoiceStore.Ancestor(node.Root, header.Slot)
+	if head.Root != root {
+		head = a.forkchoiceStore.Ancestor(head.Root, header.Slot)
 	}
-	if node.Root != root || node.PayloadStatus != cltypes.PayloadStatusFull {
+	if head.Root != root || head.PayloadStatus != cltypes.PayloadStatusFull {
 		return 0, nil
 	}
 	if !a.forkchoiceStore.IsPayloadVerified(root) {
@@ -1819,7 +1879,8 @@ func (a *ApiHandler) produceBeaconBody(
 			stateVersion,
 		)
 		if err != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
+			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w",
+				preserveProductionCancellation(ctx.Err(), err))
 			return
 		}
 		if len(idBytes) == 0 {
@@ -2046,7 +2107,12 @@ func (a *ApiHandler) produceBeaconBody(
 	})
 	wg.Wait()
 	if syncAggregateErr != nil {
-		return nil, nil, syncAggregateErr
+		if classifyProductionError(executionErr) == productionErrorActionable &&
+			classifyProductionError(syncAggregateErr) == productionErrorActionable {
+			// Keep the secondary failure as text so only the primary error controls classification.
+			return nil, nil, fmt.Errorf("%w (also: %s)", executionErr, syncAggregateErr.Error())
+		}
+		return nil, nil, mostActionableProductionError(executionErr, syncAggregateErr)
 	}
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations after the payload
 	// wait: votes for the parent slot keep arriving until shortly after this slot starts, so
@@ -3134,6 +3200,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		if blockErr != nil {
 			return blockErr
 		}
+		_, knownBlock = a.forkchoiceStore.GetHeader(blockRoot)
 	}
 
 	// Cache the execution payload body before writing to DB so the beacon API
@@ -3146,6 +3213,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
+		if knownBlock {
+			return &clservices.AcceptedBlockWriteError{Block: block, Err: err}
+		}
 		return err
 	}
 
@@ -3159,10 +3229,10 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
-		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) && !errors.Is(err, execution_client.ErrForkChoiceUpdateBusy) {
 			return err
 		}
-		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
+		log.Debug("BlockProduction: forkchoice update deferred while storing block", "root", headRoot, "err", err)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {

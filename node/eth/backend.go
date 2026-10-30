@@ -1266,7 +1266,8 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			Logger(logger).
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
-			WithErigonDBSettings(erigonDBSettings)
+			WithErigonDBSettings(erigonDBSettings).
+			BtIndexInMem() // only the node opens here: integration and other tools pass their own *temporal.DB
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
 			stepsStr := "Inf"

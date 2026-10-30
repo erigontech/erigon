@@ -376,7 +376,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
 	if oldGasLimit != stateChanges.BlockGasLimit {
 		p.all.ascendAll(func(mt *metaTxn) bool {
-			if mt.TxnSlot.GetGas() < stateChanges.BlockGasLimit {
+			if mt.TxnSlot.GetGas() <= stateChanges.BlockGasLimit {
 				mt.subPool |= NotTooMuchGas
 			} else {
 				mt.subPool &^= NotTooMuchGas
@@ -404,6 +404,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
+	for i, txn := range unwindTxns.Txns {
+		unwindTxns.IsLocal[i] = p.isLocalLRU.Contains(string(txn.IDHash[:]))
+	}
 	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
 		return err
@@ -798,7 +801,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		if mt.TxnSlot.GetGas() >= p.blockGasLimit.Load() {
+		if mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
 		}
@@ -1619,11 +1622,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	// An interesting note here is that if the block contained any transactions local to the node,
-	// by being first removed from the pool (from the "local" part of it), and then re-injected,
-	// they effective lose their priority over the "remote" transactions. In order to prevent that,
-	// somehow the fact that certain transactions were local, needs to be remembered for some
-	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
@@ -1684,11 +1682,6 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	// An interesting note here is that if the block contained any transactions local to the node,
-	// by being first removed from the pool (from the "local" part of it), and then re-injected,
-	// they effective lose their priority over the "remote" transactions. In order to prevent that,
-	// somehow the fact that certain transactions were local, needs to be remembered for some
-	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
@@ -2316,7 +2309,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 
 		mt.subPool &^= NotTooMuchGas
-		if mt.TxnSlot.GetGas() < blockGasLimit {
+		if mt.TxnSlot.GetGas() <= blockGasLimit {
 			mt.subPool |= NotTooMuchGas
 		}
 
@@ -2791,6 +2784,51 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
+	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
+
+	if p.feeCalculator != nil {
+		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if pendingBaseFee == 0 {
+		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			pendingBaseFee = binary.BigEndian.Uint64(v)
+		}
+	}
+
+	if pendingBlobFee == 0 {
+		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			pendingBlobFee = binary.BigEndian.Uint64(v)
+		}
+	}
+
+	if pendingBlobFee == 0 {
+		pendingBlobFee = minBlobGasPrice
+	}
+
+	if blockGasLimit == 0 {
+		blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
+	}
+
+	// The validation and insertion below read these from p, so publish them first.
+	var pendingBaseFee256 uint256.Int
+	pendingBaseFee256.SetUint64(pendingBaseFee)
+	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
+	p.pendingBaseFee.Store(pendingBaseFee)
+	p.pendingBlobFee.Store(pendingBlobFee)
+	p.blockGasLimit.Store(blockGasLimit)
+
 	txns := TxnSlots{}
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
@@ -2835,47 +2873,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		i++
 	}
 
-	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
-
-	if p.feeCalculator != nil {
-		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
-		if err != nil {
-			return err
-		}
-	}
-
-	if pendingBaseFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			pendingBaseFee = binary.BigEndian.Uint64(v)
-		}
-	}
-
-	if pendingBlobFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			pendingBlobFee = binary.BigEndian.Uint64(v)
-		}
-	}
-
-	if pendingBlobFee == 0 {
-		pendingBlobFee = minBlobGasPrice
-	}
-
-	if blockGasLimit == 0 {
-		if p.chainConfig.DefaultBlockGasLimit != nil {
-			blockGasLimit = *p.chainConfig.DefaultBlockGasLimit
-		} else {
-			blockGasLimit = ethconfig.DefaultBlockGasLimit
-		}
-	}
-
 	err = p.senders.registerNewSenders(&txns, p.logger)
 	if err != nil {
 		return err
@@ -2908,14 +2905,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return true
 	})
 
-	// Initialise cached pendingBaseFee values in all queues so that their
-	// comparators use the correct base fee even before the first OnNewBlock.
-	var pendingBaseFee256 uint256.Int
-	pendingBaseFee256.SetUint64(pendingBaseFee)
-	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
-	p.pendingBaseFee.Store(pendingBaseFee)
-	p.pendingBlobFee.Store(pendingBlobFee)
-	p.blockGasLimit.Store(blockGasLimit)
 	return nil
 }
 

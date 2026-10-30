@@ -203,6 +203,12 @@ func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool
 	return val, txNum, true
 }
 
+// GetAsOf is GetVisible for a read as of ts: the latest visible value, written before ts, is also the value as of ts.
+func (v ReadView) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool) {
+	val, txNum, ok := v.GetVisible(domain, key)
+	return val, ok && txNum < ts
+}
+
 // GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss.
 func (v ReadView) GetCodeByHash(codeHash []byte) ([]byte, bool) {
