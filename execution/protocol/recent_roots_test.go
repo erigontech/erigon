@@ -55,15 +55,32 @@ func recentRootTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 }
 
 func TestFrameValidationRecentRoot(t *testing.T) {
-	evm, tx := recentRootTestEnv(t)
-	validation, err := ValidateFrameTransaction(evm, tx)
-	require.NoError(t, err)
-	require.Contains(t, validation.Dependencies, types.FrameRecentRootVerifier)
-	require.Equal(t, []RecentRootReference{{
-		StorageKey: common.HexToHash("0x5f027aa1cbe2df279bf6518edd4b44ea5409fd800189ec35224e10ab05e574c3"),
-		EntryHash:  common.HexToHash("0x0a0d1254c851be5a133b4c9a9e300f5602fc0f43dbe65aa6a66930d4ca0a51b8"),
-		Slot:       1,
-	}}, validation.RecentRoots)
+	for _, expiry := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expiry=%t", expiry), func(t *testing.T) {
+			evm, tx := recentRootTestEnv(t)
+			var deadline uint64
+			if expiry {
+				deadline = evm.Context.Time + 1
+				require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(types.FrameExpiryVerifier), frameExpiryCode, tracing.CodeChangeUnspecified))
+				tx.Frames = append([]types.Frame{{
+					Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier,
+					Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000},
+				}}, tx.Frames...)
+			}
+			validation, err := ValidateFrameTransaction(evm, tx)
+			require.NoError(t, err)
+			require.Equal(t, deadline, validation.Deadline)
+			require.Contains(t, validation.Dependencies, types.FrameRecentRootVerifier)
+			require.Equal(t, []RecentRootReference{{
+				StorageKey: common.HexToHash("0x5f027aa1cbe2df279bf6518edd4b44ea5409fd800189ec35224e10ab05e574c3"),
+				EntryHash:  common.HexToHash("0x0a0d1254c851be5a133b4c9a9e300f5602fc0f43dbe65aa6a66930d4ca0a51b8"),
+				Slot:       1,
+			}}, validation.RecentRoots)
+			refs, err := FrameTransactionRecentRoots(tx)
+			require.NoError(t, err)
+			require.Equal(t, validation.RecentRoots, refs)
+		})
+	}
 }
 
 func TestFrameValidationRecentRootPrefixes(t *testing.T) {
@@ -74,14 +91,17 @@ func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 					t.Run(fmt.Sprintf("deploy=%t/sponsored=%t/expiry=%t/roots=%t", deploy, sponsored, expiry, roots), func(t *testing.T) {
 						_, tx := recentRootTestEnv(t)
 						root, sender := tx.Frames[0], tx.Frames[1]
+						rootIndex, deployIndex := -1, -1
 						tx.Frames = nil
 						if expiry {
 							tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: make([]byte, 8)})
 						}
 						if roots {
+							rootIndex = len(tx.Frames)
 							tx.Frames = append(tx.Frames, root)
 						}
 						if deploy {
+							deployIndex = len(tx.Frames)
 							tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameDefault})
 						}
 						if sponsored {
@@ -92,7 +112,11 @@ func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 							payer := common.Address{9}
 							tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer})
 						}
-						require.NoError(t, ValidateFrameTransactionPrefix(tx))
+						prefix, err := frameValidationPrefix(tx)
+						require.NoError(t, err)
+						require.Equal(t, rootIndex, prefix.recentRoot)
+						require.Equal(t, deployIndex, prefix.deploy)
+						require.Equal(t, len(tx.Frames)-1, prefix.end)
 					})
 				}
 			}
@@ -146,7 +170,7 @@ func TestFrameValidationRecentRootAge(t *testing.T) {
 			if tc.valid {
 				require.NoError(t, err)
 			} else {
-				require.Error(t, err)
+				require.ErrorIs(t, err, vm.ErrExecutionReverted)
 			}
 		})
 	}

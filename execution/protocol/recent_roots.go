@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -50,6 +51,19 @@ type RecentRootReference struct {
 
 func (r RecentRootReference) ValidAt(slot uint64) bool {
 	return r.Slot < slot && slot-r.Slot < RecentRootLength
+}
+
+// FrameTransactionRecentRoots uses the validation prefix, so approval frames
+// targeting the verifier address do not become recent-root dependencies.
+func FrameTransactionRecentRoots(tx *types.FrameTransaction) ([]RecentRootReference, error) {
+	prefix, err := frameValidationPrefix(tx)
+	if err != nil {
+		return nil, err
+	}
+	if prefix.recentRoot < 0 {
+		return nil, nil
+	}
+	return ParseRecentRootReferences(tx.Frames[prefix.recentRoot].Data)
 }
 
 func validateRecentRootDataLength(size int) error {

@@ -44,7 +44,7 @@ func TestFrameValidationRecentRootPendingSlot(t *testing.T) {
 	entry := common.HexToHash("0x0a0d1254c851be5a133b4c9a9e300f5602fc0f43dbe65aa6a66930d4ca0a51b8")
 	data := common.FromHex("b9382d35273c75a50631a3e84d3c75ec9266e2b18c35a627e16cdbf26a18ca8500000000000000010000000000000000000000000000000000000000000000000000000000000002")
 	genesis := &types.Genesis{
-		Config: cfg, Timestamp: uint64(time.Now().Unix()) - 86400, SlotNumber: common.NewUint64(1), GasLimit: 30_000_000,
+		Config: cfg, Timestamp: uint64(time.Now().Add(-48 * time.Hour).Unix()), SlotNumber: common.NewUint64(1), GasLimit: 30_000_000,
 		Alloc: types.GenesisAlloc{
 			sender:                        {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
 			types.FrameRecentRootVerifier: {Code: protocol.RecentRootCode, Storage: map[common.Hash]common.Hash{key: entry}},

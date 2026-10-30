@@ -53,19 +53,44 @@ func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, fee uint6
 	return &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
 }
 
+func TestFramePoolRecentRootAddressAsPaymaster(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.payer, backend.paymaster = types.FrameRecentRootVerifier, true
+	backend.dependencies = [][]byte{types.FrameRecentRootVerifier[:]}
+	tx := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 100}},
+			{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &types.FrameRecentRootVerifier, Limits: mdgas.MdGas{Execution: 100}},
+		},
+		Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
+	}
+	require.NoError(t, protocol.ValidateFrameTransactionPrefix(tx))
+	var encoded bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&encoded))
+	slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+	var txns TxnSlots
+	txns.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Empty(t, slot.frameValidation.RecentRoots)
+	require.Contains(t, slot.frameValidation.Dependencies, types.FrameRecentRootVerifier)
+}
+
 func TestFramePoolRecentRootExpiry(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		slot           *uint64
-		inactive, keep bool
+		name string
+		slot *uint64
+		keep bool
 	}{
-		{"oldest usable", common.NewUint64(10 + protocol.RecentRootLength - 2), false, true},
-		{"expired", common.NewUint64(10 + protocol.RecentRootLength - 1), false, false},
-		{"current slot after reorg", common.NewUint64(9), false, false},
-		{"future slot after reorg", common.NewUint64(8), false, false},
-		{"missing slot", nil, false, false},
-		{"slot overflow", common.NewUint64(math.MaxUint64), false, false},
-		{"activation unwound", common.NewUint64(11), true, false},
+		{"oldest usable", common.NewUint64(10 + protocol.RecentRootLength - 2), true},
+		{"expired", common.NewUint64(10 + protocol.RecentRootLength - 1), false},
+		{"current slot after reorg", common.NewUint64(9), false},
+		{"future slot after reorg", common.NewUint64(8), false},
+		{"missing slot", nil, false},
+		{"slot overflow", common.NewUint64(math.MaxUint64), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
@@ -83,9 +108,6 @@ func TestFramePoolRecentRootExpiry(t *testing.T) {
 
 			change := newBlockChangeForAccounts(common.Hash{2}, 0)
 			change.ChangeBatch[0].SlotNumber = tc.slot
-			if tc.inactive {
-				pool.chainConfig.BogotaTime = common.NewUint64(100)
-			}
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.keep {
 				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
@@ -95,6 +117,52 @@ func TestFramePoolRecentRootExpiry(t *testing.T) {
 				require.Empty(t, pool.all.senderIDFrameTxn)
 			}
 			require.Empty(t, backend.calls, "age checks must not require EVM simulation")
+		})
+	}
+}
+
+func TestFramePoolRecentRootForkBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		initialTime uint64
+		initialSlot uint64
+		direction   remoteproto.Direction
+		valid       bool
+	}{
+		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, true},
+		{"activation unwound", 100, 21, remoteproto.Direction_UNWIND, true},
+		{"invalid after unwind", 100, 21, remoteproto.Direction_UNWIND, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.chainConfig.BogotaTime = common.NewUint64(100)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.dependencies = [][]byte{types.FrameRecentRootVerifier[:]}
+			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+			initial.ChangeBatch[0].BlockTime = tc.initialTime
+			initial.ChangeBatch[0].SlotNumber = common.NewUint64(tc.initialSlot)
+			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			slot := recentRootPoolSlot(t, sender, 10, 1)
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			backend.valid, backend.calls = tc.valid, nil
+			change := newBlockChangeForAccounts(common.Hash{2}, 0)
+			change.ChangeBatch[0].BlockTime = 88
+			change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
+			change.ChangeBatch[0].Direction = tc.direction
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Equal(t, []common.Hash{slot.IDHash}, backend.calls, "simulation decides activation using the next payload's rules")
+			if tc.valid {
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+			} else {
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+				require.Empty(t, pool.all.senderIDFrameTxn)
+			}
 		})
 	}
 }

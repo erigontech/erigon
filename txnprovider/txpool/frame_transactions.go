@@ -250,14 +250,9 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	}
 	// Root storage references are derived locally from frame calldata. The RPC
 	// reply supplies the verifier's account dependency.
-	for _, frame := range txn.Txn.(*types.FrameTransaction).Frames {
-		if frame.IsRecentRootVerifier() {
-			v.RecentRoots, err = protocol.ParseRecentRootReferences(frame.Data)
-			if err != nil {
-				return nil, err
-			}
-			break
-		}
+	v.RecentRoots, err = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
+	if err != nil {
+		return nil, err
 	}
 	return v, nil
 }
@@ -407,8 +402,11 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		// Blob costs can change with the block context even when none
+		// of the validation's account dependencies changed.
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		if len(previous.RecentRoots) > 0 {
-			valid := p.chainConfig.IsBogota(blockTime) && head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
+			valid := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
 			if valid {
 				for _, ref := range previous.RecentRoots {
 					if !ref.ValidAt(*head.SlotNumber + 1) {
@@ -422,6 +420,9 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 				continue
 			}
+			// A pre-fork head may still produce a post-fork payload. Recheck
+			// activation through simulation using the same rules as admission.
+			affected = affected || !p.chainConfig.IsBogota(blockTime)
 		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
@@ -431,9 +432,6 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			continue
 		}
 		keyedNonce := !frame.UsesLegacyNonce()
-		// Blob costs can change with the block context even when none
-		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		// Helper account changes matter only when code changes. Sender and payer
 		// state can also affect approval or funding. Storage slots and creation
 		// nonces are checked separately below.
