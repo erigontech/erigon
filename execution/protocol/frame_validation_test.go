@@ -87,6 +87,54 @@ func TestFrameValidationPolicy(t *testing.T) {
 	}
 }
 
+func TestFrameValidationPrecompileCodeHash(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		balance uint64
+	}{
+		{"empty", 0},
+		{"funded", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			precompile := common.BytesToAddress([]byte{1})
+			ibs := evm.IntraBlockState()
+			require.NoError(t, ibs.SetBalance(accounts.InternAddress(precompile), *uint256.NewInt(tc.balance), tracing.BalanceChangeUnspecified))
+			code := program.New().Push(precompile).Op(vm.EXTCODEHASH, vm.POP).
+				Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), code, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 10_000}}}
+			_, err := ValidateFrameTransaction(evm, tx)
+			require.ErrorContains(t, err, "opcode EXTCODEHASH is not allowed in frame validation")
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+		})
+	}
+}
+
+func TestFrameValidationCodeAccess(t *testing.T) {
+	precompile := common.BytesToAddress([]byte{1})
+	helper := common.HexToAddress("0x2000")
+	for name, code := range map[string]*program.Program{
+		"precompile call": program.New().StaticCall(uint256.NewInt(3_000), precompile, 0, 0, 0, 0).Op(vm.POP),
+		"precompile size": program.New().Push(precompile).Op(vm.EXTCODESIZE, vm.POP),
+		"precompile copy": program.New().ExtcodeCopy(precompile, 0, 0, 1),
+		"contract hash":   program.New().Push(helper).Op(vm.EXTCODEHASH, vm.POP),
+	} {
+		t.Run(name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(helper), []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+			code.Push(3).Push0().Push0().Op(vm.APPROVE)
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), code.Bytes(), tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 10_000}}}
+			_, err := ValidateFrameTransaction(evm, tx)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestFrameValidationZeroDeadline(t *testing.T) {
 	evm, tx := frameTestEnv(t)
 	evm.Context.Time = 1

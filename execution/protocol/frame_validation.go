@@ -321,7 +321,15 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		banned = scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.EXTCODESIZE, vm.EXTCODEHASH, vm.EXTCODECOPY:
 		if len(stack) > 0 {
-			v.checkTarget(accounts.InternAddress(common.Address(stack[len(stack)-1].Bytes20())), false)
+			address := accounts.InternAddress(common.Address(stack[len(stack)-1].Bytes20()))
+			if vm.OpCode(op) == vm.EXTCODEHASH {
+				// Empty and funded precompiles have different EXTCODEHASH results,
+				// exposing a helper balance forbidden by the pool policy:
+				// https://eips.ethereum.org/EIPS/eip-8141#policy-summary
+				// Proposed clarification: https://github.com/ethereum/EIPs/pull/12596
+				_, banned = vm.Precompiles(v.evm.ChainRules())[address]
+			}
+			v.checkTarget(address, false)
 		}
 	case vm.CALL, vm.CALLCODE, vm.DELEGATECALL, vm.STATICCALL:
 		if len(stack) > 1 {
