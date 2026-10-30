@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
 func TestForEachPBinLeafWithWorkersStopsSiblingsOnError(t *testing.T) {
@@ -97,6 +98,7 @@ func TestForEachPBinLeafWithWorkersMatchesSerial(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+	walkWorkers := temporal.LeafWalkWorkers(t)
 	for _, workers := range []int{1, 4, 16} {
 		at := agg.BeginFilesRo()
 		var parallel []state.PBinLeaf
@@ -117,5 +119,10 @@ func TestForEachPBinLeafWithWorkersMatchesSerial(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, serialRoot, parallelRoot, "workers=%d", workers)
+		if walked := walkWorkers(); workers > 1 {
+			require.GreaterOrEqual(t, walked, 2, "workers=%d", workers)
+		} else {
+			require.Zero(t, walked)
+		}
 	}
 }

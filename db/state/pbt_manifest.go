@@ -107,7 +107,29 @@ func ReadPBTManifest(path string) (PBTManifest, error) {
 	if manifest.Format != PBTManifestFormat {
 		return PBTManifest{}, fmt.Errorf("pbt manifest: unknown format %d", manifest.Format)
 	}
+	if err := checkPBTManifestFields(data); err != nil {
+		return PBTManifest{}, err
+	}
 	return manifest, nil
+}
+
+func checkPBTManifestFields(data []byte) error {
+	var fields map[string]any
+	if err := toml.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("pbt manifest: decode: %w", err)
+	}
+	for _, name := range []string{"point", "pbt_root", "hex_root", "trie_hash"} {
+		if _, ok := fields[name]; !ok {
+			return fmt.Errorf("pbt manifest: missing field %s", name)
+		}
+	}
+	point, _ := fields["point"].(map[string]any)
+	for _, name := range []string{"block", "tx_num"} {
+		if _, ok := point[name]; !ok {
+			return fmt.Errorf("pbt manifest: missing field point.%s", name)
+		}
+	}
+	return nil
 }
 
 func ValidatePBTManifestFiles(ctx context.Context, manifest PBTManifest, sources []PBTManifestFileSource, workers int, progress PBTManifestProgressFunc) error {

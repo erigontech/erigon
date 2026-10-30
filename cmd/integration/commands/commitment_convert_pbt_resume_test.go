@@ -22,9 +22,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -414,6 +417,69 @@ func TestVerifyPBTResumeStreamRootHonorsCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	require.ErrorIs(t, verifyPBTResumeStreamRoot(ctx, agg, common.Hash{}, 2), context.Canceled)
+}
+
+func TestVerifyPBTResumeStreamRootDefaultsWorkers(t *testing.T) {
+	source, _ := pbtResumeFixture(t, 1, false, false)
+	settings, err := dbstate.ReadErigonDBSettings(source.Tester.Dirs)
+	require.NoError(t, err)
+	agg, err := openPBTState(t.Context(), source.Tester.Dirs, settings, nil, log.New())
+	require.NoError(t, err)
+	defer agg.Close()
+	previousWorkers := dbg.PBTWorkers
+	dbg.PBTWorkers = 2
+	t.Cleanup(func() { dbg.PBTWorkers = previousWorkers })
+	walkWorkers := commitmenttemporal.LeafWalkWorkers(t)
+	require.ErrorContains(t, verifyPBTResumeStreamRoot(t.Context(), agg, common.Hash{}, 0), "differs from resumed root")
+	require.GreaterOrEqual(t, walkWorkers(), 2, "--workers 0 must use the same default as the conversion")
+}
+
+func pbtManifestWithoutField(t *testing.T, data []byte, field string) []byte {
+	t.Helper()
+	pattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(field) + ` = .*\n`)
+	if field == "point" {
+		pattern = regexp.MustCompile(`(?m)^\[point\]\n(?:\w+ = .*\n)*`)
+	}
+	require.True(t, pattern.Match(data), "manifest has no field %s:\n%s", field, data)
+	return pattern.ReplaceAll(data, nil)
+}
+
+func TestPBTManifestMissingFieldRefused(t *testing.T) {
+	fields := []string{"point", "pbt_root", "hex_root", "trie_hash"}
+	t.Run("resume", func(t *testing.T) {
+		source, baseOutput := pbtResumeFixture(t, 1, false, false)
+		for _, field := range fields {
+			t.Run(field, func(t *testing.T) {
+				output := filepath.Join(t.TempDir(), "output")
+				copyPBTResumeSnapshot(t, baseOutput, output)
+				manifestPath := filepath.Join(datadir.Open(output).Snap, "pbt-manifest.toml")
+				data, err := os.ReadFile(manifestPath)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(manifestPath, pbtManifestWithoutField(t, data, field), 0o644))
+				before := snapshotTreeDigest(t, output)
+				err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1})
+				require.ErrorContains(t, err, "missing field "+field)
+				require.Equal(t, before, snapshotTreeDigest(t, output))
+			})
+		}
+	})
+	t.Run("attach", func(t *testing.T) {
+		selectPBTCommandSuite(t)
+		source, _ := newPBTConversionSource(t)
+		published := filepath.Join(t.TempDir(), "published")
+		require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+		setExecutionProgress(t, source.Chaindata, 1)
+		manifestPath := filepath.Join(datadir.Open(published).Snap, "pbt-manifest.toml")
+		original, err := os.ReadFile(manifestPath)
+		require.NoError(t, err)
+		for _, field := range fields {
+			t.Run(field, func(t *testing.T) {
+				require.NoError(t, os.WriteFile(manifestPath, pbtManifestWithoutField(t, original, field), 0o644))
+				err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
+				require.ErrorContains(t, err, "missing field "+field)
+			})
+		}
+	})
 }
 
 func TestPBTResumeRefusesUnequalStateDomainEnds(t *testing.T) {

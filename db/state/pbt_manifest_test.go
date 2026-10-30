@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -86,6 +87,47 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 		require.NoError(t, err)
 		require.ErrorContains(t, state.ValidatePBTManifestFileSet(read, sources), "duplicate file name")
 		require.NoError(t, state.WritePBTManifest(path, manifest))
+	})
+	for _, test := range []struct{ field, pattern string }{
+		{"point", `(?m)^\[point\]\n(?:\w+ = .*\n)*`},
+		{"point.block", `(?m)^block = .*\n`},
+		{"point.tx_num", `(?m)^tx_num = .*\n`},
+		{"pbt_root", `(?m)^pbt_root = .*\n`},
+		{"hex_root", `(?m)^hex_root = .*\n`},
+		{"trie_hash", `(?m)^trie_hash = .*\n`},
+	} {
+		t.Run("missing "+test.field, func(t *testing.T) {
+			require.NoError(t, state.WritePBTManifest(path, manifest))
+			data, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			pattern := regexp.MustCompile(test.pattern)
+			require.True(t, pattern.Match(data))
+			require.NoError(t, os.WriteFile(path, pattern.ReplaceAll(data, nil), 0o644))
+			_, err := state.ReadPBTManifest(path)
+			require.ErrorContains(t, err, "missing field "+test.field)
+		})
+	}
+	t.Run("empty hex root and zero point", func(t *testing.T) {
+		present := manifest
+		present.HexRoot = ""
+		present.Point = state.PBTManifestPoint{}
+		require.NoError(t, state.WritePBTManifest(path, present))
+		got, err := state.ReadPBTManifest(path)
+		require.NoError(t, err)
+		require.Equal(t, present, got)
+	})
+	t.Run("missing skip_verify means false", func(t *testing.T) {
+		skipping := manifest
+		skipping.SkipVerify = true
+		require.NoError(t, state.WritePBTManifest(path, skipping))
+		data, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		pattern := regexp.MustCompile(`(?m)^skip_verify = .*\n`)
+		require.True(t, pattern.Match(data))
+		require.NoError(t, os.WriteFile(path, pattern.ReplaceAll(data, nil), 0o644))
+		got, err := state.ReadPBTManifest(path)
+		require.NoError(t, err)
+		require.False(t, got.SkipVerify)
 	})
 	t.Run("unknown format", func(t *testing.T) {
 		data, readErr := os.ReadFile(path)

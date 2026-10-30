@@ -1508,7 +1508,7 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 func verifyPBTResumeStreamRoot(ctx context.Context, aggregator *dbstate.Aggregator, want common.Hash, workers int) error {
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
-	workers = max(workers, 1)
+	workers = dbstate.PBinConvertWorkers(workers)
 	builder, err := eip8297.NewParallelStreamRoot(eip8297.HashBytes, workers)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: C-e stream root: %w", err)

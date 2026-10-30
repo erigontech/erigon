@@ -107,6 +107,13 @@ func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) e
 	return builder.RootHash()
 }
 
+func PBinConvertWorkers(workers int) int {
+	if workers <= 0 {
+		workers = dbg.PBTWorkers
+	}
+	return max(workers, 1)
+}
+
 func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, error) {
 	if opts.SourceAggregator == nil || opts.SourceTx == nil || opts.TargetAggregator == nil || opts.TargetTx == nil {
 		return common.Hash{}, fmt.Errorf("pbin conversion: missing database input")
@@ -117,11 +124,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if opts.Hash == nil {
 		return common.Hash{}, fmt.Errorf("pbin conversion: nil hash function")
 	}
-	workers := opts.Workers
-	if workers <= 0 {
-		workers = dbg.PBTWorkers
-	}
-	workers = max(workers, 1)
+	workers := PBinConvertWorkers(opts.Workers)
 	limits := PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes}
 	if opts.RangeWriterLimits != nil {
 		limits = *opts.RangeWriterLimits

@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
+	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -605,7 +606,7 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 		converted := make(map[bool]map[string][]byte, 2)
 		for _, sequential := range []bool{true, false} {
 			output := filepath.Join(t.TempDir(), "output")
-			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential}
+			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential, workers: 4}
 			require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), hooks), "maxOps=%d sequential=%v", maxOps, sequential)
 			converted[sequential] = pbtCommitmentBinFiles(t, output, ".kv")
 			require.NotEmpty(t, converted[sequential])
@@ -647,14 +648,17 @@ func TestConvertPBTSourceWalkWorkersMatchSerial(t *testing.T) {
 	source, _ := newPBTConversionSourceAt(t, 15)
 	var wantLeaves map[string][]byte
 	var wantRoot common.Hash
+	walkWorkers := commitmenttemporal.LeafWalkWorkers(t)
 	for _, workers := range []int{1, 4, 16} {
 		output := filepath.Join(t.TempDir(), fmt.Sprintf("output-%d", workers))
 		require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{workers: workers}), "workers=%d", workers)
 		gotLeaves := readPBTBinLeaves(t, output, source.Chaindata)
 		gotRoot := readPBTBinRoot(t, output, source.Chaindata)
+		walked := walkWorkers()
 		if workers == 1 {
 			wantLeaves, wantRoot = gotLeaves, gotRoot
 		} else {
+			require.GreaterOrEqual(t, walked, 2, "workers=%d: the source walk did not run on several workers", workers)
 			require.Equal(t, wantLeaves, gotLeaves, "workers=%d", workers)
 			require.Equal(t, wantRoot, gotRoot, "workers=%d", workers)
 		}

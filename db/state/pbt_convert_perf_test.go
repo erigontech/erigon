@@ -18,8 +18,11 @@ package state_test
 
 import (
 	"bytes"
+	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -41,6 +44,72 @@ func (tx pbinCommitmentReadCounter) GetLatest(domain kv.Domain, k []byte, opts k
 		tx.reads.Add(1)
 	}
 	return tx.TemporalRwTx.GetLatest(domain, k, opts)
+}
+
+type pbinWorkerBarrier struct {
+	mu     sync.Mutex
+	inside int
+	met    chan struct{}
+}
+
+func (b *pbinWorkerBarrier) enter() {
+	b.mu.Lock()
+	b.inside++
+	if b.inside == 2 {
+		select {
+		case <-b.met:
+		default:
+			close(b.met)
+		}
+	}
+	b.mu.Unlock()
+	select {
+	case <-b.met:
+	case <-time.After(30 * time.Second):
+	}
+	b.mu.Lock()
+	b.inside--
+	b.mu.Unlock()
+}
+
+type pbinBarrierPin struct {
+	kv.TemporalFilesPin
+	barrier *pbinWorkerBarrier
+}
+
+func (p pbinBarrierPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	p.barrier.enter()
+	return p.TemporalFilesPin.BeginTemporalRo(ctx)
+}
+
+type pbinBarrierTx struct {
+	kv.TemporalRwTx
+	barrier *pbinWorkerBarrier
+}
+
+func (tx pbinBarrierTx) Pin() kv.TemporalFilesPin {
+	return pbinBarrierPin{TemporalFilesPin: tx.TemporalRwTx.(interface{ Pin() kv.TemporalFilesPin }).Pin(), barrier: tx.barrier}
+}
+
+func TestConvertPBinRunsWalkAndRoundOnSeveralWorkers(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 1024)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	walkWorkers := temporal.LeafWalkWorkers(t)
+	barrier := &pbinWorkerBarrier{met: make(chan struct{})}
+	convertPBin(t, db, agg, db, agg, 7, func(options *state.PBinConvertOptions) {
+		options.TargetDB = db
+		options.TargetTx = pbinBarrierTx{TemporalRwTx: options.TargetTx, barrier: barrier}
+		options.Workers = 4
+	})
+	require.GreaterOrEqual(t, walkWorkers(), 2, "the source walk must run on several workers")
+	select {
+	case <-barrier.met:
+	default:
+		t.Fatal("the commitment round must hold two worker contexts open at once")
+	}
 }
 
 func TestConvertPBinDetachDoesNotReadMDBX(t *testing.T) {
