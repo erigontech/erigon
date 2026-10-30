@@ -1662,9 +1662,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		execLoopCtxCancel(cause)
 		cancelWorkers()
 
-		// Drain in-flight dispatch goroutines before tearing down worker contexts:
-		// cancelWorkers unblocks any waiting on runSem, so no goroutine touches a
-		// worker after teardown.
+		// Join the scheduler before draining workers: it may still add to runWG.
+		_ = pe.wait()
 		pe.runWG.Wait()
 		for drained := false; !drained; {
 			select {
@@ -1685,8 +1684,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		}
 		pe.mintedWorkers = nil
 		pe.mintMu.Unlock()
-
-		_ = pe.wait()
 	}, nil
 }
 
