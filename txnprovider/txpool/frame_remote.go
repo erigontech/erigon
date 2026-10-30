@@ -34,7 +34,7 @@ import (
 const (
 	remoteFrameQueueLimit = 64
 	remoteFramePeerLimit  = 4
-	remoteFramePeerRate   = 16 // frames per second
+	remoteFramePeerRate   = 16 // frame transactions per second
 )
 
 type remoteFrameTxn struct {

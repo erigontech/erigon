@@ -66,8 +66,10 @@ type frameBlockUpdate struct {
 
 var errFrameStateChanged = errors.New("frame validation state changed")
 
-// One deadline covers the whole batch, including waits for the simulation gate.
-// A fresh timeout per transaction would let large batches hold up admission.
+// Each admission or revalidation batch shares one deadline, including waits for
+// the simulation gate, so the time limit does not grow with the batch size.
+// The remote worker admits one transaction per batch; waiting in its queue
+// does not consume that transaction's deadline.
 const frameValidationTimeout = 5 * time.Second
 
 func (tx *TxnSlot) hasKeyedNonce() bool {

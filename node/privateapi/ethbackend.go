@@ -586,8 +586,8 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			return nil, err
 		}
 	}
-	// Fee caps determine queue placement. Prefix validation must also accept
-	// transactions waiting for execution or blob fees to fall.
+	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
+	// do not become cached failures of prefix validation.
 	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
 		blockContext.BaseFee.Set(frame.GetFeeCap())
 	}
