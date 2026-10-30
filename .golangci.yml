@@ -52,7 +52,11 @@ linters:
   settings:
     gosec:
       includes:
+        - G109
+        - G110
         - G112
+        - G114
+        - G402
     usetesting:
       os-mkdir-temp: false
     goconst:
@@ -118,16 +122,15 @@ linters:
         - unusedwrite
         - shadow
         - sortslice
+        - unsafeptr
       disable:
         - deepequalerrors
         - fieldalignment
-        - unsafeptr
   exclusions:
     generated: lax
     presets:
       - comments
       - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       - linters:

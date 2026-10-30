@@ -45,11 +45,11 @@ func TestSlotData(t *testing.T) {
 		Fork:                          &cltypes.Fork{Epoch: 12},
 	}
 	var b bytes.Buffer
-	if err := m.WriteTo(&b); err != nil {
+	if err := m.Serialize(&b); err != nil {
 		t.Fatal(err)
 	}
 	m2 := &SlotData{}
-	if err := m2.ReadFrom(&b); err != nil {
+	if err := m2.Deserialize(&b); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,10 +74,10 @@ func TestSlotDataGloas(t *testing.T) {
 		Fork:                          &cltypes.Fork{Epoch: 12},
 	}
 	var b bytes.Buffer
-	require.NoError(t, m.WriteTo(&b))
+	require.NoError(t, m.Serialize(&b))
 
 	m2 := &SlotData{}
-	require.NoError(t, m2.ReadFrom(&b))
+	require.NoError(t, m2.Deserialize(&b))
 
 	require.Equal(t, m, m2)
 }
@@ -101,10 +101,10 @@ func TestSlotDataGloasDefaultHash(t *testing.T) {
 		Fork:                          &cltypes.Fork{},
 	}
 	var b bytes.Buffer
-	require.NoError(t, m.WriteTo(&b))
+	require.NoError(t, m.Serialize(&b))
 
 	m2 := &SlotData{}
-	require.NoError(t, m2.ReadFrom(&b))
+	require.NoError(t, m2.Deserialize(&b))
 
 	require.Equal(t, m, m2)
 }
@@ -144,10 +144,10 @@ func TestSlotDataGloasAllFieldsNonZero(t *testing.T) {
 		},
 	}
 	var b bytes.Buffer
-	require.NoError(t, m.WriteTo(&b))
+	require.NoError(t, m.Serialize(&b))
 
 	m2 := &SlotData{}
-	require.NoError(t, m2.ReadFrom(&b))
+	require.NoError(t, m2.Deserialize(&b))
 
 	require.Equal(t, m, m2)
 }
@@ -181,10 +181,10 @@ func TestSlotDataPreGloasDoesNotIncludeGloasFields(t *testing.T) {
 				Fork:                       &cltypes.Fork{Epoch: 12},
 			}
 			var b bytes.Buffer
-			require.NoError(t, m.WriteTo(&b))
+			require.NoError(t, m.Serialize(&b))
 
 			m2 := &SlotData{}
-			require.NoError(t, m2.ReadFrom(&b))
+			require.NoError(t, m2.Deserialize(&b))
 
 			// GLOAS fields should be zero after round-trip through a pre-GLOAS version.
 			require.Equal(t, uint64(0), m2.NextWithdrawalBuilderIndex)
@@ -225,8 +225,8 @@ func TestSlotDataGloasEncodesMoreBytesThanElectra(t *testing.T) {
 	}
 
 	var electraBuf, gloasBuf bytes.Buffer
-	require.NoError(t, base(clparams.ElectraVersion).WriteTo(&electraBuf))
-	require.NoError(t, base(clparams.GloasVersion).WriteTo(&gloasBuf))
+	require.NoError(t, base(clparams.ElectraVersion).Serialize(&electraBuf))
+	require.NoError(t, base(clparams.GloasVersion).Serialize(&gloasBuf))
 
 	// GLOAS adds uint64 (8 bytes) + Hash (32 bytes) = 40 bytes more
 	require.Greater(t, gloasBuf.Len(), electraBuf.Len(),
@@ -237,7 +237,7 @@ func TestSlotDataGloasEncodesMoreBytesThanElectra(t *testing.T) {
 
 // TestSlotDataReadSlotDataRoundTrip tests the full ReadSlotData path using a
 // mock GetValFn that simulates reading from the kv.SlotData table. This tests
-// the integration between WriteTo, ReadSlotData, and the SlotData DB encoding.
+// the integration between Serialize, ReadSlotData, and the SlotData DB encoding.
 func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -284,7 +284,7 @@ func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			require.NoError(t, tc.sd.WriteTo(&buf))
+			require.NoError(t, tc.sd.Serialize(&buf))
 
 			slot := uint64(1000)
 			key := base_encoding.Encode64ToBytes4(slot)
@@ -324,7 +324,7 @@ func TestSlotDataReadSlotDataPreGloasReturnsZeroGloasFields(t *testing.T) {
 		Fork:                          &cltypes.Fork{Epoch: 12},
 	}
 	var buf bytes.Buffer
-	require.NoError(t, m.WriteTo(&buf))
+	require.NoError(t, m.Serialize(&buf))
 
 	slot := uint64(500)
 	key := base_encoding.Encode64ToBytes4(slot)

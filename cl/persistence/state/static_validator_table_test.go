@@ -74,9 +74,9 @@ func TestStaticValidatorTable(t *testing.T) {
 	// Lastly serialize and deserialization
 	table.ForEach(func(validatorIndex uint64, validator *StaticValidator) bool {
 		var b bytes.Buffer
-		require.NoError(t, validator.WriteTo(&b))
+		require.NoError(t, validator.Serialize(&b))
 		tmp := &StaticValidator{}
-		require.NoError(t, tmp.ReadFrom(&b))
+		require.NoError(t, tmp.Deserialize(&b))
 		require.Equal(t, validator, tmp)
 		return true
 	})

@@ -382,7 +382,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return true
 			}
 			buf.Reset()
-			if writeErr = validator.WriteTo(buf); writeErr != nil {
+			if writeErr = validator.Serialize(buf); writeErr != nil {
 				return false
 			}
 			if writeErr = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), bytes.Clone(buf.Bytes())); writeErr != nil {

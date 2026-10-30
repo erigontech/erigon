@@ -866,7 +866,7 @@ func TestGetStateProposerLookaheadHistorical(t *testing.T) {
 
 	epochData := &state_accessors.EpochData{JustificationBits: &cltypes.JustificationBits{}, ProposerLookahead: lookahead, BeaconConfig: cfg, Version: clparams.FuluVersion}
 	var buf bytes.Buffer
-	require.NoError(t, epochData.WriteTo(&buf))
+	require.NoError(t, epochData.Serialize(&buf))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return tx.Put(kv.EpochData, key, buf.Bytes())
 	}))
