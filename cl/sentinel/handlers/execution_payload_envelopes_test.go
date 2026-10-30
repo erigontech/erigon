@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -42,7 +43,6 @@ type testEnvelopeRebuilder struct {
 	rejected  map[common.Hash]struct{}
 	onRebuild func()
 	err       error
-	calls     int
 	called    []common.Hash
 }
 
@@ -79,7 +79,6 @@ func (r *testEnvelopeRebuilder) Prepare(_ context.Context, _ kv.Tx, _ uint64, bl
 
 func (r *testEnvelopeRebuilder) TryRebuild(_ context.Context, prepared *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	blockRoot := r.prepared[prepared]
-	r.calls++
 	r.called = append(r.called, blockRoot)
 	if r.onRebuild != nil {
 		r.onRebuild()
@@ -670,16 +669,9 @@ func TestExecutionPayloadEnvelopesByRootRebuildsMissingCanonicalEnvelope(t *test
 
 	roots := solid.NewHashList(int(beaconCfg.MaxRequestPayloads))
 	roots.Append(root)
-	var request bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-	stream := &envelopeHandlerStream{
-		request:  bytes.NewReader(request.Bytes()),
-		conn:     &remotePeerConn{peerID: peer.ID("history-peer")},
-		protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1),
-	}
-	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-	require.Equal(t, byte(SuccessfulResponsePrefix), stream.response.Bytes()[0])
-	require.Equal(t, 1, rebuilder.calls)
+	stream := newRootHandlerTestStream(roots, peer.ID("history-peer"))
+	require.Equal(t, byte(SuccessfulResponsePrefix), stream.run(t, c)[0])
+	require.Len(t, rebuilder.called, 1)
 }
 
 func TestExecutionPayloadEnvelopesByRootServesStoredEnvelopesBeforeRebuilds(t *testing.T) {
@@ -706,78 +698,72 @@ func TestExecutionPayloadEnvelopesByRootServesStoredEnvelopesBeforeRebuilds(t *t
 	fc.SetEnvelope(roots.Get(1), storedEnvelope)
 	rebuilder := &testEnvelopeRebuilder{err: context.DeadlineExceeded}
 	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-	var request bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
+	stream := newRootHandlerTestStream(roots, peer.ID("history-peer"))
 	rebuilder.onRebuild = func() { stream.expired = true }
 
-	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-	require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
-	require.Equal(t, 1, rebuilder.calls)
+	require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, stream.run(t, c), cfg))
+	require.Len(t, rebuilder.called, 1)
 }
 
-func TestExecutionPayloadEnvelopesByRootCapsRebuilds(t *testing.T) {
+func TestExecutionPayloadEnvelopesByRootRebuildBudgetIsPerPeer(t *testing.T) {
 	ctx := t.Context()
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 	ethClock, cfg := getGloasEthClockAndConfig(t)
-	startSlot := ethClock.GetCurrentSlot() - envelope_history.MaxRebuildsPerRequest - 2
 	tx, err := indiciesDB.BeginRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	blocks := populateDatabaseWithBlocks(t, store, tx, startSlot, envelope_history.MaxRebuildsPerRequest+1)
+	blocks := populateDatabaseWithBlocks(t, store, tx, ethClock.GetCurrentSlot()-2, 1)
 	require.NoError(t, tx.Commit())
-	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(blocks))
 	roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
-	for i, block := range blocks {
+	for _, block := range blocks {
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
 		roots.Append(root)
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
-		envelope.Message.BuilderIndex = uint64(i)
-		if i < envelope_history.MaxRebuildsPerRequest {
-			envelopes[root] = envelope
-		}
 	}
-	rebuilder := &testEnvelopeRebuilder{envelopes: envelopes}
+	rebuiltEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	rebuiltEnvelope.Message.BuilderIndex = 1
+	rebuilder := &testEnvelopeRebuilder{envelopes: map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{roots.Get(1): rebuiltEnvelope}}
 	fc := mock_services.NewForkChoiceStorageMock(t)
 	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
-	lastRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	lastEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
-	lastEnvelope.Message.BuilderIndex = 999
-	fc.SetEnvelope(lastRoot, lastEnvelope)
+	storedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	storedEnvelope.Message.BuilderIndex = 99
+	fc.SetEnvelope(roots.Get(0), storedEnvelope)
 	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-	var request bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
+	run := func(peerID peer.ID) []uint64 {
+		return readEnvelopeBuilderIndices(t, newRootHandlerTestStream(roots, peerID).run(t, c), cfg)
+	}
 
-	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-	indices := readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg)
-	require.Len(t, indices, envelope_history.MaxRebuildsPerRequest+1)
-	require.Equal(t, uint64(999), indices[0])
-	require.Equal(t, envelope_history.MaxRebuildsPerRequest, rebuilder.calls)
+	peerA := peer.ID("peer-a")
+	bucket := c.rateLimiter.tryStartEnvelopeRebuild(peerA.String())
+	require.NotNil(t, bucket)
+	c.rateLimiter.finishEnvelopeRebuild(bucket, 2*time.Second, true)
+	require.Equal(t, []uint64{99}, run(peerA))
+	require.Empty(t, rebuilder.called)
+	require.Equal(t, []uint64{99, 1}, run(peer.ID("peer-b")))
+	require.Len(t, rebuilder.called, 1)
 }
 
-func TestExecutionPayloadEnvelopesByRootCapIgnoresCheapRejections(t *testing.T) {
+func TestExecutionPayloadEnvelopesByRootRebuildBudgetIgnoresCheapRejections(t *testing.T) {
+	const cheapRejections = 33
 	ctx := t.Context()
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 	ethClock, cfg := getGloasEthClockAndConfig(t)
-	startSlot := ethClock.GetCurrentSlot() - envelope_history.MaxRebuildsPerRequest - 2
+	startSlot := ethClock.GetCurrentSlot() - cheapRejections - 2
 	tx, err := indiciesDB.BeginRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	blocks := populateDatabaseWithBlocks(t, store, tx, startSlot, envelope_history.MaxRebuildsPerRequest+1)
+	blocks := populateDatabaseWithBlocks(t, store, tx, startSlot, cheapRejections)
 	require.NoError(t, tx.Commit())
 
 	roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
-	rejected := make(map[common.Hash]struct{}, envelope_history.MaxRebuildsPerRequest+1)
+	rejected := make(map[common.Hash]struct{}, cheapRejections)
 	for i, block := range blocks {
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
 		roots.Append(root)
-		if i < envelope_history.MaxRebuildsPerRequest+1 {
+		if i < cheapRejections {
 			rejected[root] = struct{}{}
 		}
 	}
@@ -792,13 +778,41 @@ func TestExecutionPayloadEnvelopesByRootCapIgnoresCheapRejections(t *testing.T) 
 	fc := mock_services.NewForkChoiceStorageMock(t)
 	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
 	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-	var request bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
 
-	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-	require.Equal(t, []uint64{999}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
-	require.Equal(t, 1, rebuilder.calls)
+	data := newRootHandlerTestStream(roots, peer.ID("history-peer")).run(t, c)
+	require.Equal(t, []uint64{999}, readEnvelopeBuilderIndices(t, data, cfg))
+	require.Len(t, rebuilder.called, 1)
+}
+
+func TestExecutionPayloadEnvelopesByRootRebuildsMoreThanThirtyTwoEnvelopes(t *testing.T) {
+	const rebuildCount = 33
+	ctx := t.Context()
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+	ethClock, cfg := getGloasEthClockAndConfig(t)
+	startSlot := ethClock.GetCurrentSlot() - rebuildCount - 1
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, cfg, startSlot, rebuildCount, -1)
+	require.NoError(t, tx.Commit())
+
+	requestRoots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+	wantIndices := make([]uint64, 0, rebuildCount)
+	for i, root := range roots {
+		requestRoots.Append(root)
+		wantIndices = append(wantIndices, uint64(i))
+	}
+	rebuilder := &testEnvelopeRebuilder{envelopes: envelopes}
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+	now := time.Now()
+	c.rateLimiter.now = func() time.Time { return now }
+
+	data := newRootHandlerTestStream(requestRoots, peer.ID("history-peer")).run(t, c)
+	require.Equal(t, wantIndices, readEnvelopeBuilderIndices(t, data, cfg))
+	require.Len(t, rebuilder.called, rebuildCount)
 }
 
 func TestExecutionPayloadEnvelopesByRootContinuesAfterRebuildError(t *testing.T) {
@@ -833,13 +847,10 @@ func TestExecutionPayloadEnvelopesByRootContinuesAfterRebuildError(t *testing.T)
 			fc.SetEnvelope(roots.Get(1), storedEnvelope)
 			rebuilder := &testEnvelopeRebuilder{err: test.err}
 			c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-			var request bytes.Buffer
-			require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-			stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
 
-			require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-			require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), cfg))
-			require.Equal(t, 1, rebuilder.calls)
+			data := newRootHandlerTestStream(roots, peer.ID("history-peer")).run(t, c)
+			require.Equal(t, []uint64{99}, readEnvelopeBuilderIndices(t, data, cfg))
+			require.Len(t, rebuilder.called, 1)
 			require.Equal(t, []common.Hash{roots.Get(0)}, rebuilder.called)
 		})
 	}
@@ -867,13 +878,9 @@ func TestExecutionPayloadEnvelopesByRootSkipsOutsideServeWindow(t *testing.T) {
 	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
 	roots := solid.NewHashList(int(cfg.MaxRequestPayloads))
 	roots.Append(root)
-	var request bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, roots))
-	stream := &envelopeHandlerStream{request: bytes.NewReader(request.Bytes()), conn: &remotePeerConn{peerID: peer.ID("history-peer")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)}
 
-	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(stream))
-	require.Empty(t, stream.response.Bytes())
-	require.Zero(t, rebuilder.calls)
+	require.Empty(t, newRootHandlerTestStream(roots, peer.ID("history-peer")).run(t, c))
+	require.Empty(t, rebuilder.called)
 }
 
 func TestExecutionPayloadEnvelopesByRangeRebuildsHistoryBelowForkGraph(t *testing.T) {
@@ -885,7 +892,7 @@ func TestExecutionPayloadEnvelopesByRangeRebuildsHistoryBelowForkGraph(t *testin
 	tx, err := indiciesDB.BeginRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, beaconCfg, startSlot, 3)
+	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, beaconCfg, startSlot, 3, -1)
 	require.NoError(t, tx.Commit())
 
 	rebuilder := &testEnvelopeRebuilder{envelopes: envelopes}
@@ -906,7 +913,7 @@ func TestExecutionPayloadEnvelopesByRangeRebuildsHistoryBelowForkGraph(t *testin
 	}
 	require.NoError(t, c.executionPayloadEnvelopesByRangeHandler(stream))
 	require.Equal(t, []uint64{0, 1}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), beaconCfg))
-	require.Equal(t, 2, rebuilder.calls)
+	require.Len(t, rebuilder.called, 2)
 }
 
 func TestExecutionPayloadEnvelopesByRangeStartsAtFirstKnownCanonicalBlock(t *testing.T) {
@@ -1013,11 +1020,94 @@ func TestExecutionPayloadEnvelopesByRangeStopsAtUnavailableEnvelope(t *testing.T
 	}
 }
 
-func TestExecutionPayloadEnvelopesByRangeCapsRebuilds(t *testing.T) {
-	c, cfg, _, _, rebuilder, stream := newRangeHistoryHandler(t, envelope_history.MaxRebuildsPerRequest+2, envelope_history.MaxRebuildsPerRequest+1)
+func TestExecutionPayloadEnvelopesByRangeRebuildBudgetIsPerPeer(t *testing.T) {
+	c, cfg, _, _, rebuilder, stream := newRangeHistoryHandler(t, 3, 1)
+	peerA := peer.ID("peer-a")
+	bucket := c.rateLimiter.tryStartEnvelopeRebuild(peerA.String())
+	require.NotNil(t, bucket)
+	c.rateLimiter.finishEnvelopeRebuild(bucket, 2*time.Second, true)
+	stream.conn = &remotePeerConn{peerID: peerA}
 	data := stream.run(t, c)
-	require.Len(t, readEnvelopeBuilderIndices(t, data, cfg), envelope_history.MaxRebuildsPerRequest)
-	require.Equal(t, envelope_history.MaxRebuildsPerRequest, rebuilder.calls)
+	require.Equal(t, byte(ResourceUnavailablePrefix), data[0])
+	require.Empty(t, rebuilder.called)
+
+	peerBStream := &rangeHandlerTestStream{
+		envelopeHandlerStream: &envelopeHandlerStream{conn: &remotePeerConn{peerID: peer.ID("peer-b")}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRangeProtocolV1)},
+		startSlot:             stream.startSlot,
+		count:                 stream.count,
+	}
+	require.Equal(t, []uint64{0}, readEnvelopeBuilderIndices(t, peerBStream.run(t, c), cfg))
+	require.Len(t, rebuilder.called, 1)
+}
+
+func TestExecutionPayloadEnvelopesByRangeChargesRebuildSlotTime(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantCredit bool
+	}{
+		{name: "rebuild", wantCredit: false},
+		{name: "busy", err: envelope_history.ErrRebuildBusy, wantCredit: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _, _, _, rebuilder, stream := newRangeHistoryHandler(t, 3, 1)
+			now := time.Now()
+			c.rateLimiter.now = func() time.Time { return now }
+			rebuilder.err = test.err
+			rebuilder.onRebuild = func() { now = now.Add(2 * time.Second) }
+
+			stream.run(t, c)
+			require.Len(t, rebuilder.called, 1)
+			peerID := peer.ID("history-peer").String()
+			bucket := c.rateLimiter.tryStartEnvelopeRebuild(peerID)
+			require.Equal(t, test.wantCredit, bucket != nil)
+			if bucket != nil {
+				c.rateLimiter.finishEnvelopeRebuild(bucket, 0, false)
+			}
+		})
+	}
+}
+
+func TestExecutionPayloadEnvelopesByRangeBlocksConcurrentRebuildForSamePeer(t *testing.T) {
+	c, cfg, roots, _, rebuilder, stream := newRangeHistoryHandler(t, 3, 1)
+	now := time.Now()
+	c.rateLimiter.now = func() time.Time { return now }
+	rebuilder.onRebuild = func() {
+		rebuilder.onRebuild = nil
+		now = now.Add(2 * time.Second)
+		nested := &rangeHandlerTestStream{
+			envelopeHandlerStream: &envelopeHandlerStream{conn: stream.conn, protocol: stream.protocol},
+			startSlot:             stream.startSlot + 1,
+			count:                 1,
+		}
+		data := nested.run(t, c)
+		require.Equal(t, byte(ResourceUnavailablePrefix), data[0])
+		require.Equal(t, []common.Hash{roots[0]}, rebuilder.called)
+	}
+
+	require.Equal(t, []uint64{0}, readEnvelopeBuilderIndices(t, stream.run(t, c), cfg))
+	require.Equal(t, []common.Hash{roots[0]}, rebuilder.called)
+	require.Nil(t, c.rateLimiter.tryStartEnvelopeRebuild(peer.ID("history-peer").String()))
+}
+
+func TestTryRebuildEnvelopeChargesPanic(t *testing.T) {
+	now := time.Now()
+	rebuilder := &testEnvelopeRebuilder{onRebuild: func() {
+		now = now.Add(2 * time.Second)
+		panic("rebuild failed")
+	}}
+	c := &ConsensusHandlers{rateLimiter: newPeerRateLimiter(), envelopeRebuilder: rebuilder}
+	c.rateLimiter.now = func() time.Time { return now }
+	peerID := peer.ID("history-peer").String()
+
+	require.Panics(t, func() {
+		_, _ = c.tryRebuildEnvelope(t.Context(), peerID, new(envelope_history.PreparedRebuild))
+	})
+	require.Nil(t, c.rateLimiter.tryStartEnvelopeRebuild(peerID))
+	now = now.Add(2 * time.Second)
+	bucket := c.rateLimiter.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	c.rateLimiter.finishEnvelopeRebuild(bucket, 0, false)
 }
 
 func TestExecutionPayloadEnvelopesByRangeDoesNotRebuildFullHeadWithoutChild(t *testing.T) {
@@ -1031,7 +1121,7 @@ func TestExecutionPayloadEnvelopesByRangeDoesNotRebuildFullHeadWithoutChild(t *t
 
 	data := stream.run(t, c)
 	require.Equal(t, []uint64{0, 1}, readEnvelopeBuilderIndices(t, data, cfg))
-	require.Zero(t, rebuilder.calls)
+	require.Empty(t, rebuilder.called)
 }
 
 func TestExecutionPayloadEnvelopesByRangeSkipsEmptyHistoricalPayload(t *testing.T) {
@@ -1043,7 +1133,7 @@ func TestExecutionPayloadEnvelopesByRangeSkipsEmptyHistoricalPayload(t *testing.
 	tx, err := indiciesDB.BeginRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	roots, envelopes := populateGloasEnvelopeHistoryWithEmpty(t, store, tx, cfg, startSlot, 4, 1)
+	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, cfg, startSlot, 4, 1)
 	require.NoError(t, tx.Commit())
 	rebuilder := &testEnvelopeRebuilder{envelopes: envelopes}
 	fc := mock_services.NewForkChoiceStorageMock(t)
@@ -1067,6 +1157,27 @@ type rangeHandlerTestStream struct {
 	count     uint64
 }
 
+type rootHandlerTestStream struct {
+	*envelopeHandlerStream
+	roots solid.HashListSSZ
+}
+
+func newRootHandlerTestStream(roots solid.HashListSSZ, peerID peer.ID) *rootHandlerTestStream {
+	return &rootHandlerTestStream{
+		envelopeHandlerStream: &envelopeHandlerStream{conn: &remotePeerConn{peerID: peerID}, protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1)},
+		roots:                 roots,
+	}
+}
+
+func (s *rootHandlerTestStream) run(t *testing.T, c *ConsensusHandlers) []byte {
+	t.Helper()
+	var request bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, s.roots))
+	s.request = bytes.NewReader(request.Bytes())
+	require.NoError(t, c.executionPayloadEnvelopesByRootHandler(s))
+	return s.response.Bytes()
+}
+
 func (s *rangeHandlerTestStream) run(t *testing.T, c *ConsensusHandlers) []byte {
 	t.Helper()
 	var request bytes.Buffer
@@ -1086,7 +1197,7 @@ func newRangeHistoryHandler(t *testing.T, blockCount, requestCount int) (*Consen
 	tx, err := indiciesDB.BeginRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, beaconCfg, startSlot, blockCount)
+	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, beaconCfg, startSlot, blockCount, -1)
 	require.NoError(t, tx.Commit())
 	rebuilder := &testEnvelopeRebuilder{envelopes: maps.Clone(envelopes)}
 	fc := mock_services.NewForkChoiceStorageMock(t)
@@ -1105,11 +1216,7 @@ func newRangeHistoryHandler(t *testing.T, blockCount, requestCount int) (*Consen
 	return c, beaconCfg, roots, envelopes, rebuilder, stream
 }
 
-func populateGloasEnvelopeHistory(t *testing.T, store *tests.MockBlockReader, tx kv.RwTx, cfg *clparams.BeaconChainConfig, startSlot uint64, count int) ([]common.Hash, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
-	return populateGloasEnvelopeHistoryWithEmpty(t, store, tx, cfg, startSlot, count, -1)
-}
-
-func populateGloasEnvelopeHistoryWithEmpty(t *testing.T, store *tests.MockBlockReader, tx kv.RwTx, cfg *clparams.BeaconChainConfig, startSlot uint64, count, emptyPayloadIndex int) ([]common.Hash, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+func populateGloasEnvelopeHistory(t *testing.T, store *tests.MockBlockReader, tx kv.RwTx, cfg *clparams.BeaconChainConfig, startSlot uint64, count, emptyPayloadIndex int) ([]common.Hash, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
 	t.Helper()
 	roots := make([]common.Hash, 0, count)
 	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, count)

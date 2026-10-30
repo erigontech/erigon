@@ -18,6 +18,7 @@ package envelope_history
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -46,12 +47,25 @@ type testEngine struct {
 	bodyCalls   int
 	headerCtx   context.Context
 	bodyCtx     context.Context
+	headerErr   error
+	headerStart chan struct{}
+	headerWait  <-chan struct{}
 }
 
 func (e *testEngine) GetHeaderByHash(ctx context.Context, _ common.Hash) (*types.Header, error) {
 	e.headerCalls++
 	e.headerCtx = ctx
-	return e.header, nil
+	if e.headerStart != nil {
+		close(e.headerStart)
+	}
+	if e.headerWait != nil {
+		select {
+		case <-e.headerWait:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return e.header, e.headerErr
 }
 
 func (e *testEngine) GetPayloadBodiesByHash(ctx context.Context, _ []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
@@ -287,10 +301,12 @@ func TestTryRebuildReturnsBusyWithoutCallingEL(t *testing.T) {
 		defer rebuilder.rebuildSlot.Release(1)
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
+		started := time.Now()
 
 		rebuilt, err := rebuilder.TryRebuild(ctx, prepared)
 		require.Nil(t, rebuilt)
 		require.ErrorIs(t, err, ErrRebuildBusy)
+		require.Equal(t, started, time.Now())
 		require.Zero(t, fixture.engine.headerCalls)
 		require.Zero(t, fixture.engine.bodyCalls)
 	})
@@ -334,6 +350,94 @@ func TestRebuildWaitsForHeldSlot(t *testing.T) {
 		require.Equal(t, 1, fixture.engine.headerCalls)
 		require.Equal(t, 1, fixture.engine.bodyCalls)
 	})
+}
+
+func TestRebuildWaiterHasPriorityOverTryRebuild(t *testing.T) {
+	fixture := newRebuildFixture(t)
+	prepared := fixture.prepare(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		headerWait := make(chan struct{})
+		engine := &testEngine{header: fixture.engine.header, body: fixture.engine.body, headerWait: headerWait}
+		rebuilder := NewRebuilder(fixture.rebuilder.beaconCfg, fixture.reader, engine)
+		require.NoError(t, rebuilder.rebuildSlot.Acquire(t.Context(), 1))
+		var rebuilt *cltypes.SignedExecutionPayloadEnvelope
+		var rebuildErr error
+		go func() {
+			rebuilt, rebuildErr = rebuilder.Rebuild(t.Context(), prepared)
+		}()
+
+		synctest.Wait()
+		rebuilder.rebuildSlot.Release(1)
+		synctest.Wait()
+		require.Equal(t, 1, engine.headerCalls)
+		require.Zero(t, engine.bodyCalls)
+		tried, err := rebuilder.TryRebuild(t.Context(), prepared)
+		require.Nil(t, tried)
+		require.ErrorIs(t, err, ErrRebuildBusy)
+		close(headerWait)
+		synctest.Wait()
+		require.NoError(t, rebuildErr)
+		require.NotNil(t, rebuilt)
+	})
+}
+
+func TestTryRebuildReleasesSlot(t *testing.T) {
+	errELUnavailable := errors.New("EL unavailable")
+	for _, test := range []struct {
+		name    string
+		run     func(*testing.T, *rebuildFixture, *PreparedRebuild) error
+		wantErr error
+	}{
+		{
+			name: "success",
+			run: func(t *testing.T, fixture *rebuildFixture, prepared *PreparedRebuild) error {
+				_, err := fixture.rebuilder.TryRebuild(t.Context(), prepared)
+				return err
+			},
+		},
+		{
+			name:    "EL error",
+			wantErr: errELUnavailable,
+			run: func(t *testing.T, fixture *rebuildFixture, prepared *PreparedRebuild) error {
+				fixture.engine.headerErr = errELUnavailable
+				_, err := fixture.rebuilder.TryRebuild(t.Context(), prepared)
+				return err
+			},
+		},
+		{
+			name:    "context canceled during EL call",
+			wantErr: context.Canceled,
+			run: func(t *testing.T, fixture *rebuildFixture, prepared *PreparedRebuild) error {
+				headerStart := make(chan struct{})
+				headerWait := make(chan struct{})
+				engine := &testEngine{header: fixture.engine.header, body: fixture.engine.body, headerStart: headerStart, headerWait: headerWait}
+				fixture.rebuilder = NewRebuilder(fixture.rebuilder.beaconCfg, fixture.reader, engine)
+				ctx, cancel := context.WithCancel(t.Context())
+				result := make(chan error, 1)
+				go func() {
+					_, err := fixture.rebuilder.TryRebuild(ctx, prepared)
+					result <- err
+				}()
+				<-headerStart
+				cancel()
+				return <-result
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRebuildFixture(t)
+			prepared := fixture.prepare(t)
+			err := test.run(t, fixture, prepared)
+			if test.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, test.wantErr)
+			}
+			require.True(t, fixture.rebuilder.rebuildSlot.TryAcquire(1))
+			fixture.rebuilder.rebuildSlot.Release(1)
+		})
+	}
 }
 
 func TestRebuildPassesCallerContextToEL(t *testing.T) {

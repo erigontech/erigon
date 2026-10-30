@@ -37,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-const MaxRebuildsPerRequest = 32
-
 var ErrRebuildBusy = errors.New("execution payload envelope rebuild is busy")
 
 type ExecutionEngine interface {

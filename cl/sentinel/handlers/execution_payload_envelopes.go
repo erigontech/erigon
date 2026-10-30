@@ -34,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+var errNoRebuildCredit = errors.New("execution payload envelope rebuild credit exhausted")
+
 // executionPayloadEnvelopesByRangeHandler handles the ExecutionPayloadEnvelopesByRange v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.Stream) error {
@@ -222,7 +224,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 
 	wroteResponse := false
-	rebuilds := 0
+	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range responseCandidates {
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
 		if c.forkChoiceReader.HasEnvelope(candidate.root) {
@@ -231,12 +233,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 				log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
 			}
 		}
-		if envelope == nil && err == nil && candidate.rebuildable && c.envelopeRebuilder != nil && rebuilds < envelope_history.MaxRebuildsPerRequest {
-			rebuilds++
+		if envelope == nil && err == nil && candidate.rebuildable && c.envelopeRebuilder != nil {
 			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.root)
 			err = prepareErr
 			if err == nil && prepared != nil {
-				envelope, err = c.envelopeRebuilder.TryRebuild(requestCtx, prepared)
+				envelope, err = c.tryRebuildEnvelope(requestCtx, peerID, prepared)
 			}
 		}
 		if err != nil || envelope == nil {
@@ -386,9 +387,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
-	rebuilds := 0
+	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range rebuildCandidates {
-		if count >= int(maxPayloads) || rebuilds >= envelope_history.MaxRebuildsPerRequest {
+		if count >= int(maxPayloads) {
 			break
 		}
 
@@ -400,9 +401,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		if prepared == nil {
 			continue
 		}
-
-		rebuilds++
-		envelope, err := c.envelopeRebuilder.TryRebuild(requestCtx, prepared)
+		envelope, err := c.tryRebuildEnvelope(requestCtx, peerID, prepared)
 		if err != nil {
 			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
 			break
@@ -413,6 +412,23 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 
 	return nil
+}
+
+func (c *ConsensusHandlers) tryRebuildEnvelope(ctx context.Context, peerID string, prepared *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	bucket := c.rateLimiter.tryStartEnvelopeRebuild(peerID)
+	if bucket == nil {
+		return nil, errNoRebuildCredit
+	}
+	started := c.rateLimiter.now()
+	charge := true
+	defer func() {
+		c.rateLimiter.finishEnvelopeRebuild(bucket, c.rateLimiter.now().Sub(started), charge)
+	}()
+	envelope, err := c.envelopeRebuilder.TryRebuild(ctx, prepared)
+	if errors.Is(err, envelope_history.ErrRebuildBusy) {
+		charge = false
+	}
+	return envelope, err
 }
 
 func minExecutionPayloadServeEpoch(beaconConfig *clparams.BeaconChainConfig, currentEpoch, finalizedEpoch uint64) uint64 {
