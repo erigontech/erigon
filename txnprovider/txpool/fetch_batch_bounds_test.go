@@ -42,9 +42,11 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		bytes, messages int
+		wantFlushes     int32
 	}{
-		{"bytes", 1024 * 1024, 5},
-		{"messages", 1, 257},
+		{"bytes", 1024 * 1024, 5, 1},
+		{"messages", 1, 257, 1},
+		{"bytes_before_append", 3 * 1024 * 1024, 3, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -58,7 +60,7 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 				received := 0
 				stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 					if received == tc.messages {
-						require.Positive(t, flushes.Load(), "the inbound batch must flush before the stream closes")
+						require.Equal(t, tc.wantFlushes, flushes.Load(), "unexpected flush count before stream closure")
 						return nil, nil
 					}
 					received++
