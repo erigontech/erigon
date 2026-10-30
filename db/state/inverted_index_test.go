@@ -1777,6 +1777,7 @@ func requireIIChunks(t *testing.T, tx kv.Tx, table string, m iiChunkModel) {
 						}
 						s, err := newIIChunkStream(tx, table, []byte(k), from, to, asc, limit)
 						require.NoError(t, err)
+						require.Equal(t, limit < 0, s.CanSeek(), "a limited stream must not seek past elements it does not count")
 						got, err := stream.ToArrayU64(s)
 						s.Close()
 						require.NoError(t, err)

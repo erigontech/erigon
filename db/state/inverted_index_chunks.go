@@ -478,7 +478,7 @@ func (s *iiChunkStream) Next() (uint64, error) {
 	return n, nil
 }
 
-func (s *iiChunkStream) CanSeek() bool { return true }
+func (s *iiChunkStream) CanSeek() bool { return s.limit < 0 }
 
 func (s *iiChunkStream) Seek(t uint64) error {
 	if s.err != nil || !s.hasNext || s.asc && t <= s.nextN || !s.asc && t >= s.nextN {
