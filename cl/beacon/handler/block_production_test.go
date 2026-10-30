@@ -43,6 +43,7 @@ import (
 	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
@@ -2540,6 +2541,8 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	}
 	handler.forkchoiceStore = installing
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	for range 2 {
 		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip, func() {})
@@ -2547,6 +2550,11 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 		var writeErr *clservices.AcceptedBlockWriteError
 		require.ErrorAs(t, err, &writeErr)
 		require.Same(t, block, writeErr.Block)
+	}
+	select {
+	case <-indicesChanged:
+		t.Fatal("failed writes must not notify index readers")
+	default:
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
 }
@@ -2568,10 +2576,17 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 
 	require.NoError(t, err)
+	select {
+	case <-indicesChanged:
+	default:
+		t.Fatal("the committed block indices must notify readers even if fork choice is busy")
+	}
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
@@ -5752,14 +5767,13 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 		highestSeenAtSlot bool
 		wantNewHead       bool
 		minWait           time.Duration
-		maxWait           time.Duration
 		wantStatus        int
 	}{
-		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond, maxWait: 100 * time.Millisecond},
-		{name: "no claim", maxWait: 100 * time.Millisecond},
-		{name: "claim for another slot", claim: true, claimNextSlot: true, maxWait: 100 * time.Millisecond},
-		{name: "block already seen", claim: true, highestSeenAtSlot: true, maxWait: 100 * time.Millisecond},
-		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, maxWait: 100 * time.Millisecond, wantStatus: http.StatusInternalServerError},
+		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond},
+		{name: "no claim"},
+		{name: "claim for another slot", claim: true, claimNextSlot: true},
+		{name: "block already seen", claim: true, highestSeenAtSlot: true},
+		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -5768,7 +5782,8 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
-			handler.attestationDataImportWait = 60 * time.Millisecond
+			const importWait = time.Second
+			handler.attestationDataImportWait = importWait
 			calls := 0
 			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 
@@ -5832,7 +5847,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			}
 
 			require.GreaterOrEqual(t, elapsed, tt.minWait)
-			require.Less(t, elapsed, tt.maxWait)
+			require.NotEqual(t, attestationSlot+1, handler.attestationDataWaitedSlot.Load(), "the response came from the import-wait cap")
 			require.Zero(t, calls)
 			wantStatus := tt.wantStatus
 			if wantStatus == 0 {

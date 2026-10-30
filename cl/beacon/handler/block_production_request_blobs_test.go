@@ -134,7 +134,7 @@ func TestRequestBlobBundlesVerifiesRequestBlobs(t *testing.T) {
 			requireNotCached(t, h, first, second)
 			if version >= clparams.FuluVersion {
 				for _, b := range []testBlob{first, second} {
-					cells, err := das.ComputeCells(b.blob)
+					cells, err := peerdasutils.ComputeCells(b.blob)
 					require.NoError(t, err)
 					require.Equal(t, cells, bundles[common.Bytes48(b.commitment)].Cells, "the verified cells must be kept for the column build")
 				}
