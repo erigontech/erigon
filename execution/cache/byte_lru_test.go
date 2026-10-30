@@ -38,6 +38,7 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	for i := range uint64(64) {
 		b.Add(i, make([]byte, 512))
 	}
+	b.c.CleanUp()
 	require.Equal(t, used, cachebudget.Global.Used())
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()

@@ -71,7 +71,7 @@ type byteLRUEvictions[V any] struct {
 
 // otterEntryOverheadBytes is otter's own per-entry cost beyond the key and the
 // value. Omitting it undercounts a cache of small entries ~1.6x.
-const otterEntryOverheadBytes = 64
+const otterEntryOverheadBytes = 96
 
 // ByteLRUEntryOverheadBytes is what an entry costs beyond its value's own bytes:
 // the uint64 key and otter's bookkeeping. Weighers add it to every entry.
@@ -98,10 +98,7 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	return b
 }
 
-// onDeletion refunds a removal and forwards it to the owner's hook. It closes
-// over the evictions object, not the ByteLRU: otter's runtime cleanup keeps the
-// handler alive as long as the cache, and a handler reaching the ByteLRU would
-// make it uncollectable.
+// onDeletion refunds a removal and forwards it to the owner's hook.
 func (ev *byteLRUEvictions[V]) onDeletion(weigh func(uint64, V) int64) func(otter.DeletionEvent[uint64, V]) {
 	return func(e otter.DeletionEvent[uint64, V]) {
 		// A replacement is refunded by the write, from the value Set displaced.
@@ -132,7 +129,6 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 		// Atomic: called inside the delete itself, so otter allocates no event per
 		// eviction to hand to the executor.
 		OnAtomicDeletion: onDeletion,
-		Executor:         func(fn func()) { fn() },
 	})
 }
 
@@ -258,6 +254,7 @@ func (b *ByteLRU[V]) Close() {
 	b.closed = true
 	// Entries, not just the reservation: the owner may keep the cache after Close.
 	b.c.InvalidateAll()
+	b.c.SetMaximum(0)
 	b.onEvict.Store(nil)
 	if !b.unbudgeted {
 		cachebudget.Global.Release(b.limit.Load())

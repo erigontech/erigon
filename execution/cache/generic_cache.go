@@ -211,7 +211,7 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	})
 }
 
-// Clear removes all entries and restores the starting capacity. It starts an
+// Clear removes all entries and returns the grown reservation. It starts an
 // empty coherence generation by advancing the epoch and lifting the unwind
 // floor, so subsequent puts are not constrained by an unwind that belongs to
 // the retired data.
