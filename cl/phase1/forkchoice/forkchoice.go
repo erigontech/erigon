@@ -67,12 +67,14 @@ type ForkNode struct {
 }
 
 const (
-	checkpointsPerCache        = 1024
-	maxCheckpointStates        = 10
-	allowedCachedStates        = 8
-	queueCacheSize             = 128
-	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
-	maxPendingELPayloads       = 1024
+	checkpointsPerCache                = 1024
+	maxCheckpointStates                = 10
+	maxConcurrentTargetCommitteeBuilds = 2
+	maxTargetCheckpointBlockAge        = 4
+	allowedCachedStates                = 8
+	queueCacheSize                     = 128
+	pendingELPayloadsShrinkCap         = 256 // drain releases the backing array when cap exceeds this
+	maxPendingELPayloads               = 1024
 )
 
 type randaoDelta struct {
@@ -153,6 +155,8 @@ type ForkChoiceStore struct {
 	localValidators    *validator_params.ValidatorParams
 
 	checkpointStateBuilds singleflight.Group
+	targetStateBuildsMu   sync.Mutex
+	targetStateBuilds     map[solid.Checkpoint]*targetStateBuild
 
 	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager

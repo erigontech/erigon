@@ -75,6 +75,7 @@ type aggregateAndProofServiceImpl struct {
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
+	targetStateBuildClaims *lru.Cache[targetStateBuildClaim, struct{}]
 	validatorParams        *validator_params.ValidatorParams
 
 	awaitingBlock *blockArrivalQueue
@@ -104,6 +105,7 @@ func NewAggregateAndProofService(
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
+		targetStateBuildClaims: newTargetStateBuildClaims(),
 		validatorParams:        validatorParams,
 		awaitingBlock: newBlockArrivalQueue(
 			forkchoiceStore,
@@ -132,6 +134,61 @@ func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []b
 		return nil, err
 	}
 	return obj, nil
+}
+
+func (a *aggregateAndProofServiceImpl) checkSeenAggregator(aggregateAndProof *SignedAggregateAndProofForGossip) (seenAggregateIndex, common.Hash, error) {
+	signedAggregate := aggregateAndProof.SignedAggregateAndProof
+	seenIndex := seenAggregateIndex{
+		epoch: signedAggregate.Message.Aggregate.Data.Target.Epoch,
+		index: signedAggregate.Message.AggregatorIndex,
+	}
+	var aggregateRoot common.Hash
+	if aggregateAndProof.ImmediateProcess {
+		root, err := signedAggregate.HashSSZ()
+		if err != nil {
+			return seenIndex, aggregateRoot, err
+		}
+		aggregateRoot = root
+	}
+	if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
+		if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
+			// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
+			return seenIndex, aggregateRoot, fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
+		}
+		return seenIndex, aggregateRoot, fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
+	}
+	return seenIndex, aggregateRoot, nil
+}
+
+func (a *aggregateAndProofServiceImpl) verifyAggregateBeforeBuild(aggregateAndProof *SignedAggregateAndProofForGossip) error {
+	if _, _, err := a.checkSeenAggregator(aggregateAndProof); err != nil {
+		return err
+	}
+	signedAggregate := aggregateAndProof.SignedAggregateAndProof
+	var signature1, signingRoot1, pubKey1, signature2, signingRoot2, pubKey2 []byte
+	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		var err error
+		signature1, signingRoot1, pubKey1, err = AggregateAndProofSignature(headState, signedAggregate.Message)
+		if err != nil {
+			return err
+		}
+		signature2, signingRoot2, pubKey2, err = AggregatorSignature(headState, signedAggregate)
+		return err
+	}); err != nil {
+		return err
+	}
+	valid, err := blsVerifyMultipleSignatures(
+		[][]byte{signature1, signature2},
+		[][]byte{signingRoot1, signingRoot2},
+		[][]byte{pubKey1, pubKey2},
+	)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidBlsSignature
+	}
+	return nil
 }
 
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
@@ -214,130 +271,117 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if epoch < prevEpoch || epoch > currEpoch {
 			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
-
-		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
-		committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
-		if committeeIndex >= committeeCountPerSlot {
-			return errors.New("invalid committee index in aggregate and proof")
-		}
-		// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
-		if aggregateData.Target.Epoch != epoch {
-			return errors.New("invalid target epoch in aggregate and proof")
-		}
-		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-		// Checked before the finalized ancestor, which an unknown block always fails.
-		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
-		if !blockHeaderOk {
-			if !aggregateAndProof.ImmediateProcess {
-				a.awaitingBlock.add(aggregateData.BeaconBlockRoot, func(ctx context.Context) { _ = a.ProcessMessage(ctx, nil, aggregateAndProof) })
-			}
-			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
-		}
-
-		finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
-		finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
-		// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
-		if a.forkchoiceStore.Ancestor(
-			aggregateData.BeaconBlockRoot,
-			finalizedSlot,
-		).Root != finalizedCheckpoint.Root {
-			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
-		}
-
-		// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
-		// This means: when same slot, index MUST be 0 (reject if not 0)
-		if clversion.AfterOrEqual(clparams.GloasVersion) {
-			if blockHeader.Slot == slot && aggregate.Data.CommitteeIndex != 0 {
-				return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
-			}
-
-			if aggregate.Data.CommitteeIndex == 1 {
-				if !a.forkchoiceStore.IsPayloadVerified(aggregateData.BeaconBlockRoot) {
-					return unverifiedGloasPayloadError(a.forkchoiceStore, aggregateData.BeaconBlockRoot)
-				}
-			}
-		}
-
-		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
-		seenIndex = seenAggregateIndex{
-			epoch: target.Epoch,
-			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
-		}
-		if aggregateAndProof.ImmediateProcess {
-			root, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
-			if err != nil {
-				return err
-			}
-			aggregateRoot = root
-		}
-		if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
-			if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
-				// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
-				return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
-			}
-			return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
-		}
-
-		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
-		if err != nil {
-			return err
-		}
-		// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, aggregate.data.slot, index)).
-		if aggregate.AggregationBits.Bits() != len(committee) {
-			return fmt.Errorf("aggregation bits length %d does not match committee size %d", aggregate.AggregationBits.Bits(), len(committee))
-		}
-		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
-		if err != nil {
-			return err
-		}
-		if len(attestingIndices) == 0 {
-			return errors.New("no attesting indicies")
-		}
-
-		// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
-		if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
-			return errors.New("committee index not in committee")
-		}
-		// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
-		if a.forkchoiceStore.Ancestor(
-			aggregateData.BeaconBlockRoot,
-			target.Epoch*a.beaconCfg.SlotsPerEpoch,
-		).Root != target.Root {
-			return errors.New("invalid target block")
-		}
-		if a.test {
-			return nil
-		}
-
-		// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
-		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), selectionProof) {
-			log.Warn("receveived aggregate and proof from invalid aggregator")
-			return errors.New("invalid aggregate and proof")
-		}
-
-		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
-		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
-		monitor.ObserveCommitteeSize(float64(len(committee)))
-
-		// A node with validators verifies every aggregate: it relays them and packs them into its own blocks.
-		if len(a.validatorParams.GetValidators()) > 0 || aggregateAndProof.ImmediateProcess {
-			// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
-			// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
-			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
-			// aggregate signatures for later verification
-			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
-			if err != nil {
-				return err
-			}
-		}
-
 		return nil
 	}); err != nil {
 		return err
 	}
+
+	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
+	if aggregateData.Target.Epoch != epoch {
+		return errors.New("invalid target epoch in aggregate and proof")
+	}
+	// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
+	// Checked before the finalized ancestor, which an unknown block always fails.
+	blockHeader, blockHeaderOK := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
+	if !blockHeaderOK {
+		if !aggregateAndProof.ImmediateProcess {
+			a.awaitingBlock.add(aggregateData.BeaconBlockRoot, func(ctx context.Context) { _ = a.ProcessMessage(ctx, nil, aggregateAndProof) })
+		}
+		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+	}
+	committee, committeesPerSlot, err := beaconCommittee(
+		a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex,
+		a.beaconCfg.SlotsPerEpoch, func() error { return a.verifyAggregateBeforeBuild(aggregateAndProof) },
+		claimTargetStateBuild(a.targetStateBuildClaims, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex, target.Epoch),
+	)
+	if err != nil {
+		return err
+	}
+	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
+	if committeeIndex >= committeesPerSlot {
+		return errors.New("invalid committee index in aggregate and proof")
+	}
+
+	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
+	finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
+	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
+	if a.forkchoiceStore.Ancestor(
+		aggregateData.BeaconBlockRoot,
+		finalizedSlot,
+	).Root != finalizedCheckpoint.Root {
+		return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
+	}
+
+	// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
+	// This means: when same slot, index MUST be 0 (reject if not 0)
+	if clversion.AfterOrEqual(clparams.GloasVersion) {
+		if blockHeader.Slot == slot && aggregate.Data.CommitteeIndex != 0 {
+			return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
+		}
+
+		if aggregate.Data.CommitteeIndex == 1 {
+			if !a.forkchoiceStore.IsPayloadVerified(aggregateData.BeaconBlockRoot) {
+				return unverifiedGloasPayloadError(a.forkchoiceStore, aggregateData.BeaconBlockRoot)
+			}
+		}
+	}
+
+	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
+	seenIndex, aggregateRoot, err = a.checkSeenAggregator(aggregateAndProof)
+	if err != nil {
+		return err
+	}
+
+	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, aggregate.data.slot, index)).
+	if aggregate.AggregationBits.Bits() != len(committee) {
+		return fmt.Errorf("aggregation bits length %d does not match committee size %d", aggregate.AggregationBits.Bits(), len(committee))
+	}
+	for i, validatorIndex := range committee {
+		if aggregate.AggregationBits.GetBitAt(i) {
+			attestingIndices = append(attestingIndices, validatorIndex)
+		}
+	}
+	if len(attestingIndices) == 0 {
+		return errors.New("no attesting indicies")
+	}
+	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
+	if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
+		return errors.New("committee index not in committee")
+	}
+	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
+	if a.forkchoiceStore.Ancestor(
+		aggregateData.BeaconBlockRoot,
+		target.Epoch*a.beaconCfg.SlotsPerEpoch,
+	).Root != target.Root {
+		return errors.New("invalid target block")
+	}
 	if a.test {
 		return nil
+	}
+
+	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
+	if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), selectionProof) {
+		log.Warn("receveived aggregate and proof from invalid aggregator")
+		return errors.New("invalid aggregate and proof")
+	}
+
+	monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
+	monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
+	monitor.ObserveCommitteeSize(float64(len(committee)))
+
+	// A node with validators verifies every aggregate: it relays them and packs them into its own blocks.
+	if len(a.validatorParams.GetValidators()) > 0 || aggregateAndProof.ImmediateProcess {
+		// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
+		// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
+		// aggregate signatures for later verification
+		if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			var err error
+			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 	if aggregateVerificationData == nil {
 		return ErrIgnore
