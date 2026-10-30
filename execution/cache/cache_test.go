@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -84,12 +83,6 @@ func (c *blockingPutCache) Clear()                             {}
 func (c *blockingPutCache) Unwind(uint64)                      {}
 func (c *blockingPutCache) Close()                             {}
 func (c *blockingPutCache) Len() int                           { return 0 }
-
-func makeHash(i int) common.Hash {
-	var h common.Hash
-	h[31] = byte(i)
-	return h
-}
 
 func makeCode(i int) []byte {
 	return []byte{0x60, 0x00, byte(i)} // PUSH1 0x00 + unique byte
@@ -730,23 +723,6 @@ func TestStateCache_DomainIsolation(t *testing.T) {
 // =============================================================================
 // RevertWithDiffset Tests
 // =============================================================================
-
-// makeDiffKey creates a domain entry key with an 8-byte step suffix, matching
-// the format used by DomainEntryDiff (full key = base key + inverted step).
-func makeDiffKey(baseKey []byte, step uint64) string {
-	k := make([]byte, len(baseKey)+8)
-	copy(k, baseKey)
-	// Store inverted step in the suffix (same encoding as domain tables).
-	k[len(k)-8] = byte(^step >> 56)
-	k[len(k)-7] = byte(^step >> 48)
-	k[len(k)-6] = byte(^step >> 40)
-	k[len(k)-5] = byte(^step >> 32)
-	k[len(k)-4] = byte(^step >> 24)
-	k[len(k)-3] = byte(^step >> 16)
-	k[len(k)-2] = byte(^step >> 8)
-	k[len(k)-1] = byte(^step)
-	return string(k)
-}
 
 // --- txNum/epoch unwind invalidation (replaces the blockHash/diffset model) ---
 
@@ -1659,6 +1635,24 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 
 	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
 	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
+}
+
+// A value written at txNum 5 is the value as of any later txNum, not as of 5 itself.
+func TestStateCache_GetAsOfServesValuesWrittenBefore(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
+	view := sc.View(FrontierWithStateVersion(FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true }), 2))
+
+	v, ok := view.GetAsOf(kv.AccountsDomain, key, 6)
+	require.True(t, ok)
+	require.Equal(t, makeValue(1), v)
+	_, ok = view.GetAsOf(kv.AccountsDomain, key, 5)
+	require.False(t, ok)
 }
 
 func TestAccountCodeHashes(t *testing.T) {

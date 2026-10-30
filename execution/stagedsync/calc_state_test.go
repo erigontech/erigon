@@ -813,3 +813,108 @@ func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testin
 	assert.Equal(t, accounts.SerialiseV3(&expected), enc,
 		"record must be balance-only: nonce, code hash and incarnation cleared")
 }
+
+func TestFlushToUpdates_EmitsOnlyAccountsWrittenSinceReset(t *testing.T) {
+	cs := newTestCalcState()
+	a := accounts.InternAddress(common.Address{0xa1})
+	b := accounts.InternAddress(common.Address{0xb2})
+
+	cs.ApplyWrites(newWS().
+		bal(a, state.Version{}, *uint256.NewInt(1)).
+		bal(b, state.Version{}, *uint256.NewInt(2)).
+		build())
+	first := newTestUpdates()
+	cs.FlushToUpdates(first)
+	require.Len(t, updatesSnapshot(t, first), 2)
+	cs.ResetBlockFlags()
+
+	cs.ApplyWrites(newWS().nonce(b, state.Version{}, 7).build())
+	second := newTestUpdates()
+	cs.FlushToUpdates(second)
+	got := updatesSnapshot(t, second)
+	require.Len(t, got, 1, "an account untouched since ResetBlockFlags must not be re-emitted")
+	bKey := b.Value()
+	require.Contains(t, got[string(bKey[:])], "bal=2 nonce=7", "the accumulated balance must survive the reset")
+}
+
+func TestApplyWrites_EveryPathListsTheAccountAfterReset(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{0xc3})
+	addrKey := addr.Value()
+	cases := map[string]func(*wsb) *wsb{
+		"balance": func(w *wsb) *wsb { return w.bal(addr, state.Version{}, *uint256.NewInt(5)) },
+		"nonce":   func(w *wsb) *wsb { return w.nonce(addr, state.Version{}, 5) },
+		"codeHash": func(w *wsb) *wsb {
+			return w.codeHash(addr, state.Version{}, accounts.InternCodeHash(common.Hash{0x11}))
+		},
+		"code":         func(w *wsb) *wsb { return w.code(addr, state.Version{}, accounts.NewCode([]byte{0x60, 0x00})) },
+		"incarnation":  func(w *wsb) *wsb { return w.inc(addr, state.Version{}, 1) },
+		"selfDestruct": func(w *wsb) *wsb { return w.selfDestruct(addr, state.Version{}, true) },
+	}
+	for name, write := range cases {
+		t.Run(name, func(t *testing.T) {
+			cs := newTestCalcState()
+			cs.ApplyWrites(newWS().bal(addr, state.Version{}, *uint256.NewInt(1)).build())
+			cs.ResetBlockFlags()
+			cs.ApplyWrites(write(newWS()).build())
+			updates := newTestUpdates()
+			cs.FlushToUpdates(updates)
+			require.Contains(t, updatesSnapshot(t, updates), string(addrKey[:]),
+				"a %s write after ResetBlockFlags must list the account for the next flush", name)
+		})
+	}
+}
+
+func TestApplyWrites_RepeatedWritesListTheAccountOnce(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress(common.Address{0xd4})
+	for i := uint64(1); i <= 3; i++ {
+		cs.ApplyWrites(newWS().
+			bal(addr, state.Version{}, *uint256.NewInt(i)).
+			nonce(addr, state.Version{}, i).
+			build())
+	}
+	require.Len(t, cs.dirtyAccounts, 1)
+	cs.ResetBlockFlags()
+	require.Empty(t, cs.dirtyAccounts)
+}
+
+func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
+	cs := newTestCalcState()
+	a := accounts.InternAddress(common.Address{0xe5})
+	b := accounts.InternAddress(common.Address{0xf6})
+	aKey, bKey := a.Value(), b.Value()
+
+	cs.ApplyWrites(newWS().bal(a, state.Version{}, *uint256.NewInt(1)).build())
+	checkpoint := newTestUpdates()
+	cs.FlushToUpdates(checkpoint)
+	require.Len(t, updatesSnapshot(t, checkpoint), 1)
+
+	cs.ApplyWrites(newWS().bal(b, state.Version{}, *uint256.NewInt(2)).build())
+	blockEnd := newTestUpdates()
+	cs.FlushToUpdates(blockEnd)
+	got := updatesSnapshot(t, blockEnd)
+	require.Len(t, got, 2, "a flush without ResetBlockFlags must keep earlier dirty accounts for the block-end flush")
+	require.Contains(t, got, string(aKey[:]))
+	require.Contains(t, got, string(bKey[:]))
+	require.Len(t, cs.dirtyAccounts, 2, "a mid-block flush must not list an account twice")
+}
+
+// A field missing from the writes must still load from the domain, else it
+// would flush as zero.
+func TestApplyWrites_ReadsBaselineWhenWritesIncomplete(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe2})
+	_, tx, doms := setupStepTest(t)
+	baseline := accounts.Account{Nonce: 7, Balance: *uint256.NewInt(99), CodeHash: accounts.EmptyCodeHash}
+	addrVal := addr.Value()
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&baseline), 1, nil))
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 2, dr: state.NewLayeredDomainReader(doms, nil, nil).CloneWithTx(tx)}
+	cs := newCalcState(reader, log.New(), "test")
+
+	cs.ApplyWrites(newWS().bal(addr, state.Version{}, *uint256.NewInt(5)).build())
+	require.NoError(t, cs.LazyLoadErr())
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "the write wins over the baseline")
+	assert.Equal(t, uint64(7), acc.Nonce, "the untouched nonce comes from the baseline")
+}

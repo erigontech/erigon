@@ -40,7 +40,7 @@ func writeValidated(t *testing.T, vm *VersionMap, reader StateReader, txIndex in
 	w.txIndex = txIndex
 	require.NoError(t, w.SetState(addr, key, val))
 	writes := w.VersionedWrites()
-	vm.FlushVersionedWrites(writes, false, "")
+	vm.FlushVersionedWrites(writes, false)
 	vm.MarkWritesValidated(writes, nil)
 	return writes
 }

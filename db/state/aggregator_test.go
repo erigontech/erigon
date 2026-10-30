@@ -75,33 +75,6 @@ func TestSetDomainStepsInFrozenFile(t *testing.T) {
 	}
 }
 
-// takes first 100k keys from file
-func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := seg.NewDecompressor(dataPath)
-	if err != nil {
-		return nil, err
-	}
-
-	getter := decomp.MakeGetter()
-	getter.Reset(0)
-
-	key := make([]byte, 0, 64)
-
-	listing := make([][]byte, 0, 1000)
-
-	for getter.HasNext() {
-		if len(listing) > 100000 {
-			break
-		}
-		key, _ := getter.Next(key[:0])
-		listing = append(listing, bytes.Clone(key))
-		getter.Skip()
-	}
-	decomp.Close()
-
-	return listing, nil
-}
-
 func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
@@ -936,4 +909,31 @@ func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
 		require.NotEmpty(t, v)
 		return nil
 	}))
+}
+
+func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		opts := NewTest(datadir.New(t.TempDir())).StepSize(1)
+		if enabled {
+			opts = opts.BtIndexInMem()
+		}
+		agg := opts.MustOpen(t.Context())
+		var budget *btInMemBudget
+		for _, d := range agg.d {
+			if d == nil {
+				continue
+			}
+			if !enabled {
+				require.Nil(t, d.btBudget, "domain=%s", d.Name)
+				continue
+			}
+			require.NotNil(t, d.btBudget, "domain=%s", d.Name)
+			if budget == nil {
+				budget = d.btBudget
+			}
+			require.Same(t, budget, d.btBudget, "one budget for all domains")
+		}
+		agg.Close()
+	}
 }

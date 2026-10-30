@@ -26,8 +26,10 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 func TestCustomTraceReceiptDomain(t *testing.T) {
@@ -128,4 +130,47 @@ func TestCustomTraceDomainProgressConsistency(t *testing.T) {
 		return nil
 	})
 	require.NoError(err)
+}
+
+func TestCustomTraceIndexesBlockRewardRecipients(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	require := require.New(t)
+	ctx := context.Background()
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+
+	coinbaseIndexed := func() []bool {
+		var indexed []bool
+		require.NoError(m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+			require.NoError(err)
+			txNumsReader := m.BlockReader.TxnumReader()
+			for blockNum := uint64(1); blockNum <= execProgress; blockNum++ {
+				header, err := m.BlockReader.HeaderByNumber(ctx, tx, blockNum)
+				require.NoError(err)
+				blockEndTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+				require.NoError(err)
+				it, err := tx.IndexRange(kv.TracesToIdx, header.Coinbase[:], int(blockEndTxNum), int(blockEndTxNum+1), order.Asc, kv.Unlim)
+				require.NoError(err)
+				indexed = append(indexed, it.HasNext())
+				it.Close()
+			}
+			return nil
+		}))
+		return indexed
+	}
+
+	byExec := coinbaseIndexed()
+	require.NotEmpty(byExec)
+	for i, ok := range byExec {
+		require.True(ok, "exec must index the coinbase of block %d at its block-end txNum", i+1)
+	}
+
+	stageCfg := stagedsync.StageCustomTraceCfg([]string{kv.TracesToIdx.String()}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
+	require.NoError(stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce))
+	require.NoError(stagedsync.SpawnCustomTrace(stageCfg, ctx, m.Log))
+
+	require.Equal(byExec, coinbaseIndexed())
 }
