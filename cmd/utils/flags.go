@@ -2423,8 +2423,6 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 	return g.None[bool]()
 }
 
-// SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
-// no URLs are set.
 // setOverrideGenesis applies --override.genesis. It must run after the --chain
 // defaults are applied, as it replaces the ones that belong to the default
 // --chain network rather than to the given genesis.
@@ -2449,6 +2447,8 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 }
 
+// SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
+// no URLs are set.
 func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, spec chainspec.Spec) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
