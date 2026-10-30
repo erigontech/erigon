@@ -793,9 +793,9 @@ func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
 	if blockNum != to {
 		return false
 	}
-	if dbg.Exec3SerialBALMinBytesPerMgas > 0 && txNums <= uint64(dbg.Exec3SerialBALMaxTxs) {
+	if dbg.Exec3SerialBALMinEntriesPerMgas > 0 && txNums <= uint64(dbg.Exec3SerialBALMaxTxs) {
 		if h := rawdb.ReadHeaderByNumber(tx, blockNum); h != nil && h.BlockAccessListHash != nil && h.GasUsed > 0 {
-			if bal, err := rawdb.ReadBlockAccessListBytes(tx, h.Hash(), blockNum); err == nil && uint64(len(bal))*1_000_000/h.GasUsed >= uint64(dbg.Exec3SerialBALMinBytesPerMgas) {
+			if bal, err := rawdb.ReadBlockAccessList(tx, h.Hash(), blockNum); err == nil && balEntries(bal)*1_000_000/h.GasUsed >= uint64(dbg.Exec3SerialBALMinEntriesPerMgas) {
 				return true
 			}
 		}
@@ -805,4 +805,12 @@ func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
 	}
 	h := rawdb.ReadHeaderByNumber(tx, blockNum)
 	return h != nil && (h.BlockAccessListHash == nil || dbg.Exec3SerialBAL) && h.GasUsed/txNums <= uint64(dbg.Exec3SerialMaxAvgGas)
+}
+
+func balEntries(bal types.BlockAccessList) uint64 {
+	n := uint64(len(bal))
+	for i := range bal {
+		n += uint64(len(bal[i].StorageChanges) + len(bal[i].StorageReads))
+	}
+	return n
 }

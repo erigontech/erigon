@@ -96,16 +96,16 @@ var (
 	Exec3SerialMinTxs    = EnvInt("EXEC3_SERIAL_MIN_TXS", 0)
 	Exec3SerialMaxAvgGas = EnvInt("EXEC3_SERIAL_MAX_AVG_GAS", 100_000)
 	Exec3SerialBAL       = EnvBool("EXEC3_SERIAL_BAL", false)
-	// Exec3SerialBALMinBytesPerMgas > 0 runs a lone BAL block of at most Exec3SerialBALMaxTxs txs on the serial
-	// executor when its BAL has at least this many bytes per Mgas used (state-bound, little tx overlap to gain).
-	Exec3SerialBALMinBytesPerMgas = EnvInt("EXEC3_SERIAL_BAL_MIN_BPMG", 1000)
-	Exec3SerialBALMaxTxs          = EnvInt("EXEC3_SERIAL_BAL_MAX_TXS", 32)
-	numWorkers                    = runtime.NumCPU()
-	Exec3Workers                  = EnvInt("EXEC3_WORKERS", numWorkers)
-	ExecTerseLoggerLevel          = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
-	CompressWorkers               = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
-	MergeWorkers                  = EnvInt("MERGE_WORKERS", 1)
-	CollateWorkers                = EnvInt("COLLATE_WORKERS", 2)
+	// Exec3SerialBALMinEntriesPerMgas > 0 runs a lone BAL block of at most Exec3SerialBALMaxTxs txs on the serial
+	// executor when its BAL has at least this many accounts+slots per Mgas used (state-bound, little tx overlap to gain).
+	Exec3SerialBALMinEntriesPerMgas = EnvInt("EXEC3_SERIAL_BAL_MIN_EPMG", 20)
+	Exec3SerialBALMaxTxs            = EnvInt("EXEC3_SERIAL_BAL_MAX_TXS", 32)
+	numWorkers                      = runtime.NumCPU()
+	Exec3Workers                    = EnvInt("EXEC3_WORKERS", numWorkers)
+	ExecTerseLoggerLevel            = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
+	CompressWorkers                 = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
+	MergeWorkers                    = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers                  = EnvInt("COLLATE_WORKERS", 2)
 
 	AggregationDelayMs = EnvInt("AGGREGATION_DELAY_MS", 0)
 
