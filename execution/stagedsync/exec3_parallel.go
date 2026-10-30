@@ -3609,6 +3609,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	if !be.execTasks.checkComplete(tx) {
 		be.execTasks.markComplete(tx)
 		be.execTasks.removeDependency(tx)
+		// Start the released dependents before validating tx, so their setup overlaps it.
+		be.scheduleExecution(ctx, pe)
 	}
 
 	// do validations ...
