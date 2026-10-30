@@ -72,6 +72,8 @@ type Cfg struct {
 	attestationDataProducer      attestation_producer.AttestationDataProducer
 	caplinConfig                 clparams.CaplinConfig
 	hasDownloaded                bool
+	forwardSyncTipRoot           common.Hash
+	forwardSyncTipSlot           uint64
 	gloasPayloadRetryOffset      atomic.Uint32
 	gloasEnvelopeRecoveryCursor  common.Hash
 	gloasEnvelopeRecoveryHead    common.Hash
@@ -103,6 +105,8 @@ type Args struct {
 	hasDownloaded bool
 	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
 	headUnpublished bool
+	// atForwardSyncTip is set while ForwardSync showed, less than an epoch ago, that no block follows the highest seen block.
+	atForwardSyncTip bool
 }
 
 func ClStagesCfg(
@@ -189,7 +193,7 @@ func MetaCatchingUp(args Args) StageName {
 	}
 	// ForwardSync can work without peers via the beacon API HTTP fallback,
 	// so allow it even when peers == 0.
-	if args.seenEpoch < args.targetEpoch {
+	if args.seenEpoch < args.targetEpoch && !args.atForwardSyncTip {
 		return ForwardSync
 	}
 	// ChainTipSync relies on gossip for real-time updates, skip it without peers.
@@ -287,6 +291,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
 			cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(cfg.ethClock.GenesisTime() + args.targetSlot*cfg.beaconCfg.SecondsPerSlot))
+			args.atForwardSyncTip = cfg.forwardSyncTipRoot != (common.Hash{}) &&
+				cfg.forwardSyncTipRoot == cfg.forkChoice.HighestSeenRoot() &&
+				args.targetSlot < cfg.forwardSyncTipSlot+cfg.beaconCfg.SlotsPerEpoch
 			if head, _, err := cfg.forkChoice.GetHead(nil); err == nil {
 				args.headUnpublished = head != cfg.syncedData.HeadRoot()
 			}

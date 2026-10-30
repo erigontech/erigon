@@ -65,10 +65,13 @@ type ForwardBeaconDownloader struct {
 	httpPreferred         atomic.Bool // set after first HTTP fallback success; skips P2P probing
 	onRequestComplete     func(response *peerAndBlocks, empty bool)
 
-	mu                 sync.Mutex
-	gloasLookahead     *cltypes.SignedBeaconBlock
-	gloasLookaheadPeer string
-	gloasNextUnscanned uint64
+	mu                       sync.Mutex
+	gloasLookahead           *cltypes.SignedBeaconBlock
+	gloasLookaheadPeer       string
+	gloasEmptyPeer           string
+	gloasEmptyThrough        uint64
+	gloasNextUnscanned       uint64
+	gloasTipProcessedThrough uint64
 }
 
 const forwardRequestRetryInterval = 300 * time.Millisecond
@@ -152,6 +155,7 @@ type peerAndBlocks struct {
 	rangeStart             uint64
 	rangeCount             uint64
 	hadGloasPending        bool
+	tipWithoutSuccessor    bool
 }
 
 var (
@@ -160,6 +164,7 @@ var (
 	forwardBeaconProbeTimeout    = 21 * time.Second
 	forwardBeaconFallbackDelay   = 5 * time.Second
 	forwardBeaconResponsePoll    = 10 * time.Millisecond
+	forwardTipEnvelopeTimeout    = 2 * time.Second
 )
 
 const maxConcurrentForwardBeaconRequests = 2
@@ -217,6 +222,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				f.httpPreferred.Store(false)
 			}
 		case httpErr == nil && hadGloasPending:
+			if response := f.tipWithoutSuccessorResponse("http-fallback", httpStart, httpCount, completedHTTPCount, hadGloasPending); response != nil {
+				response.fromHTTP = true
+				response.httpSampledHighestSlot = highestSlotProcessed
+				atomicResp.Store(*response)
+				goto Process
+			}
 			if completedHTTPCount > 0 {
 				f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount))
 			}
@@ -254,6 +265,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		type emptyRangeResult struct {
 			lastSlot uint64
 			apply    func()
+			response *peerAndBlocks
 		}
 		var pendingEmpty *emptyRangeResult
 		beginRequest := func() bool {
@@ -277,7 +289,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 			inFlightRequests--
 			if inFlightRequests == 0 {
 				if !responseAccepted && pendingEmpty != nil {
-					pendingEmpty.apply()
+					if pendingEmpty.response != nil {
+						responseAccepted = true
+						atomicResp.Store(*pendingEmpty.response)
+					} else {
+						pendingEmpty.apply()
+					}
 				}
 				pendingEmpty = nil
 			}
@@ -333,10 +350,21 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					}
 					return
 				}
-				if httpErr == nil && hadGloasPending && completedHTTPCount > 0 {
-					emptyResponse = &emptyRangeResult{
-						lastSlot: lastSlotInRange(httpStart, completedHTTPCount),
-						apply:    func() { f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount)) },
+				if httpErr == nil && hadGloasPending {
+					if response := f.tipWithoutSuccessorResponse("http-fallback", httpStart, httpCount, completedHTTPCount, hadGloasPending); response != nil {
+						response.fromHTTP = true
+						response.httpSampledHighestSlot = latestHighestSlotProcessed
+						emptyResponse = &emptyRangeResult{
+							lastSlot: lastSlotInRange(httpStart, httpCount),
+							response: response,
+						}
+						return
+					}
+					if completedHTTPCount > 0 {
+						emptyResponse = &emptyRangeResult{
+							lastSlot: lastSlotInRange(httpStart, completedHTTPCount),
+							apply:    func() { f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount)) },
+						}
 					}
 					return
 				}
@@ -443,10 +471,20 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						return
 					}
 					if len(responses) == 0 {
-						if hadGloasPending && completedReqCount > 0 {
+						if response := f.tipWithoutSuccessorResponse(peerId, reqSlot, reqCount, completedReqCount, hadGloasPending); response != nil {
 							emptyResponse = &emptyRangeResult{
-								lastSlot: lastSlotInRange(reqSlot, completedReqCount),
-								apply:    func() { f.advanceGloasScanPast(lastSlotInRange(reqSlot, completedReqCount)) },
+								lastSlot: lastSlotInRange(reqSlot, reqCount),
+								response: response,
+							}
+							return
+						}
+						if hadGloasPending && completedReqCount == reqCount {
+							lastSlot := lastSlotInRange(reqSlot, reqCount)
+							if f.confirmEmptyRange(peerId, lastSlot) != nil {
+								emptyResponse = &emptyRangeResult{
+									lastSlot: lastSlot,
+									apply:    func() { f.advanceGloasScanPast(lastSlot) },
+								}
 							}
 							return
 						}
@@ -514,6 +552,10 @@ Process:
 	f.mu.Lock()
 	lookahead := f.gloasLookahead
 	lookaheadPeer := f.gloasLookaheadPeer
+	if resp.tipWithoutSuccessor && (len(processBlocks) != 1 || processBlocks[0] != lookahead) {
+		f.mu.Unlock()
+		return
+	}
 	f.mu.Unlock()
 	if lookahead != nil {
 		processBlocks = mergeGloasLookahead(processBlocks, lookahead)
@@ -537,27 +579,50 @@ Process:
 	var nextGloasLookahead *cltypes.SignedBeaconBlock
 	nextGloasCursor := nextSlotAfterRange(resp.rangeStart, resp.rangeCount)
 	if hasGloasBlocks {
-		// A Gloas block needs its successor to determine whether its envelope exists.
-		processCount := min(int(count), len(processBlocks)-1)
-		nextGloasLookahead = processBlocks[processCount]
-		if pid != "http-fallback" || processCount+1 < len(processBlocks) {
-			nextGloasCursor = saturatingIncrement(nextGloasLookahead.Block.Slot)
+		processCount := len(processBlocks)
+		if !resp.tipWithoutSuccessor {
+			// A Gloas block needs its successor to determine whether its envelope exists.
+			processCount = min(int(count), len(processBlocks)-1)
+			nextGloasLookahead = processBlocks[processCount]
+			if pid != "http-fallback" || processCount+1 < len(processBlocks) {
+				nextGloasCursor = saturatingIncrement(nextGloasLookahead.Block.Slot)
+			}
 		}
 		fullRoots := determineFullGloasRoots(processBlocks, processCount)
+		if resp.tipWithoutSuccessor {
+			root, err := lookahead.Block.HashSSZ()
+			if err == nil {
+				fullRoots = append(fullRoots, root)
+			}
+		}
 		processBlocks = processBlocks[:processCount]
 		if len(fullRoots) > 0 {
+			envelopePeer := pid
+			envelopeCtx, p2pEnvelopeCtx := ctx, ctx
+			if resp.tipWithoutSuccessor {
+				envelopePeer = lookaheadPeer
+				var cancelEnvelopeFetch, cancelP2PEnvelopeFetch context.CancelFunc
+				envelopeCtx, cancelEnvelopeFetch = context.WithTimeout(ctx, forwardTipEnvelopeTimeout)
+				defer cancelEnvelopeFetch()
+				p2pEnvelopeCtx = envelopeCtx
+				if f.httpFallbackURL != "" {
+					// Leave half of the budget for the HTTP fallback.
+					p2pEnvelopeCtx, cancelP2PEnvelopeFetch = context.WithTimeout(envelopeCtx, forwardTipEnvelopeTimeout/2)
+					defer cancelP2PEnvelopeFetch()
+				}
+			}
 			// When blocks came from HTTP fallback, P2P is known-broken for this
 			// batch — skip the 30s P2P envelope timeout and fetch directly via HTTP.
-			if pid == "http-fallback" && f.httpFallbackURL != "" {
+			if envelopePeer == "http-fallback" && f.httpFallbackURL != "" {
 				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-				httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
+				httpResult := fetchEnvelopesFromBeaconAPI(envelopeCtx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 				if httpResult.fetched > 0 {
 					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
 				}
 			} else {
 				var envErr error
 				envelopes, envErr = requestEnvelopesFranticallyWithValidator(
-					ctx,
+					p2pEnvelopeCtx,
 					f.rpc,
 					fullRoots,
 					newEnvelopeValidator(processBlocks, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -585,7 +650,7 @@ Process:
 					if envelopes == nil {
 						envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 					}
-					httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
+					httpResult := fetchEnvelopesFromBeaconAPI(envelopeCtx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 					if httpResult.fetched > 0 {
 						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
 					}
@@ -596,7 +661,10 @@ Process:
 				"batchBlocks", len(processBlocks),
 				"firstSlot", processBlocks[0].Block.Slot,
 				"lastSlot", processBlocks[len(processBlocks)-1].Block.Slot)
-			retained := retainBlocksBeforeMissingGloasEnvelope(processBlocks, fullRoots, envelopes)
+			retained := processBlocks
+			if !resp.tipWithoutSuccessor {
+				retained = retainBlocksBeforeMissingGloasEnvelope(processBlocks, fullRoots, envelopes)
+			}
 			if len(retained) < len(processBlocks) {
 				log.Debug("[ForwardBeaconDownloader] retaining frontier before missing GLOAS envelope",
 					"retainedBlocks", len(retained), "batchBlocks", len(processBlocks))
@@ -613,6 +681,9 @@ Process:
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if resp.tipWithoutSuccessor && f.gloasLookahead != lookahead {
+		return
+	}
 	if resp.fromHTTP && f.highestSlotProcessed != resp.httpSampledHighestSlot {
 		f.httpPreferred.Store(false)
 		return
@@ -639,6 +710,12 @@ Process:
 		}
 		return
 	}
+	if resp.tipWithoutSuccessor && highestSlotProcessed < lookahead.Block.Slot {
+		if resp.fromHTTP {
+			f.httpPreferred.Store(false)
+		}
+		return
+	}
 	attemptedNewSlot := missingEnvelopeSlot > f.highestSlotProcessed || slices.ContainsFunc(processBlocks, func(block *cltypes.SignedBeaconBlock) bool {
 		return block.Block.Slot > f.highestSlotProcessed
 	})
@@ -658,6 +735,9 @@ Process:
 		f.highestSlotProcessed = highestSlotProcessed
 		f.highestSlotUpdateTime = time.Now()
 	}
+	if resp.tipWithoutSuccessor && highestSlotProcessed >= lookahead.Block.Slot {
+		f.gloasTipProcessedThrough = max(f.gloasTipProcessedThrough, lastSlotInRange(resp.rangeStart, resp.rangeCount))
+	}
 	if nextGloasLookahead != nil {
 		for _, block := range processBlocks {
 			if block.Block.Slot > f.highestSlotProcessed {
@@ -668,6 +748,10 @@ Process:
 		}
 	}
 	if nextGloasLookahead != nil && nextGloasLookahead.Block.Slot > f.highestSlotProcessed {
+		if f.gloasLookahead != nextGloasLookahead {
+			f.gloasEmptyPeer = ""
+			f.gloasEmptyThrough = 0
+		}
 		f.gloasLookahead = nextGloasLookahead
 		f.gloasLookaheadPeer = pid
 		if nextGloasLookahead == lookahead {
@@ -677,6 +761,39 @@ Process:
 	} else {
 		f.clearGloasScan()
 	}
+}
+
+func (f *ForwardBeaconDownloader) tipWithoutSuccessorResponse(peerID string, rangeStart, rangeCount, completedCount uint64, hadGloasPending bool) *peerAndBlocks {
+	if !hadGloasPending || completedCount >= rangeCount {
+		return nil
+	}
+	lookahead := f.confirmEmptyRange(peerID, lastSlotInRange(rangeStart, rangeCount))
+	if lookahead == nil {
+		return nil
+	}
+	return &peerAndBlocks{
+		peerId:              peerID,
+		blocks:              []*cltypes.SignedBeaconBlock{lookahead},
+		rangeStart:          rangeStart,
+		rangeCount:          rangeCount,
+		hadGloasPending:     true,
+		tipWithoutSuccessor: true,
+	}
+}
+
+// confirmEmptyRange returns the held lookahead once two distinct P2P peers, or the HTTP fallback, answered empty through lastSlot.
+func (f *ForwardBeaconDownloader) confirmEmptyRange(peerID string, lastSlot uint64) *cltypes.SignedBeaconBlock {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gloasLookahead == nil {
+		return nil
+	}
+	if peerID != "http-fallback" && (f.gloasEmptyPeer == "" || f.gloasEmptyPeer == peerID || f.gloasEmptyThrough != lastSlot) {
+		f.gloasEmptyPeer = peerID
+		f.gloasEmptyThrough = lastSlot
+		return nil
+	}
+	return f.gloasLookahead
 }
 
 func waitForForwardRequestRetry(ctx context.Context) {
@@ -751,6 +868,8 @@ func (f *ForwardBeaconDownloader) advanceGloasScanPast(lastSlot uint64) {
 func (f *ForwardBeaconDownloader) clearGloasScan() {
 	f.gloasLookahead = nil
 	f.gloasLookaheadPeer = ""
+	f.gloasEmptyPeer = ""
+	f.gloasEmptyThrough = 0
 	f.gloasNextUnscanned = 0
 }
 
@@ -1219,4 +1338,11 @@ func (f *ForwardBeaconDownloader) GetHighestProcessedSlot() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.highestSlotProcessed
+}
+
+// CaughtUpTo reports whether the downloader reached slot, or imported its Gloas tip after an empty scan through slot.
+func (f *ForwardBeaconDownloader) CaughtUpTo(slot uint64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.highestSlotProcessed >= slot || f.gloasTipProcessedThrough >= slot
 }

@@ -302,8 +302,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
 
-	// Run the log loop until the highest processed slot reaches the chain tip slot
-	for downloader.GetHighestProcessedSlot() < chainTipSlot {
+	for !downloader.CaughtUpTo(chainTipSlot) {
 		downloader.RequestMore(ctx)
 
 		// Detect stale progress: if no new slots processed for staleTimeout, exit.
@@ -344,6 +343,10 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 	}
 
+	if downloader.GetHighestProcessedSlot() < chainTipSlot {
+		cfg.forwardSyncTipRoot = cfg.forkChoice.HighestSeenRoot()
+		cfg.forwardSyncTipSlot = cfg.ethClock.GetCurrentSlot()
+	}
 	if shouldInsert && ctx.Err() == nil {
 		if err := cfg.blockCollector.Flush(ctx); err != nil {
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)

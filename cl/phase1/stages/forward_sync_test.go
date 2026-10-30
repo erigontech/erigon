@@ -17,18 +17,80 @@
 package stages
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/cltypes"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
+
+type forwardSyncTipSentinel struct {
+	sentinelproto.SentinelClient
+	blockResponse       []byte
+	envelopeResponse    []byte
+	onFirstBlockRequest func()
+	blockCalls          atomic.Int32
+}
+
+func (s *forwardSyncTipSentinel) SendRequest(_ context.Context, request *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	if strings.Contains(request.Topic, communication.BeaconBlocksByRangeTopic) {
+		call := s.blockCalls.Add(1)
+		if call == 1 && s.onFirstBlockRequest != nil {
+			s.onFirstBlockRequest()
+		}
+		response := []byte(nil)
+		if call == 1 {
+			response = s.blockResponse
+		}
+		return &sentinelproto.ResponseData{Data: response, Peer: &sentinelproto.Peer{Pid: fmt.Sprintf("peer-%d", call)}}, nil
+	}
+	return &sentinelproto.ResponseData{Data: s.envelopeResponse, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
+}
+
+type forwardSyncTipClock struct {
+	eth_clock.EthereumClock
+	currentSlot   *atomic.Uint64
+	slotsPerEpoch uint64
+}
+
+func (c *forwardSyncTipClock) GetCurrentSlot() uint64 {
+	return c.currentSlot.Load()
+}
+
+func (c *forwardSyncTipClock) GetCurrentEpoch() uint64 {
+	return c.GetCurrentSlot() / c.slotsPerEpoch
+}
+
+func (*forwardSyncTipSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+func (*forwardSyncTipSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	return &sentinelproto.PeerCount{Active: 1}, nil
+}
+
+func (*forwardSyncTipSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
 
 // currentSlot can overshoot the captured chainTipSlot; slotsRemaining must clamp
 // to 0 rather than underflow into a ~2^64 slot count.
@@ -101,6 +163,114 @@ func TestForwardSyncFlushesBlockCollectorAfterInsertion(t *testing.T) {
 			require.Equal(t, test.wantFlushes, collector.flushCalls)
 		})
 	}
+}
+
+func newForwardSyncTipFixture(t *testing.T) (*Cfg, common.Hash, *cltypes.SignedBeaconBlock, uint64, *forwardSyncTipSentinel) {
+	t.Helper()
+
+	cfg, graph, tipRoot, _, nextBlock, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	tip := graph.parents[tipRoot]
+	envelope := graph.envelopes[tipRoot]
+	anchorRoot := cfg.forkChoice.AnchorRoot()
+	graph.envelopes[anchorRoot] = envelope
+	cfg.forkChoice.MarkPayloadVerified(anchorRoot, envelope.Message.Payload.BlockHash)
+	require.True(t, cfg.forkChoice.IsPayloadVerified(anchorRoot))
+	delete(graph.parents, tipRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), tip, false, false, false))
+
+	const slotsAfterTip = uint64(33)
+	cfg.beaconCfg.SecondsPerSlot = 60
+	targetSlot := tip.Block.Slot + slotsAfterTip
+	genesisTime := uint64(time.Now().Unix()) - targetSlot*cfg.beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg.beaconCfg)
+	digest, err := clock.ComputeForkDigest(tip.Block.Slot / cfg.beaconCfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	var blockResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&blockResponse, tip, digest[:]...))
+	var envelopeResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&envelopeResponse, envelope, digest[:]...))
+	sentinel := &forwardSyncTipSentinel{
+		blockResponse:    blockResponse.Bytes(),
+		envelopeResponse: envelopeResponse.Bytes(),
+	}
+	cfg.ethClock = clock
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
+	return cfg, tipRoot, nextBlock, targetSlot, sentinel
+}
+
+func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
+	cfg, tipRoot, nextBlock, targetSlot, _ := newForwardSyncTipFixture(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, forwardSync(ctx, log.Root(), cfg, Args{}))
+	require.Equal(t, tipRoot, cfg.forwardSyncTipRoot)
+	cfg.hasDownloaded = true
+	cfg.syncedData = synced_data.NewSyncedDataManager(cfg.beaconCfg, true)
+	require.True(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
+
+	clockAtSlot := func(slot uint64) eth_clock.EthereumClock {
+		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		clock.EXPECT().GenesisTime().Return(uint64(0))
+		clock.EXPECT().GetCurrentSlot().Return(slot)
+		clock.EXPECT().GetCurrentEpoch().Return(slot / cfg.beaconCfg.SlotsPerEpoch)
+		return clock
+	}
+	tipExpirySlot := targetSlot + cfg.beaconCfg.SlotsPerEpoch
+	cfg.ethClock = clockAtSlot(tipExpirySlot - 1)
+	require.True(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
+	cfg.ethClock = clockAtSlot(tipExpirySlot)
+	require.False(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
+
+	cfg.ethClock = clockAtSlot(tipExpirySlot - 1)
+	cfg.forkChoice.OnTick((nextBlock.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
+	require.NoError(t, cfg.forkChoice.OnBlock(ctx, nextBlock, false, false, false))
+	require.NotEqual(t, tipRoot, cfg.forkChoice.HighestSeenRoot())
+	require.False(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
+}
+
+func TestForwardSyncRecordsTipSlotWhenEmptyScanCompletes(t *testing.T) {
+	cfg, _, _, targetSlot, sentinel := newForwardSyncTipFixture(t)
+	var currentSlot atomic.Uint64
+	currentSlot.Store(targetSlot)
+	clock := &forwardSyncTipClock{
+		EthereumClock: cfg.ethClock,
+		currentSlot:   &currentSlot,
+		slotsPerEpoch: cfg.beaconCfg.SlotsPerEpoch,
+	}
+	sentinel.onFirstBlockRequest = func() {
+		currentSlot.Store(targetSlot + cfg.beaconCfg.SlotsPerEpoch)
+	}
+	cfg.ethClock = clock
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, forwardSync(ctx, log.Root(), cfg, Args{}))
+	require.Equal(t, targetSlot+cfg.beaconCfg.SlotsPerEpoch, cfg.forwardSyncTipSlot)
+	cfg.hasDownloaded = true
+	cfg.syncedData = synced_data.NewSyncedDataManager(cfg.beaconCfg, true)
+	require.True(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
+}
+
+func TestForwardSyncRecordsHighestSeenRootAboveProcessedTip(t *testing.T) {
+	cfg, _, nextBlock, _, _ := newForwardSyncTipFixture(t)
+	cfg.forkChoice.OnTick((nextBlock.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), nextBlock, false, false, false))
+	nextBlockRoot, err := nextBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	highestSeenRoot := cfg.forkChoice.HighestSeenRoot()
+	require.NotZero(t, highestSeenRoot)
+	require.Equal(t, common.Hash(nextBlockRoot), highestSeenRoot)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, forwardSync(ctx, log.Root(), cfg, Args{}))
+	require.Equal(t, highestSeenRoot, cfg.forwardSyncTipRoot)
+	cfg.hasDownloaded = true
+	cfg.syncedData = synced_data.NewSyncedDataManager(cfg.beaconCfg, true)
+	require.True(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
 }
 
 // Forward sync imports blocks without their columns, so it asks for a backfill of the range it

@@ -142,6 +142,10 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	atTip.seenSlot = 68
 	epochsBehind := unpublished
 	epochsBehind.seenSlot, epochsBehind.seenEpoch, epochsBehind.targetEpoch = 3, 0, 1
+	epochsBehindAtTip := epochsBehind
+	epochsBehindAtTip.atForwardSyncTip = true
+	epochsBehindAtTipPublished := epochsBehindAtTip
+	epochsBehindAtTipPublished.headUnpublished = false
 
 	tests := []struct {
 		name  string
@@ -155,12 +159,15 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "forward sync reached the target, head unpublished", stage: ForwardSync, args: atTip, want: ChainTipSync},
 		{name: "forward sync, head published", stage: ForwardSync, args: behind, want: ChainTipSync},
 		{name: "forward sync, epochs behind", stage: ForwardSync, args: epochsBehind, want: ForwardSync},
+		{name: "forward sync, epochs behind at tip", stage: ForwardSync, args: epochsBehindAtTip, want: ForkChoice},
 		{name: "chain tip timeout, head unpublished", stage: ChainTipSync, args: unpublished, err: context.DeadlineExceeded, want: ForkChoice},
 		{name: "chain tip timeout, head published", stage: ChainTipSync, args: behind, err: context.DeadlineExceeded, want: ChainTipSync},
+		{name: "chain tip timeout, head published at forward sync tip", stage: ChainTipSync, args: epochsBehindAtTipPublished, err: context.DeadlineExceeded, want: ChainTipSync},
 		{name: "chain tip reached the target", stage: ChainTipSync, args: atTip, want: ForkChoice},
 		{name: "sleep ended at the slot start, head unpublished", stage: SleepForSlot, args: unpublished, want: ForkChoice},
 		// ForkChoice may fail to publish; going straight back to ForkChoice would stop fetching blocks.
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
+		{name: "fork choice, epochs behind at forward sync tip", stage: ForkChoice, args: epochsBehindAtTip, want: ChainTipSync},
 	}
 	stages := ConsensusClStages().Stages
 	for _, tt := range tests {
