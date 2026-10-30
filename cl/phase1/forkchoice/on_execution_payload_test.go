@@ -223,6 +223,11 @@ type prunedAfterDumpEnvelopeForkGraph struct {
 	dumped bool
 }
 
+type hasEnvelopeCountdownForkGraph struct {
+	*persistingEnvelopeForkGraph
+	remaining atomic.Int32
+}
+
 type persistingEnvelopeForkGraph struct {
 	dataAvailabilityForkGraph
 	mu       sync.RWMutex
@@ -434,6 +439,13 @@ func (g *prunedAfterDumpEnvelopeForkGraph) DumpEnvelopeOnDisk(root common.Hash, 
 	}
 	g.dumped = true
 	return nil
+}
+
+func (g *hasEnvelopeCountdownForkGraph) HasEnvelope(root common.Hash) bool {
+	if g.remaining.Add(-1) < 0 {
+		return false
+	}
+	return g.persistingEnvelopeForkGraph.HasEnvelope(root)
 }
 
 func (g *persistingEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
@@ -1939,6 +1951,39 @@ func TestOnExecutionPayloadIndexesEnvelopePrunedBeforeIndexWrite(t *testing.T) {
 		require.Equal(t, envelope.Signature, storedSignature)
 		return nil
 	}))
+}
+
+func TestDuplicateDeliveryKeepsKnownIndexValuesAcrossPrune(t *testing.T) {
+	for flipAfter := int32(0); flipAfter <= 6; flipAfter++ {
+		t.Run(fmt.Sprintf("flipAfter=%d", flipAfter), func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+			rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			db := &failingUpdateDB{RwDB: rwdb, fail: true}
+			f.db = db
+			root := common.Hash(envelope.Message.BeaconBlockRoot)
+
+			require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, false), ErrExecutionPayloadEnvelopeIndicesPending)
+			require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
+
+			db.fail = false
+			countdown := &hasEnvelopeCountdownForkGraph{persistingEnvelopeForkGraph: graph}
+			countdown.remaining.Store(flipAfter)
+			f.forkGraph = countdown
+			_ = f.OnExecutionPayload(t.Context(), envelope, false, false)
+
+			rowsWritten := false
+			require.NoError(t, rwdb.View(t.Context(), func(tx kv.Tx) error {
+				blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
+				if err != nil {
+					return err
+				}
+				rowsWritten = blockNumber != nil
+				return nil
+			}))
+			require.True(t, rowsWritten || len(f.envelopeIndexRepairs.repairs()) == 1, "known index values dropped")
+		})
+	}
 }
 
 func TestStoreAnchorEnvelopeCoordinatesCanonicalIndexWrite(t *testing.T) {
