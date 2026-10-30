@@ -394,3 +394,26 @@ func TestBackwardBeaconDownloaderRetriesEmptyPrefetch(t *testing.T) {
 	downloader.prefetchRange(t.Context(), 576)
 	require.Len(t, <-downloader.prefetched[0].blocks, 64)
 }
+
+func TestBackwardBeaconDownloaderPrefetchAttemptHasDeadline(t *testing.T) {
+	previousAttemptTimeout := prefetchAttemptTimeout
+	prefetchAttemptTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { prefetchAttemptTimeout = previousAttemptTimeout })
+
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	var heldCalls atomic.Int32
+	server := &slowRangeServer{
+		blocks: blocks,
+		held:   func(start uint64) bool { return start == 512 && heldCalls.Add(1) == 1 },
+		calls:  map[uint64]int{},
+	}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	select {
+	case got := <-downloader.prefetched[0].blocks:
+		require.Len(t, got, 64)
+	case <-time.After(2 * time.Second):
+		t.Fatal("prefetch attempt held by a silent peer outlived its deadline")
+	}
+}

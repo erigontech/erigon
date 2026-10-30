@@ -151,8 +151,9 @@ const (
 	maxPrefetchedRanges     = 8
 	slotsPerRange           = uint64(64)
 	prefetchAttempts        = 3
-	prefetchAttemptTimeout  = 10 * time.Second
 )
+
+var prefetchAttemptTimeout = 10 * time.Second
 
 // NewGloasSuccessorValidator validates a direct successor from an immutable checkpoint state.
 func NewGloasSuccessorValidator(anchorState *state.CachingBeaconState, anchorRoot common.Hash) func(*cltypes.SignedBeaconBlock) error {
