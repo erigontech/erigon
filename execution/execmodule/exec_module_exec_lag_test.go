@@ -125,3 +125,12 @@ func TestValidateChainBeyondLoopBlockLimitDoesNotWarn(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	require.False(t, recorder.warned.Load())
 }
+
+func TestValidateChainAcceptsCanonicalUnexecutedBlock(t *testing.T) {
+	const lag = 12
+	m, chainPack := execmoduletester.NewWithExecLag(t, lag, 1, execmoduletester.WithLoopBlockLimit(5))
+
+	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[lag].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+}

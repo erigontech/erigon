@@ -213,9 +213,15 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		return
 	}
 	if foundCanonical {
-		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
-		return
+		var executedTo uint64
+		if executedTo, criticalError = stages.GetStageProgress(tx, stages.Execution); criticalError != nil {
+			return
+		}
+		if executedTo >= number {
+			status = engine_types.ValidStatus
+			latestValidHash = header.Hash()
+			return
+		}
 	}
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
