@@ -4123,7 +4123,7 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 			txn := types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:])
 			for k, initCode := range [][]byte{storeOne, storeCallerBalance, revertInit} {
 				if n%7 == uint64(4+k) {
-					txn = types.NewContractCreation(n, uint256.NewInt(0), 100_000, uint256.NewInt(10*common.GWei), initCode)
+					txn = types.NewContractCreation(n, uint256.NewInt(n%2*3), 100_000, uint256.NewInt(10*common.GWei), initCode)
 				}
 			}
 			tx, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), privKey)

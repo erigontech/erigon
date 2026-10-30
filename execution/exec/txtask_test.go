@@ -319,8 +319,8 @@ func TestTxMessageReportsBadSignatureFirst(t *testing.T) {
 }
 
 // A creation takes its address from the tx nonce, which validation checks against the
-// sender's nonce, so a zero-value creation can run before its predecessor.
-func TestChargesSenderAtValidationIncludesZeroValueCreation(t *testing.T) {
+// sender's nonce, so a creation can run before its predecessor.
+func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
 	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
 	task := func(value uint64) *TxTask {
 		txn := &types.LegacyTx{CommonTx: types.CommonTx{Value: *uint256.NewInt(value), GasLimit: 100000}, GasPrice: *uint256.NewInt(1)}
@@ -328,5 +328,5 @@ func TestChargesSenderAtValidationIncludesZeroValueCreation(t *testing.T) {
 		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
 	}
 	require.True(t, task(0).ChargesSenderAtValidation(0))
-	require.False(t, task(1).ChargesSenderAtValidation(0))
+	require.True(t, task(1).ChargesSenderAtValidation(0))
 }
