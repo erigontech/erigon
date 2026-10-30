@@ -5779,7 +5779,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			}
 
 			require.GreaterOrEqual(t, elapsed, tt.minWait)
-			require.Less(t, elapsed, importWait/2)
+			require.NotEqual(t, attestationSlot+1, handler.attestationDataWaitedSlot.Load(), "the response came from the import-wait cap")
 			require.Zero(t, calls)
 			wantStatus := tt.wantStatus
 			if wantStatus == 0 {
