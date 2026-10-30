@@ -294,7 +294,7 @@ func TestColumnsToStore(t *testing.T) {
 	withCgc := func(cgc uint64) func(*testing.T) PeerDas {
 		return func(t *testing.T) PeerDas {
 			d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-			d.state.SetCustodyGroupCount(cgc)
+			d.state.SetCustodyGroupCount(cgc, func() uint64 { return 0 })
 			return d
 		}
 	}

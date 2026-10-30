@@ -113,7 +113,7 @@ func TestImportColumnsFromBlobsStoresAllColumnsOnCustodyLookupError(t *testing.T
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups + 1)
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
 
 	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))

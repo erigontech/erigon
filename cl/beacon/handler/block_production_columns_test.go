@@ -192,7 +192,7 @@ func (f *publishedColumnsFixture) newPeerDas(t *testing.T, caplinConfig clparams
 	t.Cleanup(nodeDB.Close)
 	localNode := enode.NewLocalNode(nodeDB, key)
 	state.SetLocalNodeID(localNode)
-	return das.NewPeerDas(nil, f.handler.beaconChainCfg, &caplinConfig, f.columns, nil, nil, localNode.ID(), nil, state, f.handler.gossipManager, nil, f.handler.indiciesDB)
+	return das.NewPeerDas(nil, f.handler.beaconChainCfg, &caplinConfig, f.columns, nil, nil, localNode.ID(), f.handler.ethClock, state, f.handler.gossipManager, nil, f.handler.indiciesDB)
 }
 
 func (f *publishedColumnsFixture) blockIndexed() (bool, error) {
