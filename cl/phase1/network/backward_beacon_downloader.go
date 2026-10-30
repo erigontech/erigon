@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -81,6 +84,7 @@ type BackwardBeaconDownloader struct {
 	currentSlot            func() uint64
 	validateGloasSuccessor func(*cltypes.SignedBeaconBlock) error
 	validateGloasEnvelope  func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
+	gloasSignatureState    *state.CachingBeaconState
 	// [New in Gloas:EIP7732] highest block from the previous batch, used as lookahead
 	// to determine FULL/EMPTY status of the highest block in the current batch.
 	prevBatchTopBlock      *cltypes.SignedBeaconBlock
@@ -127,7 +131,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 	if rpc != nil {
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
 		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-			return RequestEnvelopesFrantically(ctx, rpc, roots, blocks...)
+			return requestEnvelopesFranticallyWithValidator(ctx, rpc, roots, newEnvelopeValidator(blocks, b.validateGloasEnvelope), rpc.BanPeerForInvalidData, blocks...)
 		}
 	}
 	return b
@@ -233,6 +237,59 @@ func ValidateDownloadedGloasEnvelope(beaconCfg *clparams.BeaconChainConfig, bloc
 	return ValidateGloasEnvelopeAgainstBid(beaconCfg, blockRoot, signedBid.Message, env)
 }
 
+func backfilledGloasEnvelopeSigningKey(anchorState *state.CachingBeaconState, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (common.Bytes48, bool, error) {
+	if anchorState == nil {
+		return common.Bytes48{}, false, errors.New("nil GLOAS anchor state")
+	}
+
+	envelopeEpoch := state.GetEpochAtSlot(anchorState.BeaconConfig(), block.Block.Slot)
+	builderIndex := envelope.Message.BuilderIndex
+	if builderIndex == clparams.BuilderIndexSelfBuild {
+		validator, err := anchorState.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
+		if err != nil {
+			return common.Bytes48{}, false, fmt.Errorf("get proposer validator %d: %w", block.Block.ProposerIndex, err)
+		}
+		return validator.PublicKey(), true, nil
+	}
+	builders := anchorState.GetBuilders()
+	if builders == nil || builderIndex >= uint64(builders.Len()) {
+		return common.Bytes48{}, false, nil
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder.DepositEpoch >= envelopeEpoch {
+		return common.Bytes48{}, false, nil
+	}
+	return builder.Pubkey, true, nil
+}
+
+func validateBackfilledGloasEnvelopeSignature(anchorState *state.CachingBeaconState, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	publicKey, known, err := backfilledGloasEnvelopeSigningKey(anchorState, block, envelope)
+	if err != nil {
+		return err
+	}
+	if !known {
+		return nil
+	}
+	envelopeEpoch := state.GetEpochAtSlot(anchorState.BeaconConfig(), block.Block.Slot)
+
+	domain, err := fork.ComputeDomainAtEpoch(anchorState.BeaconConfig(), anchorState.BeaconConfig().DomainBeaconBuilder, envelopeEpoch, anchorState.GenesisValidatorsRoot())
+	if err != nil {
+		return fmt.Errorf("compute builder domain: %w", err)
+	}
+	signingRoot, err := fork.ComputeSigningRoot(envelope.Message, domain)
+	if err != nil {
+		return fmt.Errorf("compute envelope signing root: %w", err)
+	}
+	valid, err := bls.Verify(envelope.Signature[:], signingRoot[:], publicKey[:])
+	if err != nil {
+		return fmt.Errorf("verify envelope signature: %w", err)
+	}
+	if !valid {
+		return errors.New("invalid signature on GLOAS execution payload envelope")
+	}
+	return nil
+}
+
 // SetThrottle sets the throttle.
 func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.mu.Lock()
@@ -276,6 +333,16 @@ func (b *BackwardBeaconDownloader) SetCurrentSlotSampler(currentSlot func() uint
 
 func (b *BackwardBeaconDownloader) SetGloasSuccessorValidator(validate func(*cltypes.SignedBeaconBlock) error) {
 	b.validateGloasSuccessor = validate
+}
+
+func (b *BackwardBeaconDownloader) SetGloasEnvelopeSignatureValidator(anchorState *state.CachingBeaconState) {
+	b.gloasSignatureState = anchorState
+	b.validateGloasEnvelope = func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+		if err := ValidateDownloadedGloasEnvelope(b.beaconCfg, block, envelope); err != nil {
+			return err
+		}
+		return validateBackfilledGloasEnvelopeSignature(b.gloasSignatureState, block, envelope)
+	}
 }
 
 // SetOnInitialGloasBlock persists the trusted anchor without classifying its payload before traversing its ancestors.
@@ -913,36 +980,30 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return nil, fullRootSet
 	}
 
-	// When HTTP has been working, skip the slow P2P envelope fetch entirely.
-	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
-		envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
-		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
-		b.discardInvalidGloasEnvelopes(responses, envelopes)
-		if result.fetched > 0 {
-			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
-		}
-		b.recordRequiredEnvelopeAttempt(fullRootSet, envelopes)
-		return envelopes, fullRootSet
-	}
-
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	var err error
-	if b.requestEnvelopes != nil {
-		envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
-	} else {
-		err = errors.New("no P2P envelope source configured")
-	}
-	if err != nil {
-		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
-	}
-	b.discardInvalidGloasEnvelopes(responses, envelopes)
-	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
-	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
-		if envelopes == nil {
-			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
+	if !b.httpPreferred.Load() || b.httpFallbackURL == "" {
+		var err error
+		if b.requestEnvelopes != nil {
+			envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
+		} else {
+			err = errors.New("no P2P envelope source configured")
 		}
-		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
-		b.discardInvalidGloasEnvelopes(responses, envelopes)
+		if err != nil {
+			log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+		}
+	}
+	// P2P envelopes have already passed validateGloasEnvelope. Keep HTTP results
+	// separate to avoid repeating those expensive checks on P2P results.
+	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
+		missingRoots := filterReceived(fullRoots, envelopes)
+		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(missingRoots))
+		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, missingRoots, httpEnvelopes, b.beaconCfg)
+		b.discardInvalidGloasEnvelopes(responses, httpEnvelopes)
+		if envelopes == nil {
+			envelopes = httpEnvelopes
+		} else {
+			maps.Copy(envelopes, httpEnvelopes)
+		}
 		if result.fetched > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
 		}
@@ -1268,11 +1329,6 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeP2P(ctx context.Context, b
 		return nil, err
 	}
 	if envelope := envelopes[blockRoot]; envelope != nil && envelope.Message != nil && envelope.Message.BeaconBlockRoot == blockRoot {
-		if b.validateGloasEnvelope != nil {
-			if err := b.validateGloasEnvelope(block, envelope); err != nil {
-				return nil, fmt.Errorf("invalid P2P GLOAS envelope: %w", err)
-			}
-		}
 		return envelope, nil
 	}
 	return nil, errExecutionPayloadEnvelopeNotFound
