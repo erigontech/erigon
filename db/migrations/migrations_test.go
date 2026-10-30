@@ -17,6 +17,8 @@
 package migrations
 
 import (
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -297,4 +299,21 @@ func TestCommitCallRequired(t *testing.T) {
 		require.Empty(applied)
 		return nil
 	}))
+}
+
+func TestVerifyVersionRefusesNewerDB(t *testing.T) {
+	cur := &kv.DBSchemaVersion
+	for _, newer := range [][2]uint32{{cur.Major, cur.Minor + 1}, {cur.Major + 1, 0}} {
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			var v [12]byte
+			binary.BigEndian.PutUint32(v[:], newer[0])
+			binary.BigEndian.PutUint32(v[4:], newer[1])
+			return tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, v[:])
+		}))
+		err := NewMigrator(dbcfg.ChainDB).VerifyVersion(db, "/data/chaindata")
+		require.ErrorContains(t, err, fmt.Sprintf("DB schema %d.%d", newer[0], newer[1]))
+		require.ErrorContains(t, err, fmt.Sprintf("supports %d.%d", cur.Major, cur.Minor))
+		require.ErrorContains(t, err, "remove /data/chaindata")
+	}
 }

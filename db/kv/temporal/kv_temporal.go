@@ -669,6 +669,14 @@ func (tx *RwTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc 
 	return tx.indexRange(name, tx.RwTx, k, fromTs, toTs, asc, limit)
 }
 
+func (tx *Tx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return kv.JoinIndexRanges(q, tx.IndexRange)
+}
+
+func (tx *RwTx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return kv.JoinIndexRanges(q, tx.IndexRange)
+}
+
 func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.HistoryRange(name, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {

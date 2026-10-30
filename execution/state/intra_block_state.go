@@ -3666,20 +3666,18 @@ func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *acco
 // lock-free origin layer (write-once), so later reads resolve the pre-block base without taking
 // an account's e.mu. The origin is immutable pre-block state, so it lives outside the OCC cells.
 func (ibs *IntraBlockState) PublishOrigins() {
-	if ibs.versionMap == nil || ibs.versionedOrigins.IsEmpty() {
+	if ibs.versionMap == nil {
 		return
 	}
 	ws := &ibs.versionedOrigins
-	ws.forEachAddr(func(addr accounts.Address) {
-		if vw, ok := ws.address[addr]; ok {
-			ibs.versionMap.StoreOriginAccount(addr, vw.Val)
+	for addr, vw := range ws.address {
+		ibs.versionMap.StoreOriginAccount(addr, vw.Val)
+	}
+	for addr, inner := range ws.storage {
+		for key, vw := range inner {
+			ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
 		}
-		if inner, ok := ws.storage[addr]; ok {
-			for key, vw := range inner {
-				ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
-			}
-		}
-	})
+	}
 	ws.ReleaseAndReset()
 }
 

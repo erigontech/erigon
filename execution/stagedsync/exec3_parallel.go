@@ -1279,7 +1279,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	prevSenderTx := map[accounts.Address]int{}
+	prevAccountTx := map[common.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -1337,16 +1337,21 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if err != nil {
 				return err
 			}
+			addresses := make([]common.Address, 0, 2)
 			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
 				sender = accounts.NilAddress
 			}
 			if !sender.IsNil() {
-				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i)
+				addresses = append(addresses, sender.Value())
+			}
+			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
+				addresses = append(addresses, *tx.GetTo())
+			}
+			for _, address := range addresses {
+				if tx, ok := prevAccountTx[address]; ok && executor.execTasks.addDependency(tx, i) {
 					executor.execTasks.clearPending(i)
 				}
-
-				prevSenderTx[sender] = i
+				prevAccountTx[address] = i
 			}
 		}
 
@@ -1654,9 +1659,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		execLoopCtxCancel(cause)
 		cancelWorkers()
 
-		// Drain in-flight dispatch goroutines before tearing down worker contexts:
-		// cancelWorkers unblocks any waiting on runSem, so no goroutine touches a
-		// worker after teardown.
+		// Join the scheduler before draining workers: it may still add to runWG.
+		_ = pe.wait()
 		pe.runWG.Wait()
 		for drained := false; !drained; {
 			select {
@@ -1677,8 +1681,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		}
 		pe.mintedWorkers = nil
 		pe.mintMu.Unlock()
-
-		_ = pe.wait()
 	}, nil
 }
 
