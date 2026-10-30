@@ -443,6 +443,13 @@ func (g *hasEnvelopeCountdownForkGraph) HasEnvelope(root common.Hash) bool {
 	return g.persistingEnvelopeForkGraph.HasEnvelope(root)
 }
 
+func (g *hasEnvelopeCountdownForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if g.remaining.Load() <= 0 {
+		return nil, errors.New("envelope pruned after countdown")
+	}
+	return g.persistingEnvelopeForkGraph.ReadEnvelopeFromDisk(root)
+}
+
 func (g *persistingEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -1936,7 +1943,6 @@ func TestDuplicateDeliveryKeepsKnownIndexValuesAcrossPrune(t *testing.T) {
 			rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			db := &failingUpdateDB{RwDB: rwdb, fail: true}
 			f.db = db
-			root := common.Hash(envelope.Message.BeaconBlockRoot)
 
 			require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, false), ErrExecutionPayloadEnvelopeIndicesPending)
 			require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
@@ -1945,18 +1951,14 @@ func TestDuplicateDeliveryKeepsKnownIndexValuesAcrossPrune(t *testing.T) {
 			countdown := &hasEnvelopeCountdownForkGraph{persistingEnvelopeForkGraph: graph}
 			countdown.remaining.Store(flipAfter)
 			f.forkGraph = countdown
-			_ = f.OnExecutionPayload(t.Context(), envelope, false, false)
+			err := f.OnExecutionPayload(t.Context(), envelope, false, false)
+			if err != nil {
+				require.ErrorIs(t, err, ErrIgnore)
+			}
+			f.RetryPendingExecutionPayloadEnvelopeIndices(t.Context(), 1)
 
-			rowsWritten := false
-			require.NoError(t, rwdb.View(t.Context(), func(tx kv.Tx) error {
-				blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
-				if err != nil {
-					return err
-				}
-				rowsWritten = blockNumber != nil
-				return nil
-			}))
-			require.True(t, rowsWritten || len(f.envelopeIndexRepairs.repairs()) == 1, "known index values dropped")
+			require.Empty(t, f.envelopeIndexRepairs.repairs())
+			requireEnvelopeIndexRows(t, rwdb, envelope)
 		})
 	}
 }
