@@ -425,7 +425,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(poolTx, minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
@@ -2106,7 +2106,7 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs in the finalized block and older, loop through all entries
 	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
@@ -2121,19 +2121,35 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, fi
 	}
 
 	// Add mined blobs
-	minedBlobs := p.minedBlobTxnsByBlock[minedBlock]
-	for _, txn := range minedTxns {
-		if txn.TxType() == BlobTxnType {
-			// Mined txns arrive without blobs; only the pooled copy still has them.
-			if pooled, ok := p.byHash[string(txn.IDHash[:])]; ok {
-				txn = pooled.TxnSlot
-			}
-			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(minedBlobs)}
-			minedBlobs = append(minedBlobs, mt)
-			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
-		}
+	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
+		p.minedBlobTxnsByBlock[minedBlock] = nil
 	}
-	p.minedBlobTxnsByBlock[minedBlock] = minedBlobs
+	for _, txn := range minedTxns {
+		if txn.TxType() != BlobTxnType {
+			continue
+		}
+		hash := string(txn.IDHash[:])
+		// Mined txns arrive without blobs; the pooled or an earlier cached copy still has them.
+		if pooled, ok := p.byHash[hash]; ok {
+			txn = pooled.TxnSlot
+			// A flushed txn keeps its Rlp only in the db row, which the next flush deletes.
+			if txn.Rlp == nil && poolTx != nil {
+				rlp, _, _, err := p.getRlpLocked(poolTx, txn.IDHash[:])
+				if err != nil {
+					return err
+				}
+				withRlp := *txn
+				withRlp.Rlp = bytes.Clone(rlp)
+				txn = &withRlp
+			}
+		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
+			txn = cached.TxnSlot
+		}
+		p.deleteMinedBlobTxn(hash)
+		mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(p.minedBlobTxnsByBlock[minedBlock])}
+		p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
+		p.minedBlobTxnsByHash[hash] = mt
+	}
 	return nil
 }
 
