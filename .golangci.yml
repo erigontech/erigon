@@ -85,7 +85,9 @@ linters:
         - github.com/erigontech/erigon/common/log/v3.New
     gosec:
       includes:
+        - G102
         - G106
+        - G107
         - G108
         - G109
         - G110
@@ -102,6 +104,7 @@ linters:
         - G203
         - G303
         - G305
+        - G307
         - G402
         - G403
         - G405
@@ -110,7 +113,12 @@ linters:
         - G503
         - G504
         - G506
+        - G701
+        - G702
         - G704
+        - G706
+        - G707
+        - G708
         - G709
         - G710
     usetesting:
