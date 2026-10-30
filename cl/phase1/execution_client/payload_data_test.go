@@ -46,11 +46,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-type payloadDataClient interface {
-	GetHeaderByHash(context.Context, common.Hash) (*types.Header, error)
-	GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error)
-}
-
 func TestLocalExecutionClientsGetHeaderByHash(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	chainPack, err := m.GenerateChain(1, nil)
@@ -60,7 +55,7 @@ func TestLocalExecutionClientsGetHeaderByHash(t *testing.T) {
 	reader := chainreader.NewChainReaderEth1(m.ChainConfig, m.ExecModule, time.Second)
 	direct, err := NewExecutionClientDirect(reader, nil)
 	require.NoError(t, err)
-	clients := map[string]payloadDataClient{
+	clients := map[string]ExecutionEngine{
 		"direct": direct,
 		"engine": &ExecutionClientEngine{chainRW: &reader},
 	}
@@ -87,7 +82,7 @@ func TestLocalExecutionClientsGetHeaderByHashError(t *testing.T) {
 	reader := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, headerErrorExecutionModule{err: wantErr}, time.Second)
 	direct, err := NewExecutionClientDirect(reader, nil)
 	require.NoError(t, err)
-	clients := map[string]payloadDataClient{
+	clients := map[string]ExecutionEngine{
 		"direct": direct,
 		"engine": &ExecutionClientEngine{chainRW: &reader},
 	}
@@ -126,7 +121,7 @@ func TestLocalExecutionClientsGetPayloadBodiesByHash(t *testing.T) {
 			require.NoError(t, err)
 
 			reader := chainreader.NewChainReaderEth1(m.ChainConfig, m.ExecModule, time.Second)
-			var client payloadDataClient
+			var client ExecutionEngine
 			if name == "direct" {
 				client, err = NewExecutionClientDirect(reader, nil)
 				require.NoError(t, err)

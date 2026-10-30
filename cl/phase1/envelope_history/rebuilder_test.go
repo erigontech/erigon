@@ -85,7 +85,6 @@ type rebuildFixture struct {
 	block     *cltypes.SignedBeaconBlock
 	child     *cltypes.SignedBeaconBlock
 	root      common.Hash
-	childRoot common.Hash
 	want      *cltypes.SignedExecutionPayloadEnvelope
 	bal       []byte
 }
@@ -147,9 +146,10 @@ func TestRebuildSkipsUnavailableDatabaseStateBeforeCallingEL(t *testing.T) {
 			name: "empty child",
 			change: func(t *testing.T, fixture *rebuildFixture) {
 				fixture.child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{99}
-				fixture.childRoot, _ = fixture.child.Block.HashSSZ()
+				childRoot, err := fixture.child.Block.HashSSZ()
+				require.NoError(t, err)
 				require.NoError(t, fixture.db.Update(t.Context(), func(tx kv.RwTx) error {
-					return beacon_indicies.MarkRootCanonical(tx, fixture.child.Block.Slot, fixture.childRoot)
+					return beacon_indicies.MarkRootCanonical(tx, fixture.child.Block.Slot, childRoot)
 				}))
 			},
 		},
@@ -200,6 +200,8 @@ func TestRebuildReturnsUnavailableForMissingELData(t *testing.T) {
 			empty := hexutil.Bytes{}
 			fixture.engine.body.BlockAccessList = &empty
 		}},
+		{name: "nil base fee", change: func(fixture *rebuildFixture) { fixture.engine.header.BaseFee = nil }},
+		{name: "nil withdrawal", change: func(fixture *rebuildFixture) { fixture.engine.body.Withdrawals = types.Withdrawals{nil} }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			bal := []byte{12, 13, 14}
@@ -207,24 +209,6 @@ func TestRebuildReturnsUnavailableForMissingELData(t *testing.T) {
 				bal = test.bal
 			}
 			fixture := newRebuildFixtureWithBAL(t, bal)
-			test.change(fixture)
-			rebuilt, err := fixture.rebuild(t, t.Context())
-			require.NoError(t, err)
-			require.Nil(t, rebuilt)
-		})
-	}
-}
-
-func TestRebuildRejectsIncompleteELObjects(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		change func(*rebuildFixture)
-	}{
-		{name: "nil base fee", change: func(fixture *rebuildFixture) { fixture.engine.header.BaseFee = nil }},
-		{name: "nil withdrawal", change: func(fixture *rebuildFixture) { fixture.engine.body.Withdrawals = types.Withdrawals{nil} }},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newRebuildFixture(t)
 			test.change(fixture)
 			rebuilt, err := fixture.rebuild(t, t.Context())
 			require.NoError(t, err)
@@ -254,16 +238,7 @@ func TestRebuildReturnsContextErrorWhenSlotIsUnavailable(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	var rebuilt *cltypes.SignedExecutionPayloadEnvelope
-	err := fixture.db.View(t.Context(), func(tx kv.Tx) error {
-		var err error
-		prepared, err := fixture.rebuilder.Prepare(ctx, tx, fixture.block.Block.Slot, fixture.root)
-		if err != nil || prepared == nil {
-			return err
-		}
-		rebuilt, err = fixture.rebuilder.Rebuild(ctx, prepared)
-		return err
-	})
+	rebuilt, err := fixture.rebuild(t, ctx)
 	require.Nil(t, rebuilt)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, fixture.engine.headerCalls)
@@ -275,16 +250,7 @@ func TestRebuildDoesNotAcquireSlotAfterContextEnds(t *testing.T) {
 	cancel()
 
 	for range 64 {
-		var rebuilt *cltypes.SignedExecutionPayloadEnvelope
-		err := fixture.db.View(t.Context(), func(tx kv.Tx) error {
-			var err error
-			prepared, err := fixture.rebuilder.Prepare(ctx, tx, fixture.block.Block.Slot, fixture.root)
-			if err != nil || prepared == nil {
-				return err
-			}
-			rebuilt, err = fixture.rebuilder.Rebuild(ctx, prepared)
-			return err
-		})
+		rebuilt, err := fixture.rebuild(t, ctx)
 		require.Nil(t, rebuilt)
 		require.ErrorIs(t, err, context.Canceled)
 	}
@@ -369,12 +335,12 @@ func TestRebuildWaiterHasPriorityOverTryRebuild(t *testing.T) {
 
 		synctest.Wait()
 		rebuilder.rebuildSlot.Release(1)
-		synctest.Wait()
-		require.Equal(t, 1, engine.headerCalls)
-		require.Zero(t, engine.bodyCalls)
 		tried, err := rebuilder.TryRebuild(t.Context(), prepared)
 		require.Nil(t, tried)
 		require.ErrorIs(t, err, ErrRebuildBusy)
+		synctest.Wait()
+		require.Equal(t, 1, engine.headerCalls)
+		require.Zero(t, engine.bodyCalls)
 		close(headerWait)
 		synctest.Wait()
 		require.NoError(t, rebuildErr)
@@ -544,7 +510,6 @@ func newRebuildFixtureWithBAL(t *testing.T, bal []byte) *rebuildFixture {
 		block:     block,
 		child:     child,
 		root:      root,
-		childRoot: childRoot,
 		want:      want,
 		bal:       bal,
 	}
@@ -553,7 +518,7 @@ func newRebuildFixtureWithBAL(t *testing.T, bal []byte) *rebuildFixture {
 func (f *rebuildFixture) rebuild(t *testing.T, ctx context.Context) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	t.Helper()
 	var prepared *PreparedRebuild
-	err := f.db.View(ctx, func(tx kv.Tx) error {
+	err := f.db.View(t.Context(), func(tx kv.Tx) error {
 		var err error
 		prepared, err = f.rebuilder.Prepare(ctx, tx, f.block.Block.Slot, f.root)
 		return err

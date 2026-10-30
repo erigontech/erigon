@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,8 +61,7 @@ type readTrackingDB struct {
 
 type readTrackingTx struct {
 	kv.Tx
-	open     *atomic.Int32
-	rollback sync.Once
+	open *atomic.Int32
 }
 
 func (failingBeginRoDB) BeginRo(context.Context) (kv.Tx, error) {
@@ -89,10 +87,8 @@ func (db *readTrackingDB) View(ctx context.Context, f func(kv.Tx) error) error {
 }
 
 func (tx *readTrackingTx) Rollback() {
-	tx.rollback.Do(func() {
-		tx.Tx.Rollback()
-		tx.open.Add(-1)
-	})
+	tx.Tx.Rollback()
+	tx.open.Add(-1)
 }
 
 func (r *apiEnvelopeRebuilder) Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error) {
@@ -107,7 +103,7 @@ func (r *apiEnvelopeRebuilder) Rebuild(ctx context.Context, _ *envelope_history.
 }
 
 func TestGetExecutionPayloadEnvelopeRebuildsPrunedBlock(t *testing.T) {
-	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandler(t, false)
+	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	handler.envelopeRebuilder = &apiEnvelopeRebuilder{envelope: envelope}
 	forkchoiceStore.IsRootOptimisticVal = true
 
@@ -129,7 +125,7 @@ func TestGetExecutionPayloadEnvelopeUsesFinalizedCheckpointStart(t *testing.T) {
 		{name: "after checkpoint start", slot: 69, wantFinalized: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			handler, root, envelope, _ := newHistoricalEnvelopeHandlerAtSlot(t, false, test.slot)
+			handler, root, envelope, _ := newHistoricalEnvelopeHandlerAtSlot(t, test.slot)
 			handler.envelopeRebuilder = &apiEnvelopeRebuilder{envelope: envelope}
 
 			response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
@@ -139,8 +135,8 @@ func TestGetExecutionPayloadEnvelopeUsesFinalizedCheckpointStart(t *testing.T) {
 	}
 }
 
-func TestGetExecutionPayloadEnvelopeReadsAnchorBlockFromDatabase(t *testing.T) {
-	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandler(t, true)
+func TestGetExecutionPayloadEnvelopeReadsBlockFromDatabase(t *testing.T) {
+	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	forkchoiceStore.SetEnvelope(root, envelope)
 
 	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
@@ -150,7 +146,7 @@ func TestGetExecutionPayloadEnvelopeReadsAnchorBlockFromDatabase(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeForkGraphPathDoesNotReadIndices(t *testing.T) {
-	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandler(t, false)
+	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	block.Block.Slot = 64
 	rebuiltRoot, err := block.Block.HashSSZ()
@@ -166,7 +162,7 @@ func TestGetExecutionPayloadEnvelopeForkGraphPathDoesNotReadIndices(t *testing.T
 }
 
 func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T) {
-	handler, root, _, _ := newHistoricalEnvelopeHandler(t, false)
+	handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	handler.envelopeRebuilder = &apiEnvelopeRebuilder{}
 
 	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
@@ -176,7 +172,7 @@ func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T)
 }
 
 func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
-	handler, root, _, _ := newHistoricalEnvelopeHandler(t, false)
+	handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	trackedDB := &readTrackingDB{RwDB: handler.indiciesDB}
 	handler.indiciesDB = trackedDB
 
@@ -199,11 +195,7 @@ func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
 	assert.Zero(t, openDuringRebuild)
 }
 
-func newHistoricalEnvelopeHandler(t *testing.T, anchor bool) (*ApiHandler, common.Hash, *cltypes.SignedExecutionPayloadEnvelope, *mock_services.ForkChoiceStorageMock) {
-	return newHistoricalEnvelopeHandlerAtSlot(t, anchor, 64)
-}
-
-func newHistoricalEnvelopeHandlerAtSlot(t *testing.T, anchor bool, slot uint64) (*ApiHandler, common.Hash, *cltypes.SignedExecutionPayloadEnvelope, *mock_services.ForkChoiceStorageMock) {
+func newHistoricalEnvelopeHandlerAtSlot(t *testing.T, slot uint64) (*ApiHandler, common.Hash, *cltypes.SignedExecutionPayloadEnvelope, *mock_services.ForkChoiceStorageMock) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -227,9 +219,6 @@ func newHistoricalEnvelopeHandlerAtSlot(t *testing.T, anchor bool, slot uint64) 
 	forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
 	forkchoiceStore.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 	forkchoiceStore.FinalizedSlotVal = 95
-	if anchor {
-		forkchoiceStore.AnchorRootVal = root
-	}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
 	envelope.Message.BeaconBlockRoot = root
 	return &ApiHandler{
