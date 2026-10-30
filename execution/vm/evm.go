@@ -614,15 +614,18 @@ func (evm *EVM) CreateWithNonce(caller accounts.Address, code []byte, gas mdgas.
 
 func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address, value uint256.Int, incrementNonce bool, bailout bool, nested bool) (createPreparation, error) {
 	var preparation createPreparation
+	var err error
 	if evm.depth > int(params.CallCreateDepth) {
 		return preparation, ErrDepth
 	}
-	canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
-	if err != nil {
-		return preparation, err
-	}
-	if !canTransfer && !bailout {
-		return preparation, ErrInsufficientBalance
+	if !bailout {
+		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
+		if err != nil {
+			return preparation, err
+		}
+		if !canTransfer {
+			return preparation, ErrInsufficientBalance
+		}
 	}
 	if incrementNonce {
 		preparation.callerNonce, err = evm.intraBlockState.GetNonce(caller)
