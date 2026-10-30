@@ -104,8 +104,9 @@ func TestGetStageState(t *testing.T) {
 	d.SetStagesList(stages)
 
 	// Test get stage state
+	var state diaglib.StageState
 	for _, stageId := range nodeStages {
-		state, err := d.GetStageState(stageId)
+		state, err = d.GetStageState(stageId)
 		require.NoError(t, err)
 		require.Equal(t, diaglib.Queued, state)
 	}
@@ -117,7 +118,7 @@ func TestGetStageState(t *testing.T) {
 	// Test Snapshots Running state
 	err = d.SetCurrentSyncStage(diaglib.CurrentSyncStage{Stage: "Snapshots"})
 	require.NoError(t, err)
-	state, err := d.GetStageState("Snapshots")
+	state, err = d.GetStageState("Snapshots")
 	require.NoError(t, err)
 	require.Equal(t, diaglib.Running, state)
 
