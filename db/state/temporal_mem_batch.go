@@ -178,6 +178,18 @@ func (sd *TemporalMemBatch) runlockAllDomains() {
 	}
 }
 
+func (sd *TemporalMemBatch) rlockDomain(domain kv.Domain) {
+	for sh := range sd.latestStateLocks[domain] {
+		sd.latestStateLocks[domain][sh].RLock()
+	}
+}
+
+func (sd *TemporalMemBatch) runlockDomain(domain kv.Domain) {
+	for sh := range sd.latestStateLocks[domain] {
+		sd.latestStateLocks[domain][sh].RUnlock()
+	}
+}
+
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
@@ -435,10 +447,8 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	for sh := range sd.latestStateLocks[domain] {
-		sd.latestStateLocks[domain][sh].RLock()
-		defer sd.latestStateLocks[domain][sh].RUnlock()
-	}
+	sd.rlockDomain(domain)
+	defer sd.runlockDomain(domain)
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
