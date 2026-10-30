@@ -46,6 +46,9 @@ import (
 // This prevents penalizing peers for our own internal failures.
 var errInternalDB = errors.New("internal db error")
 
+// txFetchTimeout is how long an announced hash waits for the requested peer before another announcer is asked.
+const txFetchTimeout = 5 * time.Second
+
 // announceInfo records the (type, size) that a peer promised for a given hash
 // in an eth/68 NewPooledTransactionHashes announcement. We keep the peer id so
 // that a later PooledTransactions reply from a different peer does not clobber
@@ -73,6 +76,8 @@ type Fetch struct {
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
 	announcements            *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
+	requested                *maphash.LRU[time.Time]
+	now                      func() time.Time
 	logger                   log.Logger
 }
 
@@ -99,6 +104,7 @@ func NewFetch(
 	// reply is typically seconds, at worst minutes), and bounded so a DoSing
 	// peer spamming unique hashes can't grow this unboundedly.
 	announcements, _ := maphash.NewLRU[announceInfo](64 * 1024)
+	requested, _ := maphash.NewLRU[time.Time](64 * 1024)
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -108,6 +114,8 @@ func NewFetch(
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
 		announcements:        announcements,
+		requested:            requested,
+		now:                  time.Now,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
@@ -137,6 +145,20 @@ func announceKey(txHash []byte, peerHash uint64) [40]byte {
 	copy(k[:32], txHash)
 	binary.BigEndian.PutUint64(k[32:], peerHash)
 	return k
+}
+
+func (f *Fetch) skipRecentlyRequested(hashes Hashes) Hashes {
+	now := f.now()
+	var toRequest Hashes
+	for i := 0; i < len(hashes); i += 32 {
+		h := hashes[i : i+32]
+		if at, ok := f.requested.Get(h); ok && now.Sub(at) < txFetchTimeout {
+			continue
+		}
+		f.requested.Set(h, now)
+		toRequest = append(toRequest, h...)
+	}
+	return toRequest
 }
 
 // recordAnnouncement remembers the (type, size) a peer promised for each
@@ -491,6 +513,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
+		unknownHashes = f.skipRecentlyRequested(unknownHashes)
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
 			var messageID sentryproto.MessageId
@@ -523,6 +546,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
+		unknownHashes = f.skipRecentlyRequested(unknownHashes)
 		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
 		// won't come back for already-known txs, so entries for them would
 		// just sit unused in the LRU until evicted.

@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/types"
@@ -792,4 +793,44 @@ func toPeerIDs(h ...byte) (out []PeerID) {
 		out = append(out, gointerfaces.ConvertHashToH512(hash))
 	}
 	return out
+}
+
+func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true).AnyTimes()
+	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, nil }).AnyTimes()
+	var requestedFrom [][64]byte
+	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			requestedFrom = append(requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
+			return nil, nil
+		}).AnyTimes()
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+	now := time.Unix(1_000_000, 0)
+	fetch.now = func() time.Time { return now }
+
+	hash := [32]byte{0xaa}
+	buf := make([]byte, announcementsLen([]byte{types.DynamicFeeTxType}, []uint32{100}, hash[:]))
+	announcement := buf[:encodeAnnouncements([]byte{types.DynamicFeeTxType}, []uint32{100}, hash[:], buf)]
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	announce := func(peer [64]byte) {
+		require.NoError(t, fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peer),
+		}, sentryClient))
+	}
+
+	announce(peerA)
+	announce(peerB)
+	require.Equal(t, [][64]byte{peerA}, requestedFrom)
+
+	now = now.Add(txFetchTimeout)
+	announce(peerB)
+	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
 }
