@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -223,4 +224,51 @@ func TestStartupSyncLeavesStateCacheBoundForReadOnlyTxs(t *testing.T) {
 		require.Equal(t, []byte{1}, v)
 	}
 	require.Equal(t, 1, counting.reads, "the repeat read is served from the cache")
+}
+
+// The write lands in the first SharedDomains, or in the one CommitCycle opens
+// after a stage reports more work.
+func TestProcessFrozenBlocksPublishesToStateCache(t *testing.T) {
+	for _, writeCycle := range []int{1, 2} {
+		t.Run(fmt.Sprintf("cycle%d", writeCycle), func(t *testing.T) {
+			key := make([]byte, 20)
+			key[0] = 0xdd
+			cycle := 0
+			pe, hook, _ := newPinTestExecutor(t, func(_ bool, _ *stagedsync.StageState, _ stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+				if sd == nil {
+					return nil
+				}
+				cycle++
+				if cycle < writeCycle {
+					return &stagedsync.ErrLoopExhausted{From: 1, To: 1, Reason: "test"}
+				}
+				if cycle > writeCycle {
+					return nil
+				}
+				sd.SetTxNum(5)
+				if err := sd.DomainPut(kv.AccountsDomain, tx, key, []byte{1}, 5, nil); err != nil {
+					return err
+				}
+				if err := rawdbv3.TxNums.Append(tx, 1, 20); err != nil {
+					return err
+				}
+				return stages.SaveStageProgress(tx, stages.Execution, 1)
+			})
+			stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+			defer stateCache.Close()
+			pe.stateCache = stateCache
+			ctx := t.Context()
+			require.NoError(t, pe.ProcessFrozenBlocks(ctx, hook, false))
+			require.GreaterOrEqual(t, cycle, writeCycle)
+
+			roTx, err := pe.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			counting := &countingLatestTx{TemporalTx: roTx}
+			v, _, err := execctx.NewCachedTemporalTxStateGetter(counting, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, []byte{1}, v)
+			require.Zero(t, counting.reads, "a write committed by the startup sync is served from the cache")
+		})
+	}
 }
