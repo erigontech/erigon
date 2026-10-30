@@ -142,3 +142,28 @@ func TestComputeBlobsCellsFailsOnInvalidBlob(t *testing.T) {
 
 	require.ErrorContains(t, err, "blob 2")
 }
+
+// Building the columns of a head block must not queue behind recovery rows, so it ignores the recovery slots.
+func TestComputeBlobsCellsDoesNotWaitForRecoverySlots(t *testing.T) {
+	for range cap(rowRecoverySlots) {
+		rowRecoverySlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for range cap(rowRecoverySlots) {
+			<-rowRecoverySlots
+		}
+	})
+	blob := goethkzg.Blob{}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ComputeBlobsCells([][]byte{blob[:], blob[:]})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("blob cells waited for a recovery slot")
+	}
+}
