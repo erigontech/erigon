@@ -1575,7 +1575,7 @@ mainloop:
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
 			if len(result.sidecars) > result.reqLength {
 				log.Debug("rejecting over-cardinality column response", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
-				d.rpc.BanPeer(result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
 			}
 			resolved := make([]resolvedColumn, len(result.sidecars))
@@ -1610,7 +1610,7 @@ mainloop:
 			}
 			if !validResponse {
 				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
-				d.rpc.BanPeer(result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
 			}
 			var wg sync.WaitGroup
@@ -1633,7 +1633,6 @@ mainloop:
 					exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
 					if err != nil {
 						log.Debug("failed to check if column sidecar exists", "err", err)
-						d.rpc.BanPeer(result.pid)
 						return
 					}
 					if exist {
@@ -1643,7 +1642,7 @@ mainloop:
 					blobParameters := d.beaconConfig.GetBlobParameters(slot / d.beaconConfig.SlotsPerEpoch)
 					if sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
 						log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", sidecar.Index, "columnLen", sidecar.Column.Len())
-						d.rpc.BanPeer(result.pid)
+						d.rpc.BanPeerForInvalidData(ctx, result.pid)
 						return
 					}
 
@@ -1657,29 +1656,29 @@ mainloop:
 						}
 						if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitments) {
 							log.Debug("failed to verify column sidecar (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitments) {
 							log.Debug("failed to verify column sidecar kzg proofs (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 					} else {
 						// Fulu: kzg_commitments are in the sidecar
 						if !VerifyDataColumnSidecar(sidecar) {
 							log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarInclusionProof(sidecar) {
 							log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarKZGProofs(sidecar) {
 							log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 					}
