@@ -644,7 +644,8 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessageCode, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
 
 		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {

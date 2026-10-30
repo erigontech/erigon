@@ -1539,3 +1539,15 @@ func TestPeerInfo_AsyncAfterRemoveReleasesBytes(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
 }
+
+func TestRunPeer_UnknownMessageCodeKicksPeer(t *testing.T) {
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewMockMsgReadWriter()
+	require.NoError(t, rw.WriteMsg(p2p.Msg{Code: 0x0b, Size: 1, Payload: bytes.NewReader([]byte{0xc0})}))
+	rw.WriteToReadBuffer(rw.ReadAllWritten())
+	peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68},
+		rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) {},
+		func(sentryproto.MessageId) bool { return true }, log.Root())
+	require.NotNil(t, peerErr)
+	require.Equal(t, p2p.PeerErrorInvalidMessageCode, peerErr.Code)
+}
