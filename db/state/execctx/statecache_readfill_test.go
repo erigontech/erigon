@@ -356,6 +356,36 @@ func TestReadFill_CurrentStepIsVisibleToSnapshotGetter(t *testing.T) {
 	}
 }
 
+func TestReadFill_WritableKeepsStepEndStamp(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, _, value, _ := twoStepRows(t, db, stateCache)
+	stateCache.Applier().Clear()
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.BindStateCache(stateCache)
+
+	got, step, err := domains.AsGetter(tx).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	end, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.Less(t, end-1, step.LastTxNum(stepSize), "the fixture must distinguish the visible end from the step end")
+	cached, stamp, hit := stateCache.View(nil).GetWithTxNum(kv.AccountsDomain, key)
+	require.True(t, hit)
+	require.Equal(t, value, cached)
+	require.Equal(t, step.LastTxNum(stepSize), stamp, "a writable read must keep the conservative step-end stamp")
+}
+
 func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	t.Parallel()
 
