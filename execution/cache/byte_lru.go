@@ -132,7 +132,6 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 		// Atomic: called inside the delete itself, so otter allocates no event per
 		// eviction to hand to the executor.
 		OnAtomicDeletion: onDeletion,
-		Executor:         func(fn func()) { fn() },
 	})
 }
 
