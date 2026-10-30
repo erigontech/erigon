@@ -164,17 +164,22 @@ func TestImportColumnsFromBlobsSupernodeSchedulesRecovery(t *testing.T) {
 	}
 }
 
-func TestImportColumnsFromBlobsStoresAllColumnsWhenSubscribedToAllTopics(t *testing.T) {
+func TestImportColumnsFromBlobsPublishesAllColumnsWhenSubscribedToAllTopics(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{SubscribeAllTopics: true})
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
 
-	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
 	require.NoError(t, err)
 
-	require.Len(t, stored, int(cfg.NumberOfColumns))
+	require.Len(t, toPublish, int(cfg.NumberOfColumns))
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
-	require.Len(t, saved, int(cfg.NumberOfColumns))
+	require.Len(t, saved, len(custody))
+	for _, index := range saved {
+		require.True(t, custody[index])
+	}
 }

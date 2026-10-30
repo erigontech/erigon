@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -36,11 +37,13 @@ func elBlobsTestBlock(t *testing.T, version clparams.StateVersion, commitments i
 }
 
 type recordingColumnsPublisher struct {
-	published [][]*cltypes.DataColumnSidecar
+	published  [][]*cltypes.DataColumnSidecar
+	contextErr []error
 }
 
-func (r *recordingColumnsPublisher) PublishColumnsFromEL(_ context.Context, sidecars []*cltypes.DataColumnSidecar) {
+func (r *recordingColumnsPublisher) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
 	r.published = append(r.published, sidecars)
+	r.contextErr = append(r.contextErr, ctx.Err())
 }
 
 func setupELBlobsBlockService(t *testing.T) (*blockService, *execution_client.MockExecutionEngine, *das_mock.MockPeerDas, *recordingColumnsPublisher) {
@@ -94,6 +97,39 @@ func TestImportColumnsFromELBlobsSkipsBlockAboveBlobLimit(t *testing.T) {
 	block, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, int(maxBlobs)+1)
 
 	b.importColumnsFromELBlobs(t.Context(), block)
+}
+
+// The limit comes from the blob schedule entry of the block's epoch, not from an earlier fork.
+func TestImportColumnsFromELBlobsUsesTheBlobLimitOfTheBlockEpoch(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	cfg := *b.beaconCfg
+	block, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 5)
+	epoch := block.Block.Slot / cfg.SlotsPerEpoch
+	require.Greater(t, cfg.GetBlobParameters(0).MaxBlobsPerBlock, uint64(5))
+	cfg.BlobSchedule = append(slices.Clone(cfg.BlobSchedule), clparams.BlobParameters{Epoch: epoch, MaxBlobsPerBlock: 4})
+	b.beaconCfg = &cfg
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+}
+
+func TestImportColumnsFromELBlobsPublishesAfterTheImportContextExpires(t *testing.T) {
+	b, engine, peerDas, columns := setupELBlobsBlockService(t)
+	cfg := *b.beaconCfg
+	cfg.SecondsPerSlot = 0
+	b.beaconCfg = &cfg
+	block, root, hashes := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	blobs := [][]byte{{1}, {2}}
+	proofs := [][][]byte{{{1}}, {{2}}}
+	built := []*cltypes.DataColumnSidecar{cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)}
+
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil)
+	engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.FuluVersion).Return(blobs, proofs, nil)
+	peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(built, nil)
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+
+	require.Equal(t, [][]*cltypes.DataColumnSidecar{built}, columns.published)
+	require.Equal(t, []error{nil}, columns.contextErr)
 }
 
 func TestImportColumnsFromELBlobsSkipsWhenNotNeeded(t *testing.T) {

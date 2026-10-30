@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,4 +85,18 @@ func TestPublishColumnsFromELSkipsColumnsFinalityNoLongerAllows(t *testing.T) {
 			require.False(t, ok)
 		})
 	}
+}
+
+// A column that could not be published stays unclaimed, so a copy from gossip is still processed and relayed.
+func TestPublishColumnsFromELReleasesTheClaimOfAFailedPublish(t *testing.T) {
+	service, publisher, clock, _ := newELPublishTestService(t)
+	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1, 2, 3, 4}, nil).AnyTimes()
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("topic not found")).Times(1)
+
+	service.PublishColumnsFromEL(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(100, 3)})
+
+	_, ok := service.seenSidecar.Get(seenSidecarKey{slot: 100, proposerIndex: 7, index: 3})
+	require.False(t, ok)
 }

@@ -286,8 +286,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 }
 
 // PublishColumnsFromEL marks each sidecar as seen and publishes it on its subnet, unless a sidecar
-// for its (slot, proposer, index) was seen already. The sidecars must be ones this node stores, so
-// it publishes exactly on the subnets it subscribes to.
+// for its (slot, proposer, index) was seen already. The sidecars must be on subnets this node subscribes to.
 func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
 	if len(sidecars) == 0 {
 		return
@@ -299,25 +298,23 @@ func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sid
 		log.Debug("[dataColumnSidecarService] not publishing columns built from EL blobs below finality", "slot", header.Slot)
 		return
 	}
-	var forkDigest common.Bytes4
-	if s.gossipManager != nil {
-		var err error
-		if forkDigest, err = s.ethClock.ComputeForkDigest(header.Slot / s.cfg.SlotsPerEpoch); err != nil {
-			log.Warn("[dataColumnSidecarService] failed to compute the fork digest of columns built from EL blobs", "slot", header.Slot, "err", err)
-			return
-		}
+	forkDigest, err := s.ethClock.ComputeForkDigest(header.Slot / s.cfg.SlotsPerEpoch)
+	if err != nil {
+		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of columns built from EL blobs", "slot", header.Slot, "err", err)
+		return
 	}
 	for _, sidecar := range sidecars {
 		key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
-		if seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{}); seen || s.gossipManager == nil {
+		if seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{}); seen {
 			continue
 		}
 		encoded, err := sidecar.EncodeSSZ(nil)
-		if err != nil {
-			log.Warn("[dataColumnSidecarService] failed to encode a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
-			continue
+		if err == nil {
+			err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
 		}
-		if err := s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded); err != nil {
+		if err != nil {
+			// Unclaimed, a copy from gossip is still processed and relayed.
+			s.seenSidecar.Remove(key)
 			log.Debug("[dataColumnSidecarService] failed to publish a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
 		}
 	}

@@ -17,7 +17,8 @@ import (
 // engine_getBlobsV2 response and stores the columns this node keeps. The response
 // must hold every blob of the block, each with one proof per cell, and every cell
 // must verify against the block's commitments; otherwise nothing is stored. It returns
-// the stored sidecars.
+// the sidecars to publish: all of them when the node subscribes to every topic, else the
+// stored ones.
 func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
 	commitments := block.GetBlobKzgCommitments()
 	if len(blobs) != commitments.Len() || len(cellProofs) != commitments.Len() {
@@ -70,15 +71,14 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		return nil, err
 	}
 
-	// Like the gossip path, keep every column the node subscribes to, not only its custody columns.
-	storeAll := d.IsArchivedMode() || d.caplinConfig.SubscribeAllTopics
+	archive := d.IsArchivedMode()
 	custody, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return nil, err
 	}
 	stored := make([]*cltypes.DataColumnSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
-		if !storeAll && len(custody) > 0 && !custody[sidecar.Index] {
+		if !archive && len(custody) > 0 && !custody[sidecar.Index] {
 			continue
 		}
 		if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
@@ -88,6 +88,9 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 	}
 	if err := d.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
 		log.Warn("[peerdas] failed to schedule blob recovery after EL import", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
+	}
+	if d.caplinConfig.SubscribeAllTopics {
+		return sidecars, nil
 	}
 	return stored, nil
 }

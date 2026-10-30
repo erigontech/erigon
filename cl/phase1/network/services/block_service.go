@@ -374,14 +374,13 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
 	}
-	stored, err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs)
+	toPublish, err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs)
 	if err != nil {
 		log.Debug("[blockService] columns not built from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
 	}
-	if b.dataColumns != nil {
-		b.dataColumns.PublishColumnsFromEL(ctx, stored)
-	}
+	// The EL wait may have used up the import deadline, but the columns must still be published.
+	b.dataColumns.PublishColumnsFromEL(context.WithoutCancel(ctx), toPublish)
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }
 
