@@ -614,6 +614,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 }
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks
@@ -687,10 +690,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 				)
 			}
 		}
-	}
-
-	if dbg.NoPrune() {
-		return s.Done(tx)
 	}
 
 	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
