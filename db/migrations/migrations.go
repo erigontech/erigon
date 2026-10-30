@@ -59,6 +59,7 @@ var migrations = map[kv.Label][]Migration{
 		dropLegacyE2Tables,
 		createPtcWindowEpochTable,
 		createExecutionPayloadEnvelopeSignaturesTable,
+		dropCodeCacheTable,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},
