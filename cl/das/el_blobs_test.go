@@ -31,7 +31,7 @@ func elBlobsFixture(t testing.TB, cfg *clparams.BeaconChainConfig, n int) (*clty
 	for i := range blobs {
 		blob := &goethkzg.Blob{}
 		for j := 0; j < len(blob); j += 32 {
-			blob[j+31], blob[j+30] = byte(i+1), byte(j/32)
+			blob[j+31], blob[j+30] = byte(i+1), byte(j/32+i)
 		}
 		commitment, err := kzg.Ctx().BlobToKZGCommitment(blob, 0)
 		require.NoError(t, err)
@@ -41,6 +41,12 @@ func elBlobsFixture(t testing.TB, cfg *clparams.BeaconChainConfig, n int) (*clty
 		blobs[i] = blob[:]
 		for j := range cellProofs {
 			proofs[i] = append(proofs[i], cellProofs[j][:])
+		}
+	}
+	// A proof moved to another blob at the same cell index must not verify.
+	for i := 1; i < n; i++ {
+		for j := range proofs[i] {
+			require.NotEqual(t, proofs[0][j], proofs[i][j], "blob %d cell %d", i, j)
 		}
 	}
 	root, err := block.Block.HashSSZ()
@@ -71,7 +77,8 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, available)
 
-	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
 
 	available, err = d.IsDataAvailable(block.Block.Slot, root)
 	require.NoError(t, err)
@@ -81,6 +88,10 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
 	require.Len(t, saved, len(custody))
+	require.Len(t, stored, len(custody))
+	for _, sidecar := range stored {
+		require.True(t, custody[sidecar.Index])
+	}
 	for _, index := range saved {
 		require.True(t, custody[index])
 		sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, int64(index))
@@ -99,7 +110,8 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
 
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
@@ -128,7 +140,8 @@ func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
 			block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 			blobs, proofs = corrupt(blobs, proofs)
 
-			require.Error(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
+			_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+			require.Error(t, err)
 
 			saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
 			require.NoError(t, err)
@@ -148,9 +161,51 @@ func TestImportColumnsFromBlobsTrustsELCellProofs(t *testing.T) {
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 	proofs[0][5] = proofs[0][6]
 
-	require.NoError(t, d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs))
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
 
 	sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, 5)
 	require.NoError(t, err)
 	require.Equal(t, proofs[0][5], sidecar.KzgProofs.Get(0)[:])
+}
+
+func TestImportColumnsFromBlobsSupernodeSchedulesRecovery(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+	require.True(t, d.state.IsSupernode())
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	select {
+	case request := <-d.recoverBlobsQueue:
+		require.Equal(t, root, request.blockRoot)
+	default:
+		t.Fatal("blob recovery was not scheduled")
+	}
+}
+
+func TestImportColumnsFromBlobsPublishesAllColumnsWhenSubscribedToAllTopics(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{SubscribeAllTopics: true})
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	require.Len(t, toPublish, int(cfg.NumberOfColumns))
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, len(custody))
+	for _, index := range saved {
+		require.True(t, custody[index])
+	}
 }

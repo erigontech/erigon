@@ -20,7 +20,7 @@ func BenchmarkImportColumnsFromBlobs(b *testing.B) {
 			d := newELBlobsTestPeerDas(b, &cfg, &clparams.CaplinConfig{})
 			for b.Loop() {
 				d.columnStorage = blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
-				if err := d.ImportColumnsFromBlobs(b.Context(), block, blobs, proofs); err != nil {
+				if _, err := d.ImportColumnsFromBlobs(b.Context(), block, blobs, proofs); err != nil {
 					b.Fatal(err)
 				}
 			}

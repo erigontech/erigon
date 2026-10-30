@@ -376,12 +376,16 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		//db.Close()
 	}
 
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true)
+}
+
+func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, rootInFiles []byte, fPaths []string, rebuildFiles bool) {
+	t.Helper()
 	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
-	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -390,10 +394,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	for _, b := range buckets {
 		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
-			//size, err := rwTx.BucketSize(b)
-			//require.NoError(t, err)
-			//t.Logf("cleaned table %s: %d keys", b, size)
-
 			err = rwTx.ClearTable(b)
 			require.NoError(t, err)
 		}
@@ -403,14 +403,13 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	for _, fn := range fPaths {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, dir.RemoveFile(fn))
-			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
 	err = agg.OpenFolder(db)
 	require.NoError(t, err)
 
 	ctx := t.Context()
-	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
+	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), rebuildFiles)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, empty.RootHash[:], finalRoot)

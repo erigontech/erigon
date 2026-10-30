@@ -228,6 +228,9 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	rejected := make(map[common.Hash]error)
 MainLoop:
 	for {
+		if err := retryPendingBlockWrite(ctx, cfg); err != nil {
+			return err
+		}
 		select {
 		case <-presenceTicker.C:
 			// Check if the highest seen block is greater than or equal to the target slot
@@ -337,7 +340,10 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 
 		// Process the block without its data; the deferred requestCustodyBackfill fetches it.
-		if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
+		if err := processBlock(ctx, cfg, block, true); err != nil {
+			if cfg.pendingBlockWrite != nil {
+				return false
+			}
 			if parentEnvelopeUnavailable(cfg, block, envelopes, parentBlockByRoot) {
 				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errParentEnvelopeUnavailable.Error(), errParentEnvelopeUnavailable)
 			} else {
@@ -1518,6 +1524,9 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
+		return err
+	}
 	cfg.chainTipRejections.logIfDue(chainTipHeadSlot(cfg))
 	if shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
 		recoverMissingEnvelopes(ctx, cfg)
