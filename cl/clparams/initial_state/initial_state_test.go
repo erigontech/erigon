@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -41,4 +42,29 @@ func TestSepolia(t *testing.T) {
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	assert.Equal(t, common.Hash(root), common.HexToHash("fb9afe32150fa39f4b346be2519a67e2a4f5efcd50a1dc192c3f6b3d013d2798"))
+}
+
+func TestGnosis(t *testing.T) {
+	state, err := initial_state.GetGenesisState(t.Context(), chainspec.GnosisChainID)
+	require.NoError(t, err)
+	root, err := state.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, common.Hash(root), common.HexToHash("1511578d6de70428bf3529ab92102f21070694cb205443437fae359a7f220537"))
+}
+
+func TestChiado(t *testing.T) {
+	state, err := initial_state.GetGenesisState(t.Context(), chainspec.ChiadoChainID)
+	require.NoError(t, err)
+	root, err := state.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, common.Hash(root), common.HexToHash("a48419160f8f146ecaa53d12a5d6e1e6af414a328afdc56b60d5002bb472a077"))
+}
+
+func TestBloatnet(t *testing.T) {
+	state, err := initial_state.GetGenesisState(t.Context(), chainspec.BloatnetNetworkID)
+	require.NoError(t, err)
+	assert.Equal(t, clparams.ElectraVersion, state.Version())
+	root, err := state.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, common.Hash(root), common.HexToHash("aef610bf806246b2f1df61e5a02679fb88fda6514e06eaa9188f98bd6bbcb3a9"))
 }
