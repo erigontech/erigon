@@ -28,10 +28,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
@@ -397,4 +399,25 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 		delete(started, id)
 		delete(stopped, id)
 	}
+}
+
+func TestOpenDatabaseStampsSchemaVersionOnRecreatedChaindata(t *testing.T) {
+	logger := log.New()
+	cfg := testNodeConfig(t)
+	requireSchemaVersion := func() {
+		t.Helper()
+		db, err := OpenDatabase(t.Context(), cfg, dbcfg.ChainDB, "", false, logger)
+		require.NoError(t, err)
+		defer db.Close()
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
+			require.True(t, ok, "binaries at an older schema must refuse this chaindata")
+			require.Equal(t, kv.DBSchemaVersion.Major, major)
+			require.Equal(t, kv.DBSchemaVersion.Minor, minor)
+			return err
+		}))
+	}
+	requireSchemaVersion()
+	require.NoError(t, dir.RemoveAll(cfg.Dirs.Chaindata)) // a downgrade removes chaindata; the migrations DB stays
+	requireSchemaVersion()
 }
