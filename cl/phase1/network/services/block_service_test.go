@@ -686,7 +686,7 @@ func TestBlockServiceGossipUsesPostUpgradeExecutionHeadAtGloasBoundary(t *testin
 	fcu.Blocks[parentRoot] = blocks[0]
 	fcu.StateAtBlockRootVal[parentRoot] = parentState
 	fcu.Ancestors[0] = forkchoice.ForkChoiceNode{Root: parentRoot}
-	service := NewBlockService(t.Context(), db, fcu, nil, syncedDataManager, ethClock, &cfg, nil)
+	service := NewBlockService(t.Context(), db, fcu, nil, nil, syncedDataManager, ethClock, &cfg, nil)
 
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
@@ -2466,7 +2466,7 @@ func TestPublishedBlockJobRefreshSurvivesEarlierExpirySample(t *testing.T) {
 func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := clparams.MainnetBeaconConfig
-	service := NewBlockService(ctx, nil, mock_services.NewForkChoiceStorageMock(t), nil, nil, nil, &cfg, nil).(*blockService)
+	service := NewBlockService(ctx, nil, mock_services.NewForkChoiceStorageMock(t), nil, nil, nil, nil, &cfg, nil).(*blockService)
 	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock.Block.Slot = 1

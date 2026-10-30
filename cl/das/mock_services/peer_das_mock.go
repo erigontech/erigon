@@ -157,11 +157,12 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.C
 }
 
 // ImportColumnsFromBlobs mocks base method.
-func (m *MockPeerDas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) error {
+func (m *MockPeerDas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ImportColumnsFromBlobs", ctx, block, blobs, cellProofs)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].([]*cltypes.DataColumnSidecar)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // ImportColumnsFromBlobs indicates an expected call of ImportColumnsFromBlobs.
@@ -177,19 +178,19 @@ type MockPeerDasImportColumnsFromBlobsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPeerDasImportColumnsFromBlobsCall) Return(arg0 error) *MockPeerDasImportColumnsFromBlobsCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockPeerDasImportColumnsFromBlobsCall) Return(arg0 []*cltypes.DataColumnSidecar, arg1 error) *MockPeerDasImportColumnsFromBlobsCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasImportColumnsFromBlobsCall) Do(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) error) *MockPeerDasImportColumnsFromBlobsCall {
+func (c *MockPeerDasImportColumnsFromBlobsCall) Do(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasImportColumnsFromBlobsCall) DoAndReturn(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) error) *MockPeerDasImportColumnsFromBlobsCall {
+func (c *MockPeerDasImportColumnsFromBlobsCall) DoAndReturn(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
