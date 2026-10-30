@@ -767,7 +767,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case readAhead <- blockNum:
 			default:
 			}
-			go warmTxsHashes(b)
+			go warmTxsHashes(b, te.cfg.chainConfig.ChainID)
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

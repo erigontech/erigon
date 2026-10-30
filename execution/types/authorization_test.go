@@ -20,6 +20,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -121,5 +122,114 @@ func TestSignAuthorizationRejectsNilKeyBeforeMaxNonce(t *testing.T) {
 	_, err := SignAuthorization(nil, uint256.Int{}, common.Address{}, math.MaxUint64)
 	if !errors.Is(err, errAuthNilPrivateKey) {
 		t.Fatalf("expected nil private key to be rejected first, got %v", err)
+	}
+}
+
+func TestRecoverSignersMatchesRecoverSigner(t *testing.T) {
+	t.Parallel()
+
+	auths := make([]Authorization, 100)
+	for i := range auths {
+		key, err := crypto.GenerateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if auths[i], err = SignAuthorization(key, *uint256.NewInt(1), common.Address{byte(i)}, uint64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	auths[3].Nonce = math.MaxUint64
+	auths[50].YParity = 5
+	auths[99].S.Clear()
+
+	auths[7].ChainID = *uint256.NewInt(2)
+
+	signers, errs := RecoverSigners(auths, uint256.NewInt(1))
+	if signers[7] != (common.Address{}) || errs[7] != nil {
+		t.Errorf("foreign-chain auth 7 was recovered: %v, %v", signers[7], errs[7])
+	}
+	for i := range auths {
+		if i == 7 {
+			continue
+		}
+		want, wantErr := auths[i].RecoverSigner()
+		if signers[i] != want || (errs[i] == nil) != (wantErr == nil) {
+			t.Errorf("auth %d: got %v, %v; want %v, %v", i, signers[i], errs[i], want, wantErr)
+		}
+	}
+}
+
+func TestSetCodeTxWarmAuthoritiesCaches(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := SignAuthorization(key, *uint256.NewInt(1), common.Address{1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := &SetCodeTransaction{Authorizations: []Authorization{auth}}
+	if tx.authorities.Load() != nil {
+		t.Fatal("authorities recovered before WarmAuthorities")
+	}
+
+	tx.WarmAuthorities(uint256.NewInt(1))
+	got := tx.authorities.Load()
+	if got == nil || got.Signers[0] != crypto.PubkeyToAddress(key.PublicKey) || got.Errs[0] != nil {
+		t.Fatalf("recovered %+v, want %v", got, crypto.PubkeyToAddress(key.PublicKey))
+	}
+	tx.WarmAuthorities(uint256.NewInt(1))
+	if tx.authorities.Load() != got {
+		t.Error("a second WarmAuthorities replaced the published result")
+	}
+}
+
+func TestMessageRecoveredAuthoritiesWaitsForInFlightRecovery(t *testing.T) {
+	t.Parallel()
+
+	tx := &SetCodeTransaction{}
+	inFlight := &RecoveredAuthorities{done: make(chan struct{})}
+	tx.authorities.Store(inFlight)
+	msg := &Message{authorities: &tx.authorities}
+
+	got := make(chan *RecoveredAuthorities)
+	go func() { got <- msg.RecoveredAuthorities() }()
+	select {
+	case <-got:
+		t.Fatal("returned before the in-flight recovery finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	tx.WarmAuthorities(uint256.NewInt(1))
+	inFlight.Signers, inFlight.Errs = []common.Address{{1}}, []error{nil}
+	close(inFlight.done)
+	if r := <-got; r != inFlight || r.Signers[0] != (common.Address{1}) {
+		t.Fatalf("got %+v, want the in-flight result", r)
+	}
+}
+
+func TestRecoverSignersNilChainIDIsChainZero(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := SignAuthorization(key, *uint256.NewInt(7), common.Address{1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain0, err := SignAuthorization(key, uint256.Int{}, common.Address{1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signers, errs := RecoverSigners([]Authorization{foreign, chain0}, nil)
+	if signers[0] != (common.Address{}) || errs[0] != nil {
+		t.Errorf("foreign-chain auth was recovered: %v, %v", signers[0], errs[0])
+	}
+	if signers[1] != crypto.PubkeyToAddress(key.PublicKey) || errs[1] != nil {
+		t.Errorf("chain-0 auth: got %v, %v", signers[1], errs[1])
 	}
 }
