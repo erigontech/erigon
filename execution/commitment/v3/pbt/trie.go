@@ -98,6 +98,16 @@ type Trie struct {
 	verifiedBucketKeys     map[string]struct{}
 	verifiedChains         map[string]verifiedChain
 	verifyProgress         func([]byte)
+	verifyRows             map[string][]byte
+	verifyRowsUsed         map[string]struct{}
+	verifyRowsExact        bool
+	verifyUpperRows        map[string][]byte
+	verifyUpperRowsUsed    map[string]struct{}
+	verifyTaskRows         uint64
+	verifyTaskBytes        uint64
+	verifyTaskLoaded       bool
+	verifyReferencedKeys   uint64
+	verifyStats            *VerifyStats
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {

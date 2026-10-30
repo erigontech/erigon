@@ -844,6 +844,23 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(domain kv.Domain, roTx kv.Tempo
 	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(domain, ks, v, txNum, prevVal, diff)
 }
 
+func (sd *SharedDomains) DomainPutCommitmentDiffNoRead(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
+	if err := sd.ensureDomainWritable(roTx, domain); err != nil {
+		return err
+	}
+	if v == nil {
+		return errors.New("DomainPutCommitmentDiffNoRead: trying to put nil value, not allowed")
+	}
+	ks := string(k)
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, v)
+	}
+	if bytes.Equal(prevVal, v) {
+		return nil
+	}
+	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(domain, ks, v, txNum, prevVal, diff)
+}
+
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
 // writes through an explicit diff (DomainPutCommitmentDiff) instead of the
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
@@ -868,6 +885,10 @@ func (p *commitmentDiffPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum ui
 		return p.sd.DomainPutCommitmentDiff(domain, p.tx, k, v, txNum, prevVal, p.diff)
 	}
 	return p.temporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
+}
+
+func (p *commitmentDiffPutDel) PutCommitmentBranchDirect(k, v, prevVal []byte, txNum uint64) error {
+	return p.sd.DomainPutCommitmentDiffNoRead(p.commitmentDomain, p.tx, k, v, txNum, prevVal, p.diff)
 }
 
 func (p *commitmentDiffPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {

@@ -22,8 +22,33 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
+
+type pbinReusedBranchContext struct {
+	*trieTestContext
+	buf []byte
+}
+
+func (c *pbinReusedBranchContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	data, step, err := c.trieTestContext.Branch(key)
+	c.buf = append(c.buf[:0], data...)
+	return c.buf, step, err
+}
+
+func TestTrieVerifyThenProcessWithReusedBranchBuffer(t *testing.T) {
+	entries := randomEntries(0x8297, 100)
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process(entriesOps(entries[:50]))
+	require.NoError(t, err)
+
+	trie := NewTrie(&pbinReusedBranchContext{trieTestContext: ctx})
+	require.NoError(t, trie.Verify())
+	root, err := trie.Process(entriesOps(entries[50:]))
+	require.NoError(t, err)
+	require.Equal(t, eip8297.StateRoot(entries), root)
+}
 
 func TestTrieVerifyRejectsStaleBranchHash(t *testing.T) {
 	ctx := newTrieTestContext()

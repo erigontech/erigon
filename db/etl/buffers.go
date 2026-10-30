@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -302,6 +303,10 @@ func (b *sortableBuffer) Put(k, v []byte) {
 // and entryLocSize bytes of metadata per entry.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
+}
+
+func (b *sortableBuffer) AllocatedSize() int {
+	return b.chunkBytes + cap(b.entries)*int(unsafe.Sizeof(entryLoc{})) + cap(b.chunks)*int(unsafe.Sizeof([]byte{}))
 }
 
 func (b *sortableBuffer) Len() int {

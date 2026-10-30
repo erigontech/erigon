@@ -27,10 +27,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -48,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
@@ -57,14 +60,16 @@ import (
 var (
 	attachPBTFrom       string
 	attachPBTSkipVerify bool
+	attachPBTWorkers    int
 )
 
 type pbtAttachHooks struct {
 	step       func(string) error
-	leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)
 	genesis    func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error
 	hexRoot    func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, uint64, uint64, log.Logger) (common.Hash, bool, error)
+	afterCopy  func() error
 	skipVerify bool
+	workers    int
 }
 
 func init() {
@@ -73,7 +78,8 @@ func init() {
 	withConfig(cmdCommitmentAttachPBT)
 	withExperimentalCommitment(cmdCommitmentAttachPBT)
 	cmdCommitmentAttachPBT.Flags().StringVar(&attachPBTFrom, "from", "", "published datadir containing converted commitment files")
-	cmdCommitmentAttachPBT.Flags().BoolVar(&attachPBTSkipVerify, "skip-verify", false, "adopt a pre-fork point without the published leaf pass, bin row check or node PBT root; writes no shadow root")
+	cmdCommitmentAttachPBT.Flags().IntVar(&attachPBTWorkers, "workers", dbg.PBTWorkers, "manifest digest workers")
+	cmdCommitmentAttachPBT.Flags().BoolVar(&attachPBTSkipVerify, "skip-verify", false, "skip only the manifest digest passes")
 	must(cmdCommitmentAttachPBT.MarkFlagDirname("from"))
 	must(cmdCommitmentAttachPBT.MarkFlagRequired("from"))
 	commitmentCmd.AddCommand(cmdCommitmentAttachPBT)
@@ -85,7 +91,7 @@ var cmdCommitmentAttachPBT = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		return attachPBTWithHooks(ctx, datadirCli, attachPBTFrom, chain, logger, pbtAttachHooks{skipVerify: attachPBTSkipVerify})
+		return attachPBTWithHooks(ctx, datadirCli, attachPBTFrom, chain, logger, pbtAttachHooks{skipVerify: attachPBTSkipVerify, workers: attachPBTWorkers})
 	},
 }
 
@@ -113,17 +119,16 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if hooks.step == nil {
 		hooks.step = func(string) error { return nil }
 	}
-	if hooks.skipVerify {
-		hooks.leafStamps = func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) { return common.Hash{}, nil }
-	} else if hooks.leafStamps == nil {
-		hooks.leafStamps = validatePBTAttachLeafStamps
-	}
 	if hooks.genesis == nil {
 		hooks.genesis = validatePBTAttachGenesis
 	}
 	if hooks.hexRoot == nil {
 		hooks.hexRoot = pbtAttachHexRoot
 	}
+	if hooks.workers <= 0 {
+		hooks.workers = dbg.PBTWorkers
+	}
+	hooks.workers = max(hooks.workers, 1)
 	if nodePath == "" || publishedPath == "" {
 		return errors.New("commitment attach-pbt: node and published datadirs are required")
 	}
@@ -136,6 +141,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err != nil {
 		return fmt.Errorf("%w; remove only %s and rerun attach-pbt --from %s", err, dbstate.PBTAttachMarkerPath(nodeDirs), publishedPath)
 	}
+	legacyMarker := marker != nil && marker.NodeHexRoot == "" && marker.HeaderRoot == ""
 	nodeV3 := false
 	if marker == nil {
 		if nodeV3, err = dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
@@ -200,6 +206,23 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := validatePBTAttachSalts(nodeDirs, publishedDirs); err != nil {
 		return err
 	}
+	manifestPath := filepath.Join(publishedDirs.Snap, "pbt-manifest.toml")
+	manifest, manifestErr := dbstate.ReadPBTManifest(manifestPath)
+	manifestAvailable := true
+	if errors.Is(manifestErr, fs.ErrNotExist) {
+		manifestAvailable = false
+	} else if manifestErr != nil {
+		return fmt.Errorf("commitment attach-pbt: read pbt-manifest.toml: %w", manifestErr)
+	}
+	if manifestAvailable {
+		sources, sourceErr := pbtAttachManifestSources(publishedDirs)
+		if sourceErr != nil {
+			return fmt.Errorf("commitment attach-pbt: manifest files: %w", sourceErr)
+		}
+		if fileSetErr := dbstate.ValidatePBTManifestFileSet(manifest, sources); fileSetErr != nil {
+			return fileSetErr
+		}
+	}
 	if marker == nil {
 		nodeFiles, fileErr := pbtAttachFiles(nodeDirs)
 		if fileErr != nil {
@@ -236,13 +259,52 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			}
 			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
 		}
+	} else {
+		if legacyMarker {
+			nodeBlock, nodeTx, nodeHexRoot, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, false, logger)
+			if err != nil {
+				return fmt.Errorf("commitment attach-pbt: legacy attach marker has no roots; restore the node before retry: %w", err)
+			}
+		}
+		if legacyMarker && (nodeBlock != blockNum || nodeTx != txNum) {
+			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
+		}
+	}
+	if !manifestAvailable {
+		return errors.New("commitment attach-pbt: pbt-manifest.toml is missing; re-run convert-pbt with this binary")
+	}
+	manifestDigest, err := dbstate.PBTManifestDigest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("commitment attach-pbt: manifest digest: %w", err)
+	}
+	if marker != nil {
+		if marker.ManifestBlake3 == "" {
+			return fmt.Errorf("commitment attach-pbt: marker has no manifest digest; remove only %s and rerun attach-pbt --from %s", dbstate.PBTAttachMarkerPath(nodeDirs), publishedPath)
+		}
+		if marker.ManifestBlake3 != manifestDigest {
+			return fmt.Errorf("commitment attach-pbt: published manifest digest %s differs from marker digest %s", manifestDigest, marker.ManifestBlake3)
+		}
+		if !legacyMarker {
+			nodeHexRoot, err = parsePBTAttachHash("marker node hex root", marker.NodeHexRoot)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
 		return err
 	}
-	if hooks.skipVerify && afterFork {
-		return fmt.Errorf("commitment attach-pbt: --skip-verify needs a conversion point before the binary trie fork; block %d is after it", blockNum)
+	if marker != nil {
+		if !legacyMarker {
+			markerHeaderRoot, markerErr := parsePBTAttachHash("marker header root", marker.HeaderRoot)
+			if markerErr != nil {
+				return markerErr
+			}
+			if headerRoot != markerHeaderRoot {
+				return fmt.Errorf("commitment attach-pbt: current header root %s differs from marker root %s", headerRoot, markerHeaderRoot)
+			}
+		}
 	}
 	if marker == nil {
 		if nodeProgress > blockNum {
@@ -252,48 +314,63 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)
 		}
 	}
-	publishedPbtRoot, err := validatePBTAttachPublishedPointWithLeafStamps(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger, hooks.leafStamps)
+	manifestPbtRoot, err := parsePBTManifestHash("pbt_root", manifest.PBTRoot)
 	if err != nil {
 		return err
 	}
-	if hooks.skipVerify {
-		logger.Info("commitment attach-pbt: published PBT verification skipped", "block", blockNum, "txNum", txNum)
-	} else if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, publishedPbtRoot, logger); err != nil {
+	manifestHexRoot, err := parsePBTManifestHash("hex_root", manifest.HexRoot)
+	if err != nil {
 		return err
 	}
-	var publishedHexRoot common.Hash
-	var publishedHexFound bool
+	if manifest.Point.Block != blockNum || manifest.Point.TxNum != txNum {
+		return fmt.Errorf("commitment attach-pbt: manifest point is (%d, %d), want (%d, %d)", manifest.Point.Block, manifest.Point.TxNum, blockNum, txNum)
+	}
+	if marker != nil {
+		markerBlock, markerTx, markerPoint, markerErr := marker.Settings.ConversionPoint()
+		if markerErr != nil {
+			return markerErr
+		}
+		if !markerPoint || markerBlock != blockNum || markerTx != txNum {
+			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
+		}
+	}
+	if manifest.TrieHash != publishedSettings.TrieHashName() {
+		return fmt.Errorf("commitment attach-pbt: manifest trie_hash %q differs from published settings %q", manifest.TrieHash, publishedSettings.TrieHashName())
+	}
+	if err := validatePBTAttachManifestFiles(ctx, manifest, publishedDirs, hooks.workers, hooks.skipVerify, logger, "attach published manifest digest"); err != nil {
+		return err
+	}
+	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
+		return err
+	}
+	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, manifestPbtRoot, logger); err != nil {
+		return err
+	}
+	publishedHexRoot, publishedHexFound, err := hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+	if err != nil {
+		return err
+	}
+	if !publishedHexFound {
+		return fmt.Errorf("commitment attach-pbt: published hex root is missing at (%d, %d)", blockNum, txNum)
+	}
+	if publishedHexRoot != manifestHexRoot {
+		return fmt.Errorf("commitment attach-pbt: published hex root %s differs from manifest root %s at (%d, %d)", publishedHexRoot, manifestHexRoot, blockNum, txNum)
+	}
+	if nodeHexRoot != manifestHexRoot {
+		return fmt.Errorf("commitment attach-pbt: node hex root %s differs from manifest root %s at (%d, %d)", nodeHexRoot, manifestHexRoot, blockNum, txNum)
+	}
+	if blockEnd {
+		wantHeaderRoot := manifestHexRoot
+		if afterFork {
+			wantHeaderRoot = manifestPbtRoot
+		}
+		if headerRoot != wantHeaderRoot {
+			return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
+		}
+	}
 	if marker == nil {
-		publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
-		if err != nil {
-			return err
-		}
-		if !publishedHexFound {
-			return fmt.Errorf("commitment attach-pbt: published hex root is missing at (%d, %d)", blockNum, txNum)
-		}
-		if nodeHexRoot != publishedHexRoot {
-			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodeHexRoot, publishedHexRoot, blockNum, txNum)
-		}
-		if blockEnd {
-			wantHeaderRoot := publishedHexRoot
-			if afterFork {
-				wantHeaderRoot = publishedPbtRoot
-			}
-			if headerRoot != wantHeaderRoot {
-				return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
-			}
-		}
 		if err := hooks.genesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
-		}
-		if !hooks.skipVerify {
-			nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, nodeV3, publishedSettings.TrieHashName(), logger)
-			if err != nil {
-				return err
-			}
-			if nodePbtRoot != publishedPbtRoot {
-				return fmt.Errorf("commitment attach-pbt: node PBT root %s differs from published root %s at (%d, %d)", nodePbtRoot, publishedPbtRoot, blockNum, txNum)
-			}
 		}
 	}
 	refs := publishedSettings.RefsInCommitmentBranches()
@@ -310,21 +387,33 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		ConversionTxNum:                &txNum,
 	}
 	if marker != nil {
-		markerBlock, markerTx, markerPoint, markerErr := marker.Settings.ConversionPoint()
-		if markerErr != nil {
-			return markerErr
-		}
-		if !markerPoint || markerBlock != blockNum || markerTx != txNum {
-			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
-		}
 		finalSettings = marker.Settings
-	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
+		if legacyMarker {
+			marker.NodeHexRoot = nodeHexRoot.Hex()
+			marker.HeaderRoot = headerRoot.Hex()
+			if err := dbstate.WritePBTAttachMarker(nodeDirs, marker); err != nil {
+				return err
+			}
+		}
+	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, ManifestBlake3: manifestDigest, NodeHexRoot: nodeHexRoot.Hex(), HeaderRoot: headerRoot.Hex(), Settings: finalSettings}); err != nil {
 		return err
 	}
 	if err := hooks.step("marker"); err != nil {
 		return err
 	}
 	if err := adoptPBTFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
+		return err
+	}
+	if hooks.afterCopy != nil {
+		if err := hooks.afterCopy(); err != nil {
+			return err
+		}
+	}
+	if err := validatePBTAttachManifestFiles(ctx, manifest, nodeDirs, hooks.workers, hooks.skipVerify, logger, "attach destination manifest digest"); err != nil {
+		cleanupErr := removePBTAdoptedManifestFiles(nodeDirs)
+		if cleanupErr != nil {
+			return errors.Join(err, cleanupErr)
+		}
 		return err
 	}
 	if err := hooks.step("swap"); err != nil {
@@ -337,28 +426,12 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return err
 	}
 	if blockEnd {
-		var shadowRoot common.Hash
+		shadowRoot := manifestPbtRoot
 		if afterFork {
-			if !publishedHexFound {
-				publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
-				if err != nil {
-					return err
-				}
-			}
-			if publishedHexFound {
-				shadowRoot = publishedHexRoot
-			} else {
-				blockEnd = false
-			}
-		} else if hooks.skipVerify {
-			blockEnd = false
-		} else {
-			shadowRoot = publishedPbtRoot
+			shadowRoot = publishedHexRoot
 		}
-		if blockEnd {
-			if err := writePBTAttachShadowRoot(ctx, nodeDirs, blockHash, blockNum, shadowRoot); err != nil {
-				return err
-			}
+		if err := writePBTAttachShadowRoot(ctx, nodeDirs, blockHash, blockNum, shadowRoot); err != nil {
+			return err
 		}
 	}
 	if err := dbstate.WriteErigonDBSettings(nodeDirs, finalSettings); err != nil {
@@ -381,29 +454,77 @@ func configurePBTNodeVariant(settings *dbstate.ErigonDBSettings, v3 bool) {
 	configurePBTSourceVariant(settings)
 }
 
-func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, v3 bool, hashName string, logger log.Logger) (common.Hash, error) {
-	configurePBTNodeVariant(settings, v3)
-	if err := eip8297.SetHashSuite(hashName); err != nil {
-		return common.Hash{}, err
+func parsePBTManifestHash(name, value string) (common.Hash, error) {
+	return parsePBTAttachHash("manifest "+name, value)
+}
+
+func parsePBTAttachHash(name, value string) (common.Hash, error) {
+	var hash common.Hash
+	if err := hash.UnmarshalText([]byte(value)); err != nil {
+		return common.Hash{}, fmt.Errorf("commitment attach-pbt: %s is not a 32-byte hash: %w", name, err)
 	}
-	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	return hash, nil
+}
+
+func pbtAttachManifestSources(dirs datadir.Dirs) ([]dbstate.PBTManifestFileSource, error) {
+	files, err := pbtAttachFiles(dirs)
 	if err != nil {
-		return common.Hash{}, err
+		return nil, err
 	}
-	defer db.Close()
-	agg, err := openPBTState(ctx, dirs, settings, db, logger)
+	visible := pbtAttachVisibleFiles(files)
+	sources := make([]dbstate.PBTManifestFileSource, 0, len(visible))
+	for _, file := range visible {
+		if !pbtAttachAdoptsFile(file) {
+			continue
+		}
+		rel, err := filepath.Rel(dirs.Snap, file.path)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, dbstate.PBTManifestFileSource{Name: filepath.Clean(rel), Path: file.path})
+	}
+	return sources, nil
+}
+
+func validatePBTAttachManifestFiles(ctx context.Context, manifest dbstate.PBTManifest, dirs datadir.Dirs, workers int, skipVerify bool, logger log.Logger, phase string) error {
+	sources, err := pbtAttachManifestSources(dirs)
 	if err != nil {
-		return common.Hash{}, err
+		return fmt.Errorf("commitment attach-pbt: manifest files: %w", err)
 	}
-	defer agg.Close()
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	roTx, err := db.BeginRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
+	if err := dbstate.ValidatePBTManifestFileSet(manifest, sources); err != nil {
+		return err
 	}
-	defer roTx.Rollback()
-	return dbstate.PBinStateRoot(at, roTx, false, eip8297.SelectedHash())
+	if skipVerify {
+		logger.Warn("commitment attach-pbt: manifest digest verification skipped", "phase", phase)
+		return nil
+	}
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{
+		Logger:  logger,
+		Message: "PBT manifest progress",
+		Phase:   phase,
+		Total:   uint64(len(sources)),
+		TempDir: dirs.Tmp,
+		Fields:  []any{"bytes_done", uint64(0)},
+	})
+	var bytesDone atomic.Uint64
+	err = dbstate.ValidatePBTManifestFiles(ctx, manifest, sources, workers, func(done, _, bytes uint64) {
+		progress.SetFields("bytes_done", bytesDone.Add(bytes))
+		progress.Add(1)
+		_ = done
+	})
+	progress.Done()
+	return err
+}
+
+func removePBTAdoptedManifestFiles(dirs datadir.Dirs) error {
+	if err := removePBTFiles(dirs, pbtAttachAdoptsFile); err != nil {
+		return err
+	}
+	path := filepath.Join(dirs.Snap, "pbt-manifest.toml")
+	if err := removePBTPath(path); err != nil {
+		return err
+	}
+	return fsyncPBTDirs(map[string]struct{}{dirs.Snap: {}})
 }
 
 func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, common.Hash, bool, bool, uint64, error) {
@@ -620,21 +741,21 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 	return nil
 }
 
-func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger, leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)) (common.Hash, error) {
+func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) error {
 	configurePBTSourceVariant(settings)
 	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	defer agg.Close()
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	publishedFiles, err := pbtAttachFiles(dirs)
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	opened := make(map[kv.Domain]map[string]struct{})
@@ -650,14 +771,14 @@ func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs dat
 		files := at.Files(domain)
 		needsOpened := domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain
 		if (needsOpened && len(opened[domain]) == 0) || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() <= txNum {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
+			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
 			if file.domain != domain || !file.data || file.from*settings.StepSize > txNum {
 				continue
 			}
 			if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
-				return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
+				return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
 			}
 		}
 	}
@@ -682,44 +803,90 @@ func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs dat
 	for _, check := range checks {
 		value, found, start, end, err := at.DebugGetLatestFromFiles(check.domain, check.key, math.MaxUint64)
 		if err != nil {
-			return common.Hash{}, err
+			return err
 		}
 		if !found || start > txNum || end <= txNum {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
+			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
 		}
 		gotBlock, gotTx, err := check.decode(value)
 		if err != nil {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
+			return fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
 		}
 		if gotBlock != blockNum || gotTx != txNum {
-			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
+			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
-	}
-	return leafStamps(txNum, func(emit func(dbstate.PBinLeaf) error) error {
-		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
-	})
-}
-
-func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
-	root, err := verifyPBTRowsInScratchDB(ctx, publishedDirs, settings, kv.CommitmentBinDomain, point, "commitment attach-pbt: verify published binary rows", logger)
-	if err != nil {
-		return err
-	}
-	if root != wantRoot {
-		return fmt.Errorf("commitment attach-pbt: published binary rows root %s differs from published state root %s", root, wantRoot)
 	}
 	return nil
 }
 
-func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
-	return dbstate.PBinRootFromStream(eip8297.SelectedHash(), func(emit func(dbstate.PBinLeaf) error) error {
-		return forEach(func(leaf dbstate.PBinLeaf) error {
-			if leaf.Stamp > txNum {
-				return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
+func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Logger: logger, Phase: "attach published bin verify", Total: 1, TempDir: publishedDirs.Tmp})
+	defer progress.Done()
+	configurePBTSourceVariant(settings)
+	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
+		return err
+	}
+	agg, err := openPBTState(ctx, publishedDirs, settings, nil, logger)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	value, found, start, end, err := at.DebugGetLatestFromFiles(kv.CommitmentBinDomain, pbt.GlobalRootKey(), math.MaxUint64)
+	if err != nil {
+		return err
+	}
+	if !found || start > point.TxNum || end < point.TxNum {
+		if !found && wantRoot == eip8297.EmptyTreeHash {
+			state, stateFound, stateStart, stateEnd, stateErr := at.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, math.MaxUint64)
+			if stateErr != nil {
+				return stateErr
 			}
-			return emit(leaf)
-		})
-	})
+			if stateFound && stateStart <= point.TxNum && stateEnd >= point.TxNum {
+				empty, emptyErr := pbtStateRootIsEmpty(state)
+				if emptyErr != nil {
+					return fmt.Errorf("commitment attach-pbt: decode published binary state: %w", emptyErr)
+				}
+				if empty {
+					progress.Add(1)
+					return nil
+				}
+			}
+		}
+		return fmt.Errorf("commitment attach-pbt: published binary root record is not at conversion txNum %d", point.TxNum)
+	}
+	record, err := pbt.DecodeRecord(pbt.GlobalRootKey(), value)
+	if err != nil {
+		return fmt.Errorf("commitment attach-pbt: decode published binary root record: %w", err)
+	}
+	root, err := pbt.Fold(pbt.GlobalRootKey(), &record)
+	if err != nil {
+		return fmt.Errorf("commitment attach-pbt: fold published binary root record: %w", err)
+	}
+	if root != wantRoot {
+		return fmt.Errorf("commitment attach-pbt: published binary root record %s differs from manifest root %s", root, wantRoot)
+	}
+	progress.Add(1)
+	return nil
+}
+
+func pbtStateRootIsEmpty(value []byte) (bool, error) {
+	state := value
+	if !commitment.IsPBinState(state) {
+		if len(state) < 18 {
+			return false, fmt.Errorf("state envelope is %d bytes, want at least 18", len(state))
+		}
+		stateLen := int(state[16])<<8 | int(state[17])
+		if len(state) != 18+stateLen {
+			return false, fmt.Errorf("state envelope claims %d bytes, %d present", stateLen, len(state)-18)
+		}
+		state = state[18:]
+	}
+	if err := commitment.PBinValidateRowStateFormat(state); err != nil {
+		return false, err
+	}
+	return len(state) == 5, nil
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {
@@ -1000,12 +1167,25 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 	if err := removePBTFiles(nodeDirs, pbtAttachAdoptsFile); err != nil {
 		return err
 	}
+	if err := removePBTPath(filepath.Join(nodeDirs.Snap, "pbt-manifest.toml")); err != nil {
+		return err
+	}
 	touched := make(map[string]struct{})
 	publishedFiles, err := pbtAttachFiles(publishedDirs)
 	if err != nil {
 		return err
 	}
 	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
+	var adoptable uint64
+	for _, file := range publishedFiles {
+		if file.from*stepSize <= endTxNum && pbtAttachAdoptsFile(file) {
+			adoptable++
+		}
+	}
+	_, manifestErr := os.Stat(filepath.Join(publishedDirs.Snap, "pbt-manifest.toml"))
+	manifestPresent := manifestErr == nil
+	progress := dbstate.NewPBTProgress(dbstate.PBTProgressConfig{Phase: "attach adopt", Total: adoptable + btoi(manifestPresent), TempDir: nodeDirs.Tmp})
+	defer progress.Done()
 	for _, file := range publishedFiles {
 		if file.from*stepSize > endTxNum || !pbtAttachAdoptsFile(file) {
 			continue
@@ -1024,12 +1204,29 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 		if err := syncPBTFileSidecar(file.path, dst); err != nil {
 			return err
 		}
+		progress.Add(1)
 		touched[filepath.Dir(dst)] = struct{}{}
+	}
+	manifestSrc := filepath.Join(publishedDirs.Snap, "pbt-manifest.toml")
+	if manifestPresent {
+		manifestDst := filepath.Join(nodeDirs.Snap, "pbt-manifest.toml")
+		if err := linkOrCopyPBTFile(manifestSrc, manifestDst); err != nil {
+			return err
+		}
+		touched[filepath.Dir(manifestDst)] = struct{}{}
+		progress.Add(1)
 	}
 	if err := fsyncPBTDirs(touched); err != nil {
 		return err
 	}
 	return nil
+}
+
+func btoi(value bool) uint64 {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func validatePBTAttachSalts(nodeDirs, publishedDirs datadir.Dirs) error {

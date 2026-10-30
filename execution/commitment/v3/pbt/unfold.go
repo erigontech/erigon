@@ -29,7 +29,7 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 	}
 	t.rootLoaded = true
 	rootKey := t.rootRecordKey()
-	data, _, err := t.ctx.Branch(rootKey)
+	data, _, err := t.verifyBranch(rootKey)
 	if err != nil {
 		return nil, err
 	}
@@ -42,8 +42,13 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.root.raw = bytes.Clone(data)
-	t.root.prev = bytes.Clone(data)
+	if t.verifyOnly {
+		t.root.raw = data
+		t.root.prev = data
+	} else {
+		t.root.raw = bytes.Clone(data)
+		t.root.prev = bytes.Clone(data)
+	}
 	switch record.Form {
 	case RowRoot:
 		path := t.rootRecordPath()
@@ -86,7 +91,7 @@ func (t *Trie) loadRow(path eip8297.Bitpath) (*rowNode, error) {
 			return row, nil
 		}
 	}
-	data, _, err := t.ctx.Branch(key)
+	data, _, err := t.verifyBranch(key)
 	if err != nil {
 		return nil, err
 	}

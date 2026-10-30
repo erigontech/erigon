@@ -14,30 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commands
+package state
 
 import (
-	"os"
-	"os/exec"
+	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPBinReviewConvertOracleRejectsSerialFallback(t *testing.T) {
-	if os.Getenv("ERIGON_REVIEW_SERIAL_ORACLE") == "1" {
-		require.Equal(t, 1, dbg.PBTWorkers)
-		TestConvertPBTWorkersMatchSequentialFiles(t)
-		return
+func TestPBinLeafAddressRangesPartition(t *testing.T) {
+	ranges := pbinLeafAddressRanges(16)
+	require.Len(t, ranges, 64)
+	require.Nil(t, ranges[0].from)
+	require.Nil(t, ranges[len(ranges)-1].to)
+	for i := 1; i < len(ranges); i++ {
+		require.Equal(t, ranges[i-1].to, ranges[i].from)
 	}
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestPBinReviewConvertOracleRejectsSerialFallback$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "ERIGON_REVIEW_SERIAL_ORACLE=1", "PBT_WORKERS=1")
-	output, err := cmd.CombinedOutput()
-	require.NotContains(t, string(output), "panic:")
-	if err == nil {
-		t.Fatalf("convert byte oracle accepted serial fallback: PBT_WORKERS=1, child exit=0")
+	for _, r := range ranges {
+		if r.from != nil && r.to != nil {
+			require.Less(t, bytes.Compare(r.from, r.to), 0)
+		}
 	}
 }

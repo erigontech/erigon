@@ -22,10 +22,12 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
@@ -69,19 +71,21 @@ type sd interface {
 }
 
 type SharedDomainsCommitmentContext struct {
-	sharedDomains    sd
-	commitmentDomain kv.Domain
-	updates          *commitment.Updates
-	codeKeys         map[string]struct{}
-	feed             *commitment.Feed
-	pbinFeed         *commitment.PBinFeed
-	pbinOps          []pbt.Op
-	patriciaTrie     commitment.Trie
-	variant          commitment.TrieVariant
-	justRestored     atomic.Bool
-	traceW           io.Writer
-	stateReader      StateReader
-	paraTrieDB       kv.TemporalRoDB
+	sharedDomains      sd
+	commitmentDomain   kv.Domain
+	updates            *commitment.Updates
+	codeKeys           map[string]struct{}
+	feed               *commitment.Feed
+	pbinFeed           *commitment.PBinFeed
+	pbinOps            []pbt.Op
+	patriciaTrie       commitment.Trie
+	variant            commitment.TrieVariant
+	justRestored       atomic.Bool
+	traceW             io.Writer
+	stateReader        StateReader
+	paraTrieDB         kv.TemporalRoDB
+	verifyPointLookups *atomic.Uint64
+	verifyRangePlan    *verifyRangePlan
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
 	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
 	warmupBase commitment.WarmupConfig
@@ -384,13 +388,19 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		putter = sdc.sharedDomains.AsPutDel(tx)
 	}
 	mainTtx := &TrieContext{
-		putter:           putter,
-		commitmentDomain: sdc.CommitmentDomain(),
-		stepSize:         sdc.sharedDomains.StepSize(),
-		txNum:            txNum,
-		blockNum:         blockNum,
-		traceW:           sdc.traceW,
-		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
+		putter:             putter,
+		commitmentDomain:   sdc.CommitmentDomain(),
+		stepSize:           sdc.sharedDomains.StepSize(),
+		txNum:              txNum,
+		blockNum:           blockNum,
+		traceW:             sdc.traceW,
+		readCodeSize:       sdc.variant == commitment.VariantBinPatriciaTrie,
+		verifyPointLookups: sdc.verifyPointLookups,
+	}
+	if directPutter, ok := putter.(interface {
+		PutCommitmentBranchDirect([]byte, []byte, []byte, uint64) error
+	}); ok {
+		mainTtx.directPutter = directPutter
 	}
 	switch {
 	case stateReader != nil:
@@ -425,8 +435,32 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 	return sdc.patriciaTrie
 }
 
-func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) {
-	sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
+func (sdc *SharedDomainsCommitmentContext) SetVerifyPointLookupCounter(counter *atomic.Uint64) {
+	sdc.verifyPointLookups = counter
+}
+
+func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) error {
+	sdc.verifyRangePlan = nil
+	var verifyLiveKeys, verifyStateKeys uint64
+	verifyKeyCount := false
+	if planner, ok := tx.AggTx().(verifyRangePlanner); ok {
+		sdc.verifyRangePlan = &verifyRangePlan{planner: planner, domain: sdc.CommitmentDomain(), tx: tx}
+		if counter, ok := tx.AggTx().(verifyDomainKeyCounter); ok {
+			var err error
+			verifyLiveKeys, verifyStateKeys, err = counter.DebugRangeLatestCount(tx, sdc.CommitmentDomain())
+			if err != nil {
+				return err
+			}
+			verifyKeyCount = true
+		}
+	}
+	ctx := sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
+	ctx.verifyRange = verifyRangeReader(tx, sdc.CommitmentDomain(), sdc.verifyRangePlan)
+	ctx.verifyRangePlan = sdc.verifyRangePlan
+	ctx.verifyLiveKeys = verifyLiveKeys
+	ctx.verifyStateKeys = verifyStateKeys
+	ctx.verifyKeyCount = verifyKeyCount
+	return nil
 }
 
 var errVerificationViewDrifted = errors.New("verification worker view drifted from the caller's snapshot")
@@ -451,10 +485,13 @@ func (sdc *SharedDomainsCommitmentContext) VerificationContextFactory(tx kv.Temp
 			return &errorTrieContext{err: errVerificationViewDrifted}, func() {}
 		}
 		return &TrieContext{
-			putter:           sdc.sharedDomains.AsPutDel(roTx),
-			stateReader:      NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
-			commitmentDomain: sdc.CommitmentDomain(),
-			stepSize:         sdc.sharedDomains.StepSize(),
+			putter:             sdc.sharedDomains.AsPutDel(roTx),
+			stateReader:        NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
+			commitmentDomain:   sdc.CommitmentDomain(),
+			stepSize:           sdc.sharedDomains.StepSize(),
+			verifyRange:        verifyRangeReader(roTx, sdc.CommitmentDomain(), sdc.verifyRangePlan),
+			verifyRangePlan:    sdc.verifyRangePlan,
+			verifyPointLookups: sdc.verifyPointLookups,
 		}, roTx.Rollback
 	}
 	return factory, pin.Close
@@ -1508,20 +1545,182 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	putter           kv.TemporalPutDel
+	putter       kv.TemporalPutDel
+	directPutter interface {
+		PutCommitmentBranchDirect([]byte, []byte, []byte, uint64) error
+	}
 	commitmentDomain kv.Domain
 	txNum            uint64
 	blockNum         uint64
 
-	stepSize       uint64
-	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
-	stateReader    StateReader
-	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+	stepSize           uint64
+	traceW             io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
+	stateReader        StateReader
+	localCollector     *etl.Collector // per-goroutine collector for concurrent PutBranch
+	verifyPointLookups *atomic.Uint64
 	// readCodeSize makes Account resolve the account's code length. Only the
 	// binary trie hashes code_size, and the extra CodeDomain read is not free.
 	readCodeSize bool
 
-	branchBuf []byte // reused across Branch calls; see the ownership note on Branch
+	branchBuf       []byte // reused across Branch calls; see the ownership note on Branch
+	verifyRange     func([]byte, []byte, func([]byte, []byte) error) (uint64, error)
+	verifyRangePlan *verifyRangePlan
+	verifyLiveKeys  uint64
+	verifyStateKeys uint64
+	verifyKeyCount  bool
+}
+
+type verifyRangePlanner interface {
+	DebugRangeLatestVerifyData(kv.Tx, kv.Domain, []byte, int16) (map[uint64][]uint64, []uint64, map[string][]byte, error)
+}
+
+type verifyDomainKeyCounter interface {
+	DebugRangeLatestCount(kv.Tx, kv.Domain) (uint64, uint64, error)
+}
+
+type verifyRangeAt interface {
+	DebugRangeLatestWithOffsets(kv.Tx, kv.Domain, []byte, []byte, int, []uint64) (stream.KV, error)
+}
+
+type verifyRangePlan struct {
+	planner        verifyRangePlanner
+	domain         kv.Domain
+	tx             kv.Tx
+	offsets        map[string][]uint64
+	offsetReads    *atomic.Uint64
+	prefixOffsets  map[uint64][]uint64
+	fileEnds       []uint64
+	upperRows      map[string][]byte
+	upperBits      int16
+	upperRowsReady bool
+}
+
+func (p *verifyRangePlan) prepare(starts [][]byte) error {
+	p.offsets = make(map[string][]uint64, len(starts))
+	for _, start := range starts {
+		if len(start)*8 < int(p.upperBits) {
+			continue
+		}
+		path := eip8297.PathFromBits(start, p.upperBits)
+		prefix := path.Words[0] >> uint(64-p.upperBits)
+		offsets := make([]uint64, len(p.fileEnds))
+		copy(offsets, p.fileEnds)
+		if planned := p.prefixOffsets[prefix]; planned != nil {
+			for fileIndex, offset := range planned {
+				if offset != ^uint64(0) {
+					offsets[fileIndex] = offset
+				}
+			}
+		}
+		p.offsets[string(start)] = offsets
+	}
+	return nil
+}
+
+func (p *verifyRangePlan) prepareUpper(rootKey []byte, upperBits int16) (map[string][]byte, error) {
+	if p.upperRowsReady {
+		return p.upperRows, nil
+	}
+	prefixOffsets, fileEnds, upperRows, err := p.planner.DebugRangeLatestVerifyData(p.tx, p.domain, rootKey, upperBits)
+	if err != nil {
+		return nil, err
+	}
+	p.prefixOffsets = prefixOffsets
+	p.fileEnds = fileEnds
+	p.upperRows = upperRows
+	p.upperBits = upperBits
+	p.upperRowsReady = true
+	return upperRows, nil
+}
+
+func (p *verifyRangePlan) forStart(start []byte) []uint64 {
+	if p == nil || p.offsets == nil {
+		return nil
+	}
+	return p.offsets[string(start)]
+}
+
+func (p *verifyRangePlan) recordRangeAtOffset() {
+	if p != nil && p.offsetReads != nil {
+		p.offsetReads.Add(1)
+	}
+}
+
+func (sdc *TrieContext) PrepareVerifyRanges(starts [][]byte) error {
+	if sdc.verifyRangePlan == nil {
+		return nil
+	}
+	return sdc.verifyRangePlan.prepare(starts)
+}
+
+func (sdc *TrieContext) PrepareVerifyUpper(rootKey []byte, upperBits int16) (map[string][]byte, error) {
+	if sdc.verifyRangePlan == nil {
+		return nil, nil
+	}
+	return sdc.verifyRangePlan.prepareUpper(rootKey, upperBits)
+}
+
+func (sdc *TrieContext) SetVerifyRangeOffsetCounter(counter *atomic.Uint64) {
+	if sdc.verifyRangePlan != nil {
+		sdc.verifyRangePlan.offsetReads = counter
+	}
+}
+
+func (sdc *TrieContext) VerifyKeyCount(referenced uint64) error {
+	if !sdc.verifyKeyCount {
+		return nil
+	}
+	if referenced+sdc.verifyStateKeys != sdc.verifyLiveKeys {
+		return fmt.Errorf("unreferenced verification row count: referenced %d plus state %d of %d live keys", referenced, sdc.verifyStateKeys, sdc.verifyLiveKeys)
+	}
+	return nil
+}
+
+func verifyRangeReader(tx kv.TemporalTx, domain kv.Domain, plan *verifyRangePlan) func([]byte, []byte, func([]byte, []byte) error) (uint64, error) {
+	agg, ok := tx.AggTx().(interface {
+		DebugRangeLatest(kv.Tx, kv.Domain, []byte, []byte, int) (stream.KV, error)
+	})
+	if !ok {
+		return nil
+	}
+	return func(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
+		var it stream.KV
+		var err error
+		if rangeAt, ok := agg.(verifyRangeAt); ok {
+			if offsets := plan.forStart(from); offsets != nil {
+				plan.recordRangeAtOffset()
+				it, err = rangeAt.DebugRangeLatestWithOffsets(tx, domain, from, to, -1, offsets)
+			}
+		}
+		if it == nil {
+			it, err = agg.DebugRangeLatest(tx, domain, from, to, -1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		defer it.Close()
+		var rows uint64
+		for it.HasNext() {
+			key, value, nextErr := it.Next()
+			if nextErr != nil {
+				return rows, nextErr
+			}
+			if emitErr := emit(key, value); emitErr != nil {
+				return rows, emitErr
+			}
+			rows++
+		}
+		return rows, nil
+	}
+}
+
+func (sdc *TrieContext) HasVerifyRange() bool { return sdc.verifyRange != nil }
+
+func (sdc *TrieContext) ReadVerifyRange(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
+	if sdc.verifyRange == nil {
+		return 0, errors.New("verification range reader is unavailable")
+	}
+	return sdc.verifyRange(from, to, emit)
 }
 
 func (sdc *TrieContext) SetReadCodeSize(v bool) { sdc.readCodeSize = v }
@@ -1533,6 +1732,9 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	if sdc.verifyPointLookups != nil {
+		sdc.verifyPointLookups.Add(1)
+	}
 	enc, step, err := sdc.readDomain(sdc.commitmentDomainValue(), pref)
 	if err != nil {
 		return nil, 0, err
@@ -1600,6 +1802,16 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 		return sdc.localCollector.Collect(prefix, data)
 	}
 	return sdc.putter.DomainPut(sdc.commitmentDomainValue(), prefix, data, sdc.txNum, prevData)
+}
+
+func (sdc *TrieContext) PutBranchDirect(prefix []byte, data []byte, prevData []byte) error {
+	if sdc.stateReader.WithHistory() {
+		return nil
+	}
+	if sdc.directPutter == nil {
+		return sdc.PutBranch(prefix, data, prevData)
+	}
+	return sdc.directPutter.PutCommitmentBranchDirect(prefix, data, prevData, sdc.txNum)
 }
 
 func (sdc *TrieContext) commitmentDomainValue() kv.Domain {

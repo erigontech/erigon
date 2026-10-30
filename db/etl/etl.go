@@ -73,12 +73,18 @@ type TransformArgs struct {
 	Quit              <-chan struct{}
 	LogDetailsExtract AdditionalLogArguments
 	LogDetailsLoad    AdditionalLogArguments
+	Progress          Progress
 	// [ExtractStartKey, ExtractEndKey)
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
 	BufferType      int
 	BufferSize      int
 	EmptyVals       bool // `v=nil` case: `false` means `Del(k)`, `true` means `Put(k, nil)`
+}
+
+type Progress interface {
+	Add(uint64)
+	Done()
 }
 
 func Transform(

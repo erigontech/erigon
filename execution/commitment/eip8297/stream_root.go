@@ -35,13 +35,14 @@ type streamRootBranch struct {
 }
 
 type StreamRootBuilder struct {
-	sum      HashFn
-	branches []streamRootBranch
-	prevKey  []byte
-	prevBits []byte
-	lastLeaf common.Hash
-	hasLeaf  bool
-	err      error
+	sum       HashFn
+	branches  []streamRootBranch
+	prevKey   []byte
+	prevBits  []byte
+	firstBits []byte
+	lastLeaf  common.Hash
+	hasLeaf   bool
+	err       error
 }
 
 func NewStreamRootBuilder(sum HashFn) (*StreamRootBuilder, error) {
@@ -55,14 +56,8 @@ func (b *StreamRootBuilder) Add(key, value []byte) error {
 	if b.err != nil {
 		return b.err
 	}
-	if len(key) == 0 || len(key) > maxReferenceKeyLength {
-		return b.fail(fmt.Errorf("eip8297: key length %d out of range", len(key)))
-	}
-	if len(value) != ValueLength {
-		return b.fail(fmt.Errorf("eip8297: value of %d bytes, want %d", len(value), ValueLength))
-	}
-	if [ValueLength]byte(value) == [ValueLength]byte{} {
-		return b.fail(errors.New("eip8297: zero values are not stored"))
+	if err := validateStreamRootLeaf(key, value); err != nil {
+		return b.fail(err)
 	}
 	if b.hasLeaf && bytes.Compare(key, b.prevKey) <= 0 {
 		return b.fail(errors.New("eip8297: stream keys are not strictly ascending"))
@@ -70,6 +65,9 @@ func (b *StreamRootBuilder) Add(key, value []byte) error {
 
 	bits := bytesToBits(key)
 	leaf := b.hashLeaf(key, value)
+	if !b.hasLeaf {
+		b.firstBits = append(b.firstBits[:0], bits...)
+	}
 	if b.hasLeaf {
 		commonBits := streamRootCommonPrefix(b.prevBits, bits)
 		if commonBits == len(b.prevBits) || commonBits == len(bits) {
@@ -142,12 +140,29 @@ func (b *StreamRootBuilder) hashLeaf(key, value []byte) common.Hash {
 }
 
 func (b *StreamRootBuilder) hashBranch(prefix []byte, left, right common.Hash) common.Hash {
-	preimage := make([]byte, 0, 1+2+(len(prefix)+7)/8+2*len(left))
-	preimage = append(preimage, BranchTag)
-	preimage = append(preimage, EncodeBitPrefix(prefix)...)
-	preimage = append(preimage, left[:]...)
-	preimage = append(preimage, right[:]...)
-	return common.Hash(b.sum(preimage))
+	return hashStreamRootBranch(b.sum, prefix, left, right)
+}
+
+func (b *StreamRootBuilder) subtree() streamRootSubtree {
+	return streamRootSubtree{
+		firstBits: b.firstBits,
+		branches:  b.branches,
+		lastLeaf:  b.lastLeaf,
+		hasLeaf:   b.hasLeaf,
+	}
+}
+
+func validateStreamRootLeaf(key, value []byte) error {
+	if len(key) == 0 || len(key) > maxReferenceKeyLength {
+		return fmt.Errorf("eip8297: key length %d out of range", len(key))
+	}
+	if len(value) != ValueLength {
+		return fmt.Errorf("eip8297: value of %d bytes, want %d", len(value), ValueLength)
+	}
+	if [ValueLength]byte(value) == [ValueLength]byte{} {
+		return errors.New("eip8297: zero values are not stored")
+	}
+	return nil
 }
 
 func streamRootCommonPrefix(a, b []byte) int {

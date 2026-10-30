@@ -96,9 +96,11 @@ type Collector struct {
 	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
 	sortAndFlushInBackground       bool
 	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
+	mergeInBackground              bool
 
 	allocator *Allocator
 	fill      int
+	collected uint64
 }
 
 // NewCollectorWithAllocator builds a collector that draws its buffer from the
@@ -120,6 +122,11 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 	return c
 }
 
+func (c *Collector) MergeInBackground(v bool) *Collector {
+	c.mergeInBackground = v
+	return c
+}
+
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if len(k) > MaxKeyLen {
 		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
@@ -127,6 +134,7 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if len(v) > MaxValLen {
 		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
 	}
+	c.collected++
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
@@ -139,6 +147,10 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 		return nil
 	}
 	return c.flushBuffer(false)
+}
+
+func (c *Collector) Collected() uint64 {
+	return c.collected
 }
 
 // Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
@@ -165,6 +177,16 @@ func (c *Collector) InMemorySize() int {
 		return sized.Size()
 	}
 	return 0
+}
+
+func (c *Collector) InMemoryCapacity() int {
+	if c.buf == nil {
+		return 0
+	}
+	if sized, ok := c.buf.(interface{ AllocatedSize() int }); ok {
+		return sized.AllocatedSize()
+	}
+	return c.InMemorySize()
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
@@ -302,7 +324,11 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
+	merge := mergeSortFiles
+	if c.mergeInBackground {
+		merge = mergeSortFilesInBackground
+	}
+	if err := merge(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -312,7 +338,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 func MergeLoad(logPrefix string, collectors []*Collector, loadFunc func(k, v []byte) error, args TransformArgs) error {
 	errs := make([]error, len(collectors))
 	var wg sync.WaitGroup
+	mergeInBackground := false
 	for i, c := range collectors {
+		mergeInBackground = mergeInBackground || c.mergeInBackground
 		if c.allFlushed {
 			continue
 		}
@@ -326,6 +354,9 @@ func MergeLoad(logPrefix string, collectors []*Collector, loadFunc func(k, v []b
 	for _, c := range collectors {
 		providers = append(providers, c.dataProviders...)
 		args.BufferType = c.bufType
+	}
+	if mergeInBackground {
+		return mergeSortFilesInBackground(logPrefix, providers, loadFunc, args)
 	}
 	return mergeSortFiles(logPrefix, providers, loadFunc, args)
 }
@@ -352,6 +383,7 @@ func (c *Collector) Close() {
 		c.allocator.rememberFill(c.logPrefix, c.fill)
 	}
 	c.fill = 0
+	c.collected = 0
 	c.allFlushed = false
 }
 
@@ -363,6 +395,19 @@ func (c *Collector) Close() {
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
 func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
+	var progressDone uint64
+	progressThreshold := uint64(4096)
+	if args.Progress != nil {
+		if p, ok := args.Progress.(interface{ ProgressBatchSize() uint64 }); ok {
+			progressThreshold = p.ProgressBatchSize()
+		}
+		defer func() {
+			if progressDone != 0 {
+				args.Progress.Add(progressDone)
+			}
+			args.Progress.Done()
+		}()
+	}
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -394,6 +439,13 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 
 		element := heapPop(h)
+		if args.Progress != nil {
+			progressDone++
+			if progressDone >= progressThreshold {
+				args.Progress.Add(progressDone)
+				progressDone = 0
+			}
+		}
 		provider := providers[element.TimeIdx]
 
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear

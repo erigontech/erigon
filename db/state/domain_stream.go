@@ -109,11 +109,14 @@ type DomainLatestIterFile struct {
 	roTx          kv.Tx
 	valsTable     string
 
-	limit       int
-	largeVals   bool
-	filesOnly   bool // when true, iterate only over .kv files, ignoring MDBX
-	from, to    []byte
-	orderAscend order.By
+	limit           int
+	largeVals       bool
+	filesOnly       bool // when true, iterate only over .kv files, ignoring MDBX
+	includeEmpty    bool
+	minFileEndTxNum uint64
+	from, to        []byte
+	orderAscend     order.By
+	fileOffsets     []uint64
 
 	h *CursorHeap
 
@@ -180,6 +183,9 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	}
 
 	for i, item := range domainRoTx.files {
+		if item.endTxNum <= hi.minFileEndTxNum {
+			continue
+		}
 		txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
 		if domainRoTx.d.Accessors.Has(statecfg.AccessorBTree) {
 			// Use BTree cursor for domains with BTree accessor
@@ -195,25 +201,41 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 			key = btCursor.Key()
 			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 				val := btCursor.Value()
-				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
+				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: bytes.Clone(key), val: bytes.Clone(val), btCursor: btCursor, endTxNum: txNum, reverse: true})
 			} else {
 				btCursor.Close()
 			}
 		} else if domainRoTx.d.Accessors.Has(statecfg.AccessorHashMap) {
-			// For domains without BTree (e.g., commitment with HashMap accessor),
-			// iterate the data file directly using linear scan.
-			// RecSplit indices don't support OrdinalLookup (no enums), so we can't binary search.
 			reader := domainRoTx.reusableReader(i)
-			reader.Reset(0)
-
-			// Linear scan to find first key >= hi.from
-			for reader.HasNext() {
-				key, _ = reader.Next(nil)
-				if hi.from == nil || bytes.Compare(key, hi.from) >= 0 {
+			if len(hi.fileOffsets) == len(domainRoTx.files) {
+				reader.Reset(hi.fileOffsets[i])
+				if reader.HasNext() {
+					key, _ = reader.Next(nil)
 					value, _ = reader.Next(nil)
-					break
 				}
-				reader.Skip() // skip value
+			} else {
+				reader.Reset(0)
+				if hi.from == nil {
+					if reader.HasNext() {
+						key, _ = reader.Next(nil)
+						value, _ = reader.Next(nil)
+					}
+				} else {
+					for reader.HasNext() {
+						cmp := reader.MatchCmp(hi.from)
+						if cmp <= 0 {
+							if cmp < 0 {
+								key, _ = reader.Next(nil)
+							} else {
+								key = hi.from
+							}
+							value, _ = reader.Next(nil)
+							break
+						}
+						reader.Skip()
+						reader.Skip()
+					}
+				}
 			}
 
 			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
@@ -369,6 +391,10 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
 		nextStamp := (*hi.h)[0].endTxNum
+		if (*hi.h)[0].btCursor != nil {
+			lastKey = append(hi.k[:0], lastKey...)
+			lastVal = append(hi.v[:0], lastVal...)
+		}
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
@@ -412,7 +438,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 			}
 		}
-		if len(lastVal) > 0 {
+		if len(lastVal) > 0 || hi.includeEmpty {
 			hi.nextKey, hi.nextVal, hi.nextStamp = lastKey, lastVal, nextStamp
 			return nil // founc
 		}
@@ -524,7 +550,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
 			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: bytes.Clone(key), val: bytes.Clone(val), btCursor: cursor, endTxNum: txNum, reverse: true})
 		}
 	}
 
@@ -548,9 +574,9 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				indexList := dt.d.Accessors
 				if indexList.Has(statecfg.AccessorBTree) {
 					if ci1.btCursor.Next() {
-						ci1.key = ci1.btCursor.Key()
+						ci1.key = bytes.Clone(ci1.btCursor.Key())
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-							ci1.val = ci1.btCursor.Value()
+							ci1.val = bytes.Clone(ci1.btCursor.Value())
 							heap.Push(cpPtr, ci1)
 						} else {
 							ci1.btCursor.Close()

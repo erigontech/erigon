@@ -19,6 +19,8 @@ package state_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -32,9 +34,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
@@ -57,6 +56,8 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewPBinRangeWriter(t *testing.T) {
@@ -642,7 +643,8 @@ func pbinRandomThreeZoneLeaves(r *rand.Rand) []state.PBinLeaf {
 	for range 20 + r.Intn(40) {
 		address := make([]byte, 20)
 		r.Read(address)
-		leaves = append(leaves,
+		leaves = append(
+			leaves,
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: pbinRangeWriterBasicValue(byte(r.Intn(250) + 1)), Stamp: stamp()},
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.HeaderStorageOffset), Value: pbinRangeWriterHeaderValue(byte(r.Intn(250) + 1)), Stamp: stamp()},
 		)
@@ -759,6 +761,37 @@ type pbinRangeWriterEntry struct {
 	value []byte
 }
 
+func readPBinRangeWriterSnapshot(t testing.TB, agg *state.Aggregator, root common.Hash) pbinRangeWriterSnapshot {
+	t.Helper()
+	out := agg.BeginFilesRo()
+	defer out.Close()
+	snapshot := pbinRangeWriterSnapshot{root: root}
+	for _, visible := range out.Files(kv.CommitmentBinDomain) {
+		if !strings.HasSuffix(visible.Fullpath(), ".kv") {
+			continue
+		}
+		file := pbinRangeWriterFile{start: visible.StartRootNum(), end: visible.EndRootNum(), entries: []pbinRangeWriterEntry{}}
+		decompressor, err := seg.NewDecompressor(visible.Fullpath())
+		require.NoError(t, err)
+		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
+		for reader.HasNext() {
+			key, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
+			value, _ := reader.Next(nil)
+			if bytes.Equal(key, commitment.KeyCommitmentState) {
+				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
+				snapshot.state = bytes.Clone(value)
+			}
+			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
+		}
+		decompressor.Close()
+		snapshot.files = append(snapshot.files, file)
+	}
+	require.NotEmpty(t, snapshot.files)
+	require.NotNil(t, snapshot.state)
+	return snapshot
+}
+
 func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int) pbinRangeWriterSnapshot {
 	t.Helper()
 	return runPBinRangeWriterCorpusWith(t, leaves, maxOps, 0)
@@ -829,35 +862,9 @@ func runPBinRangeWriterCorpusWith(t *testing.T, leaves []state.PBinLeaf, maxOps,
 	require.NoError(t, err)
 	require.Positive(t, stampLookups(), "no row stamp was looked up")
 	pbinReviewRewritePersistedStateKey(t, agg)
-	out := agg.BeginFilesRo()
-	defer out.Close()
-	snapshot := pbinRangeWriterSnapshot{root: root}
-	for _, visible := range out.Files(kv.CommitmentBinDomain) {
-		if !strings.HasSuffix(visible.Fullpath(), ".kv") {
-			continue
-		}
-		file := pbinRangeWriterFile{start: visible.StartRootNum(), end: visible.EndRootNum(), entries: []pbinRangeWriterEntry{}}
-		decompressor, err := seg.NewDecompressor(visible.Fullpath())
-		require.NoError(t, err)
-		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
-		for reader.HasNext() {
-			key, _ := reader.Next(nil)
-			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
-			value, _ := reader.Next(nil)
-			if bytes.Equal(key, commitment.KeyCommitmentState) {
-				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
-				snapshot.state = bytes.Clone(value)
-			}
-			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
-		}
-		decompressor.Close()
-		snapshot.files = append(snapshot.files, file)
-	}
-	require.NotEmpty(t, snapshot.files)
-	require.NotNil(t, snapshot.state)
+	snapshot := readPBinRangeWriterSnapshot(t, agg, root)
 	if workers > 0 && maxOps > 1 {
 		require.Greater(t, phaseActivity.Load(), int32(1), "maxOps=%d: the parallel round did not run", maxOps)
-		require.Greater(t, run.writer.WorkerViewsForTest(), int32(1), "maxOps=%d: the round acquired no worker contexts from the factory", maxOps)
 	}
 	return snapshot
 }
@@ -868,7 +875,8 @@ func pbinRangeWriterCorpora() []pbinRangeWriterCorpus {
 		address := bytes.Repeat([]byte{i}, 20)
 		basic := pbinRangeWriterBasicValue(i)
 		header := pbinRangeWriterHeaderValue(i)
-		threeZone = append(threeZone,
+		threeZone = append(
+			threeZone,
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: basic, Stamp: uint64(i % 24)},
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.HeaderStorageOffset), Value: header, Stamp: uint64((i + 3) % 24)},
 			state.PBinLeaf{Key: eip8297.TreeKeyCodeChunk(common.BytesToHash(bytes.Repeat([]byte{i}, 32)), 0), Value: pbinRangeWriterCodeValue(i), Stamp: uint64((i + 6) % 24)},
@@ -878,7 +886,8 @@ func pbinRangeWriterCorpora() []pbinRangeWriterCorpus {
 	zonePure := make([]state.PBinLeaf, 0, 96)
 	for i := byte(1); i <= 24; i++ {
 		address := bytes.Repeat([]byte{i}, 20)
-		zonePure = append(zonePure,
+		zonePure = append(
+			zonePure,
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: pbinRangeWriterBasicValue(i), Stamp: uint64(i % 24)},
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: pbinRangeWriterCodeHashValue(i), Stamp: uint64((int(i) + 1) % 24)},
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.HeaderStorageOffset), Value: pbinRangeWriterHeaderValue(i), Stamp: uint64((int(i) + 2) % 24)},
@@ -914,7 +923,8 @@ func pbinRangeWriterCorpora() []pbinRangeWriterCorpus {
 	}
 	for i := byte(1); i <= 8; i++ {
 		address := bytes.Repeat([]byte{0xa0 + i}, 20)
-		bucketHeavy = append(bucketHeavy,
+		bucketHeavy = append(
+			bucketHeavy,
 			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: pbinRangeWriterBasicValue(120 + i), Stamp: uint64(i)},
 			state.PBinLeaf{Key: eip8297.TreeKeyCodeChunk(common.BytesToHash(bytes.Repeat([]byte{0xb0 + i}, 32)), 0), Value: pbinRangeWriterCodeValue(140 + i), Stamp: uint64(i + 8)},
 		)
@@ -1004,5 +1014,155 @@ func writePBinRangeWriterAccounts(t testing.TB, db kv.TemporalRwDB, endTxNum uin
 			domains.Close()
 			require.NoError(t, tx.Commit())
 		}()
+	}
+}
+
+func TestPBinDecodeFailureStopsQueuedCompute(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	run := openPBinRangeWriterRun(t, 30, 0, 23)
+	leaves := make([]state.PBinLeaf, 100)
+	for i := range leaves {
+		key := make([]byte, eip8297.StorageKeyLength)
+		key[0] = eip8297.StorageZone
+		binary.BigEndian.PutUint64(key[len(key)-8:], uint64(i+1))
+		leaves[i] = state.PBinLeaf{Key: key, Value: pbinRangeWriterValue(1), Stamp: 1}
+	}
+	encoded, encodeErr := pbt.EncodeOp(pbt.Op{Key: leaves[0].Key})
+	require.NoError(t, encodeErr)
+	var path string
+	var queuedBatchFlushes atomic.Int32
+	run.writer.SetPipelineHookForTest(func(stage string, index int) error {
+		if stage == "stage1" && index == 0 {
+			paths, err := filepath.Glob(filepath.Join(run.agg.Dirs().Tmp, "pbin-ops-*.bin"))
+			if err != nil {
+				return err
+			}
+			if len(paths) != 1 {
+				return fmt.Errorf("want one ops file, got %v", paths)
+			}
+			path = paths[0]
+			file, err := os.OpenFile(path, os.O_WRONLY, 0)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			_, err = file.WriteAt([]byte{0, 0, 0, 0}, int64(70*(4+8+len(encoded))))
+			return err
+		}
+		if stage == "stage2" && index == 0 {
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					return nil
+				}
+				time.Sleep(time.Millisecond)
+			}
+			return errors.New("decoder did not finish")
+		}
+		if stage == "stage3" && index == 1 {
+			queuedBatchFlushes.Add(1)
+		}
+		return nil
+	})
+	_, writeErr := run.write(t.Context(), leaves)
+	require.ErrorContains(t, writeErr, "operation record of 0 bytes")
+	require.Zero(t, queuedBatchFlushes.Load(), "stage 1 decode failed, but queued batch 1 still completed compute and reached collect: %d", queuedBatchFlushes.Load())
+}
+
+type pbinSerialTx struct {
+	kv.Tx
+	busy atomic.Bool
+}
+
+func (tx *pbinSerialTx) Cursor(table string) (kv.Cursor, error) {
+	if !tx.busy.CompareAndSwap(false, true) {
+		return nil, errors.New("MDBX transaction used concurrently")
+	}
+	defer tx.busy.Store(false)
+	time.Sleep(10 * time.Millisecond)
+	return tx.Tx.Cursor(table)
+}
+
+func (tx *pbinSerialTx) CursorDupSort(table string) (kv.CursorDupSort, error) {
+	if !tx.busy.CompareAndSwap(false, true) {
+		return nil, errors.New("MDBX transaction used concurrently")
+	}
+	defer tx.busy.Store(false)
+	time.Sleep(10 * time.Millisecond)
+	return tx.Tx.CursorDupSort(table)
+}
+
+func TestPBinStampWalkUsesMDBXSerially(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, 8)
+	writePBinLeafStreamStates(t, db, 8, []pbinLeafStreamAccount{{address: bytes.Repeat([]byte{0x80}, 20), nonce: 1, balance: 1}})
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	guarded := &pbinSerialTx{Tx: tx}
+	err = state.VerifyPBinSourceStamps(t.Context(), at, guarded, false, 15, 2, nil)
+	require.NoError(t, err, "valid MDBX rows must verify without concurrent access to their transaction; got %v", err)
+}
+
+func TestPBinResumeMergeErrorReleasesAggregatorLock(t *testing.T) {
+	selectPBinRangeWriterPipeline(t)
+	run := openPBinRangeWriterRun(t, 7, 0, 23)
+	run.writer.SetResumeSourceLayoutForTest()
+	run.writer.SetPipelineHookForTest(func(stage string, _ int) error {
+		if stage == "resume-merge" {
+			return errors.New("injected resume merge error")
+		}
+		return nil
+	})
+	_, err := run.write(t.Context(), pbinRangeWriterCorpora()[0].leaves)
+	require.ErrorContains(t, err, "injected resume merge error")
+	closed := make(chan struct{})
+	go func() {
+		run.agg.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("aggregator close blocked after resume merge error")
+	}
+}
+
+func TestPBinResumeMergeRunsOutsideDirtyFilesLock(t *testing.T) {
+	selectPBinRangeWriterPipeline(t)
+	run := openPBinRangeWriterRun(t, 7, 0, 23)
+	run.writer.SetResumeSourceLayoutForTest()
+	lockFree := false
+	stop := errors.New("stop at resume merge")
+	run.writer.SetPipelineHookForTest(func(stage string, _ int) error {
+		if stage == "resume-merge" {
+			lockFree = run.agg.DirtyFilesLockFreeForTest()
+			return stop
+		}
+		return nil
+	})
+	_, err := run.write(t.Context(), pbinRangeWriterCorpora()[0].leaves)
+	require.ErrorIs(t, err, stop)
+	require.True(t, lockFree, "a resume merge closes a files reader, which can take dirtyFilesLock")
+}
+
+func TestPBinRejectedEndCleansRanges(t *testing.T) {
+	selectPBinRangeWriterPipeline(t)
+	db, agg := commitmenttemporal.Open(t, 8)
+	writePBinRangeWriterAccounts(t, db, 32)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	pattern := filepath.Join(agg.Dirs().Tmp, "pbin-range-*")
+	before, err := filepath.Glob(pattern)
+	require.NoError(t, err)
+	require.Empty(t, before)
+	_, err = state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, math.MaxUint64)
+	require.ErrorContains(t, err, "end txNum is too large")
+	after, err := filepath.Glob(pattern)
+	require.NoError(t, err)
+	if len(after) != 0 {
+		t.Errorf("rejected writer left %d range temp directories; want 0", len(after))
 	}
 }

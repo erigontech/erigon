@@ -14,6 +14,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
@@ -43,6 +45,99 @@ func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
 
 	top = heap.Pop(&h).(*CursorItem)
 	assert.Equal(t, FILE_CURSOR, top.t, "FILE cursor must have lowest priority")
+}
+
+func TestCommitmentDomain_DebugRangeLatestOffsetsSkipPrefix(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	for keyNum := range 31 {
+		path := eip8297.Bitpath{BitLen: 16}
+		prefix := uint64(keyNum%15 + 1)
+		value := (prefix << 12) | uint64(keyNum)
+		for bit := int16(0); bit < path.BitLen; bit++ {
+			path.SetBitAt(bit, value>>uint(path.BitLen-1-bit)&1)
+		}
+		key, keyErr := pbt.EncodeRowKey(&path)
+		require.NoError(t, keyErr)
+		require.NoError(t, writer.PutWithPrev(key, []byte{byte(keyNum + 100)}, uint64(keyNum+1), nil))
+	}
+	require.NoError(t, writer.Flush(ctx, tx))
+	writer.Close()
+	domainRoTx.Close()
+	collateAndMerge(t, tx, d, 160)
+	require.NoError(t, tx.Commit())
+
+	readTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer readTx.Rollback()
+	domainRoTx = d.beginForTests()
+	defer domainRoTx.Close()
+	all, err := domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	var keys [][]byte
+	for all.HasNext() {
+		key, _, nextErr := all.Next()
+		require.NoError(t, nextErr)
+		keys = append(keys, key)
+	}
+	all.Close()
+	require.Greater(t, len(keys), 1)
+	firstPath, err := eip8297.DecodeBitPath(keys[0])
+	require.NoError(t, err)
+	starts := [][]byte{keys[0]}
+	for _, key := range keys[1:] {
+		path, pathErr := eip8297.DecodeBitPath(key)
+		require.NoError(t, pathErr)
+		if path.Words[0]>>60 != firstPath.Words[0]>>60 {
+			starts = append(starts, key)
+			break
+		}
+	}
+	require.Len(t, starts, 2)
+	prefixOffsets, fileEnds, _, err := domainRoTx.DebugRangeLatestVerifyData(readTx, pbt.GlobalRootKey(), 4)
+	require.NoError(t, err)
+	offsets := make([][]uint64, len(starts))
+	for i, start := range starts {
+		offsets[i] = make([]uint64, len(fileEnds))
+		copy(offsets[i], fileEnds)
+		path, pathErr := eip8297.DecodeBitPath(start)
+		require.NoError(t, pathErr)
+		for fileIndex, offset := range prefixOffsets[path.Words[0]>>60] {
+			if offset != ^uint64(0) {
+				offsets[i][fileIndex] = offset
+			}
+		}
+	}
+	require.Len(t, offsets, len(starts))
+	var skipped bool
+	for fileIndex := range offsets[0] {
+		if offsets[1][fileIndex] > offsets[0][fileIndex] {
+			skipped = true
+			break
+		}
+	}
+	require.True(t, skipped, "later task must start after the earlier task: offsets=%v", offsets)
+	it, err := domainRoTx.DebugRangeLatestWithOffsets(readTx, starts[1], nil, kv.Unlim, offsets[1])
+	require.NoError(t, err)
+	defer it.Close()
+	require.True(t, it.HasNext())
+	first, _, err := it.Next()
+	require.NoError(t, err)
+	require.Equal(t, starts[1], first)
+	endOffsets := make([]uint64, len(offsets[0]))
+	for fileIndex := range endOffsets {
+		endOffsets[fileIndex] = uint64(domainRoTx.reusableReader(fileIndex).DataLen())
+	}
+	empty, err := domainRoTx.DebugRangeLatestWithOffsets(readTx, starts[0], nil, kv.Unlim, endOffsets)
+	require.NoError(t, err)
+	defer empty.Close()
+	require.False(t, empty.HasNext(), "range reader rescanned a file after its end offset")
 }
 
 func TestCursorHeapPriority_MaxUint64TieBreak(t *testing.T) {

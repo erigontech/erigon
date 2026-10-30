@@ -1349,10 +1349,6 @@ type rebuiltCommitment struct {
 	LogPrefix     string
 }
 
-const (
-	pbinRebuildOpCollectorBufferBudget = 64 * datasize.MB
-)
-
 type pbinPartition [2]byte
 
 func pbinPartitionOf(key []byte) pbinPartition {
@@ -1400,26 +1396,24 @@ func pbinSameMergeGroup(a, b pbt.Op) bool {
 	return len(group) != 0 && bytes.Equal(group, pbt.MergeGroupKey(b))
 }
 
+func clonePBinOps(ops []pbt.Op) []pbt.Op {
+	cloned := make([]pbt.Op, len(ops))
+	for i := range ops {
+		cloned[i] = ops[i]
+		cloned[i].Key = bytes.Clone(ops[i].Key)
+	}
+	return cloned
+}
+
+func clonePBinKeys(keys [][]byte) [][]byte {
+	cloned := make([][]byte, len(keys))
+	for i := range keys {
+		cloned[i] = bytes.Clone(keys[i])
+	}
+	return cloned
+}
+
 func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error, stream func(func(pbt.Op, uint64) error) error) error {
-	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root()).SortAndFlushInBackground(true)
-	defer collector.Close()
-	var stampBuf [8]byte
-	emit := func(op pbt.Op, stamp uint64) error {
-		key := batchOperationKey(op)
-		encoded, err := pbt.EncodeOp(op)
-		if err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint64(stampBuf[:], stamp)
-		return collector.Collect(key, append(stampBuf[:], encoded...))
-	}
-	if err := stream(emit); err != nil {
-		return err
-	}
-	if err := collector.Flush(); err != nil {
-		return err
-	}
-	var previousOpKey, previousOpValue []byte
 	sortedFile, err := os.CreateTemp(tmpDir, "pbin-ops-*.bin")
 	if err != nil {
 		return err
@@ -1430,40 +1424,51 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		_ = dir.RemoveFile(sortedPath)
 	}()
 	sortedWriter := bufio.NewWriter(sortedFile)
+	var stampBuf [8]byte
 	var lengthBuf [4]byte
 	var partitions []pbinPartitionRange
 	var offset int64
-	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.Equal(previousOpKey, key) {
-			if !bytes.Equal(previousOpValue, value) {
-				return fmt.Errorf("commitment rebuild: duplicate operation key %x", key)
-			}
-			return nil
+	var previousKey []byte
+	writeProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT ETL progress", Phase: "pbin-ops file write", TempDir: tmpDir})
+	writeProgressBatch := &pbtProgressBatch{progress: writeProgress, threshold: 4096}
+	defer writeProgressBatch.Done()
+	emit := func(op pbt.Op, stamp uint64) error {
+		key := batchOperationKey(op)
+		if previousKey != nil && bytes.Compare(key, previousKey) <= 0 {
+			return fmt.Errorf("commitment rebuild: operation stream is not strictly ordered: key %x after %x", key, previousKey)
 		}
-		previousOpKey = bytes.Clone(key)
-		previousOpValue = bytes.Clone(value)
+		previousKey = bytes.Clone(key)
+		encoded, err := pbt.EncodeOp(op)
+		if err != nil {
+			return err
+		}
+		binary.BigEndian.PutUint64(stampBuf[:], stamp)
 		if partition := pbinPartitionOf(key); len(partitions) == 0 || partitions[len(partitions)-1].partition != partition {
 			partitions = append(partitions, pbinPartitionRange{partition: partition, offset: offset})
 		}
-		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(value)))
+		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(stampBuf)+len(encoded)))
 		if _, err := sortedWriter.Write(lengthBuf[:]); err != nil {
 			return err
 		}
-		if _, err := sortedWriter.Write(value); err != nil {
+		if _, err := sortedWriter.Write(stampBuf[:]); err != nil {
 			return err
 		}
-		size := int64(len(lengthBuf) + len(value))
+		if _, err := sortedWriter.Write(encoded); err != nil {
+			return err
+		}
+		size := int64(len(lengthBuf) + len(stampBuf) + len(encoded))
 		offset += size
 		partitions[len(partitions)-1].size += size
 		partitions[len(partitions)-1].count++
+		writeProgressBatch.Add(1)
 		return nil
-	}, etl.TransformArgs{}); err != nil {
+	}
+	if err := stream(emit); err != nil {
 		return err
 	}
 	if err := sortedWriter.Flush(); err != nil {
 		return err
 	}
-	collector.Close()
 	if err := sortedFile.Close(); err != nil {
 		return err
 	}
@@ -1523,7 +1528,7 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 			}
 		}
 		live = next
-		if err := visit(batch, stamps, lookahead, len(live) == 0); err != nil {
+		if err := visit(clonePBinOps(batch), append([]uint64(nil), stamps...), clonePBinKeys(lookahead), len(live) == 0); err != nil {
 			return err
 		}
 	}

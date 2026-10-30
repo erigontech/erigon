@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,27 @@ func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]
 	return batches, err
 }
 
+func pbinSortedOps(ops []pbt.Op) []pbt.Op {
+	sorted := append([]pbt.Op(nil), ops...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return bytes.Compare(batchOperationKey(sorted[i]), batchOperationKey(sorted[j])) < 0
+	})
+	return sorted
+}
+
+func TestPBinRebuildBatchesRejectUnorderedStream(t *testing.T) {
+	addressA := bytes.Repeat([]byte{0x01}, 20)
+	addressB := bytes.Repeat([]byte{0x02}, 20)
+	ops := []pbt.Op{
+		{Key: eip8297.TreeKeyAccount(addressB, eip8297.BasicDataLeafKey), Value: [32]byte{1}},
+		{Key: eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey), Value: [32]byte{2}},
+	}
+	ops = pbinSortedOps(ops)
+	ops[0], ops[1] = ops[1], ops[0]
+	_, err := pbinRebuildBatches(ops, t.TempDir(), 2, 1<<20)
+	require.ErrorContains(t, err, "operation stream is not strictly ordered")
+}
+
 func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {
 	addressA := bytes.Repeat([]byte{0x01}, 20)
 	addressB := bytes.Repeat([]byte{0x02}, 20)
@@ -54,6 +76,7 @@ func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {
 		{Key: eip8297.TreeKeyAccount(addressB, eip8297.BasicDataLeafKey), Value: [32]byte{4}},
 	}
 
+	ops = pbinSortedOps(ops)
 	batches, err := pbinRebuildBatches(ops, t.TempDir(), 2, 1<<20)
 	require.NoError(t, err)
 	lastInPartition := make(map[pbinPartition][]byte)
@@ -85,6 +108,7 @@ func TestPBinRebuildBatchesKeepMergeGroupsAcrossPartitions(t *testing.T) {
 			return nil
 		}))
 	}
+	ops = pbinSortedOps(ops)
 	groups := make(map[string]int)
 	partitions := make(map[pbinPartition]struct{})
 	for _, op := range ops {
@@ -149,6 +173,7 @@ func TestPBinRebuildBatchStreamPreservesOperations(t *testing.T) {
 		{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: [32]byte{2}},
 		{Key: eip8297.TreeKeyStorage(address, bytes.Repeat([]byte{0x01}, 32)), Value: [32]byte{3}},
 	}
+	ops = pbinSortedOps(ops)
 	want, err := pbinRebuildBatches(ops, t.TempDir(), 10, 1<<20)
 	require.NoError(t, err)
 	require.Len(t, want, 1)
