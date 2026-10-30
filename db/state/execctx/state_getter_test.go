@@ -460,6 +460,15 @@ func TestCachedTemporalTxStateGetterRetriesAfterCachePublication(t *testing.T) {
 		require.Empty(t, got)
 	}
 	require.Equal(t, 2, tx.reads, "the rebound view must also admit fills")
+
+	stateCache.Applier().Publish(committedVersion, committedVersion+1, nil)
+	cached, hit := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, hit)
+	require.Equal(t, value, cached)
+	got, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, 2, tx.reads, "an unchanged entry must stay usable after another forward publication")
 }
 
 func TestCachedTemporalTxStateGetterWithoutCacheReadsEveryTime(t *testing.T) {

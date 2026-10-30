@@ -150,8 +150,9 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 
 func (g *TemporalTxStateGetter) cacheReadView() cache.ReadView {
 	if g.view.NeedsFrontier() {
-		// Retry a publication gap without changing the snapshot or its unwind epoch.
-		return g.view.WithFrontier(g.frontier)
+		// Retain the binding across forward publications without changing
+		// the snapshot or its unwind epoch.
+		g.view = g.view.WithFrontier(g.frontier)
 	}
 	return g.view
 }
