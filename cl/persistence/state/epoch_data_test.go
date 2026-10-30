@@ -36,12 +36,12 @@ func TestEpochData(t *testing.T) {
 		HistoricalRootsLength:       345,
 	}
 	var b bytes.Buffer
-	if err := e.WriteTo(&b); err != nil {
+	if err := e.Serialize(&b); err != nil {
 		t.Fatal(err)
 	}
 
 	e2 := &EpochData{}
-	if err := e2.ReadFrom(&b); err != nil {
+	if err := e2.Deserialize(&b); err != nil {
 		t.Fatal(err)
 	}
 
