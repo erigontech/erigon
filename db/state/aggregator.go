@@ -1089,7 +1089,7 @@ func (a *Aggregator) collateBatch(ctx context.Context, db kv.TemporalRoDB, from,
 		}
 		g.Go(func() error {
 			return db.View(gctx, func(tx kv.Tx) (err error) {
-				batch.values[id], err = d.collateValuesBatch(gctx, from, to, tx)
+				batch.values[id], err = d.collateValuesBatch(ctx, from, to, tx)
 				return err
 			})
 		})
@@ -1100,6 +1100,22 @@ func (a *Aggregator) collateBatch(ctx context.Context, db kv.TemporalRoDB, from,
 	}
 	a.logger.Debug("[snapshots] batch collated", "fromStep", from, "toStep", to)
 	return batch, nil
+}
+
+func (a *Aggregator) nextCollationBatch(ctx context.Context, db kv.TemporalRoDB, step, limit kv.Step, finalityCtx kv.FinalityContext, batch *collationBatch, batching bool) (*collationBatch, bool, error) {
+	if !batching || batch.covers(step) {
+		return batch, batching, nil
+	}
+	batch.Close()
+	next, err := a.collateBatch(ctx, db, step, limit, finalityCtx)
+	if err == nil {
+		return next, true, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+		return nil, false, err
+	}
+	a.logger.Warn("[snapshots] batch collation failed, building step without batch", "step", step, "err", err)
+	return nil, false, nil
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, batch *collationBatch) error {
@@ -1312,18 +1328,11 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 		defer func() { batch.Close() }()
 		batching := true
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if batching && !batch.covers(step) {
-				batch.Close()
-				var err error
-				if batch, err = a.collateBatch(ctx, db, step, toStep, finalityCtx); err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-						panic(err)
-					}
-					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-					batching = false
-				}
+			var err error
+			if batch, batching, err = a.nextCollationBatch(ctx, db, step, toStep, finalityCtx, batch, batching); err != nil {
+				panic(err)
 			}
-			err := a.buildFiles(ctx, db, step, finalityCtx, nil, batch)
+			err = a.buildFiles(ctx, db, step, finalityCtx, nil, batch)
 			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 				a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
 				batch.Close()
@@ -1337,7 +1346,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					panic(err)
 				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] BuildFiles2", "err", err)
 				panic(err)
 			}
 			a.onFilesChange(nil)
@@ -2448,19 +2457,12 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		defer func() { batch.Close() }()
 		batching := true
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if batching && !batch.covers(step) {
-				batch.Close()
-				var err error
-				if batch, err = a.collateBatch(a.ctx, db, step, lastInDB, finalityCtx); err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-						close(fin)
-						return
-					}
-					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-					batching = false
-				}
+			var err error
+			if batch, batching, err = a.nextCollationBatch(a.ctx, db, step, lastInDB, finalityCtx, batch, batching); err != nil {
+				close(fin)
+				return
 			}
-			err := a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch)
+			err = a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch)
 			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 				a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
 				batch.Close()

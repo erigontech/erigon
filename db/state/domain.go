@@ -1045,6 +1045,13 @@ func (d *Domain) collateWithValues(ctx context.Context, step kv.Step, txFrom, tx
 	}()
 
 	coll.valuesPath = d.kvNewFilePath(step, step+1)
+	if values == nil && !d.LargeValues {
+		comps, err := d.collateValuesBatch(ctx, step, step+1, roTx)
+		if err != nil {
+			return coll, err
+		}
+		values = comps[0]
+	}
 	if values != nil {
 		coll.valuesComp = values
 		closeCollation = false
@@ -1062,61 +1069,24 @@ func (d *Domain) collateWithValues(ctx context.Context, step kv.Step, txFrom, tx
 
 	stepVal := ^uint64(step)
 
-	if d.LargeValues {
-		valsCursor, err := roTx.Cursor(d.ValuesTable)
+	valsCursor, err := roTx.Cursor(d.ValuesTable)
+	if err != nil {
+		return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+	}
+	defer valsCursor.Close()
+	for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
 		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+			return coll, err
 		}
-		defer valsCursor.Close()
-		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
-			if err != nil {
-				return coll, err
-			}
-			if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
-				continue
-			}
-			bareKey := k[:len(k)-8]
-			if _, err = comp.Write(bareKey); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
-			}
-			if _, err = comp.Write(v); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
-			}
+		if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
+			continue
 		}
-	} else {
-		keysCursor, err := roTx.CursorDupSort(d.ValuesTable)
-		if err != nil {
-			return Collation{}, fmt.Errorf("create %s keys cursorDupsort: %w", d.FilenameBase, err)
+		bareKey := k[:len(k)-8]
+		if _, err = comp.Write(bareKey); err != nil {
+			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
 		}
-		defer keysCursor.Close()
-		valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
-		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
-		}
-		defer valsCursor.Close()
-		stepPrefix := make([]byte, 8)
-		binary.BigEndian.PutUint64(stepPrefix, stepVal)
-		for k, v, err := keysCursor.First(); k != nil; k, v, err = keysCursor.NextNoDup() {
-			if err != nil {
-				return coll, err
-			}
-			if binary.BigEndian.Uint64(v[:8]) < stepVal {
-				if v, err = valsCursor.SeekBothRange(k, stepPrefix); err != nil {
-					return coll, err
-				}
-				if v == nil {
-					continue
-				}
-			}
-			if binary.BigEndian.Uint64(v[:8]) != stepVal {
-				continue
-			}
-			if _, err = comp.Write(k); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
-			}
-			if _, err = comp.Write(v[8:]); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
-			}
+		if _, err = comp.Write(v); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
 		}
 	}
 
@@ -1178,17 +1148,25 @@ func (d *Domain) collateValuesBatch(ctx context.Context, stepFrom, stepTo kv.Ste
 		if stepVal > oldest {
 			continue
 		}
-		dups, err := keysCursor.CountDuplicates()
-		if err != nil {
-			return comps, err
-		}
-		if dups == 1 {
-			if stepVal >= newest {
-				if err := write(k, v); err != nil {
-					return comps, err
-				}
+		if stepVal == oldest {
+			if err := write(k, v); err != nil {
+				return comps, err
 			}
 			continue
+		}
+		if newest != oldest {
+			dups, err := keysCursor.CountDuplicates()
+			if err != nil {
+				return comps, err
+			}
+			if dups == 1 {
+				if stepVal >= newest {
+					if err := write(k, v); err != nil {
+						return comps, err
+					}
+				}
+				continue
+			}
 		}
 		if v, err = valsCursor.SeekBothRange(k, newestPrefix); err != nil {
 			return comps, err
@@ -1205,6 +1183,9 @@ func (d *Domain) collateValuesBatch(ctx context.Context, stepFrom, stepTo kv.Ste
 					return comps, err
 				}
 				written, lastStepVal = true, stepVal
+			}
+			if stepVal == oldest {
+				break
 			}
 			if _, v, err = valsCursor.NextDup(); err != nil {
 				return comps, err

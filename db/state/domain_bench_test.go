@@ -22,19 +22,32 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-func BenchmarkDomain_CollateOldestStepOfBacklog(b *testing.B) {
-	const stepSize, steps, keys = 16, 256, 4000
+func benchmarkDomainCollateStep(b *testing.B, steps int, step kv.Step) {
+	const stepSize, keys = 16, 4000
 	db, d := testDbAndDomainOfStep(b, statecfg.Schema.StorageDomain, stepSize, log.New())
 	writeDupSortStepBacklog(b, db, d, stepSize, steps, keys, 11)
 	roTx, err := db.BeginRo(b.Context())
 	require.NoError(b, err)
 	defer roTx.Rollback()
 	for b.Loop() {
-		coll, err := d.collate(b.Context(), 0, 0, stepSize, roTx)
+		coll, err := d.collate(b.Context(), step, uint64(step)*stepSize, uint64(step+1)*stepSize, roTx)
 		require.NoError(b, err)
 		coll.Close()
 	}
+}
+
+func BenchmarkDomain_CollateSingleStep(b *testing.B) {
+	benchmarkDomainCollateStep(b, 1, 0)
+}
+
+func BenchmarkDomain_CollateOldestStepOfBacklog(b *testing.B) {
+	benchmarkDomainCollateStep(b, 256, 0)
+}
+
+func BenchmarkDomain_CollateNewestStepOfBacklog(b *testing.B) {
+	benchmarkDomainCollateStep(b, 256, 255)
 }

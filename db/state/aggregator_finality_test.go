@@ -223,6 +223,19 @@ func TestBuildFilesInBackgroundStopsWhenBatchCollationIsCanceled(t *testing.T) {
 	require.Empty(t, warnings.String())
 }
 
+func TestCollateBatchCompressorsOutliveTheCollation(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 16)
+	writeDupSortStepBacklog(t, db, agg.d[kv.AccountsDomain], 16, 4, 8, 3)
+
+	batch, err := agg.collateBatch(t.Context(), asTemporalRoDB(db), 0, 4, unboundedFinalityCtx)
+	require.NoError(t, err)
+	defer batch.Close()
+	comp := batch.values[kv.AccountsDomain][0]
+	for range 1024 {
+		require.NoError(t, comp.AddUncompressedWord([]byte("word")))
+	}
+}
+
 func TestCollateBatchCoversAtMostMaxSteps(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 16)
 	writeDupSortStepBacklog(t, db, agg.d[kv.AccountsDomain], 16, 12, 8, 5)

@@ -1185,6 +1185,23 @@ func TestDomain_CollationBatchMatchesPerStepCollation(t *testing.T) {
 	}
 }
 
+func TestDomain_CollateClosesHistoryWhenValuesCollationFails(t *testing.T) {
+	const stepSize = 16
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
+	writeDupSortStepBacklog(t, db, d, stepSize, 1, 8, 3)
+	obstacle := filepath.Join(d.dirs.Tmp, filepath.Base(d.kvNewFilePath(0, 1))+".idt")
+	require.NoError(t, os.Mkdir(obstacle, 0o755))
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	_, err = d.collate(t.Context(), 0, 0, stepSize, roTx)
+	require.Error(t, err)
+	leftover, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Equal(t, []string{obstacle}, leftover)
+}
+
 func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomain(t, log.New())
