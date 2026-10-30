@@ -126,12 +126,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		return nil
 	}
 	f.lastDumpedRoot = common.Hash{}
-	defer func() {
-		if err == nil {
-			f.lastDumpedRoot = blockRoot
-			f.lastDumpedSlot = slot
-		}
-	}()
+	done := false
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
@@ -145,6 +140,10 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	}
 	defer func() {
 		err = errors.Join(err, dumpedFile.Close())
+		if done && err == nil {
+			f.lastDumpedRoot = blockRoot
+			f.lastDumpedSlot = slot
+		}
 	}()
 
 	sw := snappypool.Writer(dumpedFile)
@@ -186,6 +185,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		return err
 	}
 
+	done = true
 	return
 }
 
