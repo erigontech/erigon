@@ -304,3 +304,18 @@ func mutationSurvey(t *testing.T, itemsPerRun []uint64) {
 	}
 	require.NotZero(t, accepted, "nothing was accepted, the survey proves nothing")
 }
+
+func TestWriterKeepsTempFilesInTmpDir(t *testing.T) {
+	tmpDir := filepath.Join(t.TempDir(), "tmp")
+	require.NoError(t, os.Mkdir(tmpDir, 0o755))
+	w, err := NewWriter(filepath.Join(t.TempDir(), "idx"), tmpDir, 2, 1, 2, 10)
+	require.NoError(t, err)
+	defer w.Close()
+
+	parent, err := os.ReadDir(filepath.Dir(tmpDir))
+	require.NoError(t, err)
+	require.Len(t, parent, 1)
+	inTmp, err := os.ReadDir(tmpDir)
+	require.NoError(t, err)
+	require.Len(t, inTmp, 2)
+}

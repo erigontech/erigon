@@ -323,6 +323,10 @@ func (ht *HistoryRoTx) checkValueAccessorOfFile(ctx context.Context, efItem visi
 			if err != nil {
 				return err
 			}
+			if value%pageSize == 0 && !histReader.HasNext() {
+				return fmt.Errorf("[integrity] .vi of %s: key %x at txNum %d is on a page past the end of .v",
+					hist.FileName(), common.Shorten(key, 8), txNum)
+			}
 			got, ok := vItem.src.vOffset(keyOrdinal, rank, txNum, key)
 			if !ok {
 				return fmt.Errorf("[integrity] .vi of %s: no offset for key %x at txNum %d (run %d, item %d)",

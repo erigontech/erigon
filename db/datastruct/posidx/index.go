@@ -50,6 +50,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -277,13 +278,14 @@ func NewWriter(path, tmpDir string, pageSize, runCount, itemCount, maxValue uint
 	if runCount == 0 { // nothing to address: header only
 		return w, nil
 	}
+	tmpPrefix := filepath.Join(tmpDir, filepath.Base(path))
 	var err error
-	if w.startsB, err = eliasfano32.NewEliasFanoOffHeap(runCount, itemCount, tmpDir); err != nil {
+	if w.startsB, err = eliasfano32.NewEliasFanoOffHeap(runCount, itemCount, tmpPrefix); err != nil {
 		w.Close()
 		return nil, err
 	}
 	w.pageCount = (itemCount + pageSize - 1) / pageSize
-	if w.pagesB, err = eliasfano32.NewEliasFanoOffHeap(w.pageCount, max(maxValue, 1), tmpDir); err != nil {
+	if w.pagesB, err = eliasfano32.NewEliasFanoOffHeap(w.pageCount, max(maxValue, 1), tmpPrefix); err != nil {
 		w.Close()
 		return nil, err
 	}
