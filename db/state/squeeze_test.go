@@ -400,7 +400,6 @@ func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.A
 	require.NoError(t, err)
 	defer db.Close()
 
-	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()

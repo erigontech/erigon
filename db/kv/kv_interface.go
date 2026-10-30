@@ -564,6 +564,9 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
 
+	// IndexJoin - return iterator over the timestamps that match query `q`, see IndexQuery
+	IndexJoin(q IndexQuery) (timestamps stream.U64, err error)
+
 	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
 	// `ok == true && v != nil && len(v) == 0` means key-creation even
 	HistorySeek(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)

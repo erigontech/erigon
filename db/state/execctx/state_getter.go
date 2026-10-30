@@ -29,11 +29,12 @@ import (
 const maxLentCodeBuf = 256 * 1024
 
 type stateGetter struct {
-	sd      *SharedDomains
-	tx      kv.TemporalTx
-	view    cache.ReadView
-	m       kv.GetLatestMetrics
-	codeBuf []byte
+	sd         *SharedDomains
+	tx         kv.TemporalTx
+	view       cache.ReadView
+	m          kv.GetLatestMetrics
+	codeBuf    *[]byte
+	ownCodeBuf []byte
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -48,8 +49,8 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
-	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, *g.codeBuf)
+	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
 	return code, ok, err
 }
 

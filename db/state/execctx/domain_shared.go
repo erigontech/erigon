@@ -612,7 +612,11 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 	if !dbg.KVReadLevelledMetrics {
 		metrics = nil
 	}
-	return &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx)}
+	g := &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx), codeBuf: opts.CodeBuf()}
+	if g.codeBuf == nil {
+		g.codeBuf = &g.ownCodeBuf
+	}
+	return g
 }
 
 // MergeMetrics hands a boundary producer's accumulator to three sinks: the

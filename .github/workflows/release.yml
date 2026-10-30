@@ -410,6 +410,14 @@ jobs:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
 
+      - name: Upload goroutine stacks
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: goroutine-stacks-${{ matrix.artifact }}
+          path: ${{ github.workspace }}/erigon-qa/test_system/goroutine-stacks.txt
+          if-no-files-found: ignore
+
       - name: Cleanup working directory
         run: rm -drfv *
 

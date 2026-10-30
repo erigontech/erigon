@@ -134,14 +134,66 @@ func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 // the caller lends, the way seg's Getter does.
 type codeBufTx struct {
 	kv.TemporalTx
-	code map[string][]byte
+	code     map[string][]byte
+	lentCaps *[]int
 }
 
 func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain != kv.CodeDomain {
 		return tx.TemporalTx.GetLatest(domain, key, opts)
 	}
+	if tx.lentCaps != nil {
+		*tx.lentCaps = append(*tx.lentCaps, cap(opts.Buf()))
+	}
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
+}
+
+// A caller-owned buffer outlives each getter, so a later getter decodes into it
+// instead of growing its own.
+func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	codes := [][]byte{
+		bytes.Repeat([]byte{0x17}, 1024),
+		bytes.Repeat([]byte{0x28}, 1024),
+	}
+	addrs := make([][]byte, len(codes))
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	for i := range codes {
+		addrs[i] = make([]byte, 20)
+		addrs[i][0] = byte(i + 1)
+		tx.code[string(addrs[i])] = codes[i]
+	}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	for i, addr := range addrs {
+		acc := accounts.SerialiseV3(&accounts.Account{
+			Nonce:    1,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
+		})
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
+	}
+
+	var buf []byte
+	opts := execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)
+	for i, addr := range addrs {
+		got, ok, err := sd.AsStateGetter(tx, opts).GetCode(addr, 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, codes[i], got)
+	}
+	require.Len(t, lentCaps, len(codes))
+	require.GreaterOrEqual(t, lentCaps[1], len(codes[1]), "the second getter must decode into the buffer the first one grew")
 }
 
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {

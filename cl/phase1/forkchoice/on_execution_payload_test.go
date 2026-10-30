@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
@@ -86,9 +87,10 @@ type blockRefreshForkGraph struct {
 
 type dataAvailabilityForkGraph struct {
 	fork_graph.ForkGraph
-	state    *state2.CachingBeaconState
-	stateErr *error
-	block    *cltypes.SignedBeaconBlock
+	state       *state2.CachingBeaconState
+	stateErr    *error
+	block       *cltypes.SignedBeaconBlock
+	replayCalls *atomic.Int32
 }
 
 type persistedEnvelopeForkGraph struct {
@@ -140,6 +142,18 @@ type boundedGossipValidationForkGraph struct {
 type panickingGossipValidationForkGraph struct {
 	dataAvailabilityForkGraph
 	panicIn string
+}
+
+type currentStateGossipValidationForkGraph struct {
+	dataAvailabilityForkGraph
+}
+
+func (g currentStateGossipValidationForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return g.state
+}
+
+func (currentStateGossipValidationForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
+	panic("unexpected state replay")
 }
 
 type concurrentPayloadValidationForkGraph struct {
@@ -286,6 +300,9 @@ func (g dataAvailabilityForkGraph) CurrentStateLocked(common.Hash) *state2.Cachi
 }
 
 func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
+	if g.replayCalls != nil {
+		g.replayCalls.Add(1)
+	}
 	if g.stateErr != nil && *g.stateErr != nil {
 		return nil, *g.stateErr
 	}
@@ -845,6 +862,17 @@ func TestExecutionPayloadFirstArrivalSurvivesUnrelatedRoots(t *testing.T) {
 	require.True(t, f.ExecutionPayloadReceivedBefore(timelyRoot, timelyArrival.Add(time.Nanosecond)))
 }
 
+func TestRecordExecutionPayloadArrivalKeepsFirstArrival(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.Hash{1}
+	first := time.Unix(1_700_000_000, 0)
+
+	f.RecordExecutionPayloadArrival(root, 10, first)
+	f.RecordExecutionPayloadArrival(root, 10, first.Add(time.Second))
+
+	require.True(t, f.ExecutionPayloadReceivedBefore(root, first.Add(time.Nanosecond)))
+}
+
 func TestExecutionPayloadFirstArrivalPrunesWithForkGraphSlot(t *testing.T) {
 	f := &ForkChoiceStore{}
 	oldRoot := common.Hash{1}
@@ -857,6 +885,23 @@ func TestExecutionPayloadFirstArrivalPrunesWithForkGraphSlot(t *testing.T) {
 
 	require.False(t, f.ExecutionPayloadReceivedBefore(oldRoot, arrival.Add(time.Nanosecond)))
 	require.True(t, f.ExecutionPayloadReceivedBefore(retainedRoot, arrival.Add(time.Nanosecond)))
+}
+
+func TestQueuePendingExecutionPayloadEnvelopeParksEnvelopeAndPreservesArrival(t *testing.T) {
+	_, _, _, envelope := validAdmissionCancellationFixture(t)
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{
+		forkGraph:        dataAvailabilityForkGraph{},
+		pendingEnvelopes: pending,
+	}
+	receivedAt := time.Unix(1_700_000_000, 250_000_000)
+
+	f.QueuePendingExecutionPayloadEnvelope(envelope, receivedAt)
+
+	root := envelope.Message.BeaconBlockRoot
+	require.True(t, f.HasPendingExecutionPayloadEnvelope(root))
+	require.Equal(t, receivedAt, f.pendingEnvelopeReceivedAt(envelope, time.Time{}))
 }
 
 func TestOnExecutionPayloadDoesNotRecordInvalidEarlyEnvelope(t *testing.T) {
@@ -1601,7 +1646,7 @@ func TestIndexRepairGenerationDoesNotClearReplacement(t *testing.T) {
 	root := common.HexToHash("0x1234")
 	first, ok := repairs.claim(root)
 	require.True(t, ok)
-	first = repairs.setValues(first, 1, common.HexToHash("0x01"))
+	first = repairs.setValues(first, 1, 1, common.HexToHash("0x01"), common.Bytes96{1})
 	repairs.complete(first)
 	replacement, ok := repairs.claim(root)
 	require.True(t, ok)
@@ -1622,7 +1667,7 @@ func TestStaleIndexRepairValuesDoNotMutateReplacement(t *testing.T) {
 	replacement, ok := repairs.claim(root)
 	require.True(t, ok)
 
-	stale := repairs.setValues(first, 99, common.HexToHash("0x99"))
+	stale := repairs.setValues(first, 99, 99, common.HexToHash("0x99"), common.Bytes96{9})
 
 	require.Zero(t, stale.generation)
 	require.Equal(t, []envelopeIndexRepairToken{replacement}, repairs.repairs())
@@ -1757,8 +1802,10 @@ func TestIndexRepairSurvivesEnvelopePruning(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234")
 	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted.Message.Payload.SlotNumber = 64
 	persisted.Message.Payload.BlockNumber = 42
 	persisted.Message.Payload.BlockHash = common.HexToHash("0xaaaa")
+	persisted.Signature = common.Bytes96{1, 2, 3}
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
@@ -1787,12 +1834,49 @@ func TestIndexRepairSurvivesEnvelopePruning(t *testing.T) {
 		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
 		require.NoError(t, err)
 		require.Equal(t, persisted.Message.Payload.BlockHash, blockHash)
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, persisted.Signature, signature)
+		return nil
+	}))
+}
+
+func TestIndexRepairReadsPersistedEnvelopeWithoutHeader(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted.Message.Payload.SlotNumber = 64
+	persisted.Message.Payload.BlockNumber = 42
+	persisted.Message.Payload.BlockHash = common.HexToHash("0xaaaa")
+	persisted.Signature = common.Bytes96{1, 2, 3}
+	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	f := &ForkChoiceStore{
+		forkGraph: pendingRetryForkGraph{
+			completed:         blockRoot,
+			completedEnvelope: persisted,
+		},
+		db: rwdb,
+	}
+	_, ok := f.envelopeIndexRepairs.claim(blockRoot)
+	require.True(t, ok)
+
+	f.RetryPendingExecutionPayloadEnvelopeIndices(t.Context(), 1)
+
+	require.Empty(t, f.envelopeIndexRepairs.repairs())
+	require.NoError(t, rwdb.View(t.Context(), func(tx kv.Tx) error {
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, persisted.Signature, signature)
 		return nil
 	}))
 }
 
 func TestIndexRepairSurvivesIndexWritePanic(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	slot := block.Block.Slot
+	signature := envelope.Signature
 	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
 	db := &panickingUpdateDB{
 		RwDB:    mdbxtest.NewTestDB(t, dbcfg.ChainDB),
@@ -1851,6 +1935,10 @@ func TestIndexRepairSurvivesIndexWritePanic(t *testing.T) {
 		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, envelope.Message.BeaconBlockRoot)
 		require.NoError(t, err)
 		require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
+		storedSignature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slot, envelope.Message.BeaconBlockRoot)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, signature, storedSignature)
 		return nil
 	}))
 }
@@ -1893,6 +1981,30 @@ func TestStoreAnchorEnvelopeCoordinatesCanonicalIndexWrite(t *testing.T) {
 		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
 		require.NoError(t, err)
 		require.Equal(t, first.Message.Payload.BlockHash, blockHash)
+		return nil
+	}))
+}
+
+func TestStoreAnchorEnvelopeStoresSignature(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.Payload.SlotNumber = 64
+	envelope.Message.Payload.BlockNumber = 42
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xaaaa")
+	envelope.Signature = common.Bytes96{1, 2, 3}
+	graph := &persistingEnvelopeForkGraph{}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{forkGraph: graph, db: db, eth2Roots: eth2Roots}
+
+	require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, root)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, envelope.Signature, signature)
 		return nil
 	}))
 }
@@ -1967,6 +2079,33 @@ func TestExecutionPayloadImportEmitsIntegrationEventsExactlyOnce(t *testing.T) {
 		t.Fatalf("emitted duplicate integration event: %#v", event)
 	default:
 	}
+}
+
+func TestExecutionPayloadImportStoresEnvelopeSignature(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	blockRoot := common.Hash(envelope.Message.BeaconBlockRoot)
+	graph := &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.beaconCfg = cfg
+	f.forkGraph = graph
+	f.db = db
+
+	slot := block.Block.Slot
+	blockNumber := envelope.Message.Payload.BlockNumber
+	require.Equal(t, uint64(64), slot)
+	require.Equal(t, slot, envelope.Message.Payload.SlotNumber)
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, true))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		gotBlockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
+		require.NoError(t, err)
+		require.Equal(t, blockNumber, *gotBlockNumber)
+		signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slot, blockRoot)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, envelope.Signature, signature)
+		return nil
+	}))
 }
 
 func TestExecutionPayloadIndexRepairEmitsIntegrationEventsExactlyOnce(t *testing.T) {
@@ -2341,7 +2480,10 @@ func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
 	redelivered.Message.Payload.BlockHash = common.HexToHash("0xffff")
 	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, rwdb.Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, persisted.Message)
+		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, persisted.Message); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, persisted.Message.Payload.SlotNumber, blockRoot, persisted.Signature)
 	}))
 	db := &failingUpdateDB{RwDB: rwdb}
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
@@ -2356,24 +2498,121 @@ func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
 	require.Zero(t, db.calls)
 }
 
+func TestEnsureExecutionPayloadEnvelopeIndicesRepairsMissingSignature(t *testing.T) {
+	for _, test := range []struct {
+		name                string
+		writeWrongSignature bool
+	}{
+		{name: "missing"},
+		{name: "different", writeWrongSignature: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &clparams.MainnetBeaconConfig
+			blockRoot := common.HexToHash("0x1234")
+			persisted := validIngressEnvelope(cfg, blockRoot)
+			persisted.Message.Payload.SlotNumber = 64
+			persisted.Message.Payload.BlockNumber = 42
+			persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+			persisted.Signature = common.Bytes96{1, 2, 3}
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, persisted.Message); err != nil {
+					return err
+				}
+				if test.writeWrongSignature {
+					return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, 64, blockRoot, common.Bytes96{9})
+				}
+				return nil
+			}))
+			graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
+			f := &ForkChoiceStore{forkGraph: graph, db: db}
+
+			_, indexed, err := f.ensureExecutionPayloadEnvelopeIndices(t.Context(), blockRoot, persisted, false)
+
+			require.NoError(t, err)
+			require.True(t, indexed)
+			require.Equal(t, int32(1), graph.reads.Load())
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, persisted.Signature, signature)
+				return nil
+			}))
+		})
+	}
+}
+
+func TestOnExecutionPayloadRedeliveryRepairsMissingOrMalformedSignature(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		stored []byte
+	}{
+		{name: "missing"},
+		{name: "empty", stored: []byte{}},
+		{name: "short", stored: make([]byte, 95)},
+		{name: "long", stored: make([]byte, 97)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &clparams.MainnetBeaconConfig
+			blockRoot := common.HexToHash("0x1234")
+			persisted := validIngressEnvelope(cfg, blockRoot)
+			persisted.Message.Payload.SlotNumber = 64
+			persisted.Message.Payload.BlockNumber = 42
+			persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+			persisted.Signature = common.Bytes96{1, 2, 3}
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, persisted.Message); err != nil {
+					return err
+				}
+				if test.stored != nil {
+					return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(64, blockRoot), test.stored)
+				}
+				return nil
+			}))
+			f := &ForkChoiceStore{
+				forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted},
+				beaconCfg: cfg,
+				db:        db,
+			}
+
+			require.ErrorIs(t, f.OnExecutionPayload(t.Context(), persisted, false, true), ErrIgnore)
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, 64, blockRoot)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, persisted.Signature, signature)
+				return nil
+			}))
+			require.Empty(t, f.envelopeIndexRepairs.repairs())
+		})
+	}
+}
+
 func TestPendingEnvelopeRepairsMalformedIndices(t *testing.T) {
+	validBlockNumber := []byte{0, 0, 0, 42}
+	validBlockHash := common.HexToHash("0xabcd")
 	for _, test := range []struct {
 		name        string
 		blockNumber []byte
 		blockHash   []byte
 	}{
-		{name: "short block number", blockNumber: []byte{1}, blockHash: make([]byte, 32)},
-		{name: "oversized block number", blockNumber: make([]byte, 5), blockHash: make([]byte, 32)},
-		{name: "short block hash", blockNumber: make([]byte, 4), blockHash: []byte{1}},
-		{name: "oversized block hash", blockNumber: make([]byte, 4), blockHash: make([]byte, 33)},
-		{name: "well-sized wrong values", blockNumber: []byte{0, 0, 0, 7}, blockHash: bytes.Repeat([]byte{7}, 32)},
+		{name: "short block number", blockNumber: []byte{1}, blockHash: validBlockHash[:]},
+		{name: "oversized block number", blockNumber: make([]byte, 5), blockHash: validBlockHash[:]},
+		{name: "short block hash", blockNumber: validBlockNumber, blockHash: []byte{1}},
+		{name: "oversized block hash", blockNumber: validBlockNumber, blockHash: make([]byte, 33)},
+		{name: "well-sized wrong block number", blockNumber: []byte{0, 0, 0, 7}, blockHash: validBlockHash[:]},
+		{name: "well-sized wrong block hash", blockNumber: validBlockNumber, blockHash: bytes.Repeat([]byte{7}, 32)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			blockRoot := common.HexToHash("0x1234")
 			persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 			persisted.Message.BeaconBlockRoot = blockRoot
+			persisted.Message.Payload.SlotNumber = 64
 			persisted.Message.Payload.BlockNumber = 42
 			persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+			persisted.Signature = common.Bytes96{1, 2, 3}
 			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 			require.NoError(t, err)
 			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
@@ -2384,7 +2623,10 @@ func TestPendingEnvelopeRepairsMalformedIndices(t *testing.T) {
 				if err := tx.Put(kv.BlockRootToBlockNumber, blockRoot[:], test.blockNumber); err != nil {
 					return err
 				}
-				return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], test.blockHash)
+				if err := tx.Put(kv.BlockRootToBlockHash, blockRoot[:], test.blockHash); err != nil {
+					return err
+				}
+				return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, 64, blockRoot, persisted.Signature)
 			}))
 			graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 			f := &ForkChoiceStore{
@@ -2521,7 +2763,11 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
 	validationDone := make(chan error, 1)
 	go func() { validationDone <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
-	<-graph.stateRead
+	select {
+	case <-graph.stateRead:
+	case <-time.After(5 * time.Second):
+		t.Fatal("state replay did not start")
+	}
 
 	writerStarted := make(chan struct{})
 	writerDone := make(chan struct{})
@@ -2532,13 +2778,23 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizationAfterLockR
 		store.mu.Unlock()
 		close(writerDone)
 	}()
-	<-writerStarted
-	for store.mu.TryRLock() {
-		store.mu.RUnlock()
+	select {
+	case <-writerStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("finality writer did not start")
+	}
+	select {
+	case <-writerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("finality writer did not finish")
 	}
 	close(releaseState)
-	<-writerDone
-	err := <-validationDone
+	var err error
+	select {
+	case err = <-validationDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("gossip validation did not finish")
+	}
 	require.ErrorIs(t, err, ErrIgnore)
 	require.ErrorContains(t, err, "before finalized slot")
 }
@@ -2553,6 +2809,7 @@ func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraph
 			}
 			store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
 			store.finalizedCheckpoint.Store(solid.Checkpoint{})
+			validation := store.envelopeValidationSemaphore()
 			var recovered any
 			func() {
 				defer func() { recovered = recover() }()
@@ -2563,8 +2820,8 @@ func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraph
 			require.True(t, store.mu.TryLock())
 			store.mu.Unlock()
 			select {
-			case store.executionPayloadValidation <- struct{}{}:
-				<-store.executionPayloadValidation
+			case validation <- struct{}{}:
+				<-validation
 			default:
 				t.Fatal("validation capacity leaked after panic")
 			}
@@ -2574,12 +2831,15 @@ func TestValidateExecutionPayloadEnvelopeForGossipReleasesReadLockAfterForkGraph
 
 func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	stateErr := errors.New("temporary state read failure")
 	for _, tc := range []struct {
-		name      string
-		graph     dataAvailabilityForkGraph
-		wantError string
+		name                 string
+		graph                dataAvailabilityForkGraph
+		wantError            string
+		wantStateUnavailable bool
 	}{
-		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state"},
+		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state", wantStateUnavailable: true},
+		{name: "state error", graph: dataAvailabilityForkGraph{block: block, stateErr: &stateErr}, wantError: "state"},
 		{name: "block", graph: dataAvailabilityForkGraph{state: blockState}, wantError: "block"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2589,11 +2849,38 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 			err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
 
 			require.ErrorIs(t, err, ErrIgnore)
+			if tc.wantStateUnavailable {
+				require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
+			} else {
+				require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
+			}
 			require.ErrorContains(t, err, tc.wantError)
 			require.True(t, store.mu.TryLock())
 			store.mu.Unlock()
 		})
 	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforeStateReplay(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	envelope.Message.Payload.BlockHash[0]++
+	var replayCalls atomic.Int32
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: dataAvailabilityForkGraph{
+			state:       blockState,
+			block:       block,
+			replayCalls: &replayCalls,
+		},
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "failed gossip validation")
+	require.Zero(t, replayCalls.Load())
 }
 
 func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {
@@ -2664,6 +2951,27 @@ func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWrit
 	require.True(t, limiterHeld)
 	require.Equal(t, int32(2), graph.stateCopies.Load())
 	require.Equal(t, int32(1), graph.peakCopies.Load())
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipVerifiesCurrentStateWithoutValidationCapacity(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	graph := currentStateGossipValidationForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+	}
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	validation := store.envelopeValidationSemaphore()
+	validation <- struct{}{}
+	defer func() { <-validation }()
+	done := make(chan error, 1)
+	go func() { done <- store.ValidateExecutionPayloadEnvelopeForGossip(envelope) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("current-state gossip validation waited for validation capacity")
+	}
 }
 
 func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) {

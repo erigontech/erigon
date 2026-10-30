@@ -195,17 +195,17 @@ func (v *legacyHistoryValues) lookup(dt *DomainRoTx, plainKey []byte) ([]byte, e
 	if c, ok := v.cache[string(plainKey)]; ok && c.from <= v.asOf && v.asOf <= c.until {
 		return c.value, nil
 	}
-	found, nextWrite, err := dt.ht.iit.seekInFiles(plainKey, v.asOf)
+	found, seek, err := dt.ht.iit.seekInFiles(plainKey, v.asOf)
 	if err != nil {
 		return nil, err
 	}
 	var value []byte
 	until := uint64(1<<64 - 1)
 	if found {
-		if value, _, err = dt.ht.historyValueAt(plainKey, nextWrite, v.asOf); err != nil {
+		if value, _, err = dt.ht.historyValueAt(plainKey, seek, v.asOf); err != nil {
 			return nil, err
 		}
-		until = nextWrite
+		until = seek.txNum
 	} else if value, _, _, _, err = dt.getLatestFromFiles(plainKey, nil, kv.NoStepBound); err != nil {
 		return nil, err
 	}
@@ -678,7 +678,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				if err != nil {
 					return err
 				}
-				if found && written == txNum {
+				if found && written.txNum == txNum {
 					return nil
 				}
 				value, err := legacyCommitmentAsOf(wdt, childKey, txNum)

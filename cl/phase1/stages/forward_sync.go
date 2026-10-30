@@ -62,8 +62,13 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
+		if err = processBlock(ctx, cfg, block, false); err != nil {
+			// Forward sync skips NewPayload, so a pending write must also retain the
+			// collector insertion that would otherwise be lost on a stage transition.
+			if collectExecution && cfg.pendingBlockWrite != nil && cfg.pendingBlockWrite.block == block {
+				cfg.pendingBlockWrite.collectExecution = true
+			}
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
 				if newHighestBlockProcessed == 0 {
@@ -156,8 +161,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			}
 		}
 
-		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
-		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
+		if !collectExecution {
 			continue
 		}
 		// Add the block to the block collector (pre-GLOAS only)

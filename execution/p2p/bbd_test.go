@@ -72,7 +72,7 @@ func newTestBbd(t *testing.T, fetcher Fetcher) *BackwardBlockDownloader {
 	logger := testlog.Logger(t, log.LvlCrit)
 	peerTracker := NewPeerTracker(logger, nil)
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	return NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir())
+	return NewBackwardBlockDownloader(logger, fetcher, peerTracker, t.TempDir())
 }
 
 // EL behind the requested header by more than the limit: fail-fast at initial-header step.
@@ -255,7 +255,7 @@ func requireBbdDeliversChain(t *testing.T, fetcher Fetcher, headers []*types.Hea
 	for i := uint64(1); i <= peers; i++ {
 		peerTracker.PeerConnected(PeerIdFromUint64(i))
 	}
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), peerTracker, t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
@@ -274,7 +274,7 @@ func TestBackwardBlockDownloader_DeliversBlocksDespitePersistentBALDeficit(t *te
 	logger := testlog.Logger(t, log.LvlCrit)
 	peerTracker := NewPeerTracker(logger, nil)
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	bbd := NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir(), WithBALFetcher(balFetcher))
+	bbd := NewBackwardBlockDownloader(logger, fetcher, peerTracker, t.TempDir(), WithBALFetcher(balFetcher))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	feed, err := bbd.DownloadBlocksBackwards(ctx, initial.Hash(), fixedHeaderReader{headers[0]})
