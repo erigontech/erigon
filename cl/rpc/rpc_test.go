@@ -31,6 +31,7 @@ type blockResponseSentinel struct {
 	sentinelproto.SentinelClient
 	response         []byte
 	bannedPeer       string
+	softBannedPeer   string
 	maxResponseBytes []uint64
 	requestData      [][]byte
 	calls            int
@@ -52,7 +53,11 @@ type emptyColumnResponseSentinel struct {
 	bannedPeer       string
 }
 
-func (s *emptyColumnResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+func (s *emptyColumnResponseSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *emptyColumnResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.bannedPeer = peer.Pid
 	return &sentinelproto.EmptyMessage{}, nil
 }
@@ -450,6 +455,11 @@ func (s *blockResponseSentinel) SendRequest(_ context.Context, req *sentinelprot
 }
 
 func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.softBannedPeer = peer.Pid
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *blockResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.bannedPeer = peer.Pid
 	return &sentinelproto.EmptyMessage{}, nil
 }
@@ -511,7 +521,7 @@ func TestExecutionPayloadEnvelopesByRangeCapsResponseBelowSlotSpan(t *testing.T)
 	require.ErrorContains(t, err, "more chunks than requested")
 	require.Len(t, envelopes, 1)
 	require.Equal(t, "malicious-peer", pid)
-	require.Equal(t, pid, sentinel.bannedPeer)
+	require.Equal(t, pid, sentinel.softBannedPeer)
 }
 
 func TestExecutionPayloadEnvelopesByRangeRejectsOnlyOverflowingRanges(t *testing.T) {
@@ -752,7 +762,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T
 		require.Len(t, envelopes, 1)
 		require.NotNil(t, envelopes[0].Message)
 		require.Equal(t, "malicious-peer", pid)
-		require.Equal(t, pid, sentinel.bannedPeer)
+		require.Equal(t, pid, sentinel.softBannedPeer)
 	}
 }
 
@@ -780,7 +790,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectResponseForEmptyRequest(t *testin
 		require.ErrorContains(t, err, "more chunks than requested")
 		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
-		require.Equal(t, pid, sentinel.bannedPeer)
+		require.Equal(t, pid, sentinel.softBannedPeer)
 	}
 }
 
