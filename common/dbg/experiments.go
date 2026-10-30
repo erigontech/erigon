@@ -37,6 +37,8 @@ import (
 )
 
 var (
+	// ExecSkipDepOrderValidation: UNSAFE upper-bound probe, the exec loop trusts the worker verdict.
+	ExecSkipDepOrderValidation = EnvBool("EXEC_SKIP_DEPORDER_VALIDATION", true)
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling

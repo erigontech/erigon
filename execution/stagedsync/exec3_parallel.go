@@ -3469,7 +3469,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// predecessor may have changed or sealed since (including an in-flight
 			// Validated cell the reader early-broke on), so trusting the stale verdict
 			// would commit against a value that has moved.
-			valid := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+			valid := dbg.ExecSkipDepOrderValidation || be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 				func(rv, wv state.Version) state.VersionValidity {
 					if rv != wv {
 						return state.VersionInvalid
