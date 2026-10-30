@@ -267,6 +267,22 @@ func TestAuthenticatedRpcServerRequiresJwtForGraphQL(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedRpcServerListensOnIPv6(t *testing.T) {
+	cfg := &httpcfg.HttpCfg{
+		AuthRpcHTTPListenAddress: "::1",
+		JWTSecretPath:            filepath.Join(t.TempDir(), "jwt.hex"),
+	}
+	listener, engineSrv, addr, err := createEngineListener(cfg, nil, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		engineSrv.Stop()
+		_ = listener.Close()
+	})
+	host, _, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.Equal(t, "::1", host)
+}
+
 func TestGraphQLHandlerAdmissionControl(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

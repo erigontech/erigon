@@ -28,6 +28,7 @@ linters:
     - errorlint
     - unused
     - testifylint
+    - nosprintfhostport
   disable:
     - contextcheck
     - err113
@@ -110,6 +111,7 @@ linters:
         - nilness
         - unusedwrite
         - shadow
+        - sortslice
       disable:
         - deepequalerrors
         - fieldalignment

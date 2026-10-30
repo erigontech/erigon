@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -731,7 +732,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 
 	// Separate Websocket handler if websocket port flag specified
 	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
-		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsEndpoint := "tcp://" + net.JoinHostPort(cfg.HttpListenAddress, strconv.Itoa(cfg.WebsocketPort))
 		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isWebsocket(r) {
 				wsHandler.ServeHTTP(w, r)
@@ -751,7 +752,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	if cfg.HttpServerEnabled {
-		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+		httpEndpoint := "tcp://" + net.JoinHostPort(cfg.HttpListenAddress, strconv.Itoa(cfg.HttpPort))
 		if cfg.HttpURL != "" {
 			httpEndpoint = cfg.HttpURL
 		}
@@ -777,7 +778,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if cfg.HttpsPort == 0 {
 			cfg.HttpsPort = cfg.HttpPort + 363
 		}
-		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
+		httpsEndpoint := "tcp://" + net.JoinHostPort(cfg.HttpsListenAddress, strconv.Itoa(cfg.HttpsPort))
 		if cfg.HttpsURL != "" {
 			httpsEndpoint = cfg.HttpsURL
 		}
@@ -935,7 +936,7 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 var AuthenticatedEngineRESTHandler http.Handler
 
 func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
-	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
+	engineHttpEndpoint := "tcp://" + net.JoinHostPort(cfg.AuthRpcHTTPListenAddress, strconv.Itoa(cfg.AuthRpcPort))
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
