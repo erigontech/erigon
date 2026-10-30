@@ -128,8 +128,8 @@ type parallelExecutor struct {
 	execSem chan struct{}
 	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
 	// open and close one; like applyTx it lives for one exec loop.
-	slotTxs    chan kv.TemporalTx
-	runWG      sync.WaitGroup
+	slotTxs chan kv.TemporalTx
+	runWG   sync.WaitGroup
 	// idleGo hands a task to a finished task goroutine, so its grown stack is reused.
 	idleGo     chan func()
 	workersCtx context.Context
