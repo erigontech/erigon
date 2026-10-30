@@ -638,6 +638,31 @@ func TestDumpCommitmentStepClosesCollationOnBuildError(t *testing.T) {
 	require.Empty(t, leftovers, "the domain values compressor is closed when buildFiles fails")
 }
 
+func TestRebuildCommitmentShardSkipsEmptyKeyOfExhaustedIterator(t *testing.T) {
+	db, _ := testDbAndAggregatorv3(t, 16)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	const n = 3
+	var served byte
+	next := func() (bool, []byte) {
+		if served == n {
+			return false, nil
+		}
+		served++
+		return true, bytes.Repeat([]byte{served}, length.Addr)
+	}
+	keys, err := state.RebuildCommitmentShardKeysForTest(ctx, domains, rwTx, next)
+	require.NoError(t, err)
+	require.Equal(t, uint64(n), keys, "the (false, nil) that ends the iterator is not a key")
+}
+
 func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
