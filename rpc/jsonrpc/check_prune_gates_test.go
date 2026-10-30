@@ -1911,7 +1911,7 @@ func TestBlockReceiptsGateCombinesBothBoundaries(t *testing.T) {
 	}
 }
 
-// TestUsesLogIndex pins the predicate against getTopicsBitmapV3, which skips
+// TestUsesLogIndex pins the predicate against logIndexClauses, which skips
 // empty topic positions: a criteria whose every position is empty matches any
 // topic and searches no index.
 func TestUsesLogIndex(t *testing.T) {

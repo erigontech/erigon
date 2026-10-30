@@ -29,6 +29,8 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -178,4 +180,35 @@ func TestGetLatestForwardsBranchCache(t *testing.T) {
 	_, _, err := tx.GetLatest(kv.CommitmentDomain, []byte("key"), kv.GetLatestOptions{}.WithBranchCache())
 	require.NoError(t, err)
 	require.True(t, request.GetBranchCache())
+}
+
+func TestIndexJoinJoinsRemoteIndexRanges(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	ranges := map[string][]uint64{
+		kv.LogTopicIdx.String() + "/topic": {3, 5, 8, 9},
+		kv.LogAddrIdx.String() + "/a1":     {1, 5},
+		kv.LogAddrIdx.String() + "/a2":     {8, 10},
+	}
+	client.EXPECT().IndexRange(gomock.Any(), gomock.Any()).Times(3).DoAndReturn(func(_ context.Context, req *remoteproto.IndexRangeReq, _ ...grpc.CallOption) (*remoteproto.IndexRangeReply, error) {
+		require.Equal(t, uint64(7), req.TxId)
+		require.Equal(t, int64(2), req.FromTs)
+		require.Equal(t, int64(10), req.ToTs)
+		require.True(t, req.OrderAscend)
+		require.LessOrEqual(t, req.Limit, int64(0))
+		return &remoteproto.IndexRangeReply{Timestamps: ranges[req.Table+"/"+string(req.K)]}, nil
+	})
+	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
+
+	it, err := tx.IndexJoin(kv.IndexQuery{
+		Clauses: [][]kv.IndexKey{
+			{{Idx: kv.LogTopicIdx, Key: []byte("topic")}},
+			{{Idx: kv.LogAddrIdx, Key: []byte("a1")}, {Idx: kv.LogAddrIdx, Key: []byte("a2")}},
+		},
+		FromTs: 2, ToTs: 10, Asc: order.Asc,
+	})
+	require.NoError(t, err)
+	txNums, err := stream.ToArrayU64(it)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{5, 8}, txNums)
 }
