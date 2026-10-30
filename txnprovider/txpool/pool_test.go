@@ -1623,7 +1623,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason, err := pool.validateTx(txn, false, view)
+			reason, err := pool.validateTx(txn, false, view, batchUsage{})
 			asrt.NoError(err)
 
 			if reason != test.expected {
@@ -1733,7 +1733,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result, err := pool.validateTx(txn, false /* isLocal */, view)
+	result, err := pool.validateTx(txn, false /* isLocal */, view, batchUsage{})
 	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
 }
@@ -1769,7 +1769,7 @@ func TestValidateTxReturnsSenderInfoError(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	reason, err := pool.validateTx(txn, true, view)
+	reason, err := pool.validateTx(txn, true, view, batchUsage{})
 	require.Error(t, err)
 	require.Equal(t, txpoolcfg.ErrGetSenderInfo, reason)
 	require.ErrorContains(t, err, "validateTx: sender info")
@@ -3395,6 +3395,45 @@ func TestOnNewBlockKeepsOriginalWhenUnwoundReplacementRejected(t *testing.T) {
 	require.Equal(t, original.IDHash, kept.TxnSlot.IDHash)
 	pending, baseFee, queued := pool.CountContent()
 	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestRemoteBatchRespectsAccountSlots(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+	var txns TxnSlots
+	for i := range 2 * pool.cfg.AccountSlots {
+		txn := newTestTxnSlot(i, 0, 1, 2, 21_000)
+		txn.IDHash[0] = byte(i + 1)
+		txns.Append(txn, sender[:], false)
+	}
+	pool.AddRemoteTxns(ctx, txns, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.LessOrEqual(t, uint64(pool.all.count(pool.senders.senderIDs[sender])), pool.cfg.AccountSlots+1)
+}
+
+func TestRemoteBatchOfReplacementsIsNotSpam(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+	pending := pool.cfg.AccountSlots - 6
+	addBatch := func(tip uint64, hashTag byte) {
+		var txns TxnSlots
+		for i := range pending {
+			txn := newTestTxnSlot(i, 0, tip, 2*tip, 21_000)
+			txn.IDHash[0], txn.IDHash[1] = byte(i+1), hashTag
+			txns.Append(txn, sender[:], false)
+		}
+		pool.AddRemoteTxns(ctx, txns, nil, nil)
+		require.NoError(t, pool.processRemoteTxns(ctx))
+	}
+	addBatch(1, 1)
+	addBatch(2, 2)
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.Equal(t, int(pending), pool.all.count(pool.senders.senderIDs[sender]))
 }
 
 func TestOnNewBlockKeepsUnwoundLocalTxnLocal(t *testing.T) {

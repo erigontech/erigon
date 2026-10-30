@@ -992,7 +992,14 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 	return blobs
 }
 
-func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
+// batchUsage is what the already accepted txns of the same batch will add to the pool.
+type batchUsage struct {
+	senderTxns  int
+	senderBlobs uint64
+	totalBlobs  uint64
+}
+
+func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, batch batchUsage) (txpoolcfg.DiscardReason, error) {
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1112,9 +1119,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 
-	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
+	if !isLocal && uint64(p.all.count(txn.SenderID)+batch.senderTxns) > p.cfg.AccountSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID)+batch.senderTxns, p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer, nil
 	}
@@ -1150,12 +1157,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 	if txn.TxType() == BlobTxnType {
-		return p.validateBlobTxn(txn, isLocal), nil
+		return p.validateBlobTxn(txn, isLocal, batch), nil
 	}
 	return txpoolcfg.Success, nil
 }
 
-func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
+func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, batch batchUsage) txpoolcfg.DiscardReason {
 	if !p.isCancun() {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -1200,15 +1207,15 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
+	if !isLocal && (p.all.blobCount(txn.SenderID)+batch.senderBlobs+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+batch.senderBlobs+uint64(blobCount), p.cfg.BlobSlots))
 		}
 		return txpoolcfg.Spammer
 	}
-	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+	if p.totalBlobsInPool.Load()+batch.totalBlobs >= p.cfg.TotalBlobPoolLimit {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()+batch.totalBlobs))
 		}
 		return txpoolcfg.BlobPoolOverflow
 	}
@@ -1476,11 +1483,14 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
 	}
 
+	senderTxns := map[uint64]int{}
+	senderBlobs := map[uint64]uint64{}
+	var totalBlobs uint64
 	for i, txn := range txns.Txns {
 		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
 			continue
 		}
-		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
+		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache, batchUsage{senderTxns[txn.SenderID], senderBlobs[txn.SenderID], totalBlobs})
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
 				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
@@ -1491,6 +1501,15 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		}
 		if reason == txpoolcfg.Success {
 			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
+			blobs := uint64(len(txn.GetBlobHashes()))
+			// A replacement adds only its blobs over the pooled txn's, which the pool already counts.
+			if replaced := p.all.get(txn.SenderID, txn.Nonce); replaced != nil {
+				blobs -= min(blobs, uint64(len(replaced.TxnSlot.GetBlobHashes())))
+			} else {
+				senderTxns[txn.SenderID]++
+			}
+			senderBlobs[txn.SenderID] += blobs
+			totalBlobs += blobs
 			// Success here means no DiscardReason yet, so leave it NotSet
 			continue
 		}
@@ -2858,7 +2877,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
-		reason, err := p.validateTx(txn, isLocalTx, cacheView)
+		reason, err := p.validateTx(txn, isLocalTx, cacheView, batchUsage{})
 		if err != nil {
 			return err
 		}
