@@ -307,6 +307,17 @@ func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
 	require.GreaterOrEqual(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "columns must wait for the block import")
 }
 
+func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	f.handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: f.forkchoice, err: forkchoice.ErrBlockInvalid}
+	start := time.Now()
+
+	require.ErrorIs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), forkchoice.ErrBlockInvalid)
+
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "a failed store job must release the columns")
+}
+
 func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	blocked, release := make(chan struct{}), make(chan struct{})
@@ -384,7 +395,6 @@ func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
 // does not wait for the store job: a stateful envelope POST that follows must find the custody columns.
 func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
-	f.handler.sentinel = &nonNilSentinelClient{}
 	imported := make(chan struct{})
 	f.forkchoice.afterOnBlock = func() { close(imported) }
 	f.columns.hook = func(write func() error) error {

@@ -3057,14 +3057,18 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
 		// A Gloas column has no signed block header. Lighthouse requests an unknown block from the column's peer
 		// and penalizes that peer if it cannot serve the block.
-		var storeCtx context.Context
+		var storeDone chan struct{}
 		if blk.Version() >= clparams.GloasVersion && job != nil {
-			var cancel context.CancelFunc
-			storeCtx, cancel = context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			storeCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
 			defer cancel()
+			storeDone = make(chan struct{})
+			go func() {
+				defer close(storeDone)
+				_ = job.Wait(storeCtx) // a failed or slow store must not hold back the columns of an already gossiped block
+			}()
 			select {
 			case <-servable:
-			case <-storeCtx.Done(): // a failed or slow import must not hold back the columns of an already gossiped block
+			case <-storeDone:
 			}
 		}
 		for i, column := range columnsSidecars {
@@ -3075,8 +3079,8 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		}
 		// A stateful envelope POST checks the custody columns, so a response without the integration
 		// wait must not overtake their writes.
-		if storeCtx != nil && !waitForIntegration {
-			_ = job.Wait(storeCtx)
+		if storeDone != nil && !waitForIntegration {
+			<-storeDone
 		}
 	}
 
