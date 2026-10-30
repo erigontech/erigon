@@ -385,24 +385,32 @@ func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 			tx, err := db.BeginTemporalRo(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()
-			domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-			require.NoError(t, err)
-			defer domains.Close()
-			domains.SetInMemHistoryReads(tc.history)
-			require.NoError(t, domains.InitBlockOverlay(tx))
-			domains.SetTxNum(20)
-			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(2), 20, encAccount(1)))
-			require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{2}, 20, []byte{1}))
-			domains.SetTxNum(22)
-			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(3), 22, encAccount(2)))
-			require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{3}, 22, []byte{2}))
+			newDomains := func(value byte, history bool) *execctx.SharedDomains {
+				t.Helper()
+				domains, createErr := execctx.NewSharedDomains(ctx, tx, log.New())
+				require.NoError(t, createErr)
+				t.Cleanup(domains.Close)
+				domains.SetInMemHistoryReads(history)
+				require.NoError(t, domains.InitBlockOverlay(tx))
+				domains.SetTxNum(20)
+				require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(uint64(value)), 20, encAccount(1)))
+				require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{value}, 20, []byte{1}))
+				domains.SetTxNum(22)
+				require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(uint64(value+1)), 22, encAccount(uint64(value))))
+				require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{value + 1}, 22, []byte{value}))
+				return domains
+			}
+			selected := newDomains(2, tc.history)
+			published := newDomains(4, tc.history || tc.pinned)
 
 			rpcTx := tx
+			want := uint64(4)
 			if tc.pinned {
-				rpcTx = rpchelper.PinToOverlay(tx, domains.BlockOverlay())
+				rpcTx = rpchelper.PinToOverlay(tx, selected.BlockOverlay())
+				want = 2
 			}
 			rpcCache := &execmodule.Cache{}
-			rpcCache.SetPublishedSD(func() *execctx.SharedDomains { return domains })
+			rpcCache.SetPublishedSD(func() *execctx.SharedDomains { return published })
 			view, err := rpcCache.View(ctx, rpcTx)
 			require.NoError(t, err)
 			// Read at txNum 21, between the overlay writes: neither the database
@@ -419,7 +427,7 @@ func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 						}
 						require.NoError(t, err)
 						require.NotNil(t, account)
-						require.Equal(t, uint64(2), account.Nonce)
+						require.Equal(t, want, account.Nonce)
 					})
 					t.Run("storage", func(t *testing.T) {
 						value, found, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
@@ -429,10 +437,11 @@ func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 						}
 						require.NoError(t, err)
 						require.True(t, found)
-						require.Equal(t, *uint256.NewInt(2), value)
+						require.Equal(t, *uint256.NewInt(want), value)
 					})
 				})
-				domains.Close()
+				selected.Close()
+				published.Close()
 			}
 		})
 	}

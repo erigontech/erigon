@@ -107,6 +107,33 @@ func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
 	require.True(t, tx.opts.BranchCache())
 }
 
+func TestSnapshotGetterHonorsStepBound(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, _, committed, _ := twoStepRows(t, db, stateCache)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.BindStateCache(stateCache)
+	newer := encAccount(3)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, key, newer, 40, committed))
+	getter := domains.AsSnapshotGetter(tx)
+
+	got, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{}.WithMaxStep(1))
+	require.NoError(t, err)
+	require.Equal(t, committed, got, "an in-memory value above the caller's bound must not be served")
+	require.Equal(t, kv.Step(1), tx.opts.MaxStep())
+	got, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, newer, got, "an unbounded read must still use the selected in-memory value")
+}
+
 func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

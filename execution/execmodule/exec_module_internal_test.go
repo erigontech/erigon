@@ -157,6 +157,10 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 }
 
 func TestCacheViewWithoutOverlayUsesSnapshotBoundedCache(t *testing.T) {
+	previous := dbg.UseStateCache
+	dbg.SetUseStateCache(true)
+	t.Cleanup(func() { dbg.SetUseStateCache(previous) })
+
 	ctx := t.Context()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 	stateCache := newDomainStateCache(datasize.MB)

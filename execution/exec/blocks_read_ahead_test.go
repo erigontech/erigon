@@ -789,6 +789,90 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
+func TestReadAheadGetterCurrentStepFill(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	address := common.Address{19: 1}
+	storageKey := make([]byte, 52)
+	copy(storageKey, address[:])
+	code := []byte{0x60, 0x01}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+	cases := []struct {
+		domain     kv.Domain
+		key, value []byte
+	}{
+		{kv.AccountsDomain, address[:], account},
+		{kv.StorageDomain, storageKey, []byte{1}},
+		{kv.CodeDomain, address[:], code},
+	}
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	domains.BindStateCache(stateCache)
+	domains.SetTxNum(10)
+	for _, tc := range cases {
+		require.NoError(t, domains.DomainPut(tc.domain, rwTx, tc.key, tc.value, 10, nil))
+	}
+	require.NoError(t, domains.Commit(t.Context(), rwTx))
+
+	for _, writable := range []bool{false, true} {
+		name := "read only"
+		if writable {
+			name = "writable"
+		}
+		t.Run(name, func(t *testing.T) {
+			var tx kv.TemporalTx
+			var err error
+			if writable {
+				tx, err = db.BeginTemporalRw(t.Context())
+			} else {
+				tx, err = db.BeginTemporalRo(t.Context())
+			}
+			require.NoError(t, err)
+			defer tx.Rollback()
+			for _, tc := range cases {
+				t.Run(tc.domain.String(), func(t *testing.T) {
+					stateCache.Applier().Clear()
+					got, step, err := readAheadGetter(tx, stateCache).GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+					require.NoError(t, err)
+					require.Equal(t, tc.value, got)
+					cached, stamp, hit := stateCache.View(nil).GetWithTxNum(tc.domain, tc.key)
+					require.True(t, hit)
+					require.Equal(t, tc.value, cached)
+					if writable {
+						require.Equal(t, step.LastTxNum(16), stamp, "a writable view must keep the conservative step-end stamp")
+						return
+					}
+					stateVersion, err := rawdb.GetStateVersion(tx)
+					require.NoError(t, err)
+					view := stateCache.View(cache.FrontierWithStateVersion(tx.Debug(), stateVersion))
+					_, _, hit = view.GetVisible(tc.domain, tc.key)
+					require.True(t, hit, "a prefetched current-step value must be visible on the same snapshot")
+					end, ok := tx.Debug().DomainVisibleEnd(tc.domain)
+					require.True(t, ok)
+					require.Equal(t, end-1, stamp)
+					stateCache.Applier().Unwind(end)
+					_, hit = stateCache.View(nil).Get(tc.domain, tc.key)
+					require.True(t, hit)
+					if tc.domain == kv.AccountsDomain {
+						codeHash, hit := stateCache.View(nil).GetAddrCodeHash(tc.key)
+						require.True(t, hit, "the code-hash binding must survive the same unwind as the account")
+						require.Equal(t, [32]byte(crypto.Keccak256Hash(code)), codeHash)
+					}
+					stateCache.Applier().Unwind(end - 1)
+					_, hit = stateCache.View(nil).Get(tc.domain, tc.key)
+					require.False(t, hit)
+					if tc.domain == kv.AccountsDomain {
+						_, hit = stateCache.View(nil).GetAddrCodeHash(tc.key)
+						require.False(t, hit, "the derived code-hash binding must use the same stamp")
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestCachePopulatingGetterNegativeUsesLastVisibleTxNum(t *testing.T) {
 	const visibleEnd = uint64(10_000_001)
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")

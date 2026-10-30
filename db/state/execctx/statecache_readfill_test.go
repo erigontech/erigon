@@ -287,10 +287,14 @@ func TestReadFill_CurrentStepIsVisibleToSnapshotGetter(t *testing.T) {
 		name       string
 		domain     kv.Domain
 		key, value []byte
+		overlay    bool
 	}{
-		{"account", kv.AccountsDomain, addr, account},
-		{"storage", kv.StorageDomain, storageKey, []byte{1}},
-		{"code", kv.CodeDomain, addr, code},
+		{"account", kv.AccountsDomain, addr, account, false},
+		{"storage", kv.StorageDomain, storageKey, []byte{1}, false},
+		{"code", kv.CodeDomain, addr, code, false},
+		{"owning overlay/account", kv.AccountsDomain, addr, account, true},
+		{"owning overlay/storage", kv.StorageDomain, storageKey, []byte{1}, true},
+		{"owning overlay/code", kv.CodeDomain, addr, code, true},
 	}
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -301,6 +305,9 @@ func TestReadFill_CurrentStepIsVisibleToSnapshotGetter(t *testing.T) {
 	written.BindStateCache(stateCache)
 	written.SetTxNum(10)
 	for _, tc := range cases {
+		if tc.overlay {
+			continue
+		}
 		require.NoError(t, written.DomainPut(tc.domain, rwTx, tc.key, tc.value, 10, nil))
 	}
 	require.NoError(t, written.Commit(t.Context(), rwTx))
@@ -316,7 +323,12 @@ func TestReadFill_CurrentStepIsVisibleToSnapshotGetter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stateCache.Applier().Clear()
 			tx := &countingLatestTx{TemporalTx: roTx}
-			reader := domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+			var readTx kv.TemporalTx = tx
+			if tc.overlay {
+				require.NoError(t, domains.InitBlockOverlay(tx))
+				readTx = domains.BlockOverlay()
+			}
+			reader := domains.AsStateGetter(readTx, execctxapi.StateGetterOptions{})
 			if tc.domain == kv.CodeDomain {
 				_, _, err = reader.GetCode(tc.key, 10)
 			} else {
@@ -545,12 +557,22 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	sd.BindStateCache(sc)
 	sd.Unwind(10, &diffs)
 
-	got, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
-	require.NoError(t, err)
-	require.Equal(t, v2, got)
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	for name, getter := range map[string]kv.TemporalGetter{
+		"shared":   sd.AsGetter(tx),
+		"snapshot": sd.AsSnapshotGetter(tx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx.opts = kv.GetLatestOptions{}
+			got, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, v2, got)
+			require.Equal(t, kv.Step(1), tx.opts.MaxStep(), "the staged bound must reach the backing transaction")
 
-	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a bounded in-flight unwind read must not populate the shared cache")
+			_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+			require.False(t, ok, "a bounded in-flight unwind read must not populate the shared cache")
+		})
+	}
 }
 
 func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {
