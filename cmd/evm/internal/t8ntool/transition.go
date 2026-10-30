@@ -336,7 +336,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
 
-	t8logger := log.New("t8ntool")
+	t8logger := log.New("component", "t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := protocol.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 

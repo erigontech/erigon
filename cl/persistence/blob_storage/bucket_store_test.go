@@ -230,7 +230,6 @@ func TestSlotLocksStripesBySlot(t *testing.T) {
 	var s slotLocks
 	s.initLocks()
 
-	require.Same(t, s.forSlot(7), s.forSlot(7))
 	require.Same(t, s.forSlot(7), s.forSlot(7+rwLocksCount))
 	require.NotSame(t, s.forSlot(7), s.forSlot(8))
 }
