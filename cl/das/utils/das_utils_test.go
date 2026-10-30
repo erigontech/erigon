@@ -110,3 +110,60 @@ func TestRecoverMatrixWaitsForAFreeRowSlot(t *testing.T) {
 	require.NoError(t, <-done)
 	require.Zero(t, len(rowRecoverySlots))
 }
+
+func TestComputeBlobsCellsMatchesPerBlobCells(t *testing.T) {
+	blobs := make([][]byte, 5)
+	for i := range blobs {
+		blob := goethkzg.Blob{}
+		blob[31], blob[63] = byte(i+1), byte(i)
+		blobs[i] = blob[:]
+	}
+
+	cells, err := ComputeBlobsCells(blobs)
+
+	require.NoError(t, err)
+	require.Len(t, cells, len(blobs))
+	for i, blob := range blobs {
+		want, _, err := ComputeCellsAndKZGProofs(blob)
+		require.NoError(t, err)
+		require.Equal(t, want, cells[i], "blob %d", i)
+	}
+}
+
+func TestComputeBlobsCellsFailsOnInvalidBlob(t *testing.T) {
+	invalid := goethkzg.Blob{}
+	for i := range invalid {
+		invalid[i] = 0xff // not a canonical field element
+	}
+	valid := goethkzg.Blob{}
+	blobs := [][]byte{valid[:], valid[:], invalid[:], valid[:]}
+
+	_, err := ComputeBlobsCells(blobs)
+
+	require.ErrorContains(t, err, "blob 2")
+}
+
+// Building the columns of a head block must not queue behind recovery rows, so it ignores the recovery slots.
+func TestComputeBlobsCellsDoesNotWaitForRecoverySlots(t *testing.T) {
+	for range cap(rowRecoverySlots) {
+		rowRecoverySlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for range cap(rowRecoverySlots) {
+			<-rowRecoverySlots
+		}
+	})
+	blob := goethkzg.Blob{}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ComputeBlobsCells([][]byte{blob[:], blob[:]})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("blob cells waited for a recovery slot")
+	}
+}
