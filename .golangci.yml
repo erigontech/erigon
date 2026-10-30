@@ -33,6 +33,9 @@ linters:
     - gosec
     - usetesting
     - loggercheck
+    - wastedassign
+    - revive
+    - gomoddirectives
   disable:
     - contextcheck
     - err113
@@ -46,10 +49,22 @@ linters:
     - sqlclosecheck # we don't use SQL
     - rowserrcheck # we don't use SQL
     - zerologlint # not don't use Zerolog
-    - wastedassign # `ineffassign` linter is enabled by default
     - spancheck # we don't use OpenTelemetry
     - unconvert # not enough profit from always enabling
   settings:
+    gomoddirectives:
+      replace-allow-list:
+        - github.com/holiman/bloomfilter/v2
+    revive:
+      rules:
+        - name: atomic
+        - name: inefficient-map-lookup
+        - name: string-of-int
+        - name: time-date
+        - name: time-equal
+        - name: unconditional-recursion
+        - name: useless-fallthrough
+        - name: waitgroup-by-value
     loggercheck:
       rules:
         - (github.com/erigontech/erigon/common/log/v3.Logger).Trace
@@ -132,6 +147,7 @@ linters:
         - suite-broken-parallel
         - suite-method-signature
         - suite-subtest-run
+        - nil-compare
     modernize:
       # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
       disable:
@@ -188,11 +204,11 @@ linters:
           - errcheck
         text: "^Error return value is not checked"
         source: "^\\s*(case\\s+)?<-"
-      # shadow runs under db/ and common/ only for now; the rest of the tree is not swept yet.
+      # shadow is gated only under these dirs; the rest of the tree is not swept yet.
       - linters:
           - govet
         text: "^shadow:"
-        path-except: "^(db|common)/"
+        path-except: "^(db|common|diagnostics|internal|plugins)/"
       # Bootstrap exclusion: files with baseline shadow findings, migrated one
       # file per PR. Remove a file from the list once it is clean; a file that is
       # not listed is gated, so a fixed file cannot silently regress.

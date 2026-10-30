@@ -144,7 +144,7 @@ func (b *BuilderPendingPayment) Clone() clonable.Clonable {
 	if b == nil {
 		return &BuilderPendingPayment{Withdrawal: &BuilderPendingWithdrawal{}}
 	}
-	withdrawal := (*BuilderPendingWithdrawal)(nil)
+	var withdrawal *BuilderPendingWithdrawal
 	if b.Withdrawal != nil {
 		withdrawal = b.Withdrawal.Clone().(*BuilderPendingWithdrawal)
 	} else {

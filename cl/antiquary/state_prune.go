@@ -189,7 +189,6 @@ func pruneStateBatch(ctx context.Context, db kv.RwDB, table string, marker, boun
 	}
 	defer c.Close()
 
-	newMarker = marker
 	k, _, err := c.Seek(base_encoding.Encode64ToBytes4(marker))
 	for {
 		if err != nil {
