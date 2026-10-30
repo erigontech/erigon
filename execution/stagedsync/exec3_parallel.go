@@ -117,8 +117,8 @@ type parallelExecutor struct {
 	// the explicit ordered halt the exec loop calls once it has produced up to the
 	// coalesce block.
 	cancelWorkers context.CancelFunc
-	// runSem holds the idle worker contexts; runWG tracks in-flight task goroutines
-	// for teardown.
+	// runSem holds the idle worker contexts; runWG tracks task goroutines, busy or
+	// idle, for teardown.
 	runSem chan *exec.WorkerContext
 	// execSem decouples the CPU-parallelism gate (sized to the worker count) from the
 	// WorkerContext-object pool (runSem). A worker resting mid-EVM on a dependency
@@ -1778,24 +1778,22 @@ type balTx struct {
 const elasticWorkerCap = 4096
 
 func (pe *parallelExecutor) goReused(f func()) {
-	pe.runWG.Add(1)
 	select {
 	case pe.idleGo <- f:
 		return
 	default:
 	}
 	idle, done := pe.idleGo, pe.workersCtx.Done()
-	go func() {
+	pe.runWG.Go(func() {
 		for {
 			f()
-			pe.runWG.Done()
 			select {
 			case f = <-idle:
 			case <-done:
 				return
 			}
 		}
-	}()
+	})
 }
 
 // dispatchRunSelfLoop runs one task on a worker context, looping until its result
