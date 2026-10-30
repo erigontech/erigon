@@ -790,7 +790,17 @@ func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader dbs
 
 // serialSuitsBlock: a chain of many small txs pays the parallel executor's per-tx handoff without any overlap to gain.
 func serialSuitsBlock(tx kv.Getter, blockNum, to, txNums uint64) bool {
-	if dbg.Exec3SerialMinTxs <= 0 || blockNum != to || txNums < uint64(dbg.Exec3SerialMinTxs) {
+	if blockNum != to {
+		return false
+	}
+	if dbg.Exec3SerialBALMinBytesPerMgas > 0 && txNums <= uint64(dbg.Exec3SerialBALMaxTxs) {
+		if h := rawdb.ReadHeaderByNumber(tx, blockNum); h != nil && h.BlockAccessListHash != nil && h.GasUsed > 0 {
+			if bal, err := rawdb.ReadBlockAccessListBytes(tx, h.Hash(), blockNum); err == nil && uint64(len(bal))*1_000_000/h.GasUsed >= uint64(dbg.Exec3SerialBALMinBytesPerMgas) {
+				return true
+			}
+		}
+	}
+	if dbg.Exec3SerialMinTxs <= 0 || txNums < uint64(dbg.Exec3SerialMinTxs) {
 		return false
 	}
 	h := rawdb.ReadHeaderByNumber(tx, blockNum)
