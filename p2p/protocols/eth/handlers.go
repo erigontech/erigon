@@ -156,14 +156,14 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 			lookups >= 2*MaxBodiesServe {
 			break
 		}
-		// Stop at the first block we cannot serve: each unknown hash may scan all header snapshots.
+		// Stop at the first unknown hash: each one may scan all header snapshots.
 		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
 			break
 		}
 		bodyRLP, _ := blockReader.BodyRlp(context.Background(), db, hash, *number)
 		if len(bodyRLP) == 0 {
-			break
+			continue
 		}
 		bodies = append(bodies, bodyRLP)
 		bytes += len(bodyRLP)
