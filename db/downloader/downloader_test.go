@@ -790,24 +790,6 @@ func TestInvalidateDataDiscardsLocalFile(t *testing.T) {
 	requireLoggedForName(t, logs, "invalidated local snapshot data", name)
 }
 
-// A primary and the accessors built from it are one unit: the accessor's offsets
-// only mean anything against the bytes it indexes. Discarding the primary alone
-// leaves the accessor to be adopted over whatever lands in its place.
-func TestInvalidateDataDiscardsTheAtomicSet(t *testing.T) {
-	require := require.New(t)
-	d, _, name, path := newLocalSnapshotTest(t)
-
-	accessor := "domain/v2.1-accounts.0-1024.kvi"
-	accessorPath := d.filePathForName(accessor)
-	require.NoError(os.WriteFile(accessorPath, []byte("built for the bytes being discarded"), 0o644))
-
-	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
-	require.True(download)
-
-	require.NoFileExists(path)
-	require.NoFileExists(accessorPath)
-}
-
 // The torrent client downloads into "<name>.part" (UsePartFiles), so data left
 // at that path becomes the client's scratch file and is rewritten in place. The
 // aggregator may still hold that inode mmap'd with accessors built for the old

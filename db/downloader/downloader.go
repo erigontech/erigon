@@ -1931,30 +1931,16 @@ func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metai
 	// already mapped it — the aggregator, holding accessors built for the old layout — would
 	// then decode foreign bytes. Unlinking keeps their mapping valid on the detached inode
 	// until they reopen.
-	var discarded bool
-	for _, member := range d.atomicSetOf(string(name)) {
-		switch rmErr := dir.RemoveFile(d.filePathForName(snapshotName(member))); {
-		case rmErr == nil:
-			discarded = true
-		case !errors.Is(rmErr, os.ErrNotExist):
-			return rmErr
+	err = dir.RemoveFile(d.filePathForName(name))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
 		}
-	}
-	if !discarded {
-		return nil
+		return
 	}
 	d.log(log.LvlWarn, "invalidated local snapshot data, will re-download",
 		"name", name, "preverified", preverifiedInfoHash)
 	return
-}
-
-// atomicSetOf names a primary together with the accessors built from it. An
-// accessor's offsets only mean anything against the bytes it was built from, so
-// whatever ends a primary's life ends theirs. Removal is also what makes them
-// count as missed, which is the only thing that rebuilds them from the
-// replacement bytes.
-func (d *Downloader) atomicSetOf(name string) []string {
-	return append([]string{name}, snapshotinv.AccessorsOnDisk(d.snapDir(), snapshotNameKey(name))...)
 }
 
 // Download a preverified file. That means it has a published manifest (metainfo), and a known info
