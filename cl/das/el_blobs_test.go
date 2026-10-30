@@ -147,7 +147,7 @@ func TestImportColumnsFromBlobsSupernodeSchedulesRecovery(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups)
 	require.True(t, d.state.IsSupernode())
 	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
