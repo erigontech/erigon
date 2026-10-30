@@ -408,13 +408,13 @@ func fastJSONTestState() state {
 			Code:     &code,
 			CodeHash: &codeHash,
 			Nonce:    7,
-			Storage: storage{
+			Storage: map[common.Hash]common.Hash{
 				common.HexToHash("0x02"): common.HexToHash("0xbb"),
 				common.HexToHash("0x01"): common.HexToHash("0xaa"),
 				common.HexToHash("0xf0"): {},
 			},
 		},
-		accounts.InternAddress(common.HexToAddress("0x00ff")): {Balance: new(hexutil.U256), Storage: storage{}},
+		accounts.InternAddress(common.HexToAddress("0x00ff")): {Balance: new(hexutil.U256), Storage: map[common.Hash]common.Hash{}},
 		accounts.InternAddress(common.HexToAddress("0x0a00")): {Code: &cleared},
 		accounts.InternAddress(common.HexToAddress("0x00a0")): {Nonce: 1},
 	}

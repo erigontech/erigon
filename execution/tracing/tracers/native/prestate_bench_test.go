@@ -36,7 +36,7 @@ func benchPrestateState(rng *rand.Rand, nAccounts, nContracts, codeSize, nSlots 
 		var addr common.Address
 		fillRandom(rng, addr[:])
 		balance := uint256.NewInt(rng.Uint64())
-		acc := &account{Balance: (*hexutil.U256)(balance), Nonce: rng.Uint64N(1000), Storage: storage{}}
+		acc := &account{Balance: (*hexutil.U256)(balance), Nonce: rng.Uint64N(1000), Storage: map[common.Hash]common.Hash{}}
 		if i < nContracts {
 			code := make(hexutil.Bytes, codeSize)
 			fillRandom(rng, code)
