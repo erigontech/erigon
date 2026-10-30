@@ -2126,6 +2126,8 @@ func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
 			*s = accountState{}
 			s.updateReadBalance(balance)
 			s.applyWriteBalance(balance, 1)
+			*s = accountState{}
+			s.applyWriteBalance(*uint256.NewInt(0), 1)
 		}
 	})
 	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
