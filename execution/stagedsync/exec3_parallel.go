@@ -2975,7 +2975,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
 		l := be.readerByAddr[a]
-		i, found := slices.BinarySearchFunc(l, taskIdx, func(r addrReader, tx int) int { return r.tx - tx })
+		i, found := slices.BinarySearchFunc(l, taskIdx, cmpReaderTx)
 		if found {
 			l[i].paths |= pathBit(p)
 		} else {
@@ -2992,12 +2992,14 @@ type addrReader struct {
 
 func pathBit(p state.AccountPath) uint16 { return 1 << p }
 
+func cmpReaderTx(r addrReader, tx int) int { return r.tx - tx }
+
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
 const balDispatchWindow = 32
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
-	i, _ := slices.BinarySearchFunc(l, tx+1, func(r addrReader, tx int) int { return r.tx - tx })
+	i, _ := slices.BinarySearchFunc(l, tx+1, cmpReaderTx)
 	return l[i:]
 }
 
