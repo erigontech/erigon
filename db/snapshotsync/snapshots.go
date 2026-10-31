@@ -573,14 +573,6 @@ func (s *BaseRoSnapshots) BlocksAvailable() uint64 {
 	return s.idxMax.Load()
 }
 
-func (s *BaseRoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
-	return s.dirtyIdxAvailability(t)
-}
-
-func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
-	return s.visibleIdxAvailability(t)
-}
-
 func (s *BaseRoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
 	if !wasReady {
@@ -965,33 +957,6 @@ func (s *BaseRoSnapshots) idxAvailabilityOf(visible *snapshotVisible) uint64 {
 	return maxIdx
 }
 
-func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
-	s.dirtyLock.RLock()
-	defer s.dirtyLock.RUnlock()
-
-	dirty := s.dirty[segtype]
-
-	if dirty == nil {
-		return 0
-	}
-
-	var _max uint64
-
-	dirty.Walk(func(segments []*DirtySegment) bool {
-		for _, seg := range segments {
-			if !seg.IsIndexed() {
-				break
-			}
-
-			_max = seg.to - 1
-		}
-
-		return true
-	})
-
-	return _max
-}
-
 // WalkDirtySegments calls f for every dirty segment of segtype, lowest range first,
 // stopping when f returns false. dirtyLock is held for the walk, so f must not open,
 // close or republish files.
@@ -1012,15 +977,6 @@ func (s *BaseRoSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*Dirty
 		}
 		return true
 	})
-}
-
-func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
-	visibleFiles := s.visible.Load().segments[segtype]
-	if len(visibleFiles) > 0 {
-		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
-	}
-
-	return
 }
 
 // VisibleSegmentsMaxTo is the exclusive upper bound of the last visible segment of segtype.

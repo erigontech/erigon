@@ -19,6 +19,7 @@ package freezeblocks
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -159,8 +160,7 @@ func TestFrozenBlobsReportsVisibleSegmentEnd(t *testing.T) {
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
 }
 
-// Blocks run ahead of blobs (blobs only start at Deneb) and the block tip is
-// dumped before it is indexed, so the watermarks legitimately disagree.
+// Blocks run ahead of blobs (blobs only start at Deneb).
 func TestCaplinWatermarks(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -186,6 +186,153 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
 	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+}
+
+// The archive backfill takes SegmentsMax as the last slot readable from beacon-block
+// snapshots, so blob segments past a block gap or past the last block segment must not raise it.
+func TestCaplinSegmentsMaxIgnoresBlobSidecars(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	for _, tc := range []struct {
+		name   string
+		blocks [][2]uint64
+		blobs  [][2]uint64
+	}{
+		{
+			name:   "blobs past a block gap",
+			blocks: [][2]uint64{{0, limit}, {2 * limit, 3 * limit}},
+			blobs:  [][2]uint64{{0, limit}, {limit, 2 * limit}, {2 * limit, 3 * limit}},
+		},
+		{
+			name:   "blobs past the last block segment",
+			blocks: [][2]uint64{{0, limit}},
+			blobs:  [][2]uint64{{0, 2 * limit}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for _, r := range tc.blocks {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], true)
+			}
+			for _, r := range tc.blobs {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, r[0], r[1], true)
+			}
+
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+		})
+	}
+}
+
+// Visibility skips an unindexed segment and anchors at the first indexed one above it, but the
+// archive backfill still cannot read the slots below. SegmentsMax stays 0 until the visible set
+// starts at the lowest segment on disk.
+func TestCaplinSegmentsMaxAnchorsAtLowestSegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	for _, tc := range []struct {
+		name      string
+		indexed   [][2]uint64
+		unindexed [][2]uint64
+		want      uint64
+	}{
+		{
+			name:      "unindexed segment below a gap",
+			indexed:   [][2]uint64{{2 * limit, 3 * limit}},
+			unindexed: [][2]uint64{{0, limit}},
+			want:      0,
+		},
+		{
+			name:      "unindexed segment directly below",
+			indexed:   [][2]uint64{{limit, 2 * limit}},
+			unindexed: [][2]uint64{{0, limit}},
+			want:      0,
+		},
+		{
+			name:      "unindexed segment covered by an indexed one of the same start",
+			indexed:   [][2]uint64{{0, 2 * limit}},
+			unindexed: [][2]uint64{{0, limit}},
+			want:      2*limit - 1,
+		},
+		{
+			name:    "lowest segment above slot zero",
+			indexed: [][2]uint64{{limit, 2 * limit}},
+			want:    2*limit - 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for _, r := range tc.indexed {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], true)
+			}
+			for _, r := range tc.unindexed {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], false)
+			}
+
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			require.Equal(t, tc.want, sn.SegmentsMax())
+		})
+	}
+}
+
+// SegmentsMax compares the dirty set with the visible set, so a republish landing between the
+// two reads must not pair the old visible start with the new height. The two layouts share the
+// lowest start, which is what lets the old generation pass the anchor check. They are switched
+// through OpenList because Windows refuses to remove a file a reader still has mapped.
+func TestCaplinSegmentsMaxConcurrentWithRepublish(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, false)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+
+	indexedHead := []string{snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, limit)}
+	unindexedHead := []string{
+		snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, 2*limit),
+		snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 2*limit),
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenList(unindexedHead, false))
+	require.Zero(t, sn.SegmentsMax())
+	require.NoError(t, sn.OpenList(indexedHead, false))
+	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+
+	done := make(chan struct{})
+	var eg errgroup.Group
+	eg.Go(func() error {
+		defer close(done)
+		for range 200 {
+			if err := sn.OpenList(unindexedHead, false); err != nil {
+				return err
+			}
+			if err := sn.OpenList(indexedHead, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		for {
+			select {
+			case <-done:
+				return nil
+			default:
+			}
+			if got := sn.SegmentsMax(); got != 0 && got != limit-1 {
+				return fmt.Errorf("SegmentsMax = %d, want 0 or %d", got, limit-1)
+			}
+		}
+	})
+	require.NoError(t, eg.Wait())
 }
 
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
