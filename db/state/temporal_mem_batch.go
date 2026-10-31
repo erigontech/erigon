@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"hash/maphash"
 	"maps"
 	"slices"
 	"sync"
@@ -45,6 +46,24 @@ type dataWithTxNum struct {
 // platforms with 128 mod (cache line size) = 0 — the sync.Pool poolLocal pad
 // pattern. The 128-byte stride keeps lock bodies off a shared 64-byte line
 // for any base alignment of the array.
+const memShards = 16
+
+var memShardSeed = maphash.MakeSeed()
+
+func memShard(domain kv.Domain, key string) int {
+	if domain == kv.StorageDomain {
+		return 0
+	}
+	return int(maphash.String(memShardSeed, key) & (memShards - 1))
+}
+
+func memShardBytes(domain kv.Domain, key []byte) int {
+	if domain == kv.StorageDomain {
+		return 0
+	}
+	return int(maphash.Bytes(memShardSeed, key) & (memShards - 1))
+}
+
 type paddedRWMutex struct {
 	sync.RWMutex
 	_ [128 - unsafe.Sizeof(sync.RWMutex{})%128]byte
@@ -60,8 +79,10 @@ type TemporalMemBatch struct {
 	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
 	inMemHistoryReads bool
 
-	latestStateLocks [kv.DomainLen]paddedRWMutex
-	domains          [kv.DomainLen]map[string][]dataWithTxNum
+	// latest state is sharded by key hash so a write does not block reads of other keys;
+	// StorageDomain keeps shard 0 because its btree keeps keys ordered
+	latestStateLocks [kv.DomainLen][memShards]paddedRWMutex
+	domains          [kv.DomainLen][memShards]map[string][]dataWithTxNum
 	storage          *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
@@ -113,7 +134,9 @@ func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalM
 	}
 
 	for id, d := range aggTx.d {
-		sd.domains[id] = map[string][]dataWithTxNum{}
+		for sh := range sd.domains[id] {
+			sd.domains[id][sh] = map[string][]dataWithTxNum{}
+		}
 		sd.domainWriters[id] = d.NewWriter(db)
 	}
 
@@ -125,25 +148,45 @@ func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistor
 
 func (sd *TemporalMemBatch) lockAllDomains() {
 	for i := range sd.latestStateLocks {
-		sd.latestStateLocks[i].Lock()
+		for sh := range sd.latestStateLocks[i] {
+			sd.latestStateLocks[i][sh].Lock()
+		}
 	}
 }
 
 func (sd *TemporalMemBatch) unlockAllDomains() {
 	for i := range sd.latestStateLocks {
-		sd.latestStateLocks[i].Unlock()
+		for sh := range sd.latestStateLocks[i] {
+			sd.latestStateLocks[i][sh].Unlock()
+		}
 	}
 }
 
 func (sd *TemporalMemBatch) rlockAllDomains() {
 	for i := range sd.latestStateLocks {
-		sd.latestStateLocks[i].RLock()
+		for sh := range sd.latestStateLocks[i] {
+			sd.latestStateLocks[i][sh].RLock()
+		}
 	}
 }
 
 func (sd *TemporalMemBatch) runlockAllDomains() {
 	for i := range sd.latestStateLocks {
-		sd.latestStateLocks[i].RUnlock()
+		for sh := range sd.latestStateLocks[i] {
+			sd.latestStateLocks[i][sh].RUnlock()
+		}
+	}
+}
+
+func (sd *TemporalMemBatch) rlockDomain(domain kv.Domain) {
+	for sh := range sd.latestStateLocks[domain] {
+		sd.latestStateLocks[domain][sh].RLock()
+	}
+}
+
+func (sd *TemporalMemBatch) runlockDomain(domain kv.Domain) {
+	for sh := range sd.latestStateLocks[domain] {
+		sd.latestStateLocks[domain][sh].RUnlock()
 	}
 }
 
@@ -190,8 +233,9 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 // putLatest reports whether this write is a same-txNum update of the key,
 // replacing the key's last entry in place instead of appending a version.
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
-	sd.latestStateLocks[domain].Lock()
-	defer sd.latestStateLocks[domain].Unlock()
+	sh := memShard(domain, key)
+	sd.latestStateLocks[domain][sh].Lock()
+	defer sd.latestStateLocks[domain][sh].Unlock()
 
 	updateMetrics := func(domain kv.Domain, putKeySize int, putValueSize int) {
 		sd.metrics.Lock()
@@ -246,23 +290,23 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		return sameTxNumUpdate
 	}
 
-	if old, ok := sd.domains[domain][key]; ok {
+	if old, ok := sd.domains[domain][sh][key]; ok {
 		switch {
 		case old[len(old)-1].txNum == txNum:
 			sameTxNumUpdate = true
 			putValueSize += len(val) - len(old[len(old)-1].data)
 			old[len(old)-1] = valWithStep
-			sd.domains[domain][key] = old
+			sd.domains[domain][sh][key] = old
 		case sd.inMemHistoryReads:
-			sd.domains[domain][key] = append(old, valWithStep)
+			sd.domains[domain][sh][key] = append(old, valWithStep)
 			putValueSize += len(val)
 		default:
 			putValueSize += len(val) - len(old[len(old)-1].data)
 			old[0] = valWithStep
-			sd.domains[domain][key] = old[:1]
+			sd.domains[domain][sh][key] = old[:1]
 		}
 	} else {
-		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
+		sd.domains[domain][sh][key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
 		putValueSize += len(val)
 	}
@@ -272,8 +316,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	sd.latestStateLocks[domain].RLock()
-	defer sd.latestStateLocks[domain].RUnlock()
+	sh := memShardBytes(domain, key)
+	sd.latestStateLocks[domain][sh].RLock()
+	defer sd.latestStateLocks[domain][sh].RUnlock()
 	return sd.getLatest(domain, key)
 }
 
@@ -316,7 +361,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 
 	}
 
-	dataWithTxNums, ok = sd.domains[domain][keyS]
+	dataWithTxNums, ok = sd.domains[domain][memShard(domain, keyS)][keyS]
 	if !ok {
 		return unwoundLatest(domain, keyS)
 	}
@@ -328,8 +373,9 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
 		return nil, false, kv.ErrInMemHistoryDisabled
 	}
-	sd.latestStateLocks[domain].RLock()
-	defer sd.latestStateLocks[domain].RUnlock()
+	sh := memShardBytes(domain, key)
+	sd.latestStateLocks[domain][sh].RLock()
+	defer sd.latestStateLocks[domain][sh].RUnlock()
 
 	// unwoundLatest returns the pre-unwound-block value for a key that was
 	// modified by the unwound block. Only fires when ts is at-or-after the
@@ -374,7 +420,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 		return unwoundLatest(domain, keyS)
 	}
 
-	dataWithTxNums, ok = sd.domains[domain][keyS]
+	dataWithTxNums, ok = sd.domains[domain][memShard(domain, keyS)][keyS]
 	if !ok {
 		return unwoundLatest(domain, keyS)
 	}
@@ -401,8 +447,8 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	sd.latestStateLocks[domain].RLock()
-	defer sd.latestStateLocks[domain].RUnlock()
+	sd.rlockDomain(domain)
+	defer sd.runlockDomain(domain)
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
@@ -550,12 +596,14 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 		return kept
 	}
 	for d := range sd.domains {
-		for k, entries := range sd.domains[d] {
-			kept := pruneSlice(entries)
-			if len(kept) == 0 {
-				delete(sd.domains[d], k)
-			} else {
-				sd.domains[d][k] = kept
+		for _, m := range sd.domains[d] {
+			for k, entries := range m {
+				kept := pruneSlice(entries)
+				if len(kept) == 0 {
+					delete(m, k)
+				} else {
+					m[k] = kept
+				}
 			}
 		}
 	}
@@ -642,9 +690,10 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return fmt.Errorf("can't merge %T into *TemporalMemBatch", o)
 	}
 
-	for domain, otherEntries := range other.domains {
-		entries := sd.domains[domain]
-		maps.Copy(entries, otherEntries)
+	for domain := range other.domains {
+		for sh, otherEntries := range other.domains[domain] {
+			maps.Copy(sd.domains[domain][sh], otherEntries)
+		}
 	}
 
 	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
@@ -794,12 +843,14 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 				})
 				continue
 			}
-			for keyStr, history := range sd.domains[domain] {
-				if len(history) == 0 {
-					continue
+			for _, m := range sd.domains[domain] {
+				for keyStr, history := range m {
+					if len(history) == 0 {
+						continue
+					}
+					latest := history[len(history)-1]
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 				}
-				latest := history[len(history)-1]
-				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 			}
 		}
 	}
