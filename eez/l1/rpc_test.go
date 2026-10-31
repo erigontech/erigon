@@ -18,7 +18,11 @@ package l1_test
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -89,4 +93,32 @@ func TestRPCErrorMapping(t *testing.T) {
 	}
 	err := l1.MapRPCError(errors.New("connection refused"), "call")
 	require.False(t, errors.Is(err, l1.ErrRangeTooWide) || errors.Is(err, l1.ErrNotFound))
+}
+
+// TestRPCTransportError checks that a failed connection prints the call, the
+// socket operation, the remote address and the system error only.
+func TestRPCTransportError(t *testing.T) {
+	reset := &url.Error{Op: "Post", URL: "http://127.0.0.1:18545", Err: &net.OpError{
+		Op:     "read",
+		Net:    "tcp",
+		Source: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 57349},
+		Addr:   &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 18545},
+		Err:    &os.SyscallError{Syscall: "read", Err: syscall.ECONNRESET},
+	}}
+	err := l1.MapRPCError(reset, "eth_getBlockByNumber(latest)")
+	require.EqualError(t, err, "eth_getBlockByNumber(latest): read tcp 127.0.0.1:18545: read: connection reset by peer")
+	require.ErrorIs(t, err, syscall.ECONNRESET)
+	var ue *url.Error
+	require.ErrorAs(t, err, &ue)
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+	r, err := l1.DialRPC(t.Context(), "http://"+addr, log.New())
+	require.NoError(t, err)
+	defer r.Close()
+	_, err = r.ChainID(t.Context())
+	require.EqualError(t, err, "eth_chainId: dial tcp "+addr+": connect: connection refused")
+	require.ErrorIs(t, err, syscall.ECONNREFUSED)
 }

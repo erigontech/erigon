@@ -19,7 +19,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/erigontech/erigon/common"
@@ -51,7 +53,7 @@ func (r *RPC) Close() { r.client.Close() }
 func (r *RPC) ChainID(ctx context.Context) (uint64, error) {
 	var id hexutil.Uint64
 	if err := r.client.CallContext(ctx, &id, "eth_chainId"); err != nil {
-		return 0, err
+		return 0, mapError(err, "eth_chainId")
 	}
 	return uint64(id), nil
 }
@@ -174,6 +176,7 @@ var rangeTooWide = []string{
 var notFound = []string{"not found", "unknown block", "finalized block"}
 
 func mapError(err error, what string) error {
+	err = shortTransport(err)
 	msg := strings.ToLower(err.Error())
 	for _, s := range rangeTooWide {
 		if strings.Contains(msg, s) {
@@ -186,4 +189,26 @@ func mapError(err error, what string) error {
 		}
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// transportError prints a failed connection without the request URL, which
+// is the configured endpoint, and the local address, which changes per
+// connection.
+type transportError struct {
+	op  net.OpError
+	err error
+}
+
+func (e *transportError) Error() string { return e.op.Error() }
+
+func (e *transportError) Unwrap() error { return e.err }
+
+func shortTransport(err error) error {
+	var op *net.OpError
+	if !errors.As(err, &op) {
+		return err
+	}
+	short := *op
+	short.Source = nil
+	return &transportError{op: short, err: err}
 }
