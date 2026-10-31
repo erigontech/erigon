@@ -78,8 +78,7 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 
-	// toSlot == CaplinMergeLimit: toSlot-fromSlot is not < blocksPerFile,
-	// so the loop reaches chooseSegmentEnd and dumpBeaconBlocksRange.
+	// toSlot == CaplinMergeLimit fills one segment, so the loop reaches dumpBeaconBlocksRange.
 	// Before the fix this panicked; now it returns an error (no snap dir / empty db).
 	var err error
 	require.NotPanics(t, func() {

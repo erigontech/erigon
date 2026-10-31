@@ -409,14 +409,8 @@ func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	cfg := snapcfg.KnownCfgOrDevnet("")
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, cfg) {
-		blocksPerFile := snapcfg.MergeLimitFromCfg(cfg, snaptype.CaplinEnums.BeaconBlocks, i)
-
-		if toSlot-i < blocksPerFile {
-			break
-		}
-		to := chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, cfg)
+	for i := fromSlot; i+snaptype.CaplinMergeLimit <= toSlot; i += snaptype.CaplinMergeLimit {
+		to := i + snaptype.CaplinMergeLimit
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, i, to, salt, dirs, workers, lvl, logger); err != nil {
 			return err

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 const (
@@ -430,7 +431,7 @@ func (s *Antiquary) antiquate() error {
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
-		return nil
+		return s.mergeBlocks()
 	}
 	// if s.snBuildSema != nil {
 	// 	if !s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
@@ -462,6 +463,25 @@ func (s *Antiquary) antiquate() error {
 		}
 	}
 
+	return s.mergeBlocks()
+}
+
+func (s *Antiquary) mergeBlocks() error {
+	merger := snapshotsync.NewMerger(s.dirs.Tmp, 1, log.LvlDebug, nil, &chain.Config{}, s.logger)
+	ranges := merger.FindMergeRanges(s.sn.Ranges(false), snaptype.CaplinEnums.BeaconBlocks)
+	if len(ranges) == 0 {
+		return nil
+	}
+	var onMerge func([]string) error
+	var onDelete func(context.Context, []string) error
+	if s.downloader != nil {
+		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
+		onDelete = s.downloader.Delete
+	}
+	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
+		return err
+	}
+	s.removeBlockOverlaps()
 	return nil
 }
 

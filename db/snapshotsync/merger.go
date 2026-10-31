@@ -38,15 +38,15 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
-func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
+func (m *Merger) FindMergeRanges(currentRanges []Range, snapType snaptype.Enum) (toMerge []Range) {
 	cfg := m.snCfg
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
+		mergeLimit := cfg.MergeLimit(snapType, r.From())
 		if r.To()-r.From() >= mergeLimit {
 			continue
 		}
-		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, r.From()) {
+		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snapType, r.From()) {
 			if r.To()%span != 0 {
 				continue
 			}
@@ -65,9 +65,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	return toMerge
 }
 
-func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
+func (m *Merger) filesByRange(v *View, snapTypes []snaptype.Type, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
 	toMerge := map[snaptype.Enum][]*DirtySegment{}
-	for _, t := range v.s.types {
+	for _, t := range snapTypes {
 		toMerge[t.Enum()] = m.filesByRangeOfType(v, from, to, t)
 	}
 
@@ -103,6 +103,7 @@ func (m *Merger) mergeSubSegment(
 			}
 		}
 		if err != nil {
+			newDirtySegment.close()
 			f := sn.Path
 			_ = dir.RemoveFile(f)
 			_ = dir.RemoveFile(f + ".torrent")
@@ -204,10 +205,20 @@ func (m *Merger) Merge(
 	in := make(map[snaptype.Enum][]*DirtySegment)
 	out := make(map[snaptype.Enum][]*DirtySegment)
 	mergedFileNames := make([]string, 0, 16)
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, segments := range in {
+			for _, segment := range segments {
+				segment.close()
+			}
+		}
+	}()
 
 	for _, r := range mergeRanges {
 		mergedFileNames = mergedFileNames[:0]
-		toMerge, err := m.filesByRange(v, r.From(), r.To())
+		toMerge, err := m.filesByRange(v, snapTypes, r.From(), r.To())
 		if err != nil {
 			return err
 		}
