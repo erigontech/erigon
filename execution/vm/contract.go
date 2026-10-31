@@ -20,11 +20,12 @@
 package vm
 
 import (
-	"github.com/c2h5oh/datasize"
+	"encoding/binary"
+	"sync/atomic"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -63,11 +64,18 @@ type Contract struct {
 	selfBalanceCached bool
 }
 
-// around 64MB cache in the worst case.
-var jumpDestCache = newJumpDestCache()
+// jumpDests holds JUMPDEST analyses by code hash, at most 64 MB of bitmaps for 64 KB codes. An
+// analysis never changes, so a slot is replaced whole and a hit takes no lock: workers that call
+// one contract do not serialize on it.
+var jumpDests = new([1 << 13]atomic.Pointer[jumpDestEntry])
 
-func newJumpDestCache() *cache.GenericCache[bitvec] {
-	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
+type jumpDestEntry struct {
+	codeHash common.Hash
+	bits     bitvec
+}
+
+func jumpDestSlot(codeHash common.Hash) *atomic.Pointer[jumpDestEntry] {
+	return &jumpDests[binary.LittleEndian.Uint64(codeHash[:8])&(uint64(len(jumpDests))-1)]
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
@@ -100,26 +108,17 @@ func (c *Contract) analysedJumpdest(dest *uint256.Int) bool {
 
 // jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.
 func (c *Contract) jumpdestAnalysis() bitvec {
-	var codeHash common.Hash
-	isCodeHashZero := c.CodeHash.IsZero()
-	if !isCodeHashZero {
-		codeHash = c.CodeHash.Value()
+	if c.CodeHash.IsZero() {
+		return codeBitmap(c.Code)
 	}
-
-	if !isCodeHashZero {
-		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
-			return analysis
-		}
+	codeHash := c.CodeHash.Value()
+	slot := jumpDestSlot(codeHash)
+	if e := slot.Load(); e != nil && e.codeHash == codeHash {
+		return e.bits
 	}
-
-	analysis := codeBitmap(c.Code)
-
-	if !isCodeHashZero {
-		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], analysis, 0)
-	}
-
-	return analysis
+	bits := codeBitmap(c.Code)
+	slot.Store(&jumpDestEntry{codeHash: codeHash, bits: bits})
+	return bits
 }
 
 // GetOp returns the n'th element in the contract's byte array

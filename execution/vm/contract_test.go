@@ -20,18 +20,24 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func TestJumpDestCacheSizeBytes(t *testing.T) {
-	t.Parallel()
-	c := newJumpDestCache()
-	t.Cleanup(c.Close)
-	key := []byte("code hash")
+func TestJumpdestAnalysisCachedByCodeHash(t *testing.T) {
+	code := []byte{byte(PUSH1), byte(JUMPDEST), byte(JUMPDEST)}
+	hash := common.Hash{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	c := &Contract{Code: code, CodeHash: accounts.InternCodeHash(hash)}
+	bits := c.jumpdestAnalysis()
+	require.False(t, bits.isJumpdest(1), "push data")
+	require.True(t, bits.isJumpdest(2))
+	require.Same(t, &bits[0], &c.jumpdestAnalysis()[0], "the second analysis was recomputed")
 
-	c.Put(key, make(bitvec, 1), 0)
-	small := c.SizeBytes()
-	c.Put(key, make(bitvec, 512), 0)
-	require.Equal(t, int64(511*8), c.SizeBytes()-small, "replacement")
-	c.Delete(key)
-	require.Zero(t, c.SizeBytes(), "removal")
+	// A code hash that shares the slot replaces the entry, and the old one is recomputed.
+	other := hash
+	other[31] = 1
+	o := &Contract{Code: []byte{byte(JUMPDEST)}, CodeHash: accounts.InternCodeHash(other)}
+	require.True(t, o.jumpdestAnalysis().isJumpdest(0))
+	require.NotSame(t, &bits[0], &c.jumpdestAnalysis()[0])
 }
