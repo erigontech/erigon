@@ -537,7 +537,9 @@ func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 // whose gas is below its normalized key length is not cached.
 func TestCachedPrecompileAdmission(t *testing.T) {
 	run := func(n int, p *countingPrecompile, input []byte, normalize func([]byte) ([]byte, bool)) int {
-		c := newCachedPrecompile(p, normalize, [21]byte{209})
+		domain := [21]byte{209}
+		binary.BigEndian.PutUint64(domain[1:], cacheTestID.Add(1))
+		c := newCachedPrecompile(p, normalize, domain)
 		for range n {
 			_, err := c.Run(input)
 			require.NoError(t, err)
