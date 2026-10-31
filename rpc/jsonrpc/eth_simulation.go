@@ -757,7 +757,11 @@ func (s *simulator) simulateBlock(
 	// Determine the active precompiled contracts for this block.
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum, s.touchedKeys)
+	domainsTx := tx
+	if !latest {
+		domainsTx = baseStateTx{TemporalTx: tx, txNum: firstMinTxNum}
+	}
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(domainsTx), minTxNum, s.touchedKeys)
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
 
 	// Override the state before block execution.
@@ -809,7 +813,7 @@ func (s *simulator) simulateBlock(
 			intraBlockState.MergeTxIOInto(balIO, writes)
 			intraBlockState.FlushWritesToVersionMap(writes)
 			stateWriter.trackWrites(writes)
-			if err := state.ApplyWrites(writes, sharedDomains, tx, blockNumber, minTxNum, nil, rules, false); err != nil {
+			if err := state.ApplyWrites(writes, sharedDomains, domainsTx, blockNumber, minTxNum, nil, rules, false); err != nil {
 				return fmt.Errorf("apply simulated writes: %w", err)
 			}
 			intraBlockState.ResetVersionedIO()
@@ -1032,7 +1036,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
 	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, baseStateTx{TemporalTx: tx, txNum: firstMinTxNum}, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
 		if err != nil {
 			return err
 		}
@@ -1316,6 +1320,22 @@ func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomain
 	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
 }
 
+// baseStateTx returns account, storage and code state as of txNum, the end of the
+// base block, in place of the latest state. SharedDomains skips a write that
+// matches the state it reads, so on an old base it must read the base state.
+type baseStateTx struct {
+	kv.TemporalTx
+	txNum uint64
+}
+
+func (tx baseStateTx) GetLatest(domain kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain != kv.AccountsDomain && domain != kv.StorageDomain && domain != kv.CodeDomain {
+		return tx.TemporalTx.GetLatest(domain, k, opts)
+	}
+	v, _, err := tx.GetAsOf(domain, k, tx.txNum)
+	return v, 0, err
+}
+
 // simulationIntraBlockStateReader is a state.StateReader for the 2nd+ block of an eth_simulateV1
 // multi-block simulation.
 //
@@ -1439,7 +1459,7 @@ func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomain
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
 func (s *simulator) computeCommitmentFromStateHistory(
 	ctx context.Context,
-	tx kv.TemporalTx,
+	tx, stateTx kv.TemporalTx,
 	sd *execctx.SharedDomains,
 	touched keysByAccount,
 	baseBlockNum uint64,
@@ -1451,7 +1471,7 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
 	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
+		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, stateTx, tsd, sd))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
 			addrValue := address.Value()
