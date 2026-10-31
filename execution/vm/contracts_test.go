@@ -554,6 +554,7 @@ func TestCachedPrecompileAdmission(t *testing.T) {
 	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 200}, input(300), zeroPaddedKey(128)), "gas above the normalized key length not cached")
 	require.Equal(t, 1, runTwice(&countingPrecompile{output: make([]byte, 1024)}, input(64), wholeInputKey), "1024-byte output not cached")
 	require.Equal(t, 2, runTwice(&countingPrecompile{output: make([]byte, 1025)}, input(64), wholeInputKey), "1025-byte output cached")
+	require.Equal(t, 2, runTwice(&countingPrecompile{output: []byte{1}}, make([]byte, 128), zeroPaddedKey(128)), "all-zero input cached")
 }
 
 func TestCachedPrecompileDomainAndErrors(t *testing.T) {
