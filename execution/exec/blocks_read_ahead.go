@@ -119,7 +119,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
 	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
-	if _, writable := kv.UnderlyingTx(ttx).(kv.TemporalRwTx); !writable {
+	if !kv.UnderlyingTxIsWritable(ttx) {
 		getter.snapshot = frontier
 	}
 	return getter

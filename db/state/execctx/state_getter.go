@@ -134,7 +134,7 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	// Overlay read views expose write methods, while read-only wrappers can
 	// hide a writable tx, so classify the underlying transaction.
 	generationTx := kv.UnderlyingTx(tx)
-	if generationTx == nil || writableTx(generationTx) {
+	if generationTx == nil || kv.UnderlyingTxIsWritable(generationTx) {
 		return g
 	}
 	stateVersion, err := rawdb.GetStateVersion(generationTx)
@@ -155,11 +155,6 @@ func (g *TemporalTxStateGetter) cacheReadView() cache.ReadView {
 		g.view = g.view.WithFrontier(g.frontier)
 	}
 	return g.view
-}
-
-func writableTx(tx kv.TemporalTx) bool {
-	_, writable := tx.(kv.TemporalRwTx)
-	return writable
 }
 
 func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
