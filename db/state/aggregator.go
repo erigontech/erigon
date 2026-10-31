@@ -714,8 +714,6 @@ func (a *Aggregator) CloseFilesNoReopen() {
 	a.recalcVisibleFiles(nil)
 }
 
-func (a *Aggregator) CloseFilesNoReopen() { a.closeDirtyFilesNoReopen() }
-
 func (a *Aggregator) WaitForFiles() {
 	for range a.WaitForBuildAndMerge(a.ctx) {
 		// The loop will exit when the channel is closed

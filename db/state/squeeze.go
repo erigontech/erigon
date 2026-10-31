@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -765,7 +766,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				curBlock = blockNum
 			}
-			if cfg.Variant == commitment.VariantCommitmentV3 {
+			if domains.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
 				if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
 					return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
 				}
@@ -1078,7 +1079,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if rebuildTrieCfg.Variant != commitment.VariantCommitmentV3 {
+			if statecfg.ExperimentalParallelCommitment && rebuildTrieCfg.Variant != commitment.VariantCommitmentV3 {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
