@@ -97,7 +97,25 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
+func (s *CaplinSnapshots) SegmentsMax() uint64 {
+	var view *CaplinView
+	var lowest uint64
+	s.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
+		lowest, _ = sn.GetRange()
+		view = s.View()
+		return false
+	})
+	if view == nil {
+		return 0
+	}
+	defer view.Close()
+
+	visible := view.BeaconBlocks()
+	if len(visible) == 0 || visible[0].From() != lowest {
+		return 0
+	}
+	return visible[len(visible)-1].To() - 1
+}
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
@@ -143,17 +161,11 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
-
 func (s *CaplinSnapshots) OpenBeaconBlocks() error {
 	return s.openFolder(false, func(f snaptype.FileInfo) bool {
 		return f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks
 	})
 }
-
-// Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
-// Go embedding has no virtual dispatch, so they would call the base OpenFolder.
-func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
 type snapshotNotifier interface {
 	OnNewSnapshot()
@@ -170,7 +182,7 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 }
 
 func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
 		return err
 	}

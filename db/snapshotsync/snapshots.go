@@ -54,59 +54,6 @@ type SortedRange interface {
 	GetGrouping() string
 }
 
-// NoOverlaps - keep largest ranges and avoid overlap
-func NoOverlaps[T SortedRange](in []T) (res []T) {
-	if len(in) == 1 {
-		return in
-	}
-
-	for i := 0; i < len(in); i++ {
-		r := in[i]
-		iFrom, iTo := r.GetRange()
-		if iFrom == iTo {
-			continue
-		}
-		for j := i + 1; j < len(in); j++ {
-			r2 := in[j]
-			jFrom, jTo := r2.GetRange()
-			if jFrom == jTo {
-				continue
-			}
-			if jFrom > iFrom {
-				break
-			}
-			r = r2
-			i++
-		}
-		res = append(res, r)
-	}
-	return res
-}
-
-func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	if len(in) == 1 {
-		return in, nil
-	}
-
-	prevTo, _ := in[0].GetRange()
-	for _, f := range in {
-		from, to := f.GetRange()
-		if to <= prevTo {
-			continue
-		}
-		if from != prevTo { // no gaps
-			missingRanges = append(missingRanges, Range{prevTo, from})
-			continue
-		}
-		prevTo = to
-		out = append(out, f)
-	}
-	return out, missingRanges
-}
-
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
@@ -2071,36 +2018,4 @@ func removeOldFiles(toDel []string) {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
 	}
-}
-
-func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	{
-		var l, lSidecars []snaptype.FileInfo
-		var m []Range
-		for i := range list {
-			f := &list[i]
-			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-				continue
-			}
-			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, *f) // blobs are an exception
-				continue
-			}
-			l = append(l, *f)
-		}
-		l, m = NoGaps(NoOverlaps(l))
-		if len(m) > 0 {
-			lst := m[len(m)-1]
-			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.From())
-		}
-		res = append(res, l...)
-		res = append(res, lSidecars...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	return res, missingSnapshots, nil
 }
