@@ -134,13 +134,17 @@ func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 // the caller lends, the way seg's Getter does.
 type codeBufTx struct {
 	kv.TemporalTx
-	code     map[string][]byte
-	lentCaps *[]int
+	code              map[string][]byte
+	bufferedCodeReads int
+	lentCaps          *[]int
 }
 
-func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+func (tx *codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain != kv.CodeDomain {
 		return tx.TemporalTx.GetLatest(domain, key, opts)
+	}
+	if cap(opts.Buf()) > 0 {
+		tx.bufferedCodeReads++
 	}
 	if tx.lentCaps != nil {
 		*tx.lentCaps = append(*tx.lentCaps, cap(opts.Buf()))
@@ -148,25 +152,50 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
 }
 
+// commitCodeAccounts commits accounts whose code hashes match codes, so reads
+// resolve those hashes from committed state rather than from the batch.
+func commitCodeAccounts(t *testing.T, db kv.TemporalRwDB, addrs, codes [][]byte) {
+	t.Helper()
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	for i := range codes {
+		acc := accounts.SerialiseV3(&accounts.Account{
+			Nonce:    1,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
+		})
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addrs[i], acc, 5, nil))
+	}
+	require.NoError(t, sd.Commit(ctx, rwTx))
+}
+
 // A caller-owned buffer outlives each getter, so a later getter decodes into it
 // instead of growing its own.
 func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
-	roTx, err := db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
 
 	codes := [][]byte{
 		bytes.Repeat([]byte{0x17}, 1024),
 		bytes.Repeat([]byte{0x28}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	var lentCaps []int
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
+	}
+	commitCodeAccounts(t, db, addrs, codes)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := &codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	for i := range codes {
 		tx.code[string(addrs[i])] = codes[i]
 	}
 
@@ -176,13 +205,6 @@ func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	sd.BindStateCache(sc)
-	for i, addr := range addrs {
-		acc := accounts.SerialiseV3(&accounts.Account{
-			Nonce:    1,
-			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
-		})
-		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
-	}
 
 	var buf []byte
 	opts := execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)
@@ -199,9 +221,6 @@ func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
-	roTx, err := db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
 
 	codes := [][]byte{
 		bytes.Repeat([]byte{0xa1}, 1024),
@@ -209,10 +228,17 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		bytes.Repeat([]byte{0xc3}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
+	}
+	commitCodeAccounts(t, db, addrs, codes)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	for i := range codes {
 		tx.code[string(addrs[i])] = codes[i]
 	}
 
@@ -222,13 +248,6 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	sd.BindStateCache(sc)
-	for i, addr := range addrs {
-		acc := accounts.SerialiseV3(&accounts.Account{
-			Nonce:    1,
-			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
-		})
-		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
-	}
 
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 	got := make([][]byte, len(codes))
@@ -242,6 +261,7 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	for i := range codes {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
 	}
+	require.Equal(t, len(codes)-1, tx.bufferedCodeReads)
 }
 
 // A read that does not resolve a codeHash skips the cache copy, so it must not
@@ -259,7 +279,7 @@ func TestStateGetterCodeBufNotLentWithoutCodeHash(t *testing.T) {
 		bytes.Repeat([]byte{0xf6}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	tx := &codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)

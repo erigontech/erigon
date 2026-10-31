@@ -1540,8 +1540,9 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
 	var codeHash []byte
+	var hashMayBeFromMem bool
 	if sd.stateCache != nil {
-		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
+		if codeHash, hashMayBeFromMem = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
 			if size, ok := view.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
@@ -1554,7 +1555,10 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		}
 	}
 
-	size, found, answered, err := sd.getLatestValSize(kv.CodeDomain, tx, addr, view)
+	if hashMayBeFromMem {
+		codeHash = nil
+	}
+	size, found, answered, sizeFromMem, err := sd.getLatestValSize(kv.CodeDomain, tx, addr, view)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1562,7 +1566,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		if !found || size == 0 {
 			return 0, false, nil
 		}
-		if len(codeHash) == len(common.Hash{}) {
+		if !sizeFromMem && len(codeHash) == len(common.Hash{}) {
 			view.FillCodeSize(codeHash, size, txNum)
 		}
 		return size, true, nil
@@ -1578,21 +1582,21 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 	return len(v), true, nil
 }
 
-func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte, view cache.ReadView) (size int, found bool, answered bool, err error) {
+func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte, view cache.ReadView) (size int, found, answered, fromMem bool, err error) {
 	v, _, maxStep, ok := sd.latestFromMem(domain, k)
 	if ok {
-		return len(v), true, true, nil
+		return len(v), true, true, true, nil
 	}
 	if sd.stateCache != nil {
 		if v, txNum, ok := view.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep) && !sd.rejectedByLocalUnwind(txNum) {
-			return len(v), true, true, nil
+			return len(v), true, true, false, nil
 		}
 	}
 	if maxStep != kv.NoStepBound {
-		return 0, false, false, nil
+		return 0, false, false, false, nil
 	}
 	size, found, err = tx.GetLatestValSize(domain, k)
-	return size, found, true, err
+	return size, found, true, false, err
 }
 
 // GetCode returns the contract code at addr. The fast path resolves the
@@ -1619,14 +1623,18 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	var codeHash []byte
+	var hashMayBeFromMem bool
 	if sd.stateCache != nil {
-		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
+		if codeHash, hashMayBeFromMem = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
 			if cv, ok := view.GetCodeByHash(codeHash); ok {
 				return cv, true, nil
 			}
 		}
 	}
 
+	if hashMayBeFromMem {
+		codeHash = nil
+	}
 	// Cold path: authoritative addr-keyed read (also populates the caches).
 	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf})
 	if err != nil {
@@ -1654,12 +1662,13 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 // CodeHashForAddr resolves the code hash for addr as of txNum, reading through
 // the shared domains' cache view.
 func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum uint64) []byte {
-	return sd.codeHashForAddr(tx, sd.cacheReader(), addr, txNum)
+	h, _ := sd.codeHashForAddr(tx, sd.cacheReader(), addr, txNum)
+	return h
 }
 
-func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) []byte {
+func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) (codeHash []byte, mayBeFromMem bool) {
 	if len(addr) == 0 {
-		return nil
+		return nil, false
 	}
 	// In-batch state is authoritative: sd.mem / parent.mem hold this batch's
 	// uncommitted account writes, while the addr→codeHash LRU is invalidated only
@@ -1667,16 +1676,16 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	// answer once mem has missed.
 	v, _, maxStep, ok := sd.latestFromMem(kv.AccountsDomain, addr)
 	if ok {
-		return accounts.DeserialiseV3CodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v), true
 	}
 	if maxStep != kv.NoStepBound || sd.hasLocalCacheUnwind() {
 		// A staged unwind bounds the committed lookup. Reuse the normal account
 		// path so every cache and database source observes the same bound.
 		v, _, err := sd.getLatest(kv.AccountsDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{})
 		if err != nil {
-			return nil
+			return nil, true
 		}
-		return accounts.DeserialiseV3CodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v), true
 	}
 
 	// Below mem: the addr → codeHash LRU caches committed state
@@ -1685,9 +1694,9 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if sd.stateCache != nil {
 		if h, ok := view.GetAddrCodeHash(addr); ok {
 			if h == ([32]byte{}) {
-				return nil
+				return nil, false
 			}
-			return h[:]
+			return h[:], false
 		}
 	}
 
@@ -1728,7 +1737,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		}
 		seedView.SeedAddrCodeHash(addr, fixed, txNum)
 	}
-	return h
+	return h, false
 }
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
