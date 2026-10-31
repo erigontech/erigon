@@ -452,6 +452,12 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // It requests blocks, processes them in reverse order via the onNewBlock callback,
 // and rejects blocks whose root hash doesn't match the expected root.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
+	defer func() {
+		if b.finished.Load() {
+			b.cancelPrefetched()
+		}
+	}()
+
 	responses, err := b.fetchBlockRange(ctx)
 	if err != nil {
 		return err

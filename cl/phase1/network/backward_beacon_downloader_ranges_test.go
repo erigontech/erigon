@@ -292,6 +292,43 @@ func TestBackwardBeaconDownloaderCancelsDroppedPrefetches(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 }
 
+func TestBackwardBeaconDownloaderCancelsPrefetchesWhenFinished(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(1280, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, delay: 5 * time.Millisecond, held: func(start uint64) bool { return start < 640 }, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	// The range holding the finishing block is answered only once the queue below it is full.
+	queueFull := make(chan struct{})
+	var queued atomic.Int32
+	downloader.requestBlocksByRange = func(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		if start < 640 && queued.Add(1) == maxPrefetchedRanges {
+			close(queueFull)
+		}
+		if start == 640 {
+			select {
+			case <-queueFull:
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			}
+		}
+		return server.requestBlocksByRange(ctx, start, count)
+	}
+	downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, _ *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		return blk.Block.Slot == 640, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	for !downloader.Finished() {
+		require.NoError(t, downloader.RequestMore(ctx))
+	}
+
+	require.Empty(t, downloader.prefetched)
+	require.Eventually(t, func() bool {
+		server.mu.Lock()
+		defer server.mu.Unlock()
+		return len(server.cancelled) == maxPrefetchedRanges
+	}, 5*time.Second, time.Millisecond)
+}
+
 func singleBlockBeaconAPI(t *testing.T, slot uint64) (string, *clparams.BeaconChainConfig) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
