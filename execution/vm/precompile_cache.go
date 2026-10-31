@@ -19,6 +19,7 @@ package vm
 import (
 	"bytes"
 	"hash/maphash"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -32,12 +33,15 @@ import (
 
 const (
 	maxCachedPrecompileInput = 64 * 1024
+	// Below this gas the insert is a large part of the call, so a result waits for its second miss.
+	admitOnFirstMissGas = 1000
 )
 
 var (
 	precompileCacheEnabled = dbg.EnvBool("PRECOMPILE_CACHE", true)
 
 	precompileSeed, precompileCheckSeed = maphash.MakeSeed(), maphash.MakeSeed()
+	precompileMissed                    = new([4096]atomic.Uint64) // the key of the last cheap miss per slot
 	precompileResults                   = cache.NewByteLRU(8*datasize.MB, func(_ uint64, r precompileResult) int64 {
 		return int64(unsafe.Sizeof(r)) + int64(len(r.output)) + cache.ByteLRUEntryOverheadBytes
 	})
@@ -75,9 +79,10 @@ func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, 
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
+	gas := c.RequiredGas(input)
 	// Below its key length a call costs less than the insert a miss pays, and the precompiles that
 	// zero-pad answer an all-zero input without computing.
-	if !ok || len(in) == 0 || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < uint64(len(in)) {
+	if !ok || len(in) == 0 || len(in) > maxCachedPrecompileInput || gas < uint64(len(in)) {
 		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
@@ -85,10 +90,22 @@ func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 		return bytes.Clone(r.output), nil
 	}
 	output, err := c.PrecompiledContract.Run(input)
-	if err == nil && len(output) <= 1024 {
+	if err == nil && len(output) <= 1024 && admit(key, gas) {
 		precompileResults.Add(key, precompileResult{domain: c.domain, check: check, output: bytes.Clone(output)})
 	}
 	return output, err
+}
+
+func admit(key, gas uint64) bool {
+	if gas >= admitOnFirstMissGas {
+		return true
+	}
+	slot := &precompileMissed[key&(uint64(len(precompileMissed))-1)]
+	if slot.Load() == key {
+		return true
+	}
+	slot.Store(key)
+	return false
 }
 
 // precompileCacheKey returns how a cached precompile narrows its input to the bytes that decide the
