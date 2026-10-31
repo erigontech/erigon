@@ -243,3 +243,11 @@ func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int
 	acc, err := preBlock.ReadAccountData(addr)
 	return acc == nil, err
 }
+
+// OriginAccount returns the base account the block's versionMap seeded for addr, if any (nil = absent).
+func OriginAccount(v WriteSetView, addr accounts.Address) (*accounts.Account, bool) {
+	if w, ok := v.(*versionMapWriteView); ok && w.vm != nil {
+		return w.vm.LoadOriginAccount(addr)
+	}
+	return nil, false
+}
