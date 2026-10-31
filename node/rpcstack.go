@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 
@@ -42,16 +43,57 @@ import (
 // NewHTTPHandlerStack returns wrapped http-related handlers.
 // When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
 // (503 if inflight > limit) to prevent goroutine pile-up under load.
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool, opts ...HTTPHandlerOption) http.Handler {
+	o := httpHandlerOptions{loopbackCompression: true}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
-		handler = newGzipHandler(handler)
+		if o.loopbackCompression {
+			handler = newGzipHandler(handler)
+		} else {
+			handler = newSkipLoopbackCompressionHandler(handler, newGzipHandler(handler))
+		}
 	}
 	if tagAsRPC {
 		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
 	}
 	return handler
+}
+
+type httpHandlerOptions struct {
+	loopbackCompression bool
+}
+
+type HTTPHandlerOption func(*httpHandlerOptions)
+
+// WithLoopbackCompression sets whether loopback clients get compressed responses
+// (default true). On loopback compression only costs CPU and latency, but a
+// reverse proxy on the same host makes remote clients look local too.
+func WithLoopbackCompression(enabled bool) HTTPHandlerOption {
+	return func(o *httpHandlerOptions) { o.loopbackCompression = enabled }
+}
+
+// newSkipLoopbackCompressionHandler decides per request, not per listener, so a
+// server bound to 0.0.0.0 still skips compression for local clients.
+func newSkipLoopbackCompressionHandler(plain, compressed http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLoopbackAddress(r.RemoteAddr) {
+			plain.ServeHTTP(w, r)
+			return
+		}
+		compressed.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackAddress(addr string) bool {
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		return false
+	}
+	return ap.Addr().Unmap().IsLoopback()
 }
 
 // rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.

@@ -19,9 +19,11 @@ package node
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -30,6 +32,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -541,4 +545,121 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 			b.ReportMetric(float64(peak.Load())/(1<<20), "peak-heap-MiB")
 		})
 	}
+}
+
+// syntheticBlockPayload builds an eth_getBlockByNumber(full) style response of
+// roughly size bytes: random hashes and calldata (incompressible) mixed with
+// repeated keys, a shared block hash and a small address pool, so it compresses
+// in the same range as real responses.
+func syntheticBlockPayload(size int) []byte {
+	rng := rand.New(rand.NewPCG(1, 2))
+	hexOf := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(rng.Uint32())
+		}
+		return "0x" + hex.EncodeToString(b)
+	}
+	addrs := make([]string, 200)
+	for i := range addrs {
+		addrs[i] = hexOf(20)
+	}
+	blockHash := hexOf(32)
+
+	var buf bytes.Buffer
+	buf.WriteString(`{"jsonrpc":"2.0","id":1,"result":{"hash":"` + blockHash + `","number":"0x1918000","transactions":[`)
+	for i := 0; buf.Len() < size; i++ {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		fmt.Fprintf(&buf,
+			`{"blockHash":"%s","blockNumber":"0x1918000","from":"%s","gas":"0x%x","gasPrice":"0x%x","hash":"%s","input":"%s","nonce":"0x%x","to":"%s","transactionIndex":"0x%x","value":"0x0","type":"0x2","chainId":"0x1","v":"0x1","r":"%s","s":"%s"}`,
+			blockHash, addrs[rng.IntN(len(addrs))], 21000+rng.IntN(500000), 1_000_000_000+rng.IntN(1_000_000_000),
+			hexOf(32), hexOf(4+rng.IntN(300)), rng.IntN(10000), addrs[rng.IntN(len(addrs))], i, hexOf(32), hexOf(32))
+	}
+	buf.WriteString(`]}}`)
+	return buf.Bytes()
+}
+
+// BenchmarkLoopbackCompression measures a full loopback round trip through
+// NewHTTPHandlerStack, client-side decoding included, with and without
+// compression for loopback clients.
+func BenchmarkLoopbackCompression(b *testing.B) {
+	for _, size := range []int{16 << 10, 256 << 10, 2 << 20, 8 << 20} {
+		payload := syntheticBlockPayload(size)
+		inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(payload)
+		})
+		for _, mode := range []struct {
+			name     string
+			loopback bool
+			accept   string
+		}{
+			{"plain", false, "gzip, zstd"},
+			{"gzip", true, "gzip"},
+			{"zstd", true, "zstd"},
+		} {
+			b.Run(fmt.Sprintf("size=%dKB/%s", size>>10, mode.name), func(b *testing.B) {
+				srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, []string{"*"}, true, 0, false, WithLoopbackCompression(mode.loopback)))
+				defer srv.Close()
+				client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+				zr, err := zstd.NewReader(nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer zr.Close()
+
+				var wire atomic.Int64
+				roundTrip := func(zr *zstd.Decoder) {
+					req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+					req.Header.Set("Accept-Encoding", mode.accept)
+					resp, err := client.Do(req)
+					if err != nil {
+						b.Fatal(err)
+					}
+					defer resp.Body.Close()
+					cr := &countingReader{r: resp.Body}
+					var body io.Reader = cr
+					switch resp.Header.Get("Content-Encoding") {
+					case "gzip":
+						gz, err := gzip.NewReader(cr)
+						if err != nil {
+							b.Fatal(err)
+						}
+						body = gz
+					case "zstd":
+						if err := zr.Reset(cr); err != nil {
+							b.Fatal(err)
+						}
+						body = zr
+					}
+					n, err := io.Copy(io.Discard, body)
+					if err != nil || int(n) != len(payload) {
+						b.Fatalf("decoded %d of %d bytes: %v", n, len(payload), err)
+					}
+					wire.Add(cr.n)
+				}
+
+				b.SetBytes(int64(len(payload)))
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					roundTrip(zr)
+				}
+				b.ReportMetric(float64(wire.Load())/float64(b.N)/1024, "wireKB/op")
+			})
+		}
+	}
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
