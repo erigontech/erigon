@@ -121,15 +121,18 @@ func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNew
 }
 
 // AddRemoteTxns mocks base method.
-func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
+func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, previous *RemoteTxnsResult) (Hashes, *RemoteTxnsResult) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns, peerID, sentry)
+	ret := m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns, peerID, sentry, previous)
+	ret0, _ := ret[0].(Hashes)
+	ret1, _ := ret[1].(*RemoteTxnsResult)
+	return ret0, ret1
 }
 
 // AddRemoteTxns indicates an expected call of AddRemoteTxns.
-func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns, peerID, sentry any) *MockPoolAddRemoteTxnsCall {
+func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns, peerID, sentry, previous any) *MockPoolAddRemoteTxnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns, peerID, sentry)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns, peerID, sentry, previous)
 	return &MockPoolAddRemoteTxnsCall{Call: call}
 }
 
@@ -139,19 +142,19 @@ type MockPoolAddRemoteTxnsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPoolAddRemoteTxnsCall) Return() *MockPoolAddRemoteTxnsCall {
-	c.Call = c.Call.Return()
+func (c *MockPoolAddRemoteTxnsCall) Return(arg0 Hashes, arg1 *RemoteTxnsResult) *MockPoolAddRemoteTxnsCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient, *RemoteTxnsResult) (Hashes, *RemoteTxnsResult)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient, *RemoteTxnsResult) (Hashes, *RemoteTxnsResult)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -345,6 +348,46 @@ func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateCh
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error) *MockPoolOnNewBlockCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// P2PRetry mocks base method.
+func (m *MockPool) P2PRetry(ctx context.Context, tx kv.Tx, hashes Hashes, seenRevision uint64) (uint64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "P2PRetry", ctx, tx, hashes, seenRevision)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// P2PRetry indicates an expected call of P2PRetry.
+func (mr *MockPoolMockRecorder) P2PRetry(ctx, tx, hashes, seenRevision any) *MockPoolP2PRetryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "P2PRetry", reflect.TypeOf((*MockPool)(nil).P2PRetry), ctx, tx, hashes, seenRevision)
+	return &MockPoolP2PRetryCall{Call: call}
+}
+
+// MockPoolP2PRetryCall wrap *gomock.Call
+type MockPoolP2PRetryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolP2PRetryCall) Return(revision uint64, retry bool, err error) *MockPoolP2PRetryCall {
+	c.Call = c.Call.Return(revision, retry, err)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolP2PRetryCall) Do(f func(context.Context, kv.Tx, Hashes, uint64) (uint64, bool, error)) *MockPoolP2PRetryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolP2PRetryCall) DoAndReturn(f func(context.Context, kv.Tx, Hashes, uint64) (uint64, bool, error)) *MockPoolP2PRetryCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

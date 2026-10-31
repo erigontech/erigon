@@ -252,7 +252,7 @@ func TestRemoteAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	}}
 	var slots TxnSlots
 	slots.Append(txn, sender[:], false)
-	pool.AddRemoteTxns(ctx, slots, nil, nil)
+	pool.AddRemoteTxns(ctx, slots, nil, nil, nil)
 	require.Empty(t, txn.AuthAndNonces, "enqueue must defer authorization recovery to batch processing")
 	require.NoError(t, pool.processRemoteTxns(ctx))
 	require.Contains(t, pool.byHash, string(txn.IDHash[:]))
@@ -367,7 +367,7 @@ func TestAdmissionRejectionsRemainRetryable(t *testing.T) {
 			pool.lock.Lock()
 			owner := pool.byHash[string(pooled.IDHash[:])]
 			pool.removeFromSubPool(owner, "test")
-			pool.discardLocked(owner, txpoolcfg.Mined)
+			pool.discardLocked(owner, discardRecord{reason: txpoolcfg.Mined})
 			pool.lock.Unlock()
 
 			dbTx, err := db.BeginRo(ctx)
@@ -436,11 +436,11 @@ func TestRemoteAuthorizationRecoveryPreservesQueue(t *testing.T) {
 		var arrivals TxnSlots
 		arrivals.Append(txn, sender[:], false)
 		arrivals.Append(later, sender[:], false)
-		pool.AddRemoteTxns(ctx, arrivals, peer, nil)
+		pool.AddRemoteTxns(ctx, arrivals, peer, nil, nil)
 	}}
 	var slots TxnSlots
 	slots.Append(txn, sender[:], false)
-	pool.AddRemoteTxns(ctx, slots, nil, nil)
+	pool.AddRemoteTxns(ctx, slots, nil, nil, nil)
 	require.NoError(t, pool.processRemoteTxns(ctx))
 	require.Contains(t, pool.byHash, string(txn.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(later.IDHash[:]))
@@ -487,7 +487,7 @@ func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {
 	slots.Append(txn, sender[:], false)
 	peer := PeerID(gointerfaces.ConvertHashToH512([64]byte{1}))
 	sentry := sentryproto.NewMockSentryClient(gomock.NewController(t))
-	pool.AddRemoteTxns(ctx, slots, peer, sentry)
+	_, submission := pool.AddRemoteTxns(ctx, slots, peer, sentry, nil)
 
 	require.ErrorIs(t, pool.processRemoteTxns(ctx), readErr)
 	require.Equal(t, []AuthAndNonce{{crypto.PubkeyToAddress(key.PublicKey), 0}}, txn.AuthAndNonces,
@@ -496,7 +496,7 @@ func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {
 	require.Empty(t, pool.auths)
 	require.Equal(t, slots, *pool.unprocessedRemoteTxns)
 	require.Equal(t, map[string]*TxnSlot{string(txn.IDHash[:]): txn}, pool.unprocessedRemoteByHash)
-	require.Equal(t, []remoteSource{{peerID: peer, sentry: sentry}}, pool.unprocessedRemotePeers)
+	require.Equal(t, []remoteSource{{peerID: peer, sentry: sentry, result: submission}}, pool.unprocessedRemotePeers)
 	require.True(t, pool.hasUnprocessedRemoteTxns.Load())
 
 	require.NoError(t, pool.processRemoteTxns(ctx))

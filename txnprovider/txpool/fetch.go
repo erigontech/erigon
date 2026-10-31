@@ -25,10 +25,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -327,6 +329,81 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 	}
 }
 
+// bodyCache keeps only transaction hashes, never the packet or its blob data.
+type bodyCacheKey struct {
+	hash uint64
+	id   sentryproto.MessageId
+}
+
+type bodyCacheEntry struct {
+	hashes      Hashes
+	unsubmitted Hashes
+	revision    uint64
+	result      *RemoteTxnsResult
+}
+
+func (entry bodyCacheEntry) hasInvalidSidecar() bool {
+	return entry.result != nil && entry.result.invalidSidecar.Load()
+}
+
+func (entry bodyCacheEntry) retry(ctx context.Context, tx kv.Tx, pool Pool) (revision uint64, retry bool, err error) {
+	if entry.hasInvalidSidecar() {
+		return entry.revision, false, nil
+	}
+	revision, retry, err = pool.P2PRetry(ctx, tx, entry.hashes, entry.revision)
+	// Unvalidated hashes have not used this packet's nonce-progress opportunity.
+	if err == nil && !retry {
+		unvalidated := entry.unsubmitted
+		if entry.result != nil && entry.result.incomplete.Load() {
+			unvalidated = entry.hashes
+		}
+		if len(unvalidated) > 0 {
+			revision, retry, err = pool.P2PRetry(ctx, tx, unvalidated, 0)
+		}
+	}
+	if entry.hasInvalidSidecar() {
+		return revision, false, nil
+	}
+	return revision, retry, err
+}
+
+type bodyCache struct {
+	lock      sync.Mutex
+	entries   *simplelru.LRU[bodyCacheKey, bodyCacheEntry]
+	hashBytes int
+}
+
+const maxBodyCacheHashBytes = 2 * 1024 * 1024
+
+func newBodyCache() *bodyCache {
+	cache := &bodyCache{}
+	cache.entries, _ = simplelru.NewLRU[bodyCacheKey, bodyCacheEntry](1024, func(_ bodyCacheKey, entry bodyCacheEntry) {
+		cache.hashBytes -= len(entry.hashes) + len(entry.unsubmitted)
+	})
+	return cache
+}
+
+func (c *bodyCache) get(key bodyCacheKey) (bodyCacheEntry, bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.entries.Get(key)
+}
+
+func (c *bodyCache) add(key bodyCacheKey, entry bodyCacheEntry) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.entries.Remove(key)
+	weight := len(entry.hashes) + len(entry.unsubmitted)
+	if weight > maxBodyCacheHashBytes {
+		return
+	}
+	for c.hashBytes+weight > maxBodyCacheHashBytes {
+		c.entries.RemoveOldest()
+	}
+	c.entries.Add(key, entry)
+	c.hashBytes += weight
+}
+
 func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.SentryClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -350,10 +427,10 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		batch     = make([]*sentryproto.InboundMessage, 0, 256)
 		batchLock sync.Mutex
 	)
-
-	// LRU cache for deduplication - filters duplicates before they enter the batch
-	// Uses maphash to avoid string allocations
-	seenLRU, _ := maphash.NewLRU[struct{}](1024)
+	seenBodies := newBodyCache()
+	isBody := func(req *sentryproto.InboundMessage) bool {
+		return req.Id == sentryproto.MessageId_TRANSACTIONS_66 || req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66
+	}
 
 	flushBatch := func() {
 		batchLock.Lock()
@@ -386,14 +463,43 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		defer tx.Rollback()
 
 		for _, req := range toProcess {
-			if handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient); handleErr != nil {
-				if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
-					f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
+			func() {
+				if f.wg != nil {
+					defer f.wg.Done()
 				}
-			}
-			if f.wg != nil {
-				f.wg.Done()
-			}
+				var revision uint64
+				var previous *RemoteTxnsResult
+				cacheable := isBody(req)
+				key := bodyCacheKey{}
+				if cacheable {
+					key = bodyCacheKey{hash: maphash.Hash(req.Data), id: req.Id}
+					entry, found := seenBodies.get(key)
+					var retry bool
+					var err error
+					if found {
+						previous = entry.result
+						revision, retry, err = entry.retry(streamCtx, tx, f.pool)
+						if err == nil && !retry {
+							return
+						}
+					} else {
+						revision, _, err = f.pool.P2PRetry(streamCtx, tx, nil, 0)
+					}
+					cacheable = err == nil
+				}
+				entry, handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient, previous)
+				if handleErr != nil {
+					if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
+						f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
+					}
+					return
+				}
+				// Peer-specific announcement failures must not suppress an honest reply.
+				if cacheable && entry.hashes != nil {
+					entry.revision = revision
+					seenBodies.add(key, entry)
+				}
+			}()
 		}
 	}
 
@@ -430,27 +536,14 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Deduplicate transaction bodies to avoid repeated blob verification.
-		// Keep announcements for peer fallback. Replies with cached bodies are still
-		// dropped before the pool can revalidate their transactions.
-		switch req.Id {
-		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
-			if _, seen := seenLRU.Get(req.Data); seen {
-				if f.wg != nil {
-					f.wg.Done()
-				}
-				continue
-			}
-			seenLRU.Set(req.Data, struct{}{})
-		}
-
 		batchLock.Lock()
 		batch = append(batch, req)
 		batchLock.Unlock()
 	}
 }
 
-func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
+// Non-nil hashes permit caching, including immutable rejections and empty packets.
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, previous *RemoteTxnsResult) (entry bodyCacheEntry, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -458,7 +551,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	}()
 
 	if !f.pool.Started() {
-		return nil
+		return bodyCacheEntry{}, nil
 	}
 
 	const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
@@ -469,14 +562,14 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
 			f.penalizePeer(ctx, sentryClient, req.PeerId)
-			return nil
+			return bodyCacheEntry{}, nil
 		}
 
 		if hashCount > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", hashCount)
 			f.penalizePeer(ctx, sentryClient, req.PeerId)
-			return nil
+			return bodyCacheEntry{}, nil
 		}
 
 		hashes := make([]byte, 32*hashCount)
@@ -484,25 +577,25 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
 				f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
 				f.penalizePeer(ctx, sentryClient, req.PeerId)
-				return nil
+				return bodyCacheEntry{}, nil
 			}
 		}
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
-			return err
+			return bodyCacheEntry{}, err
 		}
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
 			var messageID sentryproto.MessageId
 			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
-				return err
+				return bodyCacheEntry{}, err
 			}
 			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
 				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
-				return err
+				return bodyCacheEntry{}, err
 			}
 		}
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
@@ -510,18 +603,18 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", count)
 			f.penalizePeer(ctx, sentryClient, req.PeerId)
-			return nil
+			return bodyCacheEntry{}, nil
 		}
 		txTypes, sizes, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
 			f.penalizePeer(ctx, sentryClient, req.PeerId)
-			return nil
+			return bodyCacheEntry{}, nil
 		}
 
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
-			return err
+			return bodyCacheEntry{}, err
 		}
 		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
 		// won't come back for already-known txs, so entries for them would
@@ -532,14 +625,14 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			var encodedRequest []byte
 			var messageID sentryproto.MessageId
 			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
-				return err
+				return bodyCacheEntry{}, err
 			}
 			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
 				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
-				return err
+				return bodyCacheEntry{}, err
 			}
 		}
 	case sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:
@@ -551,7 +644,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed GetPooledTransactions66", "peer", req.PeerId, "err", err)
 			f.penalizePeer(ctx, sentryClient, req.PeerId)
-			return nil
+			return bodyCacheEntry{}, nil
 		}
 
 		// limit to max 256 transactions in a reply
@@ -572,7 +665,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			txnHash := hashes[i:min(i+hashSize, len(hashes))]
 			txn, err := f.pool.GetRlp(tx, txnHash)
 			if err != nil {
-				return err
+				return bodyCacheEntry{}, err
 			}
 			if txn == nil {
 				continue
@@ -591,14 +684,17 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 			PeerId: req.PeerId,
 		}, &grpc.EmptyCallOption{}); err != nil {
-			return err
+			return bodyCacheEntry{}, err
 		}
 	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
+		entry.hashes = Hashes{}
+		entry.result = previous
 		txns := TxnSlots{}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
+					entry.hashes = append(entry.hashes, hash...)
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
 						return fmt.Errorf("%w: %w", errInternalDB, err)
@@ -613,15 +709,16 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				return nil
 			}); err != nil {
 				if errors.Is(err, errInternalDB) {
-					return err
+					return bodyCacheEntry{}, err
 				}
 				f.logger.Debug("[txpool] penalizing peer for malformed Transactions66", "peer", req.PeerId, "err", err)
 				f.penalizePeer(ctx, sentryClient, req.PeerId)
-				return nil
+				return bodyCacheEntry{hashes: Hashes{}}, nil
 			}
 		case sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
+					entry.hashes = append(entry.hashes, hash...)
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
 						return fmt.Errorf("%w: %w", errInternalDB, err)
@@ -636,14 +733,14 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				return nil
 			}); err != nil {
 				if errors.Is(err, errInternalDB) {
-					return err
+					return bodyCacheEntry{}, err
 				}
 				f.logger.Debug("[txpool] penalizing peer for malformed PooledTransactions66", "peer", req.PeerId, "err", err)
 				f.penalizePeer(ctx, sentryClient, req.PeerId)
-				return nil
+				return bodyCacheEntry{hashes: Hashes{}}, nil
 			}
 		default:
-			return fmt.Errorf("unexpected message: %s", req.Id.String())
+			return bodyCacheEntry{}, fmt.Errorf("unexpected message: %s", req.Id.String())
 		}
 		// Post-parse peer-behaviour checks. checkPooledTxnAnnouncement only
 		// applies to the POOLED_TRANSACTIONS_66 (pull) path since TRANSACTIONS_66
@@ -655,25 +752,47 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
 					f.logger.Debug("[txpool] penalizing peer for mismatched tx announcement", "peer", req.PeerId, "err", err)
 					f.penalizePeer(ctx, sentryClient, req.PeerId)
-					return nil
+					return bodyCacheEntry{}, nil
 				}
 			}
 			if err := f.checkBlobSidecar(txns.Txns[i]); err != nil {
 				f.logger.Debug("[txpool] penalizing peer for bad blob sidecar", "peer", req.PeerId, "err", err)
 				f.penalizePeer(ctx, sentryClient, req.PeerId)
-				return nil
+				return bodyCacheEntry{hashes: Hashes{}}, nil
 			}
 		}
-		if len(txns.Txns) == 0 {
-			return nil
+		var submitted Hashes
+		if len(txns.Txns) > 0 {
+			var result *RemoteTxnsResult
+			submitted, result = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient, previous)
+			if result != nil {
+				entry.result = result
+			}
 		}
-
-		f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
+		var submittedIDs map[common.Hash]struct{}
+		for i, next := 0, 0; i < len(entry.hashes); i += 32 {
+			hash := entry.hashes[i : i+32]
+			if next < len(submitted) && bytes.Equal(hash, submitted[next:next+32]) {
+				next += 32
+				continue
+			}
+			// Repeated hashes share the first occurrence's admission attempt.
+			if submittedIDs == nil && len(submitted) > 0 {
+				submittedIDs = make(map[common.Hash]struct{}, len(submitted)/32)
+				for j := 0; j < len(submitted); j += 32 {
+					submittedIDs[common.Hash(submitted[j:j+32])] = struct{}{}
+				}
+			}
+			if _, ok := submittedIDs[common.Hash(hash)]; !ok {
+				entry.unsubmitted = append(entry.unsubmitted, hash...)
+			}
+		}
+		return entry, nil
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}
 
-	return nil
+	return bodyCacheEntry{}, nil
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {

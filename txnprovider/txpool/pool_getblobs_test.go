@@ -139,7 +139,7 @@ func TestIdHashKnownRecognizesMinedBlobAfterNonceGap(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, slots))
 	reason, ok := pool.discardReasonsLRU.Get(string(blobTxn.IDHash[:]))
 	require.True(t, ok)
-	require.Equal(t, txpoolcfg.NonceTooDistant, reason)
+	require.Equal(t, txpoolcfg.NonceTooDistant, reason.reason)
 	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 		known, err := pool.IdHashKnown(tx, blobTxn.IDHash[:])
 		require.NoError(t, err)
