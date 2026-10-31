@@ -428,6 +428,7 @@ type PoolBlobBundle struct {
 	Commitment goethkzg.KZGCommitment
 	Blob       []byte
 	Proofs     []goethkzg.KZGProof // Can be 1 or more Proofs/CellProofs
+	Cells      *[goethkzg.CellsPerExtBlob]*goethkzg.Cell
 }
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.

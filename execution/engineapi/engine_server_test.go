@@ -711,6 +711,20 @@ func TestGetBlobsV4(t *testing.T) {
 	}
 }
 
+func TestGetBlobsV4UsesPoolCells(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 1)
+	_, _, poolCells := getBlobsV4Fixture(t, 2)
+	bundle.Cells = (*[goethkzg.CellsPerExtBlob]*goethkzg.Cell)(poolCells)
+	client := newGetBlobsV4Client(t, blobGetterMap{hash: bundle})
+	var result []struct {
+		BlobCells []hexutil.Bytes `json:"blob_cells"`
+	}
+	require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, hexutil.Bytes(hexutil.MustDecodeHex("0x01000000000000000000000000000000"))))
+	require.Len(t, result, 1)
+	require.Len(t, result[0].BlobCells, 1)
+	require.Equal(t, hexutil.Bytes(poolCells[0][:]), result[0].BlobCells[0], "served cell 0 must be the pool's, not recomputed from the blob")
+}
+
 func TestGetBlobsV4FastJSON(t *testing.T) {
 	hash, bundle, _ := getBlobsV4Fixture(t, 1)
 	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
