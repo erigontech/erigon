@@ -157,6 +157,31 @@ type parallelExecutor struct {
 	currentChangeSetHash common.Hash
 }
 
+// blockVMBuilder builds and registers a block's version map.
+type blockVMBuilder interface {
+	buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) *state.VersionMap
+}
+
+// buildBlockVersionMap builds the block's version map, seeds its EIP-161 removals,
+// and registers it in the prev-block chain at construction — before the block
+// executes — so a later block's seed resolves accounts created by earlier
+// dispatched-but-unsealed blocks. Safe because exec is block-ordered: a worker
+// reads only blocks before its own, already sealed; only the seed reads an
+// unsealed earlier block, through the version map's own locking.
+func (pe *parallelExecutor) buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) *state.VersionMap {
+	vm := state.NewVersionMap(bal)
+	vm.SetBaseTxNum(firstTxNum)
+	if len(bal) > 0 {
+		base := state.PrevBlockBase(committedBase, pe.prevBlocks, blockNum)
+		vm.SeedEmptyRemovals(bal,
+			blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(blockNum),
+			pe.cfg.chainConfig.Aura != nil,
+			base)
+	}
+	pe.prevBlocks.PushHead(blockNum, lastTxNum, vm)
+	return vm
+}
+
 // stopKind classifies why the executor was asked to stop. It maps directly
 // to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
 type stopKind uint8
@@ -366,6 +391,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
 	pe.prevBlocks = state.NewPrevBlockList()
+	pe.vmBuilder = pe
 
 	// Register the fan-out consumers and maxBlockNum BEFORE run() starts the execLoop
 	// goroutine: execLoop's exit path (closeApplyChannels) reads pe.consumers, so
@@ -1299,7 +1325,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted, execRequest.versionMap)
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -1310,6 +1336,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		executor.tasks = append(executor.tasks, t)
+		if len(executor.tasks) == 1 {
+			v := t.Version()
+			executor.versionMap.SetBaseTxNum(v.TxNum - uint64(v.TxIndex) - 1)
+		}
 		executor.results = append(executor.results, nil)
 		executor.execFailed = append(executor.execFailed, 0)
 
@@ -1723,6 +1753,11 @@ type blockResult struct {
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
 
+	// VersionMap is the block's shared version map (also the calculator's GetAccount
+	// source). Carried on the result so the block-end commitment fold reads it while
+	// it is still alive in prevBlocks.
+	VersionMap *state.VersionMap
+
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
 	execStartedAt time.Time
@@ -1740,7 +1775,11 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
-	rules                 *chain.Rules
+	// versionMap is the block's map; with the per-tx access list recorded at publish,
+	// the commitment calculator reads this tx's final writes from it (WritesAtTxNum)
+	// rather than from a retained write-set.
+	versionMap *state.VersionMap
+	rules      *chain.Rules
 	// balTxs carries the sealed reads and writes of txs before the block's final one,
 	// so the apply loop builds the block access list while the block runs.
 	balTxs []balTx
@@ -2196,6 +2235,9 @@ type blockRequest struct {
 	lastTxNum  uint64
 	blockTime  uint64
 	bal        types.BlockAccessList
+	// versionMap is the block's shared version map, constructed once by the dispatcher
+	// and read post-seal by the commitment calculator via GetAccount.
+	versionMap *state.VersionMap
 }
 
 // calcMode is the commitment calculator's per-block strategy.
@@ -2392,7 +2434,10 @@ func (result *execResult) calcFees(
 	}
 	coinbaseCodeHash := accounts.EmptyCodeHash
 	if cw, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
-		coinbaseHasCodeHashWrite = true
+		// Only a real contract signal: deployed code (non-empty) or a removed
+		// contract's code (ValueDeleted). An empty-codehash write from account
+		// creation — e.g. a self-destruct beneficiary funding a new coinbase — is not.
+		coinbaseHasCodeHashWrite = cw.Deletes() || cw.Val != accounts.EmptyCodeHash
 		coinbaseCodeHash = cw.Val
 	}
 	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
@@ -2424,19 +2469,22 @@ func (result *execResult) calcFees(
 		if nw, ok := result.TxOut.GetNonce(burntAddr); ok {
 			burntNonce = nw.Val
 		}
-		if _, ok := result.TxOut.GetCodeHash(burntAddr); ok {
-			burntHasCodeHashWrite = true
+		if cw, ok := result.TxOut.GetCodeHash(burntAddr); ok {
+			burntHasCodeHashWrite = cw.Deletes() || cw.Val != accounts.EmptyCodeHash
 		}
 		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
 			burntCreatedContract = true
 		}
+		// An EIP-161 touched-empty removal now carries a SelfDestruct marker too, so the
+		// marker alone no longer proves a contract. The base code (pre-tx) is the real
+		// signal: only a contract had code to SELFDESTRUCT.
 		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
-	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
-	// a touched EOA coinbase, where the delayed tip must still be credited (it
-	// re-creates the account) to match serial.
+	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT. The self-destruct
+	// marker rides the removal only for a real destruct (a contract); an EIP-161
+	// touched-empty EOA carries none, so its delayed tip is credited and re-creates the
+	// account, matching serial.
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	// A contract coinbase self-destructed with no same-tx re-create is net-absent:
@@ -2465,9 +2513,7 @@ func (result *execResult) calcFees(
 	// destruct (burnCoinbaseTip), which removes the account regardless of a non-zero
 	// residual from a later same-tx credit. Emit the removal so the deletion verdict
 	// rides the write-set directly — otherwise WriteSet.Merge copies this fee phase's
-	// live balance over the worker's ValueDeleted and the deletion survives only because
-	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
-	// the destroyed account.
+	// live balance over the worker's ValueDeleted and the deletion is lost.
 	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
 	// Pre-EIP-161 the fee touch creates and persists the coinbase even at a zero tip, so a
 	// later CALL sees it as existing (no new-account gas). EIP-161+ prunes the empty touch
@@ -2492,21 +2538,26 @@ func (result *execResult) calcFees(
 
 	addWrites := &state.WriteSet{}
 	if coinbaseNetDeleted || coinbaseEmptied {
-		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+		if coinbaseWasContract {
+			addWrites.SetContractRemoval(result.Coinbase, taskVersion)
+		} else {
+			addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+		}
 	}
 	if burntEmptied || burntNetDeleted {
-		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
-	}
-	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
-	// serial credits the tip before the tx's empty-account sweep, so the account and its
-	// storage survive.
-	if coinbaseSelfdestructed && !coinbaseWasContract && !newCoinbaseBalance.IsZero() {
-		addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
-			WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
-		})
+		if burntWasContract {
+			addWrites.SetContractRemoval(burntAddr, taskVersion)
+		} else {
+			addWrites.SetEmptyRemoval(burntAddr, taskVersion)
+		}
 	}
 	if emitCoinbase {
 		{
+			// A fee credit revives an EOA coinbase a worker removed (EIP-161); retract the
+			// removal. A genuine contract self-destruct keeps its wipe.
+			if coinbaseSelfdestructed && !coinbaseWasContract {
+				addWrites.MarkSelfDestructDeleted(result.Coinbase, taskVersion)
+			}
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
@@ -2565,17 +2616,30 @@ func (result *execResult) calcFees(
 					Val: addrAcc.CodeHash,
 				})
 			}
+			// A fee credit reviving the coinbase leaves a stale pre-destruct nonce in the
+			// version-map floor; shadow it with the revived nonce so per-path commitment
+			// doesn't resurrect it. Skipped on a BAL block, where the nonce reset is not an
+			// access-list entry and emitting one would diverge from the sealed map.
+			if !chainRules.IsAmsterdam {
+				if fn, fres, fok := vm.ReadNonce(result.Coinbase, txIndex); fok && fres.Status() != state.MVReadResultNone && fn != addrAcc.Nonce {
+					addWrites.SetNonce(result.Coinbase, &state.VersionedWrite[uint64]{
+						WriteHeader: state.WriteHeader{
+							Address: result.Coinbase,
+							Path:    state.NoncePath,
+							Version: taskVersion,
+						},
+						Val: addrAcc.Nonce,
+					})
+				}
+			}
 		}
 	}
-	// The worker's EIP-161 removal of a codeless burnt recipient is undone by the
-	// base-fee credit: serial credits the fee before the tx's empty-account sweep,
-	// so the account and its storage survive. Mirrors the coinbase revival above.
-	if hasBurnt && burntSelfdestructed && !burntWasContract && !newBurntBalance.IsZero() {
-		addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
-			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
-		})
-	}
 	if emitBurnt {
+		// Retract a worker's EIP-161 removal of the burnt recipient that this fee credit
+		// revives (see the coinbase case above).
+		if burntSelfdestructed && !burntWasContract {
+			addWrites.MarkSelfDestructDeleted(burntAddr, taskVersion)
+		}
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2842,6 +2906,9 @@ type execRequest struct {
 	consumers  *resultStream
 	profile    bool
 	exhausted  *ErrLoopExhausted
+	// versionMap is the same shared instance handed to the commitment calculator on
+	// the block request; nil on paths that let the executor build its own.
+	versionMap *state.VersionMap
 }
 
 type blockExecutor struct {
@@ -2976,7 +3043,13 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 	return be.consumers.publish(ctx, r, mustDeliver)
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted, versionMap *state.VersionMap) *blockExecutor {
+	// Prefer the shared version map the dispatcher built (also handed to the commitment
+	// calculator); build one internally only when a caller supplies none. Either way
+	// baseTxNum is set when the first task is appended.
+	if versionMap == nil {
+		versionMap = state.NewVersionMap(accessList)
+	}
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2984,7 +3057,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		stats:               map[int]ExecutionStat{},
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
-		versionMap:          state.NewVersionMap(accessList),
+		versionMap:          versionMap,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
@@ -3698,6 +3771,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+			applyResult.versionMap = be.versionMap
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
@@ -3890,6 +3964,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:      txTask.Version().TxNum,
 				rules:      lastResult.Rules(),
 				writes:     finalizeWrites,
+				versionMap: be.versionMap,
 				logs:       blockEndLogs,
 				isFinalize: true,
 			}, false); err != nil {
@@ -3897,10 +3972,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Block fully finalized: every tx sealed, block-end writes in the versionMap.
-		// Publish it as an overlay so the next block reads its writes before apply
-		// drains them to sd.mem; dropped on commit.
-		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
+		// The version map is registered in the prev-block chain at construction
+		// (buildBlockVersionMap), not here; the apply loop drops it on commit.
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
@@ -3913,6 +3986,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			complete:         true,
 			isPartial:        isPartial,
 			ApplyCount:       be.applyCount,
+			VersionMap:       be.versionMap,
 			TxIO:             be.blockIO,
 			Receipts:         blockReceipts,
 			receiptsComplete: receiptsComplete,

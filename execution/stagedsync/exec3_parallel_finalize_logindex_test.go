@@ -78,7 +78,7 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, consumers, false, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, consumers, false, nil, nil)
 
 	// One block-end anchor task (TxIndex == len(Txs)); finalize anchors on it so
 	// the coinbase/finalize sweep lands on an unsealed versionMap cell.

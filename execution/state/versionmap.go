@@ -248,6 +248,10 @@ type VersionMap struct {
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
 
+	// baseTxNum is the block's first global txNum (block-start system tx, TxIndex -1),
+	// so a global txNum maps to the block-relative TxIndex: txNum = baseTxNum + TxIndex + 1.
+	baseTxNum atomic.Uint64
+
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
@@ -948,7 +952,10 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		// the read side (readSelfDestructMemo→resolved) already treats it as a
 		// destruct, so this single lifecycle authority must too, or the two disagree
 		// on a validated destruct and a wiped-slot read never settles.
-		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value {
+		// A ValueDeleted stamp retracts the destruct (a fee credit revived a recipient a
+		// worker had already removed): the cell records that a wipe happened, but the
+		// account stays live and keeps its storage.
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value && v.valStatus != ValueDeleted {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}
@@ -1156,7 +1163,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // flushAllNoOp reports whether every write this tx made to addr is already present, so the
 // per-tx flush can be skipped without taking the write lock (and thus without parking the
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
-// is omitted from the BAL and folded away by StoragesChanged, so it is never materialized and
+// is omitted from the BAL and folded away by StorageChanges, so it is never materialized and
 // counts as already-present, unless an earlier run of the tx left a cell the flush resets or removes.
 // Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
 // Caller holds e's read lock; only used on the BAL fast path.
@@ -1290,7 +1297,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 			for key, vw := range inner {
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
-				// StoragesChanged, so it is never materialized here (nor sealed below). The slot
+				// StorageChanges, so it is never materialized here (nor sealed below). The slot
 				// must read as the access list seeds it, so a cell an earlier run of the tx left
 				// goes back to the seed or away. Before the seal a Done cell holds the seed.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {

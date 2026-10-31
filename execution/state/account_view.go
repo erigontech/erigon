@@ -6,6 +6,21 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// AccountBaseReader supplies the committed base account for fields the versionMap
+// has no cell for. It is the only capability the view needs from its base, so any
+// StateReader satisfies it — as does a lighter domain-only reader the commitment
+// calculator holds, which avoids forcing a full StateReader at the call site.
+type AccountBaseReader interface {
+	ReadAccountData(accounts.Address) (*accounts.Account, error)
+}
+
+// StorageBaseReader supplies a committed slot value for slots the versionMap has no
+// cell for — the storage counterpart of AccountBaseReader, used by VersionMapView's
+// cross-block fallback where the touched union spans earlier blocks' writes.
+type StorageBaseReader interface {
+	ReadStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error)
+}
+
 // VersionedAccountView is an accounts.AccountView composing each account field on
 // demand from the versionMap at a fixed txIndex, falling back to a lazily-loaded
 // base. A consumer reading only one field pays for only that cell; the base is
@@ -14,14 +29,14 @@ type VersionedAccountView struct {
 	addr  accounts.Address
 	txIdx int
 	vm    *VersionMap
-	base  StateReader
+	base  AccountBaseReader
 
 	baseLoaded bool
 	baseAcc    *accounts.Account
 	baseErr    error
 }
 
-func NewVersionedAccountView(addr accounts.Address, txIdx int, vm *VersionMap, base StateReader) *VersionedAccountView {
+func NewVersionedAccountView(addr accounts.Address, txIdx int, vm *VersionMap, base AccountBaseReader) *VersionedAccountView {
 	return &VersionedAccountView{addr: addr, txIdx: txIdx, vm: vm, base: base}
 }
 
@@ -134,8 +149,12 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 			return code.Bytes, nil
 		}
 	}
-	if v.base != nil {
-		return v.base.ReadAccountCode(v.addr)
+	// Code bytes live beyond the minimal AccountBaseReader (GetAccount never needs
+	// them); a base that can serve them implements ReadAccountCode.
+	if cr, ok := v.base.(interface {
+		ReadAccountCode(accounts.Address) ([]byte, error)
+	}); ok {
+		return cr.ReadAccountCode(v.addr)
 	}
 	return nil, nil
 }
@@ -147,6 +166,14 @@ func (v *VersionedAccountView) exists() bool {
 	if v.destroyed() {
 		return false
 	}
+	return v.recordExists()
+}
+
+// recordExists reports whether any record of the account is present in the
+// cascade — a version-map field cell, the version-map address cell, or the base —
+// ignoring lifecycle. It is the data-only existence the commitment read uses;
+// exists() layers the lifecycle destroyed() verdict on top for execution reads.
+func (v *VersionedAccountView) recordExists() bool {
 	if v.vm != nil {
 		if _, ok := versionedUpdateBalance(v.vm, v.addr, v.txIdx); ok {
 			return true
@@ -186,16 +213,57 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil
 	}
+	return v.compose()
+}
+
+// AccountForCommitment composes the account with data-only existence: present
+// unless its record is gone from the whole cascade, ignoring the lifecycle
+// destroyed() verdict exec reads. The caller applies the ValueDeleted removal.
+func (v *VersionedAccountView) AccountForCommitment() *accounts.Account {
+	if !v.recordExists() {
+		return nil
+	}
+	return v.compose()
+}
+
+// compose overlays the version-map field cells on the base record, reading raw
+// cells (no destroyed() gate) — the caller has already decided existence, so a
+// destroyed-but-preserved account (EIP-8246 no-burn) keeps its surviving fields.
+// For a non-destroyed account this equals the lifecycle getters. A field with no
+// cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
+func (v *VersionedAccountView) compose() *accounts.Account {
 	v.ensureBase()
 	acc := accounts.NewAccount()
 	if v.baseAcc != nil {
 		acc = *v.baseAcc
 	}
-	acc.Balance = v.GetBalance()
-	acc.Nonce = v.GetNonce()
-	acc.Incarnation = v.GetIncarnation()
-	acc.CodeHash = v.GetCodeHash()
+	if v.vm != nil {
+		if u, _, ok := v.vm.ReadBalance(v.addr, v.txIdx); ok {
+			acc.Balance = u
+		}
+		if u, _, ok := v.vm.ReadNonce(v.addr, v.txIdx); ok {
+			acc.Nonce = u
+		}
+		if u, _, ok := v.vm.ReadIncarnation(v.addr, v.txIdx); ok {
+			acc.Incarnation = u
+		}
+		if ch, _, ok := v.vm.ReadCodeHash(v.addr, v.txIdx); ok {
+			acc.CodeHash = ch
+		}
+	}
 	return &acc
+}
+
+// GetAccount returns the account composed at txIdx and whether it exists there, in
+// comma-ok form. A false ok means the account is deleted/absent (self-destructed with
+// no revival, or removed as an EIP-161 empty via the self-destruct-encoded write), so
+// the caller removes rather than writes its leaf — no separate emptiness check needed.
+func (v *VersionedAccountView) GetAccount() (accounts.Account, bool) {
+	acc := v.Account()
+	if acc == nil {
+		return accounts.Account{}, false
+	}
+	return *acc, true
 }
 
 var _ accounts.AccountView = (*VersionedAccountView)(nil)

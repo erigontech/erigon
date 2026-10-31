@@ -113,41 +113,25 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 }
 
 // TestHandleMessage_TxResultPinsAsOfReaderTxNum is the regression test for
-// the snapshot-loaded lazy-load crash: cc.asOfReader is constructed with
-// txNum=0, and only computeAndPublish / computeAndCheck (which run on
-// blockResult) overwrite that field. But cc.state.ApplyWrites runs on
-// every txResult and triggers ensureAccount / ensureStorage lazy-loads
-// through the same reader. txResults arrive before the first blockResult,
-// so the very first lazy-load fires with asOfReader.txNum=0. On a synced-
-// from-genesis chain that's in-window so seekInFiles handles it
-// gracefully; on a snapshot-loaded chain whose visible window starts
-// well past genesis (e.g. perf-devnet-3 starting at txNum~2.9B) it fails
-// hard with `seekInFiles(invIndex=storage,txNum=0) but data before
-// txNum=N not available` and FCU fails on every block.
+// the snapshot-loaded read crash: cc.asOfReader is constructed with txNum=0,
+// and only the compute methods (which run on blockResult / mid-block step
+// edges) overwrite that field. A mid-block step-boundary compute reads the
+// committed base through this reader, so if txNum were left at 0 on a
+// snapshot-loaded chain whose visible window starts well past genesis it
+// fails hard with `seekInFiles(txNum=0) but data before txNum=N not
+// available` and FCU fails on every block.
 //
-// The fix in handleMessage's *txResult branch pins asOfReader.txNum to
-// the current tx's txNum BEFORE ApplyWrites runs. computeAndPublish /
-// computeAndCheck overwrite the field back to lastTxNum+1 right before
-// ComputeCommitment, so this per-tx setting only affects the lazy-load
-// path and never leaks into the trie fold path.
+// The fix in handleMessage's *txResult branch pins asOfReader.txNum to the
+// current tx's txNum before processing its writes; the compute methods
+// overwrite it to lastTxNum+1 right before ComputeCommitment.
 //
 // We test the post-condition (asOfReader.txNum == r.txNum after each
-// txResult) — the simplest invariant that catches the absence of the
-// fix. The ordering relative to ApplyWrites (set BEFORE) is enforced by
-// inspection: the test cannot observe a successful lazy-load without
-// pulling in real SharedDomains plumbing, but a missing assignment
-// would leave txNum at its prior value and fail this test directly.
+// non-empty txResult) — the simplest invariant that catches the absence of
+// the fix; an empty-writes txResult leaves the prior pin in place.
 func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	asOfReader := &asOfStateReader{txNum: 0}
-	cs := newCalcState(asOfReader, nil, "test")
-	// Disable lazy-load — without a real SharedDomains the asOfReader's
-	// Read would NPE on r.sd.GetAsOf. The fix's contract is independent
-	// of whether the read succeeds: txNum must be pinned before the
-	// load is even attempted.
-	cs.domainReader = nil
 	cc := &commitmentCalculator{
 		asOfReader: asOfReader,
-		state:      cs,
 		// Non-nil doms with stepSize 0 so the step-boundary hook short-circuits;
 		// this test pins asOfReader.txNum, not the checkpoint path.
 		doms: &execctx.SharedDomains{},

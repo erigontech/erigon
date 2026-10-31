@@ -500,7 +500,11 @@ type txExecutor struct {
 	progress         *Progress
 	taskExecMetrics  *exec.WorkerMetrics
 	blockExecMetrics *blockExecMetrics
-	hooks            *tracing.Hooks
+
+	// vmBuilder builds and registers each block's version map; set by the
+	// parallel executor before dispatch.
+	vmBuilder blockVMBuilder
+	hooks     *tracing.Hooks
 
 	// blockSrc, when non-nil, overrides the default DB-backed block source —
 	// e.g. an ephemeral single-block source with no DB behind it.
@@ -818,6 +822,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, te.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
+			// Built and registered via the executor's factory (buildBlockVersionMap);
+			// committedBase is the chain tail for untouched fields.
+			committedBase := state.NewReaderV3(te.doms.AsGetter(execRoTx))
+			blockVersionMap := te.vmBuilder.buildBlockVersionMap(b.NumberU64(), blockStartTxNum, inputTxNum-1, dbBAL, committedBase)
+
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
 			// has been advanced past this block's tasks by the loop above,
@@ -832,6 +841,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
 					bal:        dbBAL,
+					versionMap: blockVersionMap,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
@@ -841,7 +851,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, consumers, false, exhausted,
+				dbBAL, txTasks, consumers, false, exhausted, blockVersionMap,
 			}:
 			case <-ctx.Done():
 				return ctx.Err()

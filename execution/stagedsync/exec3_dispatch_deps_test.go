@@ -45,7 +45,7 @@ func newDepsTest(t *testing.T, txs types.Transactions) *depsTest {
 	cancel()
 	pe.workersCtx = workersCtx
 	t.Cleanup(pe.runWG.Wait)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), nil, discardConsumers(16), false, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), nil, discardConsumers(16), false, nil, nil)
 	pe.blockExecutors = map[uint64]*blockExecutor{1: be}
 	tasks := make([]exec.Task, len(txs))
 	for i := range txs {
