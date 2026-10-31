@@ -21,6 +21,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -839,4 +841,79 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestFetchSerializesBatchFlushes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		started := make(chan struct{}, 3)
+		release := make(chan struct{})
+		releaseFirst := sync.OnceFunc(func() { close(release) })
+		defer releaseFirst()
+		pool.EXPECT().Started().DoAndReturn(func() bool {
+			started <- struct{}{}
+			<-release
+			return true
+		}).Times(3)
+		messages := make(chan *sentryproto.InboundMessage)
+		defer close(messages)
+		stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+			return <-messages, nil
+		}}
+		client := sentryproto.NewMockSentryClient(ctrl)
+		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		done := make(chan error, 1)
+		go func() { done <- fetch.receiveMessage(t.Context(), client) }()
+
+		message := &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66}
+		messages <- message
+		<-started
+		for range 257 {
+			messages <- message
+		}
+
+		// Mutex waits do not quiesce synctest, so observe the blocked receiver directly.
+		stacks := make([]runtime.StackRecord, 16)
+	waitForThreshold:
+		for {
+			select {
+			case <-started:
+				t.Fatal("threshold flush started before the timer flush was released")
+			default:
+			}
+			n, ok := runtime.GoroutineProfile(stacks)
+			if !ok {
+				stacks = make([]runtime.StackRecord, n)
+				continue
+			}
+			for _, stack := range stacks[:n] {
+				frames := runtime.CallersFrames(stack.Stack())
+				var previous string
+				var waiting, flushLocked, receiver bool
+				for {
+					frame, more := frames.Next()
+					waiting = waiting || strings.HasSuffix(frame.Function, ".runtime_SemacquireMutex")
+					if waiting && previous == "sync.(*Mutex).Lock" && strings.HasSuffix(frame.Function, ".(*Fetch).receiveMessage.func1") {
+						flushLocked = true
+					}
+					receiver = receiver || strings.Contains(frame.Function, ".TestFetchSerializesBatchFlushes.")
+					previous = frame.Function
+					if !more {
+						break
+					}
+				}
+				if flushLocked && receiver {
+					break waitForThreshold
+				}
+			}
+			runtime.Gosched()
+		}
+
+		releaseFirst()
+		<-started
+		messages <- nil
+		require.NoError(t, <-done)
+	})
 }
