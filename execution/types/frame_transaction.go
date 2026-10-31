@@ -231,7 +231,7 @@ func (tx *FrameTransaction) Validate() error {
 			return fmt.Errorf("invalid frame %d mode or flags", i)
 		}
 		if i > 0 && tx.Frames[i-1].Mode == FramePostTx && frame.Mode != FramePostTx {
-			return errors.New("POST_TX frames must form a trailing suffix")
+			return fmt.Errorf("invalid frame %d mode or flags: POST_TX frames must form a trailing suffix", i)
 		}
 		if frame.Mode != FrameSender && !frame.Value.IsZero() {
 			return fmt.Errorf("frame %d value requires sender mode", i)
