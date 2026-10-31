@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -2735,6 +2736,64 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 	if branchCache := at.BranchCache(); branchCache != nil {
 		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
 	}
+}
+
+// PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
+// Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
+// stay correct without it.
+func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
+	dt := at.d[domain]
+	span := uintptr(1)
+	if domain == kv.CodeDomain {
+		span = uintptr(prefetchCodeSpanPages)
+	}
+	dt.probe = mmap.NewProbe()
+	if dt.probe == nil || len(keys) == 0 {
+		dt.probe = nil
+		return 0, 0, 0, 0
+	}
+	defer func() { dt.probe = nil }()
+	pending := keys
+	for ; len(pending) > 0 && waves < 64; waves++ {
+		t0 := time.Now()
+		cold := make([]uintptr, 0, len(pending))
+		next := pending[:0:0]
+		for _, k := range pending {
+			if page, ok := probeLatestFromFiles(dt, k); ok {
+				n := uintptr(1)
+				if dt.probe.ColdData() {
+					n = span
+				}
+				for i := range n {
+					cold = append(cold, page+i*uintptr(os.Getpagesize()))
+				}
+				next = append(next, k)
+			}
+		}
+		t1 := time.Now()
+		mmap.ReadPages(cold)
+		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
+		pages += len(cold)
+		pending = next
+	}
+	return waves, pages, plan, io
+}
+
+// prefetchCodeSpanPages is how many pages from a cold code data page are read at once, since a code value spans many pages.
+var prefetchCodeSpanPages = dbg.EnvInt("BAL_PREFETCH_CODE_SPAN", 8)
+
+func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			p, ok := r.(mmap.ColdPage)
+			if !ok {
+				panic(r)
+			}
+			page, cold = uintptr(p), true
+		}
+	}()
+	_, _, _, _, _ = dt.lookupLatestFromFiles(k, nil, 0, false)
+	return 0, false
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {

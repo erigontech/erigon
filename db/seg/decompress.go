@@ -772,6 +772,7 @@ func (v *SequentialView) Close() {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
+	probe      *mmap.Probe
 	dataP      uint64     // current byte offset in data
 	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
 	dataBit    int        // bit offset within current byte (0-7)
@@ -951,9 +952,18 @@ func (g *Getter) DataLen() int {
 	return len(g.data)
 }
 
+// SetProbe makes the next reads touch their pages through pr; nil turns probing off.
+func (g *Getter) SetProbe(pr *mmap.Probe) { g.probe = pr }
+
+func (g *Getter) Probe() *mmap.Probe { return g.probe }
+
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if (mmap.PopulateEnabled || g.probe != nil) && offset < uint64(len(g.data)) {
+		mmap.Populate(unsafe.Pointer(&g.data[offset]))
+		g.probe.TouchData(unsafe.Pointer(&g.data[offset]))
+	}
 	if g.residencyGate {
 		g.ensureResident(offset)
 	}

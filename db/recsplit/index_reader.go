@@ -17,6 +17,7 @@
 package recsplit
 
 import (
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
 )
 
@@ -81,6 +82,21 @@ func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64) (offset, ordinal uint6
 	return r.index.OrdinalLookup(ordinal), ordinal, true
 }
 func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
+
+// TwoLayerLookupByHashProbe is TwoLayerLookupByHash with pr touching the pages it reads.
+func (r *IndexReader) TwoLayerLookupByHashProbe(hi, lo uint64, pr *mmap.Probe) (uint64, bool) {
+	if !r.index.Enums() {
+		return r.index.LookupProbe(hi, lo, pr)
+	}
+	if r.index.Empty() {
+		return 0, false
+	}
+	id, ok := r.index.LookupProbe(hi, lo, pr)
+	if !ok {
+		return 0, false
+	}
+	return r.index.offsetEf.GetProbe(id, pr), true
+}
 
 // TwoLayerLookupByHash high-level methods. allow to turn-off `enum` in future
 func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
