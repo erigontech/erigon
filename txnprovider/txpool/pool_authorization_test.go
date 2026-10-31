@@ -367,7 +367,7 @@ func TestAdmissionRejectionsRemainRetryable(t *testing.T) {
 			pool.lock.Lock()
 			owner := pool.byHash[string(pooled.IDHash[:])]
 			pool.removeFromSubPool(owner, "test")
-			pool.discardLocked(owner, txpoolcfg.Mined)
+			pool.discardLocked(owner, discardRecord{reason: txpoolcfg.Mined})
 			pool.lock.Unlock()
 
 			dbTx, err := db.BeginRo(ctx)

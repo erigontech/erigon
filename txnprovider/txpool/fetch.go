@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -761,13 +762,21 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if len(txns.Txns) > 0 {
 			submitted, entry.result = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
 		}
-		submittedIDs := make(map[string]struct{}, len(submitted)/32)
-		for i := 0; i < len(submitted); i += 32 {
-			submittedIDs[string(submitted[i:i+32])] = struct{}{}
-		}
-		for i := 0; i < len(entry.hashes); i += 32 {
+		var submittedIDs map[common.Hash]struct{}
+		for i, next := 0, 0; i < len(entry.hashes); i += 32 {
 			hash := entry.hashes[i : i+32]
-			if _, ok := submittedIDs[string(hash)]; !ok {
+			if next < len(submitted) && bytes.Equal(hash, submitted[next:next+32]) {
+				next += 32
+				continue
+			}
+			// Repeated hashes share the first occurrence's admission attempt.
+			if submittedIDs == nil && len(submitted) > 0 {
+				submittedIDs = make(map[common.Hash]struct{}, len(submitted)/32)
+				for j := 0; j < len(submitted); j += 32 {
+					submittedIDs[common.Hash(submitted[j:j+32])] = struct{}{}
+				}
+			}
+			if _, ok := submittedIDs[common.Hash(hash)]; !ok {
 				entry.unsubmitted = append(entry.unsubmitted, hash...)
 			}
 		}

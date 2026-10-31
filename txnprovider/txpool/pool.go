@@ -111,7 +111,6 @@ type RemoteTxnsResult struct {
 
 type discardRecord struct {
 	reason   txpoolcfg.DiscardReason
-	precheck bool // Packet suppression only; it does not mark a transaction hash known.
 	nonceGap *nonceGapState
 }
 
@@ -145,6 +144,7 @@ type TxPool struct {
 	unprocessedRemoteByHash map[string]*TxnSlot                   // to reject duplicates
 	byHash                  map[string]*metaTxn                   // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, discardRecord] // txn_hash => discard_reason : non-persisted
+	precheckLRU             *simplelru.LRU[string, struct{}]
 	pending                 *PendingPool
 	baseFee                 *SubPool
 	queued                  *SubPool
@@ -159,7 +159,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
-	nonceRetryRevision      uint64
+	nonceRetryRevision      atomic.Uint64
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -234,6 +234,11 @@ func New(
 		return nil, err
 	}
 
+	precheckHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	byNonce := &BySenderAndNonce{
 		tree:              btree.NewG[*metaTxn](32, SortByNonceLess),
 		search:            &metaTxn{TxnSlot: &TxnSlot{}},
@@ -255,6 +260,7 @@ func New(
 		byHash:                  map[string]*metaTxn{},
 		isLocalLRU:              localsHistory,
 		discardReasonsLRU:       discardHistory,
+		precheckLRU:             precheckHistory,
 		all:                     byNonce,
 		recentlyConnectedPeers:  &recentlyConnectedPeers{},
 		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
@@ -637,7 +643,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 		return true, nil
 	}
 	record, found := p.discardReasonsLRU.Get(hashS)
-	if found && !record.precheck {
+	if found {
 		// A nonce gap can close before the discarded pool row is removed.
 		return record.reason != txpoolcfg.NonceTooDistant, nil
 	}
@@ -654,9 +660,12 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 // P2PRetry checks cached hashes while leaving sidecar failures to the packet verdict.
 // Nonce-gap retries require new progress beyond each packet's recorded revision.
 func (p *TxPool) P2PRetry(ctx context.Context, hashes Hashes, seenRevision uint64) (revision uint64, retry bool, err error) {
+	if len(hashes) == 0 {
+		return p.nonceRetryRevision.Load(), false, nil
+	}
 	p.lock.Lock()
 	retry, needsView, err := p.p2pRetryLocked(hashes, seenRevision, nil)
-	revision = p.nonceRetryRevision
+	revision = p.nonceRetryRevision.Load()
 	p.lock.Unlock()
 	if err != nil || retry || !needsView {
 		return revision, retry, err
@@ -664,7 +673,7 @@ func (p *TxPool) P2PRetry(ctx context.Context, hashes Hashes, seenRevision uint6
 	err = p.withLockedState(ctx, nil, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var checkErr error
 		retry, _, checkErr = p.p2pRetryLocked(hashes, seenRevision, view)
-		revision = p.nonceRetryRevision
+		revision = p.nonceRetryRevision.Load()
 		return checkErr
 	})
 	return revision, retry, err
@@ -679,13 +688,9 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 		if p.unprocessedRemoteByHash[hash] != nil || p.byHash[hash] != nil || p.minedBlobTxnsByHash[hash] != nil {
 			continue
 		}
-		record, found := p.getDiscard(hash)
+		record, found := p.discardReasonsLRU.Get(hash)
 		if !found {
-			retry = true
-			continue
-		}
-		if record.precheck {
-			if record.reason == txpoolcfg.UnmatchedBlobTxExt || record.reason == txpoolcfg.UnequalBlobTxExt {
+			if _, rejected := p.precheckLRU.Get(hash); !rejected {
 				retry = true
 			}
 			continue
@@ -694,10 +699,6 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 			continue
 		}
 		gap := record.nonceGap
-		if gap == nil {
-			retry = true
-			continue
-		}
 		frontier := gap.firstMissingNonce
 		if gap.checkedGeneration != p.stateGeneration {
 			if view == nil {
@@ -728,8 +729,7 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 		}
 		if frontier > gap.firstMissingNonce {
 			gap.firstMissingNonce = frontier
-			p.nonceRetryRevision++
-			gap.progressRevision = p.nonceRetryRevision
+			gap.progressRevision = p.nonceRetryRevision.Add(1)
 		}
 		if gap.progressRevision > seenRevision {
 			retry = true
@@ -738,27 +738,17 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 	return retry, needsView, nil
 }
 
-func (p *TxPool) getDiscard(hash string) (discardRecord, bool) {
-	return p.discardReasonsLRU.Get(hash)
-}
-
-func (p *TxPool) setDiscard(hash string, record discardRecord) {
-	p.discardReasonsLRU.Add(hash, record)
-}
-
-func (p *TxPool) clearDiscard(hash string) {
-	p.discardReasonsLRU.Remove(hash)
-}
-
 func (p *TxPool) recordPrecheck(hash [32]byte, reason txpoolcfg.DiscardReason) {
-	if reason == txpoolcfg.NotSet || reason == txpoolcfg.Success || reason == txpoolcfg.ErrGetSenderInfo {
+	switch reason {
+	case txpoolcfg.NotSet, txpoolcfg.Success, txpoolcfg.ErrGetSenderInfo, txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnequalBlobTxExt:
 		return
 	}
 	key := string(hash[:])
-	if record, found := p.getDiscard(key); found && !record.precheck {
+	if p.discardReasonsLRU.Contains(key) {
+		p.precheckLRU.Remove(key)
 		return
 	}
-	p.setDiscard(key, discardRecord{reason: reason, precheck: true})
+	p.precheckLRU.Add(key, struct{}{})
 }
 
 func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error) {
@@ -1031,7 +1021,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	if len(toDiscard) > 0 {
 		for _, mt := range toDiscard {
 			p.pending.Remove(mt, "best", p.logger)
-			p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
+			p.discardLocked(mt, discardRecord{reason: txpoolcfg.UnmatchedBlobTxExt})
 		}
 	}
 
@@ -1347,15 +1337,21 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 		return txpoolcfg.BlobPoolOverflow
 	}
+
 	if p.isOsaka() {
-		if err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs); err != nil {
+		err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
+		if err != nil {
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
 	} else {
-		if err := libkzg.Ctx().VerifyBlobKZGProofBatch(toBlobs(blobs), commitments, proofs); err != nil {
+		// https://github.com/ethereum/consensus-specs/blob/017a8495f7671f5fff2075a9bfc9238c1a0982f8/specs/deneb/polynomial-commitments.md#verify_blob_kzg_proof_batch
+		kzgCtx := libkzg.Ctx()
+		err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(blobs), commitments, proofs)
+		if err != nil {
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
 	}
+
 	return txpoolcfg.Success
 }
 
@@ -1671,7 +1667,7 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 
 		for _, mt := range txnsToDelete {
 			p.removeFromSubPool(mt, "punishSpammer")
-			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
+			p.discardLocked(mt, discardRecord{reason: txpoolcfg.Spammer}) // can't call it while iterating by all
 		}
 	}
 }
@@ -1681,7 +1677,7 @@ func (p *TxPool) fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns T
 		if reasons[i] != txpoolcfg.NotSet {
 			continue
 		}
-		record, ok := p.getDiscard(string(newTxns.Txns[i].IDHash[:]))
+		record, ok := p.discardReasonsLRU.Get(string(newTxns.Txns[i].IDHash[:]))
 		if ok {
 			reasons[i] = record.reason
 		} else {
@@ -2034,7 +2030,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				// This pool rule is stricter than execution. Its rejection depends only on
 				// the transaction, so cache it to avoid repeating authorization recovery.
-				p.setDiscard(string(mt.TxnSlot.IDHash[:]), discardRecord{reason: txpoolcfg.NonceTooLow})
+				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), discardRecord{reason: txpoolcfg.NonceTooLow})
 				return txpoolcfg.NonceTooLow
 			}
 			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
@@ -2046,7 +2042,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 	if found != nil {
 		p.removeFromSubPool(found, "add")
-		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
+		p.discardLocked(found, discardRecord{reason: txpoolcfg.ReplacedByHigherTip})
 	}
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
@@ -2056,7 +2052,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
-	p.clearDiscard(hashStr)
+	p.discardReasonsLRU.Remove(hashStr)
+	p.precheckLRU.Remove(hashStr)
 
 	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
 		if dbg.AssertEnabled {
@@ -2084,12 +2081,12 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
-func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
+func (p *TxPool) discardLocked(mt *metaTxn, record discardRecord) {
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	delete(p.byHash, hashStr)
 	p.deletedTxns = append(p.deletedTxns, mt)
-	p.all.delete(mt, reason, p.logger)
-	p.setDiscard(hashStr, discardRecord{reason: reason})
+	p.all.delete(mt, record.reason, p.logger)
+	p.discardReasonsLRU.Add(hashStr, record)
 	if mt.TxnSlot.TxType() == BlobTxnType {
 		blobHashes := mt.TxnSlot.GetBlobHashes()
 		t := p.totalBlobsInPool.Load()
@@ -2176,7 +2173,7 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 			})
 			for _, mt := range toEvict {
 				p.queued.Remove(mt, "dormant sender", logger)
-				p.discardLocked(mt, txpoolcfg.QueuedDormant)
+				p.discardLocked(mt, discardRecord{reason: txpoolcfg.QueuedDormant})
 			}
 			delete(p.senderLastActivity, senderID)
 			evictedSenders++
@@ -2366,7 +2363,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 		discarded += len(toDel)
 
 		for _, mt := range toDel {
-			p.discardLocked(mt, txpoolcfg.Mined)
+			p.discardLocked(mt, discardRecord{reason: txpoolcfg.Mined})
 		}
 		toDel = toDel[:0]
 	}
@@ -2483,16 +2480,14 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	})
 
 	for i, mt := range toDel {
-		p.discardLocked(mt, toDelReasons[i])
-		if toDelReasons[i] == txpoolcfg.NonceTooDistant {
-			p.setDiscard(string(mt.TxnSlot.IDHash[:]), discardRecord{
-				reason: txpoolcfg.NonceTooDistant,
-				nonceGap: &nonceGapState{
-					sender: p.senders.senderID2Addr[senderID], firstMissingNonce: noGapsNonce,
-					checkedGeneration: p.stateGeneration,
-				},
-			})
+		record := discardRecord{reason: toDelReasons[i]}
+		if record.reason == txpoolcfg.NonceTooDistant {
+			record.nonceGap = &nonceGapState{
+				sender: p.senders.senderID2Addr[senderID], firstMissingNonce: noGapsNonce,
+				checkedGeneration: p.stateGeneration,
+			}
 		}
+		p.discardLocked(mt, record)
 	}
 
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
@@ -2549,19 +2544,19 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardLocked(tx, txpoolcfg.PendingPoolOverflow)
+		p.discardLocked(tx, discardRecord{reason: txpoolcfg.PendingPoolOverflow})
 	}
 
 	// Discard worst transactions from pending sub pool until it is within capacity limits
 	for p.baseFee.Len() > p.baseFee.limit {
 		tx := p.baseFee.PopWorst()
-		p.discardLocked(tx, txpoolcfg.BaseFeePoolOverflow)
+		p.discardLocked(tx, discardRecord{reason: txpoolcfg.BaseFeePoolOverflow})
 	}
 
 	// Discard worst transactions from the queued sub pool until it is within its capacity limits
 	for p.queued.Len() > p.queued.limit {
 		tx := p.queued.PopWorst()
-		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
+		p.discardLocked(tx, discardRecord{reason: txpoolcfg.QueuedPoolOverflow})
 	}
 }
 
