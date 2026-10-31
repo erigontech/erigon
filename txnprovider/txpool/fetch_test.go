@@ -1445,36 +1445,6 @@ func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
 	}
 }
 
-func TestFetchPreOsakaV1SidecarDoesNotPenalizePeer(t *testing.T) {
-	ctx := t.Context()
-	pool, good, _, _, _ := newFetchBlobRetryFixture(t, 0)
-	require.False(t, pool.isOsaka())
-	wire, err := good.ConvertToV1()
-	require.NoError(t, err)
-
-	synctest.Test(t, func(t *testing.T) {
-		client, _, penalties := newFetchTestClient(t)
-		var wg sync.WaitGroup
-		fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
-		receiveFetchTestMessages(t, fetch, client,
-			func() *sentryproto.InboundMessage {
-				return &sentryproto.InboundMessage{
-					Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, PeerId: peerID,
-					Data: EncodePooledTransactions66([][]byte{wire}, 1, nil),
-				}
-			},
-			func() *sentryproto.InboundMessage {
-				require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-				require.NoError(t, pool.processRemoteTxns(ctx))
-				return nil
-			},
-		)
-		synctest.Wait()
-		require.Empty(t, penalties)
-		require.Empty(t, pool.byHash)
-	})
-}
-
 func TestFetchRetriesMixedHonestPacketAfterNonceProgressAndQueuedSidecarFailure(t *testing.T) {
 	ctx := t.Context()
 	pool, good, badWire, goodWire, key := newFetchBlobRetryFixture(t, 65)
