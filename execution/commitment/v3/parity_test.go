@@ -372,6 +372,7 @@ func FuzzParityRandomSequences(f *testing.F) {
 			}
 			rounds[step] = []commitmenttest.Op{op}
 		}
+		// v3 only until https://github.com/erigontech/erigon/issues/25625 is fixed; then pass parityEngines.
 		differential(t, commitmenttest.Case{ID: fmt.Sprintf("fuzz/%d", seed), Rounds: rounds}, parityEngines[:1])
 	})
 }

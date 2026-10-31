@@ -971,7 +971,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	start := time.Now()
 
 	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
-	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
+	// variant enables it explicitly. Variant is set once, before the loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
 	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
