@@ -42,6 +42,35 @@ func readTransitionPostState(root fs.FS, version clparams.StateVersion) (*state.
 	return postState, false, err
 }
 
+func transitionStateWithPrecomputedCheck(t *testing.T, impl machine.Interface, beaconState *state.CachingBeaconState, block *cltypes.SignedBeaconBlock) error {
+	t.Helper()
+	cfg := beaconState.BeaconConfig()
+	if cfg.RoundSlotToEpoch(block.Block.Slot) <= cfg.RoundSlotToEpoch(beaconState.Slot()) {
+		return machine.TransitionState(impl, beaconState, block)
+	}
+
+	precomputedState, err := beaconState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, impl.ProcessSlots(precomputedState, cfg.RoundSlotToEpoch(block.Block.Slot)))
+	_, err = precomputedState.HashSSZ()
+	require.NoError(t, err)
+	advancedErr := machine.TransitionStateFromPrecomputedEpochState(impl, precomputedState, block)
+	var advancedState []byte
+	if advancedErr == nil {
+		advancedState, err = precomputedState.EncodeSSZ(nil)
+		require.NoError(t, err)
+	}
+
+	transitionErr := machine.TransitionState(impl, beaconState, block)
+	require.Equalf(t, transitionErr != nil, advancedErr != nil, "normal transition error: %v; precomputed transition error: %v", transitionErr, advancedErr)
+	if transitionErr == nil {
+		normalState, err := beaconState.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Equal(t, normalState, advancedState)
+	}
+	return transitionErr
+}
+
 func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {
 		PostFork   string `yaml:"post_fork"`
@@ -92,7 +121,7 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 			break
 		}
 		blockIndex++
-		transitionErr = machine.TransitionState(c.Machine, startState, block)
+		transitionErr = transitionStateWithPrecomputedCheck(t, c.Machine, startState, block)
 		if transitionErr != nil {
 			if !expectedError {
 				return fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", transitionErr, block.Block.Slot, startSlot)
