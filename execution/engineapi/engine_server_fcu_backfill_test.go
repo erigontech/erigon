@@ -48,6 +48,10 @@ func (f *initialHeaderRecorder) FetchHeadersBackwards(_ context.Context, hash co
 }
 
 func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *initialHeaderRecorder, *types.Header) {
+	return newForkchoiceResultServer(t, execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusMissingSegment, MissingHash: missingHash})
+}
+
+func newForkchoiceResultServer(t *testing.T, result execmodule.ForkChoiceResult) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *initialHeaderRecorder, *types.Header) {
 	head := makeParentHeader(1000)
 	headNumber := head.Number.Uint64()
 	stub := &stubExecutionModule{
@@ -56,7 +60,7 @@ func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServ
 			return &headNumber, nil
 		},
 		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
-			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusMissingSegment, MissingHash: missingHash}, nil
+			return result, nil
 		},
 	}
 
@@ -104,4 +108,27 @@ func TestForkchoiceMissingSegmentOfBadBlockIsInvalid(t *testing.T) {
 	require.Equal(t, lastValidHash, *status.LatestValidHash)
 	require.Equal(t, engine_block_downloader.Idle, downloader.Status())
 	require.Empty(t, fetcher.requested)
+}
+
+func TestForkchoiceBadBlockReturnsLatestValidHash(t *testing.T) {
+	t.Parallel()
+
+	parentHash := common.Hash{0x41}
+	srv, downloader, _, head := newForkchoiceResultServer(t, execmodule.ForkChoiceResult{
+		Status:          execmodule.ExecutionStatusBadBlock,
+		LatestValidHash: parentHash,
+		ValidationError: "invalid state root",
+	})
+
+	status, err := srv.HandleForkChoice(t.Context(), "test", &engine_types.ForkChoiceState{HeadHash: head.Hash()})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.NotNil(t, status.LatestValidHash)
+	require.Equal(t, parentHash, *status.LatestValidHash)
+	require.EqualError(t, status.ValidationError.Error(), "invalid state root")
+
+	bad, lastValid, validationErr := downloader.IsBadHeader(head.Hash())
+	require.True(t, bad)
+	require.Equal(t, parentHash, lastValid)
+	require.Equal(t, "invalid state root", validationErr)
 }
