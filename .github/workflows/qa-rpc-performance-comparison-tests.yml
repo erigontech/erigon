@@ -470,23 +470,34 @@ jobs:
             eth_getLogs_head=${{ steps.perf_eth_getLogs_head.outcome }}
             eth_getLogs_topics=${{ steps.perf_eth_getLogs_topics.outcome }}
             eth_getLogs_wide=${{ steps.perf_eth_getLogs_wide.outcome }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"
 
           result=success
           for entry in $OUTCOMES; do
             echo "$entry"
-            if [ "${entry#*=}" != "success" ]; then
-              result=failure
-            fi
+            case "${entry#*=}" in
+              success) ;;
+              failure) result=failure ;;
+              *) if [ "$result" = "success" ]; then result=incomplete; fi ;;
+            esac
           done
+          # A pattern is skipped after a failed sync too, so only the job status tells a cancellation apart
+          if [ "$result" = "incomplete" ]; then
+            if [ "$JOB_STATUS" = "cancelled" ]; then result=cancelled; else result=failure; fi
+          fi
           echo "TEST_RESULT=$result" >> "$GITHUB_OUTPUT"
 
-          if [ "$result" != "success" ]; then
-            echo "::error::Error detected during tests"
-            exit 1
-          fi
-          echo "Tests completed successfully"
+          case "$result" in
+            success)
+              echo "Tests completed successfully" ;;
+            cancelled)
+              echo "::notice::Benchmark cancelled before all the load patterns ran" ;;
+            *)
+              echo "::error::Error detected during tests"
+              exit 1 ;;
+          esac
 
       - name: Generate Summary
         if: always() && steps.prepare_perf.outcome == 'success'
