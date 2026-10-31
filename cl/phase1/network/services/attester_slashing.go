@@ -32,7 +32,7 @@ func (s *attesterSlashingService) IsMyGossipMessage(name string) bool {
 
 func (s *attesterSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.AttesterSlashing, error) {
 	obj := &cltypes.AttesterSlashing{}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

@@ -137,7 +137,7 @@ func (s *dataColumnSidecarService) IsMyGossipMessage(name string) bool {
 
 func (s *dataColumnSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
 	obj := cltypes.NewDataColumnSidecarWithVersion(version)
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
