@@ -18,7 +18,9 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"hash/maphash"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -32,12 +34,15 @@ import (
 
 const (
 	maxCachedPrecompileInput = 64 * 1024
+	// Below this gas the insert is a large part of the call, so a result waits for its second miss.
+	admitOnFirstMissGas = 1000
 )
 
 var (
 	precompileCacheEnabled = dbg.EnvBool("PRECOMPILE_CACHE", true)
 
 	precompileSeed, precompileCheckSeed = maphash.MakeSeed(), maphash.MakeSeed()
+	precompileMissed                    = new([4096]atomic.Uint64) // the key of the last cheap miss per slot
 	precompileResults                   = cache.NewByteLRU(8*datasize.MB, func(_ uint64, r precompileResult) int64 {
 		return int64(unsafe.Sizeof(r)) + int64(len(r.output)) + cache.ByteLRUEntryOverheadBytes
 	})
@@ -75,8 +80,9 @@ func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, 
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
+	gas := c.RequiredGas(input)
 	// Below its key length a call costs less than the insert a miss pays.
-	if !ok || len(in) > maxCachedPrecompileInput || c.RequiredGas(input) < uint64(len(in)) {
+	if !ok || len(in) > maxCachedPrecompileInput || gas < uint64(len(in)) {
 		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
@@ -84,10 +90,22 @@ func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 		return bytes.Clone(r.output), nil
 	}
 	output, err := c.PrecompiledContract.Run(input)
-	if err == nil && len(output) <= 1024 {
+	if err == nil && len(output) <= 1024 && admit(key, gas) {
 		precompileResults.Add(key, precompileResult{domain: c.domain, check: check, output: bytes.Clone(output)})
 	}
 	return output, err
+}
+
+func admit(key, gas uint64) bool {
+	if gas >= admitOnFirstMissGas {
+		return true
+	}
+	slot := &precompileMissed[key&(uint64(len(precompileMissed))-1)]
+	if slot.Load() == key {
+		return true
+	}
+	slot.Store(key)
+	return false
 }
 
 // precompileCacheKey returns how a cached precompile narrows its input to the bytes that decide the
@@ -99,12 +117,18 @@ func precompileCacheKey(p PrecompiledContract) func([]byte) ([]byte, bool) {
 		return zeroPaddedKey(128)
 	case *bigModExp:
 		return modExpKey
+	case *bn254AddIstanbul, *bn254AddByzantium:
+		return bn254AddKey
 	case *bn254ScalarMulIstanbul, *bn254ScalarMulByzantium:
 		return zeroPaddedKey(96)
 	case *bn254PairingIstanbul, *bn254PairingByzantium:
 		return func(input []byte) ([]byte, bool) { return input, len(input)%192 == 0 }
 	case *blake2F:
 		return lengthKey(blake2FInputLength)
+	case *bls12381G1Add:
+		return lengthKey(256)
+	case *bls12381G2Add:
+		return lengthKey(512)
 	case *bls12381G1MultiExp:
 		return lengthMultipleKey(160)
 	case *bls12381G2MultiExp:
@@ -138,11 +162,21 @@ func zeroPaddedKey(prefix int) func([]byte) ([]byte, bool) {
 	return func(input []byte) ([]byte, bool) {
 		input = input[:min(len(input), prefix)]
 		end := len(input)
+		for end >= 8 && binary.LittleEndian.Uint64(input[end-8:end]) == 0 {
+			end -= 8
+		}
 		for end > 0 && input[end-1] == 0 {
 			end--
 		}
 		return input[:end], true
 	}
+}
+
+// bn254AddKey keeps an addition with a point at infinity out of the cache: it answers faster than a lookup.
+// The key drops trailing zeros, so the second point is at infinity when the key ends within the first.
+func bn254AddKey(input []byte) ([]byte, bool) {
+	in, _ := zeroPaddedKey(128)(input)
+	return in, len(in) > 64 && [64]byte(in[:64]) != [64]byte{}
 }
 
 const modExpHeaderLength = 96
