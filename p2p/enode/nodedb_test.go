@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
@@ -506,4 +507,39 @@ func TestDBExpireV5(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.expireNodes()
+}
+
+// This test checks that the pong time of a node whose first stored item is its
+// pong is not attributed to the node stored before it.
+func TestDBExpirationNextNodePong(t *testing.T) {
+	db, err := OpenDB("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	stale := SignNull(new(enr.Record), ID{1})
+	fresh := SignNull(new(enr.Record), ID{2})
+	staleIP := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	freshIP := netip.AddrFrom4([4]byte{127, 0, 0, 2})
+
+	if err := db.UpdateNode(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(stale.ID(), staleIP, now.Add(-dbNodeExpiration-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(fresh.ID(), freshIP, now); err != nil {
+		t.Fatal(err)
+	}
+
+	db.expireNodes()
+
+	if db.Node(stale.ID()) != nil {
+		t.Error("stale node should be removed")
+	}
+	if pong := db.LastPongReceived(fresh.ID(), freshIP); !pong.Equal(now.Truncate(time.Second)) {
+		t.Errorf("fresh pong time should be kept, got %v", pong)
+	}
 }
