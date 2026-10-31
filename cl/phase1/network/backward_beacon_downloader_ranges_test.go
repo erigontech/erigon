@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func denebChain(t *testing.T, slots []uint64) []*cltypes.SignedBeaconBlock {
@@ -235,6 +236,7 @@ func TestBackwardBeaconDownloaderKeepsPrefetchesWhenFirstResponseIsPartial(t *te
 
 	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
 	require.LessOrEqual(t, server.sent.Load(), int32(11))
+	require.Greater(t, server.maxInFlight.Load(), int32(1))
 }
 
 func TestBackwardBeaconDownloaderKeepsPrefetchesWhenProcessingStopsAboveThem(t *testing.T) {
@@ -259,6 +261,7 @@ func TestBackwardBeaconDownloaderKeepsPrefetchesWhenProcessingStopsAboveThem(t *
 
 	require.Equal(t, descending(blocks), processed)
 	require.LessOrEqual(t, server.sent.Load(), int32(11))
+	require.Greater(t, server.maxInFlight.Load(), int32(1))
 }
 
 func TestBackwardBeaconDownloaderCancelsDroppedPrefetches(t *testing.T) {
@@ -321,6 +324,51 @@ func TestBackwardBeaconDownloaderCancelsPrefetchesWhenFinished(t *testing.T) {
 		require.NoError(t, downloader.RequestMore(ctx))
 	}
 
+	require.Empty(t, downloader.prefetched)
+	require.Eventually(t, func() bool {
+		server.mu.Lock()
+		defer server.mu.Unlock()
+		return len(server.cancelled) == maxPrefetchedRanges
+	}, 5*time.Second, time.Millisecond)
+}
+
+type beginRwErrorDB struct {
+	kv.RwDB
+	err error
+}
+
+func (db beginRwErrorDB) BeginRw(context.Context) (kv.RwTx, error) {
+	return nil, db.err
+}
+
+func TestBackwardBeaconDownloaderCancelsPrefetchesOnError(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	queueFull := make(chan struct{})
+	var queued atomic.Int32
+	server := &slowRangeServer{blocks: blocks, calls: map[uint64]int{}, held: func(start uint64) bool {
+		if start >= 576 {
+			select {
+			case <-queueFull:
+			case <-ctx.Done():
+			}
+			return false
+		}
+		if queued.Add(1) == maxPrefetchedRanges {
+			close(queueFull)
+		}
+		return true
+	}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	downloader.SetNeverSkip(true)
+	dbErr := errors.New("begin rw failed")
+	downloader.db = beginRwErrorDB{err: dbErr}
+	downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		return false, nil
+	})
+
+	require.ErrorIs(t, downloader.RequestMore(ctx), dbErr)
 	require.Empty(t, downloader.prefetched)
 	require.Eventually(t, func() bool {
 		server.mu.Lock()
@@ -416,6 +464,23 @@ func TestBackwardBeaconDownloaderBansPeerSendingUnrequestedRoot(t *testing.T) {
 	}
 }
 
+func TestBackwardBeaconDownloaderByRootAnswerDoesNotRecordRange(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+	downloader.requestBlocksByRange = func(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		resp, peerId, err := server.requestBlocksByRange(ctx, start, count)
+		if start == 576 {
+			return nil, peerId, err
+		}
+		return resp, peerId, err
+	}
+
+	require.Equal(t, descending(blocks), walkBackward(t, downloader))
+	require.Equal(t, int32(11), server.sent.Load())
+	require.Greater(t, server.maxInFlight.Load(), int32(1))
+}
+
 func TestBackwardBeaconDownloaderRefetchesPrefetchedRangeFromAnotherFork(t *testing.T) {
 	slots := slotsUpTo(640, func(uint64) bool { return false })
 	blocks := denebChain(t, slots)
@@ -449,14 +514,4 @@ func TestBackwardBeaconDownloaderFetchesParentByRootBelowEmptyRange(t *testing.T
 	server := &slowRangeServer{blocks: blocks, delay: 5 * time.Millisecond, calls: map[uint64]int{}}
 
 	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
-}
-
-func TestBlockWithRootReturnsFirstMatch(t *testing.T) {
-	first := makeDenebBlock(7)
-	second := makeDenebBlock(7)
-	second.Signature[0] = 1
-	root, err := first.Block.HashSSZ()
-	require.NoError(t, err)
-
-	require.Same(t, first, blockWithRoot([]*cltypes.SignedBeaconBlock{first, second}, root))
 }

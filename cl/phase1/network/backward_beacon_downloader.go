@@ -451,9 +451,9 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // RequestMore downloads a range of blocks in a backward manner.
 // It requests blocks, processes them in reverse order via the onNewBlock callback,
 // and rejects blocks whose root hash doesn't match the expected root.
-func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
+func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) (err error) {
 	defer func() {
-		if b.finished.Load() {
+		if err != nil || b.finished.Load() {
 			b.cancelPrefetched()
 		}
 	}()
@@ -508,6 +508,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 
 	// Buffered channel prevents goroutine leaks
 	received := make(chan []*cltypes.SignedBeaconBlock, 1)
+	receivedByRoot := make(chan []*cltypes.SignedBeaconBlock, 1)
 	var requestSent atomic.Bool
 
 	slot := b.slotToDownload.Load()
@@ -537,7 +538,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 				b.prefetchRange(ctx, bottom)
 				continue
 			}
-			go b.sendBlockRequest(ctx, start, count, b.expectedRoot, received, &requestSent)
+			go b.sendBlockRequest(ctx, start, count, b.expectedRoot, received, receivedByRoot, &requestSent)
 
 		case blocks := <-prefetched:
 			prefetched = nil
@@ -551,6 +552,9 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 
 		case responses := <-received:
 			b.recordLastRange(start, responses)
+			return responses, nil
+
+		case responses := <-receivedByRoot:
 			return responses, nil
 
 		case <-p2pDeadline.C:
@@ -615,6 +619,9 @@ func (b *BackwardBeaconDownloader) banPeerOnError(peerId string, err error, star
 		log.Debug("[Caplin] no peers available for backward beacon block request", "start", start, "count", count)
 		return
 	}
+	if !errors.Is(err, context.Canceled) {
+		log.Debug("[Caplin] backward beacon block request failed", "err", err, "peer", peerId, "start", start, "count", count)
+	}
 	if peerId != "" && b.rpc != nil {
 		b.rpc.BanPeer(peerId)
 	}
@@ -625,7 +632,7 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 	ctx context.Context,
 	start, count uint64,
 	root common.Hash,
-	received chan<- []*cltypes.SignedBeaconBlock,
+	received, receivedByRoot chan<- []*cltypes.SignedBeaconBlock,
 	requestSent *atomic.Bool,
 ) {
 	if b.requestBlocksByRange == nil {
@@ -638,10 +645,12 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 		requestSent.Store(false)
 		return
 	}
+	deliver := received
 	if len(blocks) == 0 {
 		// An empty response is protocol-legal: the peer may have pruned the range.
 		log.Debug("[Caplin] empty backward beacon block response", "peer", peerId, "start", start, "count", count)
 		blocks = b.blockByRoot(ctx, root, start, count)
+		deliver = receivedByRoot
 	}
 	if len(blocks) == 0 {
 		b.backOffEmpty()
@@ -651,7 +660,7 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 	b.resetEmptyBackoff()
 
 	select {
-	case received <- blocks:
+	case deliver <- blocks:
 	default:
 		// Response already received, discard
 	}
