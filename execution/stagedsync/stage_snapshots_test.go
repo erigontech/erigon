@@ -25,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -38,22 +37,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
-
-func TestOpenStateSnapshotsChecksBinaryShadowRunning(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	agg := db.(interface{ Agg() any }).Agg().(interface {
-		StopCommitmentDomain(kv.Domain)
-	})
-	agg.StopCommitmentDomain(kv.CommitmentBinDomain)
-	rawDB := db.(interface{ InternalDB() kv.RwDB }).InternalDB()
-	tx, err := rawDB.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	activation := uint64(1)
-	cfg := SnapshotsCfg{db: db, chainConfig: &chain.Config{BinaryTrieTime: &activation}}
-	require.NoError(t, CheckBinaryShadowRunning(tx, cfg.chainConfig, log.New()))
-	require.ErrorContains(t, openStateSnapshotsAndCheckBinaryShadowRunning(t.Context(), tx, cfg, log.New()), "attach-pbt")
-}
 
 // progressDownloader is an in-process downloader: it reports byte progress and
 // drops it on reset, like the real one publishing/clearing its stats snapshot.

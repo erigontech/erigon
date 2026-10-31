@@ -121,21 +121,6 @@ func mustReopenUnderlyingFilesTx(tx kv.RwTx) {
 	reopener.ForceReopenUnderlyingFilesTx()
 }
 
-func openStateSnapshotsAndCheckBinaryShadowRunning(ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
-	if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
-		return err
-	}
-	if err := CheckBinaryShadowRunning(tx, cfg.chainConfig, logger); err != nil {
-		return err
-	}
-	roTx, err := cfg.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
-	return CheckBinaryShadowRunning(roTx, cfg.chainConfig, logger)
-}
-
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
@@ -412,7 +397,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
-		if err := openStateSnapshotsAndCheckBinaryShadowRunning(ctx, tx, cfg, logger); err != nil {
+		if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
+			return err
+		}
+		if err := CheckBinaryShadowRunning(tx, cfg.chainConfig, logger); err != nil {
 			return err
 		}
 

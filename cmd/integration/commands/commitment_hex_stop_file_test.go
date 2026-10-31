@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -39,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -254,7 +257,7 @@ func TestRestoredBinStopRefusesScheduledFork(t *testing.T) {
 	require.ErrorContains(t, stagedsync.CheckBinaryShadowRunning(tx, config, log.New()), "attach-pbt")
 }
 
-func TestSetUpBlockReaderRestoresBinStopBeforeSnapshotsOpen(t *testing.T) {
+func TestSnapshotsStageRefusesRestoredBinStopOnFreshChaindata(t *testing.T) {
 	f := newHexStopFixture(t, false, kv.CommitmentBinDomain)
 	require.NoError(t, os.WriteFile(f.stopFilePath(), []byte(`{"commitment-bin":true}`), 0o644))
 	rawDB := f.freshChaindata(t)
@@ -263,25 +266,28 @@ func TestSetUpBlockReaderRestoresBinStopBeforeSnapshotsOpen(t *testing.T) {
 	activation := uint64(1)
 	chainConfig := f.config.Copy()
 	chainConfig.BinaryTrieTime = &activation
-	_, _, snapshots, temporalDB, err := eth.SetUpBlockReader(t.Context(), rawDB, f.dirs, &config, chainConfig, 1, log.New(), semaphore.NewWeighted(1))
+	logger := log.New()
+	blockReader, _, snapshots, temporalDB, err := eth.SetUpBlockReader(t.Context(), rawDB, f.dirs, &config, chainConfig, 1, logger, semaphore.NewWeighted(1))
 	require.NoError(t, err)
 	t.Cleanup(snapshots.Close)
 	t.Cleanup(temporalDB.Close)
 
-	tx, err := temporalDB.BeginTemporalRo(t.Context())
+	roTx, err := temporalDB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
-	agg := temporalDB.(interface{ Agg() any }).Agg().(interface {
-		CommitmentDomainStopped(kv.Domain) bool
-	})
-	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
-	require.NoError(t, stagedsync.CheckBinaryShadowRunning(tx, chainConfig, log.New()))
-	tx.Rollback()
+	defer roTx.Rollback()
+	require.NoError(t, stagedsync.CheckBinaryShadowRunning(roTx, chainConfig, logger))
+	roTx.Rollback()
 
-	require.NoError(t, temporalDB.OpenStateSnapshots(t.Context()))
-	tx, err = temporalDB.BeginTemporalRo(t.Context())
+	cfg := stagedsync.StageSnapshotsCfg(temporalDB, chainConfig, ethconfig.Sync{}, f.dirs, nil, nil, blockReader, shards.NewNotifications(nil), false, false, false, prune.Mode{}, nil, nil)
+	sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
+		ID: stages.Snapshots,
+		Forward: func(_ bool, s *stagedsync.StageState, _ stagedsync.Unwinder, _ *execctx.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error {
+			return stagedsync.SpawnStageSnapshots(s, t.Context(), rwTx, cfg, logger)
+		},
+	}}, nil, nil, logger, stages.ModeApplyingBlocks)
+	rwTx, err := temporalDB.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
-	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
-	require.ErrorContains(t, stagedsync.CheckBinaryShadowRunning(tx, chainConfig, log.New()), "attach-pbt")
+	defer rwTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Headers, 1))
+	require.ErrorContains(t, sync.RunSnapshots(nil, rwTx), "attach-pbt")
 }

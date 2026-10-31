@@ -174,7 +174,7 @@ func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func TestStageRebuildOutputLinksCommitmentStopMarker(t *testing.T) {
+func TestStageRebuildOutputSkipsCommitmentStopMarker(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	marker := filepath.Join(src.Snap, dbstate.COMMITMENT_STOP_FILE)
 	require.NoError(t, os.WriteFile(marker, []byte(`{"commitment":true}`), 0o644))
