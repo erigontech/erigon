@@ -519,7 +519,7 @@ func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version
 	entries := solid.NewDynamicListSSZ[*sszBodyEntry](sszMaxBodiesRequest)
 	for _, body := range bodies {
 		entry := &sszBodyEntry{version: version}
-		if body != nil {
+		if body != nil && (version < clparams.GloasVersion || body.BlockAccessList != nil) {
 			entry.Available = true
 			entry.Transactions = body.Transactions
 			entry.Withdrawals = body.Withdrawals

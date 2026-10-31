@@ -462,12 +462,14 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 
 func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 	withdrawal := &types.Withdrawal{Index: 1, Validator: 2, Address: common.HexToAddress("0x03"), Amount: 4}
-	blockAccessList := hexutil.Bytes{0xba, 0x11}
+	blockAccessList := hexutil.Bytes{0xc0}
 	body := &engine_types.ExecutionPayloadBodyV2{
 		Transactions:    []hexutil.Bytes{{0x01, 0x02}},
 		Withdrawals:     []*types.Withdrawal{withdrawal},
 		BlockAccessList: &blockAccessList,
 	}
+	bodyWithoutBAL := *body
+	bodyWithoutBAL.BlockAccessList = nil
 
 	for _, tc := range []struct {
 		version         clparams.StateVersion
@@ -480,14 +482,14 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 		{clparams.GloasVersion, true, true},
 	} {
 		t.Run(tc.version.String(), func(t *testing.T) {
-			enc, err := encodeBodiesResponse([]*engine_types.ExecutionPayloadBodyV2{body, nil}, tc.version)
+			enc, err := encodeBodiesResponse([]*engine_types.ExecutionPayloadBodyV2{body, &bodyWithoutBAL, nil}, tc.version)
 			require.NoError(t, err)
 			// BodiesResponse is a single-field container: the body opens with a
 			// 4-byte offset (=4) to the wrapped entries list.
 			require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
 			entries, err := decodeBodiesResponse(enc, tc.version)
 			require.NoError(t, err)
-			require.Len(t, entries, 2)
+			require.Len(t, entries, 3)
 
 			require.True(t, entries[0].Available)
 			require.Equal(t, body.Transactions, entries[0].Transactions)
@@ -503,8 +505,19 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 				require.Empty(t, entries[0].BlockAccessList)
 			}
 
-			require.False(t, entries[1].Available)
-			require.Empty(t, entries[1].Transactions)
+			if tc.wantBAL {
+				require.False(t, entries[1].Available)
+				require.Empty(t, entries[1].Transactions)
+				require.Empty(t, entries[1].Withdrawals)
+			} else {
+				require.True(t, entries[1].Available)
+				require.Equal(t, entries[0].Transactions, entries[1].Transactions)
+				require.Equal(t, entries[0].Withdrawals, entries[1].Withdrawals)
+			}
+			require.Empty(t, entries[1].BlockAccessList)
+
+			require.False(t, entries[2].Available)
+			require.Empty(t, entries[2].Transactions)
 		})
 	}
 }
