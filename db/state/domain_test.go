@@ -81,7 +81,7 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	return testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 }
 
-func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t testing.TB, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := domainCfg
@@ -1066,6 +1066,157 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	}
 	require.Equal(t, []string{"key1", "value1_step1"}, words1,
 		"step 1 collation must contain only step 1 values")
+}
+
+func writeDupSortStepBacklog(t testing.TB, db kv.RwDB, d *Domain, stepSize uint64, steps, keys int, seed uint64) []map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	rnd := rand.New(rand.NewPCG(seed, seed+1))
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dt := d.beginForTests()
+	defer dt.Close()
+	w := dt.NewWriter(db)
+	defer w.Close()
+	want := make([]map[string]string, steps)
+	prev := make(map[string][]byte)
+	for step := range steps {
+		want[step] = make(map[string]string)
+		for i := range keys {
+			var written bool
+			switch i % 4 {
+			case 0:
+				written = true
+			case 1:
+				written = rnd.IntN(4) == 0
+			case 2:
+				written = step < steps/4 && rnd.IntN(2) == 0
+			case 3:
+				written = step >= 3*steps/4 && rnd.IntN(2) == 0
+			}
+			if !written {
+				continue
+			}
+			k := fmt.Appendf(nil, "key%05d", i)
+			txNum := uint64(step)*stepSize + rnd.Uint64N(stepSize)
+			if i%4 == 1 && prev[string(k)] != nil && rnd.IntN(3) == 0 {
+				require.NoError(t, w.DeleteWithPrev(k, txNum, prev[string(k)]))
+				delete(prev, string(k))
+				want[step][string(k)] = ""
+				continue
+			}
+			v := fmt.Appendf(nil, "value%05d_step%03d_%d", i, step, rnd.IntN(1000))
+			require.NoError(t, w.PutWithPrev(k, v, txNum, prev[string(k)]))
+			prev[string(k)] = v
+			want[step][string(k)] = string(v)
+		}
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	return want
+}
+
+func TestDomain_CollationMatchesEveryStepOfBacklog(t *testing.T) {
+	const stepSize, steps, keys = 16, 40, 160
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
+	want := writeDupSortStepBacklog(t, db, d, stepSize, steps, keys, 7)
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for step := range steps {
+		coll, err := d.collate(t.Context(), kv.Step(step), uint64(step)*stepSize, uint64(step+1)*stepSize, roTx)
+		require.NoError(t, err)
+		sf, err := d.buildFiles(t.Context(), kv.Step(step), coll, background.NewProgressSet())
+		require.NoError(t, err)
+		got := make(map[string]string)
+		var lastKey []byte
+		g := d.dataReader(sf.valuesDecomp)
+		g.Reset(0)
+		for g.HasNext() {
+			k, _ := g.Next(nil)
+			require.True(t, g.HasNext(), "step %d: key %q without a value", step, k)
+			v, _ := g.Next(nil)
+			require.Positive(t, bytes.Compare(k, lastKey), "step %d: key %q out of order", step, k)
+			lastKey = k
+			got[string(k)] = string(v)
+		}
+		require.Equal(t, want[step], got, "step %d", step)
+		sf.CleanupOnError()
+		coll.Close()
+	}
+}
+
+func collatedValueWords(t *testing.T, d *Domain, step kv.Step, stepSize uint64, roTx kv.Tx, values *seg.Compressor) [][]byte {
+	t.Helper()
+	coll, err := d.collateWithValues(t.Context(), step, uint64(step)*stepSize, uint64(step+1)*stepSize, roTx, values)
+	require.NoError(t, err)
+	defer coll.Close()
+	sf, err := d.buildFiles(t.Context(), step, coll, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf.CleanupOnError()
+	var words [][]byte
+	g := d.dataReader(sf.valuesDecomp)
+	g.Reset(0)
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		words = append(words, bytes.Clone(w))
+	}
+	return words
+}
+
+func TestDomain_CollationBatchMatchesPerStepCollation(t *testing.T) {
+	const stepSize, steps, keys = 16, 40, 160
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
+	want := writeDupSortStepBacklog(t, db, d, stepSize, steps, keys, 7)
+
+	sameStep := make([]byte, 8, 16)
+	binary.BigEndian.PutUint64(sameStep, ^uint64(12))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursorDupSort(d.ValuesTable)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		return c.Put([]byte("key00000"), append(sameStep, "zzz"...))
+	}))
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for _, r := range []struct{ from, to kv.Step }{{0, steps}, {5, 6}, {7, 23}, {30, steps}} {
+		comps, err := d.collateValuesBatch(t.Context(), r.from, r.to, roTx)
+		require.NoError(t, err)
+		require.Len(t, comps, int(r.to-r.from))
+		for step := r.from; step < r.to; step++ {
+			batched := collatedValueWords(t, d, step, stepSize, roTx, comps[step-r.from])
+			perStep := collatedValueWords(t, d, step, stepSize, roTx, nil)
+			require.Equal(t, perStep, batched, "range [%d,%d) step %d", r.from, r.to, step)
+			got := make(map[string]string, len(batched)/2)
+			for i := 0; i+1 < len(batched); i += 2 {
+				got[string(batched[i])] = string(batched[i+1])
+			}
+			require.Equal(t, want[step], got, "range [%d,%d) step %d", r.from, r.to, step)
+		}
+	}
+}
+
+func TestDomain_CollateClosesHistoryWhenValuesCollationFails(t *testing.T) {
+	const stepSize = 16
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
+	writeDupSortStepBacklog(t, db, d, stepSize, 1, 8, 3)
+	obstacle := filepath.Join(d.dirs.Tmp, filepath.Base(d.kvNewFilePath(0, 1))+".idt")
+	require.NoError(t, os.Mkdir(obstacle, 0o755))
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	_, err = d.collate(t.Context(), 0, 0, stepSize, roTx)
+	require.Error(t, err)
+	leftover, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Equal(t, []string{obstacle}, leftover)
 }
 
 func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
