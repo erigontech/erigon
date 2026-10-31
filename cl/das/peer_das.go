@@ -1580,7 +1580,7 @@ mainloop:
 			}
 			resolved := make([]resolvedColumn, len(result.sidecars))
 			seen := make(map[requestedDataColumn]struct{}, len(result.sidecars))
-			validResponse := true
+			validResponse, unverifiedSignatureMismatch := true, false
 			for i, sidecar := range result.sidecars {
 				if sidecar == nil {
 					validResponse = false
@@ -1598,7 +1598,7 @@ mainloop:
 				}
 				metadata := req.recovery(blockRoot)
 				if sidecar.Version() < clparams.GloasVersion && metadata != nil && sidecar.SignedBlockHeader.Signature != metadata.signature {
-					validResponse = false
+					unverifiedSignatureMismatch = true
 					break
 				}
 				if _, duplicate := seen[key]; duplicate {
@@ -1607,6 +1607,12 @@ mainloop:
 				}
 				seen[key] = struct{}{}
 				resolved[i] = resolvedColumn{slot: slot, blockRoot: blockRoot}
+			}
+			if unverifiedSignatureMismatch {
+				// Backfill stores blocks without verifying their signature, so the stored one may be the forged side.
+				log.Debug("rejecting column response with a signature that differs from the stored block", "pid", result.pid)
+				d.rpc.BanPeer(result.pid)
+				continue
 			}
 			if !validResponse {
 				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)

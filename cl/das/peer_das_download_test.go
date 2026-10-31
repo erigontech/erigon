@@ -437,27 +437,23 @@ func TestRunDownloadRejectsFuluSignatureMismatchBeforeStorage(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); d.runDownload(ctx, req, true) }()
 
-	select {
-	case <-sentinel.banned:
-	case <-storage.lookups:
+	deadline := time.After(30 * time.Second)
+	for sentinel.softBans.Load() == 0 {
 		select {
-		case <-storage.writes:
-			cancel()
-			<-done
-			t.Fatal("signature-mismatched Fulu column was persisted")
 		case <-sentinel.banned:
 			cancel()
 			<-done
-			t.Fatal("signature mismatch reached storage lookup before rejection")
-		case <-time.After(30 * time.Second):
+			t.Fatal("a mismatch with the unverified stored signature hard-banned the peer")
+		case <-storage.lookups:
 			cancel()
 			<-done
-			t.Fatal("signature mismatch reached storage lookup without a terminal result")
+			t.Fatal("signature mismatch reached storage lookup before rejection")
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("signature mismatch was not rejected")
+		case <-time.After(10 * time.Millisecond):
 		}
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-done
-		t.Fatal("signature mismatch was neither rejected nor processed")
 	}
 	cancel()
 	<-done
@@ -1349,4 +1345,48 @@ func TestRunDownloadDoesNotBanPeerForLocalStorageError(t *testing.T) {
 		t.Fatal("peer was banned for a local storage error")
 	default:
 	}
+}
+
+func TestRunDownloadBansPeerForInvalidFuluKZGProof(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	columns[0].KzgProofs.Get(0)[0] ^= 1
+	require.True(t, VerifyDataColumnSidecar(columns[0]))
+	require.True(t, VerifyDataColumnSidecarInclusionProof(columns[0]))
+	require.False(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0]})
+
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("peer serving an invalid KZG proof was not banned")
+	}
+	cancel()
+	<-done
 }
