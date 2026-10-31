@@ -250,6 +250,8 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
 * `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
+* `--http.compression.loopback`: Also compresses HTTP-RPC responses to clients connecting from a loopback address (`127.0.0.1`, `::1`). By default these responses are sent uncompressed: on loopback compression only costs CPU and latency. Enable this flag when a reverse proxy on the same host forwards remote clients and does not compress responses itself.
+  * Default: `false`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests. The same list gates browser WebSocket handshakes and cross-site `GET` calls: a page whose `Origin` is not listed gets `403`. Without the flag, only pages on `http://localhost`, `http://127.0.0.1`, `http://[::1]` or the node's own hostname can open a WebSocket. Clients that send no `Origin` header, such as `curl` or server-side libraries, are not affected.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
   * Default: `localhost`
