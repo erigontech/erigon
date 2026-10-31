@@ -23,8 +23,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -198,8 +201,16 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	return sameTxNumUpdate
 }
 
+var lockWaitNs [kv.DomainLen]atomic.Int64
+var lockPuts atomic.Int64
+
 func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
+	t0 := time.Now()
 	sd.latestStateLocks[domain].Lock()
+	lockWaitNs[domain].Add(int64(time.Since(t0)))
+	if n := lockPuts.Add(1); n%20000 == 0 {
+		fmt.Fprintf(os.Stderr, "LOCKSTAT puts=%d acc=%dus storage=%dus code=%dus commitment=%dus\n", n, lockWaitNs[kv.AccountsDomain].Load()/1000, lockWaitNs[kv.StorageDomain].Load()/1000, lockWaitNs[kv.CodeDomain].Load()/1000, lockWaitNs[kv.CommitmentDomain].Load()/1000)
+	}
 	defer sd.latestStateLocks[domain].Unlock()
 
 	val, txNum := valWithStep.data, valWithStep.txNum
