@@ -197,7 +197,7 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
 
-	const txs = 80
+	const txs = 300
 	counter := common.HexToAddress("0xc0c0")
 	config := chain.TestChainOsakaConfig.Copy()
 	config.AmsterdamTime = common.NewUint64(0)
