@@ -98,22 +98,23 @@ func (s *CaplinSnapshots) Close() {
 }
 
 func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	view := s.View()
-	defer view.Close()
-
-	visible := view.BeaconBlocks()
-	if len(visible) == 0 {
-		return 0
-	}
+	var view *CaplinView
 	var lowest uint64
 	s.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
 		lowest, _ = sn.GetRange()
+		view = s.View()
 		return false
 	})
-	if visible[0].From() != lowest {
+	if view == nil {
 		return 0
 	}
-	return s.IndicesMax()
+	defer view.Close()
+
+	visible := view.BeaconBlocks()
+	if len(visible) == 0 || visible[0].From() != lowest {
+		return 0
+	}
+	return visible[len(visible)-1].To() - 1
 }
 
 func (s *CaplinSnapshots) LogStat(str string) {
