@@ -208,6 +208,43 @@ func TestSetGloasEnvelopeSignatureValidatorWiresRangeFilter(t *testing.T) {
 	require.Same(t, validEnvelope, envelopes[root])
 }
 
+func TestBackwardDownloaderRetriesPastBadSignatureEnvelope(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	slot := 2 * cfg.SlotsPerEpoch
+	epoch := state.GetEpochAtSlot(cfg, slot)
+	cfg.GloasForkEpoch = epoch
+	cfg.InitializeForkSchedule()
+	anchorState, block, valid := backfilledGloasEnvelopeFixture(t, cfg, slot, 0, epoch-1, backfillBuilderKey)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	forged := *valid
+	signBackfilledGloasEnvelope(t, cfg, anchorState, &forged, backfillOtherKey)
+	require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, &forged))
+	require.ErrorContains(t, validateBackfilledGloasEnvelopeSignature(anchorState, block, &forged), "invalid signature")
+
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	digest, err := clock.ComputeForkDigest(epoch)
+	require.NoError(t, err)
+	var forgedResponse, validResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&forgedResponse, &forged, digest[:]...))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&validResponse, valid, digest[:]...))
+	sentinel := &bogusThenValidEnvelopeSentinel{bogusResponse: forgedResponse.Bytes(), validResponse: validResponse.Bytes()}
+	downloader := NewBackwardBeaconDownloader(t.Context(), rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock), nil, nil, nil, cfg)
+	t.Cleanup(downloader.reqInterval.Stop)
+	downloader.SetGloasEnvelopeSignatureValidator(anchorState)
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeRetryInterval = time.Millisecond
+	t.Cleanup(func() { requestEnvelopeRetryInterval = previousRetryInterval })
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	envelopes, err := downloader.requestEnvelopes(ctx, [][32]byte{root}, block)
+
+	require.NoError(t, err)
+	require.Equal(t, valid.Signature, envelopes[common.Hash(root)].Signature)
+	require.Equal(t, []string{"envelope-peer"}, sentinel.banned)
+}
+
 const (
 	backfillProposerKey = "01234567890123456789012345678901"
 	backfillBuilderKey  = "builder-key-material-000000000001"
@@ -768,6 +805,48 @@ func TestBackwardBeaconDownloaderHTTPFallbackValidatesOnlyMissingEnvelopes(t *te
 			}
 			require.Equal(t, map[common.Hash]int{httpRoot: 1}, validations)
 			require.Equal(t, int32(1), httpRequests.Load())
+		})
+	}
+}
+
+func TestBackwardBeaconDownloaderFetchGloasEnvelopesDiscardsInvalidHTTPEnvelope(t *testing.T) {
+	for _, httpPreferred := range []bool{false, true} {
+		t.Run(fmt.Sprint(httpPreferred), func(t *testing.T) {
+			cfg := gloasFromGenesisConfig()
+			block := makeGloasBlock(10, hash(0xaa), common.Hash{})
+			child := makeGloasBlock(11, hash(0xbb), hash(0xaa))
+			linkBeaconBlocks(t, block, child)
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			httpEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+			httpEnvelope.Message.BeaconBlockRoot = blockRoot
+			httpEncoded, err := httpEnvelope.EncodeSSZ(nil)
+			require.NoError(t, err)
+			var httpRequests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				httpRequests.Add(1)
+				w.Header().Set("Eth-Consensus-Version", "gloas")
+				_, _ = w.Write(httpEncoded)
+			}))
+			t.Cleanup(server.Close)
+
+			downloader := &BackwardBeaconDownloader{
+				httpFallbackURL:   server.URL,
+				beaconCfg:         cfg,
+				prevBatchTopBlock: child,
+				validateGloasEnvelope: func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error {
+					return errors.New("invalid signature")
+				},
+				requestEnvelopes: func(context.Context, [][32]byte, ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+					return nil, nil
+				},
+			}
+			downloader.httpPreferred.Store(httpPreferred)
+
+			envelopes, fullRoots := downloader.fetchGloasEnvelopes(t.Context(), []*cltypes.SignedBeaconBlock{block})
+			require.Contains(t, fullRoots, common.Hash(blockRoot))
+			require.Equal(t, int32(1), httpRequests.Load())
+			require.NotContains(t, envelopes, common.Hash(blockRoot))
 		})
 	}
 }

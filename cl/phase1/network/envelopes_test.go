@@ -113,11 +113,11 @@ func TestRequestEnvelopesFranticallyCancelsBlockedRequestWhenBatchExpires(t *tes
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	sentinel := newContextBlockingSentinel()
-	rpcClient, _ := newContextBlockingBeaconRPC(ctx, sentinel)
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}})
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), nil)
 		done <- err
 	}()
 
@@ -142,11 +142,11 @@ func TestRequestEnvelopesFranticallyCancelsBlockedRequestWhenBatchExpires(t *tes
 func TestRequestEnvelopesFranticallyReturnsCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	sentinel := newContextBlockingSentinel()
-	rpcClient, _ := newContextBlockingBeaconRPC(ctx, sentinel)
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}})
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), nil)
 		done <- err
 	}()
 
@@ -184,11 +184,11 @@ func TestRequestEnvelopesFranticallyInterruptsRetryDelay(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			rpcClient, _ := newContextBlockingBeaconRPC(ctx, &immediateEnvelopeSentinel{empty: tc.empty})
+			rpcClient, cfg := newContextBlockingBeaconRPC(ctx, &immediateEnvelopeSentinel{empty: tc.empty})
 			var bans atomic.Int32
 			done := make(chan error, 1)
 			go func() {
-				_, err := requestEnvelopesFranticallyWithValidator(ctx, rpcClient, [][32]byte{{1}}, nil, func(context.Context, string) { bans.Add(1) })
+				_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), func(context.Context, string) { bans.Add(1) })
 				done <- err
 			}()
 			select {
@@ -222,7 +222,7 @@ func TestRequestEnvelopesFranticallyReservesTimeForRangeFallback(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, block)
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
 		done <- err
 	}()
 
@@ -261,7 +261,7 @@ func TestRequestEnvelopesFranticallyBoundsRangeFallbackAttempt(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, block)
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
 		done <- err
 	}()
 
@@ -283,6 +283,31 @@ type envelopeResponseSentinel struct {
 	sentinelproto.SentinelClient
 	response []byte
 	banned   []string
+}
+
+type bogusThenValidEnvelopeSentinel struct {
+	sentinelproto.SentinelClient
+	bogusResponse []byte
+	validResponse []byte
+	calls         atomic.Int32
+	banned        []string
+}
+
+func (s *bogusThenValidEnvelopeSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.banned = append(s.banned, peer.Pid)
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *bogusThenValidEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	response := s.validResponse
+	if s.calls.Add(1) == 1 {
+		response = s.bogusResponse
+	}
+	return &sentinelproto.ResponseData{Data: response, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
+}
+
+func (s *bogusThenValidEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
 }
 
 func (s *envelopeResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
@@ -338,12 +363,9 @@ func TestRequestEnvelopesFranticallyRetriesMalformedResponseWithoutBan(t *testin
 	for _, tc := range []struct {
 		name     string
 		protocol string
-		validate bool
 	}{
 		{name: "by-root", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1},
 		{name: "by-range", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
-		{name: "by-root with validator", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, validate: true},
-		{name: "by-range with validator", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, validate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
@@ -360,15 +382,7 @@ func TestRequestEnvelopesFranticallyRetriesMalformedResponseWithoutBan(t *testin
 			}
 			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 			roots := [][32]byte{envelope.Message.BeaconBlockRoot}
-			var received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-			if tc.validate {
-				validate := newEnvelopeValidator([]*cltypes.SignedBeaconBlock{block}, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-					return ValidateDownloadedGloasEnvelope(cfg, block, envelope)
-				})
-				received, err = requestEnvelopesFranticallyWithValidator(t.Context(), client, roots, validate, nil, block)
-			} else {
-				received, err = RequestEnvelopesFrantically(t.Context(), client, roots, block)
-			}
+			received, err := RequestEnvelopesFrantically(t.Context(), client, roots, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
 			require.NoError(t, err)
 			require.True(t, sentinel.sentMalformed)
 			require.Equal(t, 1, sentinel.validRequests)
@@ -642,7 +656,7 @@ func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 		Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: requestedRoot},
 	}
 
-	rejected := acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{
 		requestedEnvelope,
 		nil,
 		{},
@@ -652,41 +666,125 @@ func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 		return nil
 	}, "peer", func(pid string) { t.Errorf("unexpected ban of %s", pid) })
 
-	require.False(t, rejected)
 	require.Same(t, requestedEnvelope, received[requestedRoot])
 	require.NotContains(t, received, unsolicitedRoot)
 }
 
-func TestRequestEnvelopesByRangeRetainsValidatedPrefixOnError(t *testing.T) {
-	client, requestedRoot, block := newMixedEnvelopeResponseClient(t)
+func TestAcceptEnvelopeResponsesKeepsFirstValidEnvelope(t *testing.T) {
+	root := common.Hash{1}
+	first := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	first.Message.BeaconBlockRoot = root
+	second := first.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	second.Signature[0] = 1
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+
+	acceptEnvelopeResponsesWithValidator(
+		[]*cltypes.SignedExecutionPayloadEnvelope{first, second},
+		nil,
+		map[common.Hash]struct{}{root: {}},
+		received,
+		func(*cltypes.SignedExecutionPayloadEnvelope) error { return nil },
+		"",
+		nil,
+	)
+
+	require.Same(t, first, received[root])
+}
+
+func TestAcceptEnvelopeResponsesBansInvalidDuplicate(t *testing.T) {
+	root := common.Hash{1}
+	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	valid.Message.BeaconBlockRoot = root
+	invalid := valid.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	invalid.Signature[0] = 1
 	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
 	var banned []string
 
-	rejected := requestEnvelopesByRangeWithValidator(
+	acceptEnvelopeResponsesWithValidator(
+		[]*cltypes.SignedExecutionPayloadEnvelope{valid, invalid},
+		nil,
+		map[common.Hash]struct{}{root: {}},
+		received,
+		func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+			if envelope.Signature != valid.Signature {
+				return errors.New("invalid signature")
+			}
+			return nil
+		},
+		"duplicate-peer",
+		func(pid string) { banned = append(banned, pid) },
+	)
+
+	require.Same(t, valid, received[root])
+	require.Equal(t, []string{"duplicate-peer"}, banned)
+}
+
+func TestRequestEnvelopesByRootRequestsChunksAfterInvalidEnvelope(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	cfg.MaxRequestPayloads = 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	digest, err := clock.ComputeForkDigest(0)
+	require.NoError(t, err)
+	_, _, invalid := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+	_, _, valid := backfilledGloasEnvelopeFixture(t, cfg, 11, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+	invalidRoot, validRoot := invalid.Message.BeaconBlockRoot, valid.Message.BeaconBlockRoot
+	var invalidResponse, validResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidResponse, invalid, digest[:]...))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&validResponse, valid, digest[:]...))
+	sentinel := &bogusThenValidEnvelopeSentinel{bogusResponse: invalidResponse.Bytes(), validResponse: validResponse.Bytes()}
+	client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+
+	err = requestEnvelopesByRoot(
+		t.Context(),
+		client,
+		[][32]byte{invalidRoot, validRoot},
+		map[common.Hash]struct{}{invalidRoot: {}, validRoot: {}},
+		received,
+		func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+			if envelope.Message.BeaconBlockRoot == invalidRoot {
+				return errors.New("invalid envelope")
+			}
+			return nil
+		},
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotContains(t, received, invalidRoot)
+	require.Contains(t, received, validRoot)
+}
+
+func TestRequestEnvelopesByRangeRetainsValidatedPrefixOnError(t *testing.T) {
+	client, cfg, requestedRoot, block := newMixedEnvelopeResponseClient(t)
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+	var banned []string
+
+	requestEnvelopesByRangeWithValidator(
 		context.Background(),
 		client,
 		[]*cltypes.SignedBeaconBlock{block},
 		map[common.Hash]struct{}{requestedRoot: {}},
 		received,
-		nil,
+		NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})),
 		func(pid string) { banned = append(banned, pid) },
 	)
 
-	require.True(t, rejected)
 	require.Equal(t, []string{"mixed-response-peer"}, banned)
 	require.Contains(t, received, requestedRoot)
 	require.Equal(t, requestedRoot, received[requestedRoot].Message.BeaconBlockRoot)
 }
 
 func TestRequestEnvelopesByRootRetainsValidatedPrefixOnError(t *testing.T) {
-	client, requestedRoot, _ := newMixedEnvelopeResponseClient(t)
+	client, cfg, requestedRoot, block := newMixedEnvelopeResponseClient(t)
 
 	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
 	var banned []string
-	rejected, err := requestEnvelopesByRoot(context.Background(), client, [][32]byte{requestedRoot, {2}}, map[common.Hash]struct{}{requestedRoot: {}}, received, nil, func(pid string) { banned = append(banned, pid) })
+	validate := NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block}))
+	err := requestEnvelopesByRoot(context.Background(), client, [][32]byte{requestedRoot, {2}}, map[common.Hash]struct{}{requestedRoot: {}}, received, validate, func(pid string) { banned = append(banned, pid) })
 
 	require.Error(t, err)
-	require.True(t, rejected)
 	require.Equal(t, []string{"mixed-response-peer"}, banned)
 	require.Len(t, received, 1)
 	require.Equal(t, requestedRoot, received[requestedRoot].Message.BeaconBlockRoot)
@@ -709,25 +807,25 @@ func TestAcceptEnvelopeResponsesRejectsInvalidCandidateBeforeProgress(t *testing
 	var banned []string
 	banPeer := func(pid string) { banned = append(banned, pid) }
 
-	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, nil, requested, received, validate, "invalid-peer", banPeer))
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, nil, requested, received, validate, "invalid-peer", banPeer)
 	require.Equal(t, [][32]byte{root}, filterReceived([][32]byte{root}, received))
 	require.Equal(t, []string{"invalid-peer"}, banned)
 
-	require.False(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, nil, requested, received, validate, "valid-peer", banPeer))
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, nil, requested, received, validate, "valid-peer", banPeer)
 	require.Same(t, valid, received[root])
 	require.Equal(t, []string{"invalid-peer"}, banned)
 
 	delete(received, root)
-	require.True(t, acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid, invalid, invalid}, rpc.ErrInvalidResponse, requested, received, validate, "mixed-peer", banPeer))
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid, invalid, invalid}, rpc.ErrInvalidResponse, requested, received, validate, "mixed-peer", banPeer)
 	require.Same(t, valid, received[root])
 	require.Equal(t, []string{"invalid-peer", "mixed-peer"}, banned)
 }
 
-func TestRequestEnvelopesByRangeReportsInvalidCandidate(t *testing.T) {
-	client, requestedRoot, block := newMixedEnvelopeResponseClient(t)
+func TestRequestEnvelopesByRangeDropsInvalidCandidate(t *testing.T) {
+	client, _, requestedRoot, block := newMixedEnvelopeResponseClient(t)
 	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
 
-	rejected := requestEnvelopesByRangeWithValidator(
+	requestEnvelopesByRangeWithValidator(
 		context.Background(),
 		client,
 		[]*cltypes.SignedBeaconBlock{block},
@@ -737,7 +835,6 @@ func TestRequestEnvelopesByRangeReportsInvalidCandidate(t *testing.T) {
 		nil,
 	)
 
-	require.True(t, rejected)
 	require.Empty(t, received)
 }
 
@@ -762,7 +859,7 @@ func TestRequestEnvelopesByRangeBoundsCallsForSparseRequestedSlots(t *testing.T)
 		[]*cltypes.SignedBeaconBlock{low, high},
 		map[common.Hash]struct{}{lowRoot: {}, highRoot: {}},
 		map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{},
-		nil,
+		NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{low, high})),
 		nil,
 	)
 
@@ -773,27 +870,60 @@ func TestRequestEnvelopesFranticallyPreservesParentCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for range 100 {
-		_, err := requestEnvelopesFranticallyWithValidator(ctx, nil, [][32]byte{{1}}, nil, nil)
+		_, err := RequestEnvelopesFrantically(ctx, nil, [][32]byte{{1}}, NewEnvelopeBlockValidator(&clparams.MainnetBeaconConfig, blockLookup(nil)), nil)
 		require.ErrorIs(t, err, context.Canceled)
 	}
 }
 
-func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Hash, *cltypes.SignedBeaconBlock) {
+func TestRequestEnvelopesFranticallyRetriesPastBogusEnvelope(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	digest, err := clock.ComputeForkDigest(0)
+	require.NoError(t, err)
+	_, block, valid := backfilledGloasEnvelopeFixture(t, cfg, 1, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	validBytes, err := valid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bogus := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	require.NoError(t, bogus.DecodeSSZ(validBytes, int(clparams.GloasVersion)))
+	bogus.Message.Payload.BlockHash[0] ^= 0xff
+	require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, bogus), "block hash mismatch")
+
+	var bogusResponse, validResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&bogusResponse, bogus, digest[:]...))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&validResponse, valid, digest[:]...))
+	sentinel := &bogusThenValidEnvelopeSentinel{bogusResponse: bogusResponse.Bytes(), validResponse: validResponse.Bytes()}
+	client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeRetryInterval = 2 * time.Millisecond
+	t.Cleanup(func() { requestEnvelopeRetryInterval = previousRetryInterval })
+
+	envelopes, err := RequestEnvelopesFrantically(
+		t.Context(), client, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block,
+	)
+
+	require.NoError(t, err)
+	fetched := envelopes[common.Hash(root)]
+	require.NotNil(t, fetched)
+	require.Equal(t, valid.Message.Payload.BlockHash, fetched.Message.Payload.BlockHash)
+	require.GreaterOrEqual(t, sentinel.calls.Load(), int32(2))
+}
+
+func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, *clparams.BeaconChainConfig, common.Hash, *cltypes.SignedBeaconBlock) {
 	t.Helper()
-	cfg := clparams.MainnetBeaconConfig
+	cfg := gloasFromGenesisConfig()
 	cfg.MaxBuilderDepositRequestsPerPayload = 1
 	cfg.InitializeForkSchedule()
-	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)
 
-	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	block.Block.Slot = 1
+	_, block, valid := backfilledGloasEnvelopeFixture(t, cfg, 1, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
 	requestedRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
-	valid.Message.BeaconBlockRoot = requestedRoot
-	invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
 	invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
 	invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
 
@@ -804,8 +934,8 @@ func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Has
 	client := rpc.NewBeaconRpcP2P(
 		context.Background(),
 		&envelopeResponseSentinel{response: response.Bytes()},
-		&cfg,
+		cfg,
 		clock,
 	)
-	return client, requestedRoot, block
+	return client, cfg, requestedRoot, block
 }

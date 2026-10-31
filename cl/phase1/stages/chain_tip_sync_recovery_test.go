@@ -95,6 +95,10 @@ func (*chainTipBatchEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.
 	return &sentinelproto.PeersInfoResponse{}, nil
 }
 
+func (*chainTipBatchEnvelopeSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
 func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state2.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	root, err := block.Block.HashSSZ()
 	if err != nil {
