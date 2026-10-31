@@ -4155,6 +4155,63 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
 }
 
+// Value transfers whose recipient is credited at validation must reach the state root of serial
+// execution, also when the recipient spends, its balance is read, or it gets code in the block.
+func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	keys := make([]*ecdsa.PrivateKey, 10)
+	alloc := types.GenesisAlloc{}
+	for i := range keys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
+	}
+	recipient := crypto.PubkeyToAddress(keys[9].PublicKey)
+	codeLater := types.CreateAddress(crypto.PubkeyToAddress(keys[0].PublicKey), 0)
+	balanceReader, sink := common.Address{0xaa}, common.Address{0xcc}
+	alloc[codeLater] = types.GenesisAccount{Balance: big.NewInt(1)}
+	alloc[balanceReader] = types.GenesisAccount{Code: []byte{byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}}
+	genesis := &types.Genesis{Config: chain.TestChainOsakaConfig, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(keys[1]))
+	// The deployed code stores the call value, so a credit that skips it changes the state root.
+	storeCallValue := []byte{
+		byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.RETURN),
+	}
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		nonces := make([]uint64, len(keys))
+		add := func(k int, to *common.Address, value uint64, data []byte) {
+			var txn types.Transaction
+			if to == nil {
+				txn = types.NewContractCreation(nonces[k], uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), data)
+			} else {
+				txn = types.NewTransaction(nonces[k], *to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), data)
+			}
+			nonces[k]++
+			tx, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), keys[k])
+			require.NoError(t, err)
+			b.AddTx(tx)
+		}
+		readRecipient := common.BytesToHash(recipient[:])
+		for k := 1; k <= 4; k++ {
+			add(k, &recipient, uint64(k), nil)
+		}
+		add(9, &sink, 1, nil)
+		add(5, &balanceReader, 0, readRecipient[:])
+		add(6, &codeLater, 2, nil)
+		add(0, nil, 0, storeCallValue)
+		add(7, &codeLater, 3, nil)
+		add(8, &recipient, 8, nil)
+		add(5, &balanceReader, 0, readRecipient[:])
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
 // A tx that serial execution rejects on its sender's nonce or balance must reject the
 // block with the same error when parallel exec charges the sender at validation.
 func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {

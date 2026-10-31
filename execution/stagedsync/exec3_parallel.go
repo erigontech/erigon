@@ -1085,7 +1085,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec); err != nil {
+			if err := pe.processRequest(ctx, exec, applyTx); err != nil {
 				return err
 			}
 			continue
@@ -1280,8 +1280,21 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 	return applyTx, nil
 }
 
-func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
+func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
 	prevAccountTx := map[common.Address]int{}
+	// codeless reports whether addr exists without code before the block, the state a charged
+	// transfer's run checks before it leaves the recipient credit to validation.
+	var reader state.StateReader
+	codeless := func(addr common.Address) bool {
+		if applyTx == nil {
+			return false
+		}
+		if reader == nil {
+			reader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
+		}
+		acc, err := reader.ReadAccountByPlainAddr(addr)
+		return err == nil && acc != nil && acc.CodeHash.IsEmpty()
+	}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -1346,7 +1359,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
-				addresses = append(addresses, *tx.GetTo())
+				if to := *tx.GetTo(); chargedAtValidation && to != executor.coinbase.Value() &&
+					!slices.Contains(vm.ActivePrecompiles(txTask.Rules()), accounts.InternAddress(to)) && codeless(to) {
+					// Credited at validation: a later user of the recipient still waits for it.
+					prevAccountTx[to] = i
+				} else {
+					addresses = append(addresses, to)
+				}
 			}
 			for _, address := range addresses {
 				if tx, ok := prevAccountTx[address]; ok && executor.execTasks.addDependency(tx, i) {
@@ -2694,7 +2713,8 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		return nil, nil, err
 	}
 	sender := msg.From()
-	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
+	reader := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader)
+	acc, err := reader.ReadAccountData(sender)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2727,6 +2747,27 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: nonceReason},
 		Val:         acc.Nonce + 1,
 	})
+	// A run that skipped the transfer frame left the recipient credit to validation.
+	if to := msg.To(); !to.IsNil() && to != sender && result.ExecutionResult.Err == nil && !msg.Value().IsZero() {
+		if _, credited := result.TxOut.GetBalance(to); !credited {
+			recipient, err := reader.ReadAccountData(to)
+			if err != nil {
+				return nil, nil, err
+			}
+			if recipient == nil || !recipient.CodeHash.IsEmpty() {
+				return nil, nil, nil
+			}
+			credit, overflow := u256.AddOverflow(recipient.Balance, *msg.Value())
+			if overflow {
+				return nil, nil, nil
+			}
+			state.SeedOrigin(vm, to, recipient)
+			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
+				Val:         credit,
+			})
+		}
+	}
 	return ws, acc, nil
 }
 
@@ -3261,7 +3302,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Serial execution reads the sender before charging it; the block access list
 				// needs that read to tell a balance spent to zero from a no-op touch.
 				reads := be.blockIO.ReadSet(txVersion.TxIndex)
-				for sender := range senderWrites.Balances() {
+				if sender, err := chainTx.TxSender(); err == nil {
 					reads.SetBalance(sender, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Balance})
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}

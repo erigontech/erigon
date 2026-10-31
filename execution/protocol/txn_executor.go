@@ -684,6 +684,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.CreateWithNonce(sender, st.data, st.gasRemaining, st.value, st.msg.Nonce(), bailout)
 		case contractCreation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+		case st.chargeSenderAtValidation && st.recipientCreditedAtValidation(coinbase):
+			tracer := vmConfig.Tracer
+			tracer.EmitEnter(0, byte(vm.CALL), sender, st.to(), false, st.data, st.gasRemaining, st.value, nil)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 		default:
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
@@ -860,6 +864,20 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 		err = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
 	return gasRemaining, gasUsed, err
+}
+
+// recipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
+// recipient exists and has no code, so validation credits it after every lower tx. A recorded read
+// of the recipient would conflict with each lower credit, so the run peeks at block-start state and
+// validation re-checks the code. A tracer that follows balances or gas needs the frame.
+func (st *TxnExecutor) recipientCreditedAtValidation(coinbase accounts.Address) bool {
+	to, tracer := st.to(), st.evm.Config().Tracer
+	if st.value.IsZero() || to == coinbase || to == st.msg.From() || tracer.HasGasChangeHook() || tracer != nil && tracer.OnBalanceChange != nil ||
+		slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), to) {
+		return false
+	}
+	acc, err := st.state.StateReader().ReadAccountData(to)
+	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;

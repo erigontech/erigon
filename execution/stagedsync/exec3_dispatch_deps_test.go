@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -37,19 +38,31 @@ func valueTransfers(senders, recipients []accounts.Address) types.Transactions {
 	return txs
 }
 
-func newDepsTest(t *testing.T, txs types.Transactions) *depsTest {
+// newDepsTest seeds every sender and recipient as a funded account; a recipient in withCode
+// also has code.
+func newDepsTest(t *testing.T, txs types.Transactions, withCode ...accounts.Address) *depsTest {
 	t.Helper()
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	db := newResumeTestDB(t)
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		acc := accounts.NewAccount()
-		acc.Balance = *uint256.NewInt(1_000_000)
+		put := func(addr common.Address, hasCode bool) error {
+			acc := accounts.NewAccount()
+			acc.Balance = *uint256.NewInt(1_000_000)
+			if hasCode {
+				acc.CodeHash = accounts.InternCodeHash(common.Hash{1})
+			}
+			return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+		}
 		for _, txn := range txs {
 			sender, _ := txn.GetSender()
-			addr := sender.Value()
-			if err := putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+			if err := put(sender.Value(), false); err != nil {
 				return err
+			}
+			if to := txn.GetTo(); to != nil {
+				if err := put(*to, slices.Contains(withCode, accounts.InternAddress(*to))); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -72,7 +85,7 @@ func newDepsTest(t *testing.T, txs types.Transactions) *depsTest {
 			Txs:             txs,
 		}
 	}
-	require.NoError(t, pe.processRequest(context.Background(), &execRequest{blockNum: 1, tasks: tasks}))
+	require.NoError(t, pe.processRequest(context.Background(), &execRequest{blockNum: 1, tasks: tasks}, roTx))
 	be.scheduleExecution(context.Background(), pe)
 	d := &depsTest{t: t, pe: pe, be: be}
 	d.deliverTx = func(tx, inc int, reads state.ReadSet) {
@@ -95,18 +108,12 @@ func newDepsTest(t *testing.T, txs types.Transactions) *depsTest {
 func TestValueTransferWaitsForRecipientPredecessor(t *testing.T) {
 	a := accounts.InternAddress(common.HexToAddress("0xa0"))
 	b := accounts.InternAddress(common.HexToAddress("0xb1"))
-	c := accounts.InternAddress(common.HexToAddress("0xc2"))
-	d := accounts.InternAddress(common.HexToAddress("0xd3"))
-	e := accounts.InternAddress(common.HexToAddress("0xe4"))
-	f := accounts.InternAddress(common.HexToAddress("0xf5"))
 	for _, tc := range []struct {
 		name       string
 		senders    []accounts.Address
 		recipients []accounts.Address
 	}{
-		{"shared_recipient", []accounts.Address{a, b, c}, []accounts.Address{f, d, d}},
 		{"self_transfer", []accounts.Address{a, b, b}, []accounts.Address{a, b, b}},
-		{"sender_then_recipient", []accounts.Address{a, d, c}, []accounts.Address{f, e, d}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newDepsTest(t, valueTransfers(tc.senders, tc.recipients))
@@ -155,4 +162,77 @@ func TestChargedSenderDoesNotWaitForTransferToIt(t *testing.T) {
 	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, d}, []accounts.Address{f, d, e}))
 	require.False(t, s.be.execTasks.isBlocked(2))
 	require.True(t, s.be.selfLoopDispatched[2])
+}
+
+// A value transfer charged at validation credits its recipient after every lower tx, so it
+// need not wait for the recipient's previous tx.
+func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	e := accounts.InternAddress(common.HexToAddress("0xe4"))
+	f := accounts.InternAddress(common.HexToAddress("0xf5"))
+	for name, tc := range map[string][2][]accounts.Address{
+		"shared_recipient":      {{a, b, c}, {f, d, d}},
+		"sender_then_recipient": {{a, d, c}, {f, e, d}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newDepsTest(t, valueTransfers(tc[0], tc[1]))
+			require.False(t, s.be.execTasks.isBlocked(2))
+			require.True(t, s.be.selfLoopDispatched[2])
+		})
+	}
+	// A recipient with code runs it in the transfer frame, so the transfer still waits.
+	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), d)
+	require.True(t, s.be.execTasks.isBlocked(2))
+	require.False(t, s.be.selfLoopDispatched[2])
+	// The run executes the frame of a funded precompile, so a transfer to it still waits.
+	p := accounts.InternAddress(common.BytesToAddress([]byte{1}))
+	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p}))
+	require.True(t, s.be.execTasks.isBlocked(2))
+	require.False(t, s.be.selfLoopDispatched[2])
+}
+
+// The run peeks at the recipient's code at block start; validation credits only a recipient that
+// still has no code after the lower txs, else the tx reruns with the code executed.
+func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xa0"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xd3"))
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	task := &exec.TxTask{
+		Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000},
+		Config: chainSpec.Config,
+		Txs:    valueTransfers([]accounts.Address{sender}, []accounts.Address{recipient}),
+	}
+	reader := newMapStateReader()
+	funded := accounts.NewAccount()
+	funded.Balance = *uint256.NewInt(1_000_000)
+	reader.accounts[sender] = &funded
+	for name, codeHash := range map[string]accounts.CodeHash{"no_code": accounts.EmptyCodeHash, "code": accounts.InternCodeHash(common.Hash{1})} {
+		t.Run(name, func(t *testing.T) {
+			to := accounts.NewAccount()
+			to.CodeHash = codeHash
+			reader.accounts[recipient] = &to
+			result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+			ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, state.NewVersionMap(nil), reader)
+			require.NoError(t, err)
+			if codeHash.IsEmpty() {
+				credit, ok := ws.GetBalance(recipient)
+				require.True(t, ok)
+				require.Equal(t, uint64(1), credit.Val.Uint64())
+			} else {
+				require.Nil(t, ws, "a recipient with code was credited without running it")
+			}
+		})
+	}
+	t.Run("balance_overflow", func(t *testing.T) {
+		to := accounts.NewAccount()
+		to.Balance.SetAllOne()
+		reader.accounts[recipient] = &to
+		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+		ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, state.NewVersionMap(nil), reader)
+		require.NoError(t, err)
+		require.Nil(t, ws, "a credit that wraps the balance skipped the empty-account cleanup of a full run")
+	})
 }
