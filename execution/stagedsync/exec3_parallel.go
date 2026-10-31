@@ -3010,7 +3010,7 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 }
 
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
-const balDispatchWindow = 32
+const balDispatchWindow = 128
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []int, tx int) []int {
