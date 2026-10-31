@@ -789,6 +789,90 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
+func TestReadAheadGetterCurrentStepFill(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	address := common.Address{19: 1}
+	storageKey := make([]byte, 52)
+	copy(storageKey, address[:])
+	code := []byte{0x60, 0x01}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+	cases := []struct {
+		domain     kv.Domain
+		key, value []byte
+	}{
+		{kv.AccountsDomain, address[:], account},
+		{kv.StorageDomain, storageKey, []byte{1}},
+		{kv.CodeDomain, address[:], code},
+	}
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	domains.BindStateCache(stateCache)
+	domains.SetTxNum(10)
+	for _, tc := range cases {
+		require.NoError(t, domains.DomainPut(tc.domain, rwTx, tc.key, tc.value, 10, nil))
+	}
+	require.NoError(t, domains.Commit(t.Context(), rwTx))
+
+	for _, writable := range []bool{false, true} {
+		name := "read only"
+		if writable {
+			name = "writable"
+		}
+		t.Run(name, func(t *testing.T) {
+			var tx kv.TemporalTx
+			var err error
+			if writable {
+				tx, err = db.BeginTemporalRw(t.Context())
+			} else {
+				tx, err = db.BeginTemporalRo(t.Context())
+			}
+			require.NoError(t, err)
+			defer tx.Rollback()
+			for _, tc := range cases {
+				t.Run(tc.domain.String(), func(t *testing.T) {
+					stateCache.Applier().Clear()
+					got, step, err := readAheadGetter(tx, stateCache).GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+					require.NoError(t, err)
+					require.Equal(t, tc.value, got)
+					cached, stamp, hit := stateCache.View(nil).GetWithTxNum(tc.domain, tc.key)
+					require.True(t, hit)
+					require.Equal(t, tc.value, cached)
+					if writable {
+						require.Equal(t, step.LastTxNum(16), stamp, "a writable view must keep the conservative step-end stamp")
+						return
+					}
+					stateVersion, err := rawdb.GetStateVersion(tx)
+					require.NoError(t, err)
+					view := stateCache.View(cache.FrontierWithStateVersion(tx.Debug(), stateVersion))
+					_, _, hit = view.GetVisible(tc.domain, tc.key)
+					require.True(t, hit, "a prefetched current-step value must be visible on the same snapshot")
+					end, ok := tx.Debug().DomainVisibleEnd(tc.domain)
+					require.True(t, ok)
+					require.Equal(t, end-1, stamp)
+					stateCache.Applier().Unwind(end)
+					_, hit = stateCache.View(nil).Get(tc.domain, tc.key)
+					require.True(t, hit)
+					if tc.domain == kv.AccountsDomain {
+						codeHash, hit := stateCache.View(nil).GetAddrCodeHash(tc.key)
+						require.True(t, hit, "the code-hash binding must survive the same unwind as the account")
+						require.Equal(t, [32]byte(crypto.Keccak256Hash(code)), codeHash)
+					}
+					stateCache.Applier().Unwind(end - 1)
+					_, hit = stateCache.View(nil).Get(tc.domain, tc.key)
+					require.False(t, hit)
+					if tc.domain == kv.AccountsDomain {
+						_, hit = stateCache.View(nil).GetAddrCodeHash(tc.key)
+						require.False(t, hit, "the derived code-hash binding must use the same stamp")
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestCachePopulatingGetterNegativeUsesLastVisibleTxNum(t *testing.T) {
 	const visibleEnd = uint64(10_000_001)
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
@@ -923,4 +1007,75 @@ func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
 	dbg.StagesOnlyBlocks = false
 	dbg.Exec3Parallel = false
 	require.False(t, bra.ExecRecoversSenders(header), "serial exec has no workers, so the Senders stage recovers")
+}
+
+// Validation suspends warmup before an unwind and then executes; waiting for a running warmup must not wait for that suspension.
+func TestBlockReadAheaderWaitForRunningWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+	}))
+	<-warmupStarted
+	waited := make(chan struct{})
+	go func() {
+		bra.WaitForRunningWarmup(t.Context())
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("returned while a warmup was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(finishWarmup)
+	<-waited
+
+	resume, err := bra.SuspendWarmup(t.Context())
+	require.NoError(t, err)
+	defer resume()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	bra.WaitForRunningWarmup(ctx)
+	require.NoError(t, ctx.Err(), "waited for the suspension")
+}
+
+type blockedBeginRoDB struct {
+	kv.RoDB
+	started chan struct{}
+}
+
+func (db *blockedBeginRoDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	select {
+	case db.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	db := &blockedBeginRoDB{started: make(chan struct{}, 1)}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	body := &types.Body{Transactions: types.Transactions{types.NewTransaction(0, common.Address{19: 1}, nil, 0, nil, nil)}}
+	bra := NewBlockReadAheader()
+	bra.AddHeaderAndBody(t.Context(), db, struct{ kv.Getter }{}, header, body)
+	<-db.started
+
+	waited := make(chan struct{})
+	go func() {
+		bra.WaitForRunningWarmup(t.Context())
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("returned while the body warmup was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	bra.CancelWarmup()
+	<-waited
 }

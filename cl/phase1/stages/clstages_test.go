@@ -117,3 +117,21 @@ func TestProcessBlockPersistsAcceptedBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessBlockPreservesAcceptedSignature(t *testing.T) {
+	cfg, graph, root, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	accepted := graph.parents[root]
+	require.NoError(t, processBlock(t.Context(), cfg, accepted, false))
+	forged := *accepted
+	forged.Signature[0] ^= 1
+
+	require.NoError(t, processBlock(t.Context(), cfg, &forged, false))
+
+	require.NoError(t, cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {
+		header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, header)
+		require.Equal(t, accepted.Signature, header.Signature)
+		return nil
+	}))
+}

@@ -263,44 +263,40 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks stream.U64, err error) {
 	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
-	var blocksTo stream.U64
+	var fromClause, toClause []kv.IndexKey
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, kv.Unlim)
+			fromClause = append(fromClause, kv.IndexKey{Idx: kv.TracesFromIdx, Key: addr[:]})
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, kv.Unlim)
+			toClause = append(toClause, kv.IndexKey{Idx: kv.TracesToIdx, Key: addr[:]})
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
-	if req.Mode != TraceFilterModeUnion && len(fromAddresses) > 0 && len(toAddresses) > 0 {
-		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
-	} else {
-		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
-	}
-
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks = stream.Range[uint64](from, to)
-		//} else {
-		//allBlocks.RemoveRange(0, from)
-		//allBlocks.RemoveRange(to, uint64(0x100000000))
+		return fromAddresses, toAddresses, stream.Range[uint64](from, to), nil
 	}
 
+	var clauses [][]kv.IndexKey
+	switch {
+	case req.Mode != TraceFilterModeUnion && len(fromClause) > 0 && len(toClause) > 0:
+		clauses = [][]kv.IndexKey{fromClause, toClause}
+	case len(fromClause)+len(toClause) > 0:
+		clauses = [][]kv.IndexKey{append(fromClause, toClause...)}
+	default:
+		return fromAddresses, toAddresses, stream.EmptyU64, nil
+	}
+	allBlocks, err = tx.IndexJoin(kv.IndexQuery{Clauses: clauses, FromTs: int(from), ToTs: int(to), Asc: order.Asc})
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	return fromAddresses, toAddresses, allBlocks, nil
 }
 
