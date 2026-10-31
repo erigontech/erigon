@@ -39,6 +39,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/node/eth"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"golang.org/x/sync/semaphore"
 )
 
 type hexStopFixture struct {
@@ -249,4 +252,36 @@ func TestRestoredBinStopRefusesScheduledFork(t *testing.T) {
 	config.BinaryTrieTime = &activation
 	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
 	require.ErrorContains(t, stagedsync.CheckBinaryShadowRunning(tx, config, log.New()), "attach-pbt")
+}
+
+func TestSetUpBlockReaderRestoresBinStopBeforeSnapshotsOpen(t *testing.T) {
+	f := newHexStopFixture(t, false, kv.CommitmentBinDomain)
+	require.NoError(t, os.WriteFile(f.stopFilePath(), []byte(`{"commitment-bin":true}`), 0o644))
+	rawDB := f.freshChaindata(t)
+	config := ethconfig.Defaults
+	config.Snapshot.NoDownloader = true
+	activation := uint64(1)
+	chainConfig := f.config.Copy()
+	chainConfig.BinaryTrieTime = &activation
+	_, _, snapshots, temporalDB, err := eth.SetUpBlockReader(t.Context(), rawDB, f.dirs, &config, chainConfig, 1, log.New(), semaphore.NewWeighted(1))
+	require.NoError(t, err)
+	t.Cleanup(snapshots.Close)
+	t.Cleanup(temporalDB.Close)
+
+	tx, err := temporalDB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	agg := temporalDB.(interface{ Agg() any }).Agg().(interface {
+		CommitmentDomainStopped(kv.Domain) bool
+	})
+	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	require.NoError(t, stagedsync.CheckBinaryShadowRunning(tx, chainConfig, log.New()))
+	tx.Rollback()
+
+	require.NoError(t, temporalDB.OpenStateSnapshots(t.Context()))
+	tx, err = temporalDB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	require.ErrorContains(t, stagedsync.CheckBinaryShadowRunning(tx, chainConfig, log.New()), "attach-pbt")
 }

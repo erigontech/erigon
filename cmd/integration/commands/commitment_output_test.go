@@ -181,14 +181,12 @@ func TestStageRebuildOutputLinksCommitmentStopMarker(t *testing.T) {
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
 	require.NoError(t, err)
 	outMarker := filepath.Join(out.dirs.Snap, dbstate.COMMITMENT_STOP_FILE)
-	require.FileExists(t, outMarker)
-	sourceInfo, err := os.Stat(marker)
-	require.NoError(t, err)
-	outputInfo, err := os.Stat(outMarker)
-	require.NoError(t, err)
-	require.True(t, os.SameFile(sourceInfo, outputInfo))
+	require.NoFileExists(t, outMarker)
+	require.FileExists(t, marker)
 	_, err = stageRebuildOutput(src, out.dirs.DataDir, hexTarget(t), true, log.New())
 	require.NoError(t, err)
+	require.NoFileExists(t, outMarker)
+	require.FileExists(t, marker)
 }
 
 func TestStageRebuildOutputLeavesSourceIntact(t *testing.T) {
