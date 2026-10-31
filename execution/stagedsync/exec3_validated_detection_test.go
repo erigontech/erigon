@@ -34,7 +34,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		tasks:               tasks,
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(nil),
-		readerByAddr:        map[accounts.Address][]int{},
+		readerByAddr:        map[accounts.Address][]addrReader{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
@@ -229,5 +229,21 @@ func TestMarkReadersDirty(t *testing.T) {
 		read(be, 2, 1, slot2)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
+	})
+	t.Run("a reader of balance and nonce is flagged by a write to either", func(t *testing.T) {
+		for name, ws := range map[string]*state.WriteSet{
+			"balance": newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
+			"nonce":   newWS().nonce(addr, writer, 1).build(),
+		} {
+			be := newDetExecutor(t, 4)
+			be.revalidate = map[int]bool{}
+			rs := state.ReadSet{}
+			rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			rs.SetHeader(addr, state.NoncePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+			be.indexReads(2, rs)
+			be.markReadersDirty(1, ws)
+			require.Equal(t, map[int]bool{2: true}, be.revalidate, name)
+		}
 	})
 }
