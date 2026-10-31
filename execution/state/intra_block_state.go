@@ -2804,8 +2804,20 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	// to remember to publish separately.
 	ibs.PublishOrigins()
 	writes := ibs.versionedWrites.Finalize()
+	// Snapshot the accounts the tx really self-destructed (a SELFDESTRUCT opcode)
+	// before the removal encoders synthesize their own SelfDestruct cells, so the
+	// contract-vs-EOA removal verdict reads the genuine signal, not a synthesized one.
+	var realSelfDestruct map[accounts.Address]struct{}
+	for a, w := range writes.SelfDestructs() {
+		if w.Val {
+			if realSelfDestruct == nil {
+				realSelfDestruct = map[accounts.Address]struct{}{}
+			}
+			realSelfDestruct[a] = struct{}{}
+		}
+	}
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
-	ibs.encodeExistingEmptyRemovals(chainRules, writes)
+	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct)
 	return writes, ibs.StateReadError()
 }
 
@@ -2815,7 +2827,7 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // commitment calculator both remove the leaf from the writes without re-deriving
 // emptiness. Created-empty accounts are already withheld by
 // withholdCreatedEmptyAccounts, so only pre-existing empties reach here.
-func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet) {
+func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
@@ -2848,8 +2860,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		// write alongside the SelfDestruct reads as a same-tx SD+CREATE2 recreate, so
 		// AccountLifecycleAt would see the removed account as Revived. A real SELFDESTRUCT
 		// was a contract: keep the CodeHash ValueDeleted "code removed" signal so the fee
-		// calc burns its delayed fee instead of reviving it as an EOA.
-		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
+		// calc burns its delayed fee instead of reviving it as an EOA. A touched-empty EOA
+		// (e.g. a self-destruct beneficiary) carries no real self-destruct, so it is not one.
+		if _, sd := realSelfDestruct[addr]; sd {
 			writes.SetContractRemoval(addr, ibs.Version())
 		} else {
 			writes.SetEmptyRemoval(addr, ibs.Version())
