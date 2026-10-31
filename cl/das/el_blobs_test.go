@@ -1,0 +1,185 @@
+package das
+
+import (
+	"testing"
+
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+)
+
+// elBlobsFixture returns a Fulu block with two blob commitments and the
+// engine_getBlobsV2 style response (blobs and per-cell proofs) for it.
+func elBlobsFixture(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, common.Hash, [][]byte, [][][]byte) {
+	t.Helper()
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	rawBlobs := []goethkzg.Blob{{1}, {2}}
+	blobs := make([][]byte, len(rawBlobs))
+	proofs := make([][][]byte, len(rawBlobs))
+	for i := range rawBlobs {
+		commitment, err := kzg.Ctx().BlobToKZGCommitment(&rawBlobs[i], 0)
+		require.NoError(t, err)
+		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
+		_, cellProofs, err := peerdasutils.ComputeCellsAndKZGProofs(rawBlobs[i][:])
+		require.NoError(t, err)
+		blobs[i] = rawBlobs[i][:]
+		for j := range cellProofs {
+			proofs[i] = append(proofs[i], cellProofs[j][:])
+		}
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return block, root, blobs, proofs
+}
+
+func newELBlobsTestPeerDas(t *testing.T, cfg *clparams.BeaconChainConfig, caplinConfig *clparams.CaplinConfig) *peerdas {
+	t.Helper()
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	state := peerdasstate.NewPeerDasState(cfg, &networkConfig)
+	state.SetLocalNodeID(newCgcTestLocalNode(t))
+	return &peerdas{
+		state:         state,
+		beaconConfig:  cfg,
+		caplinConfig:  caplinConfig,
+		columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), cfg, beaconevents.NewEventEmitter()),
+	}
+}
+
+func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+
+	available, err := d.IsDataAvailable(block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, available)
+
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	available, err = d.IsDataAvailable(block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, available)
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, len(custody))
+	require.Len(t, stored, len(custody))
+	for _, sidecar := range stored {
+		require.True(t, custody[sidecar.Index])
+	}
+	for _, index := range saved {
+		require.True(t, custody[index])
+		sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, int64(index))
+		require.NoError(t, err)
+		require.True(t, VerifyDataColumnSidecar(sidecar))
+		require.True(t, VerifyDataColumnSidecarInclusionProof(sidecar))
+		require.True(t, VerifyDataColumnSidecarKZGProofs(sidecar))
+	}
+}
+
+func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{ArchiveBlobs: true})
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
+	select {
+	case request := <-d.recoverBlobsQueue:
+		require.Equal(t, root, request.blockRoot)
+	default:
+		t.Fatal("blob recovery was not scheduled")
+	}
+}
+
+func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	tests := map[string]func(blobs [][]byte, proofs [][][]byte) ([][]byte, [][][]byte){
+		"missing blob":   func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { return b[:1], p[:1] },
+		"empty entry":    func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { b[1] = nil; return b, p },
+		"short blob":     func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { b[1] = b[1][:100]; return b, p },
+		"missing proofs": func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { p[1] = p[1][:1]; return b, p },
+		"short proof":    func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { p[1][3] = p[1][3][:47]; return b, p },
+		"swapped blobs":  func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { b[0], b[1] = b[1], b[0]; return b, p },
+		"wrong proof":    func(b [][]byte, p [][][]byte) ([][]byte, [][][]byte) { p[0][5] = p[1][5]; return b, p },
+	}
+	for name, corrupt := range tests {
+		t.Run(name, func(t *testing.T) {
+			d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+			block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+			blobs, proofs = corrupt(blobs, proofs)
+
+			_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+			require.Error(t, err)
+
+			saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+			require.NoError(t, err)
+			require.Empty(t, saved)
+		})
+	}
+}
+
+func TestImportColumnsFromBlobsSupernodeSchedulesRecovery(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups)
+	require.True(t, d.state.IsSupernode())
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	select {
+	case request := <-d.recoverBlobsQueue:
+		require.Equal(t, root, request.blockRoot)
+	default:
+		t.Fatal("blob recovery was not scheduled")
+	}
+}
+
+func TestImportColumnsFromBlobsPublishesAllColumnsWhenSubscribedToAllTopics(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{SubscribeAllTopics: true})
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	require.Len(t, toPublish, int(cfg.NumberOfColumns))
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, len(custody))
+	for _, index := range saved {
+		require.True(t, custody[index])
+	}
+}
