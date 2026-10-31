@@ -251,7 +251,7 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 		ws.SetEmptyRemoval(addr, Version{TxIndex: int(maxIdx) - 1})
 	}
 	if !ws.IsEmpty() {
-		vm.FlushVersionedWrites(ws, true, "")
+		vm.FlushVersionedWrites(ws, true)
 	}
 }
 

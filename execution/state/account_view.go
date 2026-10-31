@@ -146,7 +146,7 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 	}
 	if v.vm != nil {
 		if code, ok := versionedUpdateCode(v.vm, v.addr, v.txIdx); ok {
-			return code, nil
+			return code.Bytes, nil
 		}
 	}
 	// Code bytes live beyond the minimal AccountBaseReader (GetAccount never needs

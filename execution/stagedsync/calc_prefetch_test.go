@@ -80,7 +80,7 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 		require.NoError(t, err)
 		defer tx.Rollback()
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer doms.Close()
 		for _, addr := range addrs {

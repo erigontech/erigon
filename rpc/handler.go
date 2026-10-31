@@ -173,9 +173,10 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 
 // inOrderMethods change state that a later call of the same batch may depend on, such as a
 // sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
+// eth_sendRawTransactionSync is left out: it holds its concurrency slot until its receipt,
+// so sends cannot overtake each other, and running them in order would wait for each receipt in turn.
 var inOrderMethods = map[string]struct{}{
 	"eth_sendRawTransaction":     {},
-	"eth_sendRawTransactionSync": {},
 	"graphql_sendRawTransaction": {},
 	"eth_uninstallFilter":        {},
 	"eth_getFilterChanges":       {},

@@ -49,7 +49,7 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: txIdx}, valStatus: ValueChanged},
 		Val:         slotVal,
 	})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	// …and only its key-set is frozen into the access list.
 	vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
@@ -103,7 +103,7 @@ func TestTxAccessList_StorageChangesMatchesWriteSet(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, Version: Version{TxIndex: txIdx}, valStatus: ValueUnchanged},
 		Val:         *uint256.NewInt(0),
 	})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 	vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
 
 	collect := func(view WriteSetView, seq func(WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]) map[accounts.StorageKey]uint256.Int {

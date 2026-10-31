@@ -159,6 +159,11 @@ func ExecV3(ctx context.Context,
 	rng execRange, blockSrc blockSource,
 	logger log.Logger,
 ) (out execV3Outcome, execErr error) {
+	defer func() {
+		if cfg.readAheader != nil && (out.verdict != nil || commonerrors.NilIfCanceled(execErr) != nil) {
+			cfg.readAheader.CancelWarmup()
+		}
+	}()
 	isForkValidation := syncMode == stages.ModeForkValidation
 	isApplyingBlocks := syncMode == stages.ModeApplyingBlocks
 	hooks := cfg.vmConfig.Tracer
@@ -268,7 +273,7 @@ func ExecV3(ctx context.Context,
 	// failure or an invalid-block verdict left nothing durable to persist. An
 	// operational failure outranks a recorded verdict, which outranks exhaustion.
 	if execErr != nil {
-		return out, execErr
+		return finalizeExecV3Outcome(out, execErr)
 	}
 	if out.verdict != nil {
 		haltOnBadBlockDebug(cfg, logPrefix, out.verdict.err, logger)
@@ -277,7 +282,15 @@ func ExecV3(ctx context.Context,
 
 	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
-	return out, execErr
+	return finalizeExecV3Outcome(out, execErr)
+}
+
+// finalizeExecV3Outcome drops the resumable boundary of a failed batch.
+func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) {
+	if err != nil {
+		out.exhausted = nil
+	}
+	return out, err
 }
 
 // execV3Serial runs the serial executor. It stays welded to the stage
@@ -911,8 +924,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
 		}
-		// The state version is bumped once by the SharedDomains flush on Commit for
-		// both executors; a second bump here double-counted it on the serial path.
+		// The SharedDomains flush on Commit bumps the state version for both executors.
 	}
 
 	if cfg.discardCommitment {

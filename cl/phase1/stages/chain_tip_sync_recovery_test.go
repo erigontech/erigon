@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -18,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -777,7 +779,7 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 }
 
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
-	t.Run("peer-fetched unavailable parent does not gate full child", func(t *testing.T) {
+	t.Run("peer-fetched unavailable parent leaves full child unpersisted", func(t *testing.T) {
 		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
 		fullRoot, err := fullChild.Block.HashSSZ()
 		require.NoError(t, err)
@@ -796,8 +798,9 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 			storedSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, common.Hash(fullRoot))
 			return err
 		}))
-		require.NotNil(t, storedSlot)
-		require.Equal(t, fullChild.Block.Slot, *storedSlot)
+		require.Nil(t, storedSlot)
+		require.Zero(t, graph.added[common.Hash(fullRoot)])
+		require.NotContains(t, seen, common.Hash(fullRoot))
 	})
 
 	t.Run("valid replay processes full child", func(t *testing.T) {
@@ -1378,4 +1381,31 @@ func TestChainTipSyncSkipsFlushWhenStopped(t *testing.T) {
 	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
 
 	require.Zero(t, collector.flushCalls)
+}
+
+// A chain tip batch imports blocks and parent envelopes without checking their data, so it asks
+// the custody backfill for the slots it imported, the parent whose envelope it handled included.
+func TestChainTipBatchRequestsCustodyBackfillForImportedSlots(t *testing.T) {
+	cfg, graph, parentRoot, child, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+	parent := graph.parents[parentRoot]
+	peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().BackfillCustodyColumns(parent.Block.Slot, child.Block.Slot).Times(1)
+	cfg.peerDas = peerDas
+
+	processChainTipBatch(t.Context(), cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, 1, graph.added[common.Hash(childRoot)])
+}
+
+// A batch that imports nothing asks for no backfill.
+func TestChainTipBatchWithoutImportsRequestsNoCustodyBackfill(t *testing.T) {
+	cfg, _, _, child, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+	cfg.peerDas = das_mock_services.NewMockPeerDas(gomock.NewController(t)) // any call fails the test
+	orphan := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+	orphan.Block.Slot = child.Block.Slot
+	orphan.Block.ParentRoot = common.Hash{0xde, 0xad}
+
+	processChainTipBatch(t.Context(), cfg, Args{targetSlot: orphan.Block.Slot}, []*cltypes.SignedBeaconBlock{orphan}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
 }

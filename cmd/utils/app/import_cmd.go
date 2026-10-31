@@ -132,7 +132,7 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		}
 	}()
 
-	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
+	err = ethereum.Init(stack, ethCfg)
 	if err != nil {
 		return err
 	}

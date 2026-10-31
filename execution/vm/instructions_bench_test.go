@@ -102,6 +102,12 @@ func BenchmarkOpDiv64(b *testing.B) {
 	opBenchmark(b, opDiv, x, y)
 }
 
+func BenchmarkOpDivPow2(b *testing.B) {
+	x := "80000000000000000000000000000000"
+	y := "87ffb8b26394face67d77fae3608d0891ff3f9014f20db29ae04af2c2d265de1"
+	opBenchmark(b, opDiv, x, y)
+}
+
 func BenchmarkOpSdiv(b *testing.B) {
 	x := "ff3f9014f20db29ae04af2c2d265de17"
 	y := "fe7fb0d1f59dfe9492ffbf73683fd1e870eec79504c60144cc7f5fc2bad1e611"

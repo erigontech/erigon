@@ -75,33 +75,6 @@ func TestSetDomainStepsInFrozenFile(t *testing.T) {
 	}
 }
 
-// takes first 100k keys from file
-func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := seg.NewDecompressor(dataPath)
-	if err != nil {
-		return nil, err
-	}
-
-	getter := decomp.MakeGetter()
-	getter.Reset(0)
-
-	key := make([]byte, 0, 64)
-
-	listing := make([][]byte, 0, 1000)
-
-	for getter.HasNext() {
-		if len(listing) > 100000 {
-			break
-		}
-		key, _ := getter.Next(key[:0])
-		listing = append(listing, bytes.Clone(key))
-		getter.Skip()
-	}
-	decomp.Close()
-
-	return listing, nil
-}
-
 func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
@@ -492,7 +465,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
+			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 			Build()
 		return name, schema
 	})
@@ -551,7 +524,7 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	histRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
 		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
 			Data(dirs.SnapHistory, "commitment", DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
+			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 			Build()
 		return "commitment", schema
 	})
@@ -873,4 +846,94 @@ func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
 	saltBytes, err := os.ReadFile(fpath)
 	require.NoError(t, err)
 	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
+}
+
+func testAggregatorWithStateFilesOnly(t *testing.T) (kv.RwDB, *Aggregator) {
+	t.Helper()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	generateAccountsFile(t, dirs, []testFileRange{{0, 5}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 5}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 5}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
+	require.NoError(t, agg.OpenFolder(db))
+	return db, agg
+}
+
+func testAggregatorPrune(t *testing.T, db kv.RwDB, agg *Aggregator) {
+	t.Helper()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		_, err := at.prune(t.Context(), tx, 0, true, nil)
+		return err
+	}))
+}
+
+func TestAggregator_PruneKeepsDomainWithoutFiles(t *testing.T) {
+	db, agg := testAggregatorWithStateFilesOnly(t)
+	tbl := agg.d[kv.ReceiptDomain].ValuesTable
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		v := make([]byte, 8, 9)
+		binary.BigEndian.PutUint64(v, ^uint64(1)) // step 1
+		return tx.Put(tbl, []byte("receiptKey"), append(v, 0x42))
+	}))
+
+	testAggregatorPrune(t, db, agg)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(tbl, []byte("receiptKey"))
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+		return nil
+	}))
+}
+
+func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
+	db, agg := testAggregatorWithStateFilesOnly(t)
+	ii := agg.searchII(kv.LogAddrIdx)
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], 15)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Put(ii.KeysTable, txKey[:], []byte("addr")); err != nil {
+			return err
+		}
+		return tx.Put(ii.ValuesTable, []byte("addr"), txKey[:])
+	}))
+
+	testAggregatorPrune(t, db, agg)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(ii.KeysTable, txKey[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+		return nil
+	}))
+}
+
+func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		opts := NewTest(datadir.New(t.TempDir())).StepSize(1)
+		if enabled {
+			opts = opts.BtIndexInMem()
+		}
+		agg := opts.MustOpen(t.Context())
+		var budget *btInMemBudget
+		for _, d := range agg.d {
+			if d == nil {
+				continue
+			}
+			if !enabled {
+				require.Nil(t, d.btBudget, "domain=%s", d.Name)
+				continue
+			}
+			require.NotNil(t, d.btBudget, "domain=%s", d.Name)
+			if budget == nil {
+				budget = d.btBudget
+			}
+			require.Same(t, budget, d.btBudget, "one budget for all domains")
+		}
+		agg.Close()
+	}
 }

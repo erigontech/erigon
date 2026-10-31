@@ -39,6 +39,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -76,7 +77,7 @@ func newRawViewVM(firstTxNum uint64) *state.VersionMap {
 // production txResult carries be.versionMap; the writes field is only a fallback.
 func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNum uint64, rules *chain.Rules, ws *state.WriteSet) *txResult {
 	if ws != nil {
-		vm.FlushVersionedWrites(ws, true, "")
+		vm.FlushVersionedWrites(ws, true)
 		vm.RecordWriteKeysAtTxIndex(int(txNum-vm.BaseTxNum())-1, false, ws)
 	}
 	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: ws, versionMap: vm}
@@ -257,7 +258,6 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
-	const stepSize = uint64(16)
 
 	db, tx, doms := setupStepTest(t)
 
@@ -600,7 +600,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	require.NoError(t, err)
 	t.Cleanup(func() { tx.Rollback() })
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	return db, tx, doms
@@ -890,4 +890,92 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 	}
 	require.True(t, sawStateKey,
 		"the mid-block checkpoint must record KeyCommitmentState into the changeset the executor opened for the block, or a reorg cannot unwind it")
+}
+
+type latestMetricsCaptureTx struct {
+	kv.TemporalTx
+	nonNilMetrics bool
+}
+
+func (tx *latestMetricsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, _ := opts.Metrics()
+	if dm, ok := metrics.(*kvmetrics.DomainMetrics); ok {
+		tx.nonNilMetrics = dm != nil
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	_, tx, doms := setupStepTest(t)
+	require.NotNil(t, doms.Collector())
+	doms.StartRequestMetrics(kvmetrics.SourceCommitment)
+	captureTx := &latestMetricsCaptureTx{TemporalTx: tx}
+	reader := (&asOfStateReader{sd: doms, roTx: captureTx, dr: state.NewLayeredDomainReader(doms, nil, nil)}).CloneForWorker(context.Background(), captureTx)
+	_, _, err := reader.Read(kv.CommitmentDomain, []byte{0xaa, 0xbb}, doms.StepSize())
+	require.NoError(t, err)
+	require.True(t, captureTx.nonNilMetrics)
+}
+
+func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitmentResult, bool) {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(43))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	// A partial first block computes without checking the root; the test header
+	// carries the zero root, so a checked root always mismatches.
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, !checkRoot))
+
+	var published []commitmentResult
+	for len(out) > 0 {
+		published = append(published, <-out)
+	}
+
+	pending := doms.GetCommitmentContext().HasPendingUpdate()
+	var branches int
+	require.NoError(t, doms.Flush(ctx, tx))
+	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
+		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+			branches++
+		}
+		return true, nil
+	}))
+	return branches, published, pending
+}
+
+func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
+	accepted, published, pending := isolatedCommitmentBranchCount(t, false)
+	require.Positive(t, accepted, "an unchecked isolated round must write its branch records, or the rejection arm proves nothing")
+	require.Empty(t, published, "an unchecked round publishes nothing")
+	require.False(t, pending, "an accepted round must leave nothing pending")
+
+	rejected, published, pending := isolatedCommitmentBranchCount(t, true)
+	require.Len(t, published, 1)
+	require.ErrorIs(t, published[0].err, ErrWrongTrieRoot)
+	require.Zero(t, rejected, "a rejected root must leave no branch record in the commitment domain")
+	require.False(t, pending, "the rejected round's output must be released")
 }

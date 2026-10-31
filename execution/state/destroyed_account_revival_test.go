@@ -66,7 +66,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, destroyer.FinalizeTx(amsterdamRules, NewNoopWriter()))
 	destroyWrites := finalizedWrites(t, destroyer, amsterdamRules)
 	t.Cleanup(destroyWrites.ReleaseAndReset)
-	vm.FlushVersionedWrites(destroyWrites, true, "")
+	vm.FlushVersionedWrites(destroyWrites, true)
 
 	recreator := newAmsterdamIBS(reader, vm, 1)
 	t.Cleanup(recreator.Close)
@@ -114,7 +114,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	destroyWrites, recreateWrites, changes := destroyThenRecreate(t, reader, addr, code)
 
 	vm := NewVersionMap(changes)
-	vm.FlushVersionedWrites(destroyWrites, true, "")
+	vm.FlushVersionedWrites(destroyWrites, true)
 	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
@@ -136,7 +136,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	vm.FlushVersionedWrites(recreateWrites, true, "")
+	vm.FlushVersionedWrites(recreateWrites, true)
 	rerun := newAmsterdamIBS(reader, vm, 2)
 	defer rerun.Close()
 	exists, err = rerun.Exist(addr)
@@ -160,7 +160,7 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	destroyWrites, recreateWrites, _ := destroyThenRecreate(t, reader, addr, []byte{0x60, 0x01})
 
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(destroyWrites, true, "")
+	vm.FlushVersionedWrites(destroyWrites, true)
 	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
@@ -168,7 +168,7 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, empty)
 
-	vm.FlushVersionedWrites(recreateWrites, true, "")
+	vm.FlushVersionedWrites(recreateWrites, true)
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestEIP8246PreserveCommitmentMatchesCodelessEOA(t *testing.T) {
 	require.True(t, destroyed)
 	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
 	writes := finalizedWrites(t, ibs, amsterdamRules)
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 
 	acc, ok := vm.View(1, reader).GetAccount(addr)
 	require.True(t, ok, "a balance-preserving destruct survives as an EOA")
@@ -241,7 +241,7 @@ func TestEIP8246PreserveRevertRestoresContract(t *testing.T) {
 
 	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
 	writes := finalizedWrites(t, ibs, amsterdamRules)
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 	acc, ok := vm.View(1, reader).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")

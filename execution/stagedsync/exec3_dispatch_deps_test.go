@@ -1,0 +1,132 @@
+package stagedsync
+
+import (
+	"context"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+)
+
+type depsTest struct {
+	t         *testing.T
+	pe        *parallelExecutor
+	be        *blockExecutor
+	deliverTx func(tx, inc int, reads state.ReadSet)
+}
+
+func valueTransfers(senders, recipients []accounts.Address) types.Transactions {
+	txs := make(types.Transactions, len(senders))
+	for i, sender := range senders {
+		to := recipients[i].Value()
+		tx := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(1), GasLimit: 21000}}
+		tx.SetSender(sender)
+		txs[i] = tx
+	}
+	return txs
+}
+
+func newDepsTest(t *testing.T, txs types.Transactions) *depsTest {
+	t.Helper()
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), chainSpec.Config)
+	workersCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pe.workersCtx = workersCtx
+	t.Cleanup(pe.runWG.Wait)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), nil, discardConsumers(16), false, nil, nil)
+	pe.blockExecutors = map[uint64]*blockExecutor{1: be}
+	tasks := make([]exec.Task, len(txs))
+	for i := range txs {
+		tasks[i] = &exec.TxTask{
+			Header:          header,
+			EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			TxNum:           uint64(i + 1),
+			TxIndex:         i,
+			Config:          chainSpec.Config,
+			Txs:             txs,
+		}
+	}
+	require.NoError(t, pe.processRequest(context.Background(), &execRequest{blockNum: 1, tasks: tasks}))
+	be.scheduleExecution(context.Background(), pe)
+	d := &depsTest{t: t, pe: pe, be: be}
+	d.deliverTx = func(tx, inc int, reads state.ReadSet) {
+		res := &exec.TxResult{
+			Task: &taskVersion{
+				execTask: be.tasks[tx],
+				version:  state.Version{BlockNum: 1, TxIndex: tx, Incarnation: state.Incarnation(inc), TxNum: uint64(tx + 1)},
+			},
+			TxIn:            reads,
+			TxOut:           &state.WriteSet{},
+			ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+		}
+		blockRes, err := be.nextResult(context.Background(), pe, res, roTx)
+		require.NoError(t, err)
+		require.Nil(t, blockRes)
+	}
+	return d
+}
+
+func TestValueTransferWaitsForRecipientPredecessor(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	e := accounts.InternAddress(common.HexToAddress("0xe4"))
+	f := accounts.InternAddress(common.HexToAddress("0xf5"))
+	for _, tc := range []struct {
+		name       string
+		senders    []accounts.Address
+		recipients []accounts.Address
+	}{
+		{"shared_recipient", []accounts.Address{a, b, c}, []accounts.Address{f, d, d}},
+		{"self_transfer", []accounts.Address{a, b, b}, []accounts.Address{a, b, b}},
+		{"recipient_then_sender", []accounts.Address{a, b, d}, []accounts.Address{f, d, e}},
+		{"sender_then_recipient", []accounts.Address{a, d, c}, []accounts.Address{f, e, d}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newDepsTest(t, valueTransfers(tc.senders, tc.recipients))
+			require.True(t, s.be.selfLoopDispatched[0] && s.be.selfLoopDispatched[1])
+			require.True(t, s.be.execTasks.isBlocked(2), "successor schedulable alongside its predecessor")
+			require.False(t, s.be.selfLoopDispatched[2], "successor dispatched alongside its predecessor")
+
+			s.deliverTx(0, 0, state.ReadSet{})
+			require.True(t, s.be.validateTasks.checkComplete(0))
+			require.True(t, s.be.execTasks.isBlocked(2), "successor released by an unrelated transaction's result")
+			require.False(t, s.be.selfLoopDispatched[2], "successor dispatched after an unrelated transaction's result")
+
+			s.deliverTx(1, 0, state.ReadSet{})
+			require.True(t, s.be.validateTasks.checkComplete(1))
+			require.False(t, s.be.execTasks.isBlocked(2))
+			require.True(t, s.be.selfLoopDispatched[2], "successor not dispatched after its predecessor's result")
+		})
+	}
+}
+
+func TestRecipientDependencyNeedsValueAndRecipient(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	zeroValue := valueTransfers([]accounts.Address{a, b}, []accounts.Address{d, d})
+	zeroValue[1].(*types.LegacyTx).Value = uint256.Int{}
+	creation := valueTransfers([]accounts.Address{a, b}, []accounts.Address{d, d})
+	creation[1].(*types.LegacyTx).To = nil
+	for name, txs := range map[string]types.Transactions{"zero_value": zeroValue, "contract_creation": creation} {
+		t.Run(name, func(t *testing.T) {
+			s := newDepsTest(t, txs)
+			require.False(t, s.be.execTasks.isBlocked(1), "tx without a value transfer waits on the recipient's previous tx")
+			require.True(t, s.be.selfLoopDispatched[1])
+		})
+	}
+}

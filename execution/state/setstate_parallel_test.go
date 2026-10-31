@@ -98,7 +98,7 @@ func TestGetCommittedStateParallel_ValidatedFloor(t *testing.T) {
 	ibs0.SetVersion(0)
 	require.NoError(t, ibs0.SetState(addr, key, *predVal))
 	writes0 := ibs0.VersionedWrites()
-	vm.FlushVersionedWrites(writes0, false, "")
+	vm.FlushVersionedWrites(writes0, false)
 	vm.MarkWritesValidated(writes0, nil)
 
 	_, rr, ok := vm.ReadStorage(addr, key, 5)

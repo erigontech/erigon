@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package state
 
 import (
 	"testing"
@@ -24,10 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // internMemoWords exercises every limb of the source word, alone and together,
@@ -60,39 +57,39 @@ func assertMemoMatches[H comparable](t *testing.T, rounds int, memo func(*uint25
 }
 
 func TestInternStorageKeyMatchesInternKey(t *testing.T) {
-	evm := &EVM{}
-	assertMemoMatches(t, storageKeyCacheMinOps+10, evm.internStorageKey,
+	ibs := &IntraBlockState{}
+	assertMemoMatches(t, storageKeyCacheMinOps+10, ibs.InternStorageKey,
 		func(w *uint256.Int) accounts.StorageKey { return accounts.InternKey(w.Bytes32()) })
 }
 
 func TestInternAddressMatchesInternAddress(t *testing.T) {
-	evm := &EVM{}
-	assertMemoMatches(t, addressCacheMinOps+10, evm.internAddress,
+	ibs := &IntraBlockState{}
+	assertMemoMatches(t, addressCacheMinOps+10, ibs.InternAddress,
 		func(w *uint256.Int) accounts.Address { return accounts.InternAddress(w.Bytes20()) })
 }
 
-func TestStorageKeyCacheNotAllocatedForShortLivedEVM(t *testing.T) {
-	evm := &EVM{}
+func TestStorageKeyCacheNotAllocatedForShortLivedState(t *testing.T) {
+	ibs := &IntraBlockState{}
 	word := uint256.NewInt(7)
 	for range storageKeyCacheMinOps {
-		evm.internStorageKey(word)
+		ibs.InternStorageKey(word)
 	}
-	assert.Nil(t, evm.internCache)
+	assert.Nil(t, ibs.internCache)
 
-	evm.internStorageKey(word)
-	assert.NotNil(t, evm.internCache)
+	ibs.InternStorageKey(word)
+	assert.NotNil(t, ibs.internCache)
 }
 
-func TestAddressCacheNotAllocatedForShortLivedEVM(t *testing.T) {
-	evm := &EVM{}
+func TestAddressCacheNotAllocatedForShortLivedState(t *testing.T) {
+	ibs := &IntraBlockState{}
 	word := uint256.NewInt(7)
 	for range addressCacheMinOps {
-		evm.internAddress(word)
+		ibs.InternAddress(word)
 	}
-	assert.Nil(t, evm.addrCache)
+	assert.Nil(t, ibs.addrCache)
 
-	evm.internAddress(word)
-	assert.NotNil(t, evm.addrCache)
+	ibs.InternAddress(word)
+	assert.NotNil(t, ibs.addrCache)
 }
 
 // poisonEntry replaces the table entry holding want with sentinel and returns
@@ -110,18 +107,18 @@ func poisonEntry[H comparable](handles []H, want, sentinel H) int {
 }
 
 func TestInternAddressServesHitsFromTheTable(t *testing.T) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
 	for range addressCacheMinOps + 1 {
-		evm.internAddress(&word)
+		ibs.InternAddress(&word)
 	}
-	require.NotNil(t, evm.addrCache)
+	require.NotNil(t, ibs.addrCache)
 
 	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
-	require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(word.Bytes20()), sentinel),
+	require.Equal(t, 1, poisonEntry(ibs.addrCache.handles[:], accounts.InternAddress(word.Bytes20()), sentinel),
 		"the warmed word must occupy exactly one entry")
 
-	require.True(t, sentinel == evm.internAddress(&word),
+	require.True(t, sentinel == ibs.InternAddress(&word),
 		"a repeat word must be served from the table, not interned again")
 }
 
@@ -130,19 +127,19 @@ func TestInternAddressServesHitsFromTheTable(t *testing.T) {
 // bytes hold. Keying on the whole word would leave the two forms fighting over
 // one bucket, each evicting the other.
 func TestInternAddressSharesOneEntryPerAddress(t *testing.T) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	clean := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
 	dirty := clean
 	dirty[2] |= 0xffffffff00000000
 	dirty[3] = 0xdeadbeefdeadbeef
 
 	for range addressCacheMinOps + 1 {
-		evm.internAddress(&clean)
+		ibs.InternAddress(&clean)
 	}
 	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
-	require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(clean.Bytes20()), sentinel))
+	require.Equal(t, 1, poisonEntry(ibs.addrCache.handles[:], accounts.InternAddress(clean.Bytes20()), sentinel))
 
-	require.True(t, sentinel == evm.internAddress(&dirty),
+	require.True(t, sentinel == ibs.InternAddress(&dirty),
 		"a word with dirt above the address must hit the entry its clean form filled")
 }
 
@@ -151,19 +148,19 @@ func TestInternAddressSharesOneEntryPerAddress(t *testing.T) {
 // serve a probe with the clean form. Storing the raw word still passes
 // TestInternAddressSharesOneEntryPerAddress and misses here.
 func TestInternAddressFillClearsBitsAboveTheAddress(t *testing.T) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	clean := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
 	dirty := clean
 	dirty[2] |= 0xffffffff00000000
 	dirty[3] = 0xdeadbeefdeadbeef
 
 	for range addressCacheMinOps + 1 {
-		evm.internAddress(&dirty)
+		ibs.InternAddress(&dirty)
 	}
 	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
-	require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(dirty.Bytes20()), sentinel))
+	require.Equal(t, 1, poisonEntry(ibs.addrCache.handles[:], accounts.InternAddress(dirty.Bytes20()), sentinel))
 
-	require.True(t, sentinel == evm.internAddress(&clean),
+	require.True(t, sentinel == ibs.InternAddress(&clean),
 		"a clean word must hit the entry its dirty form filled")
 }
 
@@ -184,18 +181,18 @@ func TestInternAddressSeparatesAddressesSharingABucket(t *testing.T) {
 		{"2", uint256.Int{first[0], first[1], 0x12345778, 0}},
 	} {
 		t.Run("limb_"+tc.limb, func(t *testing.T) {
-			evm := &EVM{}
+			ibs := &IntraBlockState{}
 			second := tc.second
 			require.Equal(t, addrIndex(&first), addrIndex(&second), "the pair must collide to test the compare")
 			require.NotEqual(t, first.Bytes20(), second.Bytes20())
 
 			for range addressCacheMinOps + 1 {
-				evm.internAddress(&first)
+				ibs.InternAddress(&first)
 			}
 			sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
-			require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(first.Bytes20()), sentinel))
+			require.Equal(t, 1, poisonEntry(ibs.addrCache.handles[:], accounts.InternAddress(first.Bytes20()), sentinel))
 
-			require.True(t, accounts.InternAddress(second.Bytes20()) == evm.internAddress(&second),
+			require.True(t, accounts.InternAddress(second.Bytes20()) == ibs.InternAddress(&second),
 				"a different address in the same bucket must not be served the resident entry")
 		})
 	}
@@ -206,73 +203,81 @@ func TestInternAddressSeparatesAddressesSharingABucket(t *testing.T) {
 // limb: without the guard the caller is handed the zero handle, which means "no
 // address" rather than address 0x0.
 func TestInternAddressInternsTheZeroAddressOnAnEmptyBucket(t *testing.T) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	var zero uint256.Int
 
 	// Warm past the delay with words that leave the zero word's bucket empty.
 	for i := range uint64(addressCacheMinOps + 1) {
 		word := uint256.Int{i + 1, 0, 0, 0}
 		require.NotEqual(t, addrIndex(&zero), addrIndex(&word))
-		evm.internAddress(&word)
+		ibs.InternAddress(&word)
 	}
-	require.NotNil(t, evm.addrCache)
-	require.Equal(t, accounts.NilAddress, evm.addrCache.handles[addrIndex(&zero)],
+	require.NotNil(t, ibs.addrCache)
+	require.Equal(t, accounts.NilAddress, ibs.addrCache.handles[addrIndex(&zero)],
 		"the zero word must probe an entry nothing has filled")
 
-	require.True(t, accounts.InternAddress(common.Address{}) == evm.internAddress(&zero),
+	require.True(t, accounts.InternAddress(common.Address{}) == ibs.InternAddress(&zero),
 		"the zero address must intern, not read as the empty entry it collides with")
 }
 
 // TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket is the same guard on the
 // key table: slot 0 is a legitimate key, and an empty entry holds its word.
 func TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket(t *testing.T) {
-	evm := &EVM{}
+	ibs := &IntraBlockState{}
 	var zero uint256.Int
 
 	for i := range uint64(storageKeyCacheMinOps + 1) {
 		word := uint256.Int{i + 1, 0, 0, 0}
 		require.NotEqual(t, slotIndex(&zero), slotIndex(&word))
-		evm.internStorageKey(&word)
+		ibs.InternStorageKey(&word)
 	}
-	require.NotNil(t, evm.internCache)
-	require.Equal(t, accounts.NilKey, evm.internCache.handles[slotIndex(&zero)],
+	require.NotNil(t, ibs.internCache)
+	require.Equal(t, accounts.NilKey, ibs.internCache.handles[slotIndex(&zero)],
 		"the zero word must probe an entry nothing has filled")
 
-	require.True(t, accounts.InternKey(common.Hash{}) == evm.internStorageKey(&zero),
+	require.True(t, accounts.InternKey(common.Hash{}) == ibs.InternStorageKey(&zero),
 		"slot 0 must intern, not read as the empty entry it collides with")
 }
 
-// TestInternAddressSurvivesResetBetweenBlocks pins what makes the memo worth
-// having on a reused worker EVM: interning is pure, so a warmed entry stays
-// valid across blocks and clearing it would throw away exactly the reuse the
-// table exists for.
-func TestInternAddressSurvivesResetBetweenBlocks(t *testing.T) {
-	evm := &EVM{}
+// TestInternAddressSurvivesPooling pins what makes the memo worth having on a
+// pooled or reused state: interning is pure, so a warmed entry stays valid across
+// calls and clearing it would throw away exactly the reuse the table exists for.
+func TestInternAddressSurvivesPooling(t *testing.T) {
+	withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
 	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
 	for range addressCacheMinOps + 1 {
-		evm.internAddress(&word)
+		ibs.InternAddress(&word)
 	}
 	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
-	require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(word.Bytes20()), sentinel))
+	require.Equal(t, 1, poisonEntry(ibs.addrCache.handles[:], accounts.InternAddress(word.Bytes20()), sentinel))
 
-	evm.ResetBetweenBlocks(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, Config{}, &chain.Rules{})
+	ibs.Reset()
+	require.True(t, sentinel == ibs.InternAddress(&word), "a warmed address must still hit after Reset")
 
-	require.NotNil(t, evm.addrCache, "the memo is per-EVM, not per-block")
-	require.True(t, sentinel == evm.internAddress(&word),
-		"a warmed address must still hit after the worker moves to the next block")
+	ReleasePooled(ibs)
+	next := NewPooled(NewNoopReader())
+	require.Same(t, ibs, next)
+	require.True(t, sentinel == next.InternAddress(&word),
+		"a warmed address must still hit in the next call on the pooled state")
 }
 
-var internSink accounts.Address
+func TestInternStorageKeySurvivesPooling(t *testing.T) {
+	withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
+	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0x9abcdef0}
+	for range storageKeyCacheMinOps + 1 {
+		ibs.InternStorageKey(&word)
+	}
+	sentinel := accounts.InternKey(common.HexToHash("0xdeadbeef"))
+	require.Equal(t, 1, poisonEntry(ibs.internCache.handles[:], accounts.InternKey(word.Bytes32()), sentinel))
 
-var keySink accounts.StorageKey
+	ibs.Reset()
+	require.True(t, sentinel == ibs.InternStorageKey(&word), "a warmed key must still hit after Reset")
 
-// A context idle in the pool must not pin interned keys: a handle keeps its canonical
-// map entry alive.
-func TestPutReleasesFrameSlotKeys(t *testing.T) {
-	var evm EVM
-	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
-	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
-	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
-	evm.putCallContext(ctx)
-	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
+	ReleasePooled(ibs)
+	next := NewPooled(NewNoopReader())
+	require.Same(t, ibs, next)
+	require.True(t, sentinel == next.InternStorageKey(&word),
+		"a warmed key must still hit in the next call on the pooled state")
 }

@@ -1268,7 +1268,7 @@ var (
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:  "exec.no-prune",
-		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
 		Value: false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{

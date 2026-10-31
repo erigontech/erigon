@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -967,4 +968,12 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 			require.Equal(t, 1, lookups)
 		})
 	}
+}
+
+func TestValidatedPayloadStatusAnswersSyncingWhenTooFarAway(t *testing.T) {
+	var e EngineServer
+	resp := e.validatedPayloadStatus(types.NewBlockWithHeader(&types.Header{}, nil), execmodule.ExecutionStatusTooFarAway, nil, common.Hash{})
+	require.Equal(t, engine_types.SyncingStatus, resp.Status)
+	require.Nil(t, resp.LatestValidHash)
+	require.Nil(t, resp.ValidationError)
 }

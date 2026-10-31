@@ -151,13 +151,14 @@ type forkGraphDisk struct {
 	envelopeMissing  sync.Map // common.Hash -> struct{}
 	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
-	// reusable buffers
-	sszBuffer []byte
+	// reusable disk I/O buffers, each guarded by the mutex above it
+	stateDumpLock     sync.Mutex
+	sszBuffer         []byte
+	envelopeMu        sync.Mutex
+	envelopeSSZBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData
-
-	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state.

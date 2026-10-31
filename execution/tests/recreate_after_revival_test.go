@@ -175,3 +175,30 @@ func TestCreate2AfterDestructAndTransferRevival(t *testing.T) {
 		require.Equal(t, runtime, code)
 	})
 }
+
+// Before Cancun, in one block: a slow tx destroys a pre-existing contract that is
+// the coinbase, the next tx's fee revives it as a plain account, and a third tx
+// re-creates it by CREATE2. Parallel import must accept the block that serial
+// execution built.
+func TestCreate2AfterCoinbaseDestructAndFeeRevival(t *testing.T) {
+	initCode := []byte{byte(vm.STOP)}
+	factory := common.HexToAddress("0xfac7")
+	coinbase := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+	alloc := types.GenesisAlloc{}
+	keys := revivalKeys(t, alloc, 3)
+	beneficiary := crypto.PubkeyToAddress(keys[2].PublicKey)
+	alloc[factory] = types.GenesisAccount{Nonce: 1, Code: countdownLoop(program.New().Push(1_000)).Create2(initCode, 0).Op(vm.POP, vm.STOP).Bytes()}
+	alloc[coinbase] = types.GenesisAccount{Nonce: 1, Code: countdownLoop(program.New().Push(30_000)).Selfdestruct(beneficiary).Bytes()}
+
+	gspec := &types.Genesis{Config: shanghaiConfig(), GasLimit: 60_000_000, Alloc: alloc}
+	chainPack := buildBlockSerially(t, gspec, keys, coinbase, 100_000_000_000, []revivalCall{
+		{to: coinbase},
+		{to: common.HexToAddress("0xbeef")},
+		{to: factory},
+	})
+	importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+		nonce, err := st.GetNonce(accounts.InternAddress(coinbase))
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), nonce, "the CREATE2 re-creates the revived coinbase")
+	})
+}

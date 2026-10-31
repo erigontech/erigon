@@ -1014,35 +1014,39 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 	require.Same(t, prev, ut.parallel)
 }
 
-func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
+func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantParallelHexPatricia
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer upd.Close()
-	defer trie.Release()
+	for _, tc := range []struct {
+		name         string
+		variant      TrieVariant
+		wantType     any
+		wantMode     Mode
+		wantParallel bool
+	}{
+		{"parallel", VariantParallelHexPatricia, (*ParallelPatriciaHashed)(nil), ModeParallel, true},
+		{"hex unchanged", VariantHexPatriciaTrie, (*HexPatriciaHashed)(nil), ModeDirect, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
-	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
-	require.Equal(t, ModeParallel, upd.Mode())
-	require.NotNil(t, upd.parallel)
-	require.True(t, upd.IsConcurrentCommitment())
-}
+			cfg := DefaultTrieConfig()
+			cfg.Variant = tc.variant
+			trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+			defer upd.Close()
+			defer trie.Release()
 
-func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
-	t.Parallel()
-
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantHexPatriciaTrie
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer upd.Close()
-	defer trie.Release()
-
-	require.IsType(t, (*HexPatriciaHashed)(nil), trie)
-	require.Equal(t, VariantHexPatriciaTrie, trie.Variant())
-	require.Equal(t, ModeDirect, upd.Mode())
-	require.Nil(t, upd.parallel)
+			require.IsType(t, tc.wantType, trie)
+			require.Equal(t, tc.variant, trie.Variant())
+			require.Equal(t, tc.wantMode, upd.Mode())
+			if tc.wantParallel {
+				require.NotNil(t, upd.parallel)
+				require.True(t, upd.IsConcurrentCommitment())
+			} else {
+				require.Nil(t, upd.parallel)
+			}
+		})
+	}
 }
 
 // reuseBytes is what makes the pooled buffers reusable; sync.Pool itself guarantees

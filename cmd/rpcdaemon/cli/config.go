@@ -582,7 +582,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+			if err := remoteCE.init(db, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)
 				rootCancel()
 			}
@@ -902,7 +902,7 @@ func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurr
 
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
+		if cfg.GraphQLEnabled && graphQLHandler != nil && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
 			return
 		}
 
@@ -957,9 +957,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	// latency-critical, and gzip costs far more time than the transfer it saves.
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
 
-	graphQLHandler := graphql.CreateHandler(engineApi)
-
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, graphQLHandler, jwtSecret)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, nil, jwtSecret)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -1006,7 +1004,7 @@ func (e *remoteRulesEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockReader, remoteKV remoteproto.KVClient, logger log.Logger) error {
+func (e *remoteRulesEngine) init(db kv.RoDB, remoteKV remoteproto.KVClient, logger log.Logger) error {
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err

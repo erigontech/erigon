@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 	execparams "github.com/erigontech/erigon/execution/protocol/params"
 )
 
@@ -871,9 +872,15 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 	if err != nil {
 		return nil, err
 	}
-
-	blockRoot, err := a.blockRootFromBlockId(blockId)
-	if err != nil {
+	if blockId.Genesis() {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("genesis block has no execution payload envelope"))
+	}
+	var blockRoot common.Hash
+	if err := a.indiciesDB.View(r.Context(), func(tx kv.Tx) (err error) {
+		blockRoot, err = a.rootFromBlockId(tx, blockId)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 
@@ -1388,6 +1395,9 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 		contents.KZGProofs.Len() != commitments.Len()*int(a.beaconChainCfg.NumberOfColumns) {
 		return errors.New("execution payload envelope blob, proof, and commitment counts do not match")
 	}
+	if commitments.Len() == 0 {
+		return nil
+	}
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
 	bundles := make([]BlobBundle, 0, commitments.Len())
 	for i := 0; i < commitments.Len(); i++ {
@@ -1397,7 +1407,7 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 			return fmt.Errorf("execution payload envelope blob %d is nil", i)
 		}
 		bundle := BlobBundle{Blob: blob, Commitment: common.Bytes48(*commitment), KzgProofs: make([]common.Bytes48, a.beaconChainCfg.NumberOfColumns)}
-		cells, err := das.ComputeCells(blob)
+		cells, err := peerdasutils.ComputeCells(blob)
 		if err != nil {
 			return err
 		}
@@ -1911,51 +1921,4 @@ func (a *ApiHandler) selfBuildEnvelopeForSlot(slot uint64, accept func(*cltypes.
 		}
 	}
 	return nil, false
-}
-
-// ---- Helpers ----
-
-// blockRootFromBlockId resolves a block_id to a block root hash.
-func (a *ApiHandler) blockRootFromBlockId(blockId *beaconhttp.SegmentID) (common.Hash, error) {
-	switch {
-	case blockId.Head():
-		root, _, _, err := a.getSelectedHead()
-		return root, err
-	case blockId.Finalized():
-		// Get finalized root from fork choice
-		var root common.Hash
-		err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			root = s.FinalizedCheckpoint().Root
-			return nil
-		})
-		return root, err
-	case blockId.Justified():
-		var root common.Hash
-		err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			root = s.CurrentJustifiedCheckpoint().Root
-			return nil
-		})
-		return root, err
-	case blockId.Genesis():
-		return common.Hash{}, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("genesis block has no execution payload envelope"))
-	default:
-		root := blockId.GetRoot()
-		if root == nil {
-			slot := blockId.GetSlot()
-			if slot == nil {
-				return common.Hash{}, beaconhttp.NewEndpointError(http.StatusBadRequest,
-					fmt.Errorf("invalid block_id"))
-			}
-			// Slot-based lookup: get block root at slot from state
-			var blockRoot common.Hash
-			err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-				var err error
-				blockRoot, err = s.GetBlockRootAtSlot(*slot)
-				return err
-			})
-			return blockRoot, err
-		}
-		return *root, nil
-	}
 }

@@ -107,7 +107,7 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 			ws := sc.build()
 			vm := state.NewVersionMap(nil)
 			vm.SetBaseTxNum(0)
-			vm.FlushVersionedWrites(ws, true, "")
+			vm.FlushVersionedWrites(ws, true)
 			vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
 
 			got := emitTouchedUpdates(t, vm, T, nil, vm.WritesAtTxIndex(txIdx, false))
@@ -162,7 +162,7 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 	t.Run("non-zero base value writes the slot", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.SetBaseTxNum(0)
-		vm.FlushVersionedWrites(flushed, true, "")
+		vm.FlushVersionedWrites(flushed, true)
 		vm.RecordWriteKeysAtTxIndex(txIdx, false, recorded)
 		base := &testStorageBase{
 			accounts: map[accounts.Address]*accounts.Account{addr: &acc},
@@ -178,7 +178,7 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 	t.Run("absent base value deletes the slot", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.SetBaseTxNum(0)
-		vm.FlushVersionedWrites(flushed, true, "")
+		vm.FlushVersionedWrites(flushed, true)
 		vm.RecordWriteKeysAtTxIndex(txIdx, false, recorded)
 		base := &testStorageBase{
 			accounts: map[accounts.Address]*accounts.Account{addr: &acc},

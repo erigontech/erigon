@@ -73,7 +73,7 @@ Targets SLOAD/SSTORE which account for 6% of DeFi gas, plus account reads.
   (16 hits the address intern table; 256 and 1024 measure its conflict misses)
 
 Hot paths: `IntraBlockState.GetState()`, dirty/origin/DB cache hierarchy, the
-EVM address intern table.
+address intern table on `IntraBlockState`.
 
 ### C: Token Transfers (`bench_token_transfer_test.go`)
 

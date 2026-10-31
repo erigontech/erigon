@@ -342,21 +342,55 @@ func TestApplyBuilderDepositRequestDoesNotOverflowBalance(t *testing.T) {
 	require.Equal(t, uint64(math.MaxUint64), s.GetBuilders().Get(0).Balance)
 }
 
-func TestCanBuilderCoverBidRejectsPendingBalanceOverflow(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	s := state2.New(&cfg)
-	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
-	builders.Append(&cltypes.Builder{
-		Balance:           math.MaxUint64,
-		WithdrawableEpoch: cfg.FarFutureEpoch,
-	})
-	s.SetBuilders(builders)
-	withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](64, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
-	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: math.MaxUint64})
-	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 1})
-	s.SetBuilderPendingWithdrawals(withdrawals)
+func TestBuilderBidCapacity(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		balance            uint64
+		minDepositAmount   uint64
+		pendingWithdrawals uint64
+		wantCapacity       uint64
+		wantOK             bool
+	}{
+		{name: "exact minimum", balance: 10, minDepositAmount: 10, wantOK: true},
+		{name: "below minimum", balance: 9, minDepositAmount: 10},
+		{name: "available balance", balance: 30, minDepositAmount: 10, pendingWithdrawals: 5, wantCapacity: 15, wantOK: true},
+		{name: "exact max", balance: math.MaxUint64, minDepositAmount: 1, wantCapacity: math.MaxUint64 - 1, wantOK: true},
+		{name: "minimum and pending overflow", balance: math.MaxUint64, minDepositAmount: 2, pendingWithdrawals: math.MaxUint64 - 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capacity, ok := state2.BuilderBidCapacity(test.balance, test.minDepositAmount, test.pendingWithdrawals)
+			require.Equal(t, test.wantCapacity, capacity)
+			require.Equal(t, test.wantOK, ok)
+		})
+	}
+}
 
-	require.False(t, state2.CanBuilderCoverBid(s, 0, 1))
+func TestCanBuilderCoverBidZeroCapacity(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		balance            uint64
+		pendingWithdrawals []uint64
+		want               bool
+	}{
+		{name: "exact minimum", balance: clparams.MainnetBeaconConfig.MinDepositAmount, want: true},
+		{name: "below minimum deposit", balance: 1},
+		{name: "minimum plus pending overflows", balance: math.MaxUint64, pendingWithdrawals: []uint64{math.MaxUint64, 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			s := state2.New(&cfg)
+			builders := solid.NewStaticListSSZ[*cltypes.Builder](1, new(cltypes.Builder).EncodingSizeSSZ())
+			builders.Append(&cltypes.Builder{Balance: test.balance})
+			s.SetBuilders(builders)
+			withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](len(test.pendingWithdrawals), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+			for _, amount := range test.pendingWithdrawals {
+				withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: amount})
+			}
+			s.SetBuilderPendingWithdrawals(withdrawals)
+
+			require.Equal(t, test.want, state2.CanBuilderCoverBid(s, 0, 0))
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

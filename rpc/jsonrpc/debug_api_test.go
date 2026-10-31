@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"testing"
@@ -1078,6 +1079,15 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		require.Empty(t, result.Storage)
 		require.NotNil(t, result.NextKey)
 		require.Equal(t, keys[0], *result.NextKey)
+
+		for _, maxResult := range []int{100_000_000_000, math.MaxInt} {
+			result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, maxResult)
+			require.NoError(t, err)
+			expect = StorageRangeResult{storage, nil}
+			if !reflect.DeepEqual(result, expect) {
+				t.Fatalf("maxResult %d: wrong result:\ngot %s\nwant %s", maxResult, dumper.Sdump(result), dumper.Sdump(&expect))
+			}
+		}
 	})
 }
 
@@ -2128,4 +2138,53 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	restoredHead, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
 	require.Equal(t, head, restoredHead, "chain head should be restored after UpdateForkChoice")
+}
+
+func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api, debugApi := newCallManyApisForTest(m)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, len(calls) + 1, 500} {
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: &txIndex}
+		t.Run(fmt.Sprintf("debug_traceCallMany/%d", txIndex), func(t *testing.T) {
+			err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+			require.ErrorAs(t, err, &invalidParams)
+		})
+		t.Run(fmt.Sprintf("eth_callMany/%d", txIndex), func(t *testing.T) {
+			_, err := api.CallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, nil)
+			require.ErrorAs(t, err, &invalidParams)
+		})
+		if txIndex < 0 {
+			continue
+		}
+		t.Run(fmt.Sprintf("debug_traceCall/%d", txIndex), func(t *testing.T) {
+			config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txIndex))}
+			err := debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{}))
+			require.ErrorAs(t, err, &invalidParams)
+		})
+	}
+
+	txCount := len(calls)
+	stateCtx := StateContext{BlockNumber: block, TransactionIndex: &txCount}
+	_, err := api.CallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{})))
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
+	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
+}
+
+func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	_, debugApi := newCallManyApisForTest(m)
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, 500} {
+		stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams, "debug_traceCallMany %d", txIndex)
+	}
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
+	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
+	require.ErrorAs(t, err, &invalidParams)
 }

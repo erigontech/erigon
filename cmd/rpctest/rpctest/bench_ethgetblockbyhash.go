@@ -29,7 +29,7 @@ import (
 //			    false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	                 recordFileName stores all eth_call returned wite success
 //	                 errorFileName stores information when erigon and geth doesn't return same data
-func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
+func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)

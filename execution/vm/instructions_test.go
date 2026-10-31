@@ -66,14 +66,6 @@ var (
 	twoOpMethods map[string]executionFunc
 )
 
-type contractRef struct {
-	addr common.Address
-}
-
-func (c contractRef) Address() common.Address {
-	return c.addr
-}
-
 func init() {
 	// Params is a list of common edgecases that should be used for some common tests
 	params := []string{
@@ -140,6 +132,30 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
+		}
+	}
+}
+
+func TestOpDivPowerOfTwo(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	xs := []*uint256.Int{
+		uint256.NewInt(0), uint256.NewInt(7), new(uint256.Int).SetAllOne(),
+		uint256.MustFromHex("0x87ffb8b26394face67d77fae3608d0891"),
+		uint256.MustFromHex("0x40cf02000000000000000000000000000000000000000000000000000000000"),
+	}
+	one := uint256.NewInt(1)
+	for n := range uint(256) {
+		p := new(uint256.Int).Lsh(one, n)
+		for _, y := range []*uint256.Int{p, new(uint256.Int).AddUint64(p, 1), new(uint256.Int).Sub(p, one)} {
+			for _, x := range xs {
+				callContext.Stack.push(*y)
+				callContext.Stack.push(*x)
+				opDiv(0, evm, callContext)
+				got, want := callContext.Stack.popCopy(), new(uint256.Int).Div(x, y)
+				require.Equal(t, want, &got, "%x / %x", x, y)
+			}
 		}
 	}
 }
@@ -1284,4 +1300,15 @@ func TestContextAddressWordsReusedFrame(t *testing.T) {
 		}
 		evm.putCallContext(scope)
 	}
+}
+
+// A context idle in the pool must not pin interned keys: a handle keeps its canonical
+// map entry alive.
+func TestPutReleasesFrameSlotKeys(t *testing.T) {
+	var evm EVM
+	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
+	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
+	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
+	evm.putCallContext(ctx)
+	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
 }

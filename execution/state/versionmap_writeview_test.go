@@ -4,37 +4,36 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestVersionMapWriteView_ValuesFromMap proves the wrapper sources its values
-// from the versionMap floor (the validated single source of truth), not from
-// the key-set WriteSet: a stale value in the key-set must be overridden by the
-// versionMap's value, and the yielded VersionedWrite must be a fresh copy (not
-// a pointer into the map).
+// TestVersionMapWriteView_ValuesFromMap proves the wrapper sources its account
+// values from the versionMap floor (the validated single source of truth), not
+// from the key-set WriteSet: a stale value in the key-set must be overridden by
+// the versionMap's value, and the yielded VersionedWrite must not be a pointer
+// into the map.
 func TestVersionMapWriteView_ValuesFromMap(t *testing.T) {
 	t.Parallel()
 
 	const txIdx = 4
 	addr := getAddress(1)
-	key := accounts.InternKey(uint256.NewInt(0x11).Bytes32())
 
 	// key-set carries STALE values (what a raw WriteSet copy might hold).
 	keys := &WriteSet{}
 	keys.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1)})
 	keys.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 1})
-	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: *uint256.NewInt(1)})
 
 	// versionMap holds the VALIDATED values at txIdx.
 	vm := NewVersionMap(nil)
 	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: txIdx}, *uint256.NewInt(250), true)
 	writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: txIdx}, uint64(9), true)
-	writeFor(vm, addr, StoragePath, key, Version{TxIndex: txIdx}, *uint256.NewInt(777), true)
 
 	view := NewVersionMapWriteView(keys, vm, txIdx)
 
@@ -49,16 +48,6 @@ func TestVersionMapWriteView_ValuesFromMap(t *testing.T) {
 	for _, vw := range view.Nonces() {
 		require.Equal(t, uint64(9), vw.Val, "nonce from the versionMap")
 	}
-
-	gotSlot := false
-	for a, inner := range view.Storages() {
-		require.Equal(t, addr, a)
-		vw := inner[key]
-		require.NotNil(t, vw)
-		require.Equal(t, *uint256.NewInt(777), vw.Val, "storage from the versionMap")
-		gotSlot = true
-	}
-	require.True(t, gotSlot, "storage key should be iterated")
 }
 
 // TestVersionMapWriteView_FallsBackToKeySetOnMapMiss proves the wrapper is
@@ -217,7 +206,7 @@ func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
 	vw.valStatus = ValueDeleted
 	flushed.SetBalance(burned, vw)
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(flushed, true, "")
+	vm.FlushVersionedWrites(flushed, true)
 
 	seen := 0
 	for addr, vw := range NewVersionMapWriteView(keys, vm, txIdx).Balances() {
@@ -246,7 +235,7 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 		_, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		ws := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true, IsCancun: true})
-		vm.FlushVersionedWrites(ws, true, "")
+		vm.FlushVersionedWrites(ws, true)
 		out, err := WithoutVanished(ws, vm, 1, false, reader)
 		require.NoError(t, err)
 		return out
@@ -261,13 +250,90 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	funded := NewVersionMap(nil)
 	w := &WriteSet{}
 	w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
-	funded.FlushVersionedWrites(w, true, "")
+	funded.FlushVersionedWrites(w, true)
 	require.True(t, removed(run(t, &minimalStateReader{}, funded)), "an earlier tx of the block funded the address")
 
 	// Before EIP-161 an earlier tx can leave an empty account that only its AddressPath cell records.
 	empty := NewVersionMap(nil)
 	w = &WriteSet{}
 	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
-	empty.FlushVersionedWrites(w, true, "")
+	empty.FlushVersionedWrites(w, true)
 	require.True(t, removed(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
+}
+
+// The view's value iterators reuse one VersionedWrite per call, so ranging one costs
+// no allocation per yielded element.
+func TestVersionMapWriteView_IteratorsDoNotAllocatePerElement(t *testing.T) {
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	viewOf := func(n int) WriteSetView {
+		keys := &WriteSet{}
+		for i := range n {
+			addr := getAddress(100 + i)
+			keys.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(uint64(i))})
+			keys.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(i)})
+			keys.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: 1})
+			keys.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: code.Hash})
+			keys.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code})
+			keys.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: true})
+		}
+		return NewVersionMapWriteView(keys, NewVersionMap(nil), 4)
+	}
+	small, large := viewOf(2), viewOf(16)
+	for name, rangeAll := range map[string]func(WriteSetView){
+		"Balances": func(v WriteSetView) {
+			for range v.Balances() {
+			}
+		},
+		"Nonces": func(v WriteSetView) {
+			for range v.Nonces() {
+			}
+		},
+		"Incarnations": func(v WriteSetView) {
+			for range v.Incarnations() {
+			}
+		},
+		"CodeHashes": func(v WriteSetView) {
+			for range v.CodeHashes() {
+			}
+		},
+		"Codes": func(v WriteSetView) {
+			for range v.Codes() {
+			}
+		},
+		"SelfDestructs": func(v WriteSetView) {
+			for range v.SelfDestructs() {
+			}
+		},
+	} {
+		perElement := (testing.AllocsPerRun(20, func() { rangeAll(large) }) - testing.AllocsPerRun(20, func() { rangeAll(small) })) / 14
+		assert.Less(t, perElement, 0.5, "%s allocates %v per yielded element", name, perElement)
+	}
+}
+
+// On a BAL block a net-zero storage write is not materialized in the version map, so the cell at the
+// writer's index is the access list's, which can disagree with the tx. The view must publish the
+// value the tx wrote.
+func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	addr := getAddress(3)
+	key := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: txIdx + 1, Value: *uint256.NewInt(42)}}}}}})
+	keys := &WriteSet{}
+	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: txIdx}, valStatus: ValueUnchanged},
+		Val:         *uint256.NewInt(5),
+	})
+
+	vm.FlushVersionedWrites(keys, false)
+
+	published := 0
+	for _, inner := range NewVersionMapWriteView(keys, vm, txIdx).Storages() {
+		for _, vw := range inner {
+			require.Equal(t, *uint256.NewInt(5), vw.Val)
+			published++
+		}
+	}
+	require.Equal(t, 1, published)
 }

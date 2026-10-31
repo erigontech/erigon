@@ -17,7 +17,9 @@
 package native
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var _ tracing.IntraBlockState = (*postTxIBS)(nil)
@@ -117,6 +120,38 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 
 	require.NotContains(t, tr.pre[caller].Storage, slot,
 		"storage slot referenced by a faulted SLOAD must not be recorded in the prestate")
+}
+
+// codeIBS serves one contract whose code hash is stored apart from its code, as the
+// state stores it.
+type codeIBS struct {
+	postTxIBS
+	code     []byte
+	codeHash accounts.CodeHash
+}
+
+func (m *codeIBS) GetCode(accounts.Address) ([]byte, error) { return m.code, nil }
+func (m *codeIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
+	return m.codeHash, nil
+}
+
+// The state already holds each account's code hash, so lookupAccount reports it
+// instead of hashing the whole bytecode again. The fake's hash is not keccak(code),
+// which shows where the reported hash comes from.
+func TestPrestateTracerTakesCodeHashFromState(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000003333"))
+	stateHash := common.HexToHash("0x0101010101010101010101010101010101010101010101010101010101010101")
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &codeIBS{code: []byte{0x60, 0x00, 0x60, 0x00, 0xf3}, codeHash: accounts.InternCodeHash(stateHash)},
+	}
+	tr.lookupAccount(addr)
+
+	acc, ok := tr.pre[addr]
+	require.True(t, ok)
+	require.NotNil(t, acc.CodeHash)
+	require.Equal(t, stateHash, *acc.CodeHash)
 }
 
 // TestPrestateTracerDiffModeDeletedAccount verifies that an account deleted during
@@ -356,4 +391,58 @@ func TestAccountHasNoJSONMarshaler(t *testing.T) {
 	t.Parallel()
 	_, bad := any(&account{}).(json.Marshaler)
 	require.False(t, bad, "account must not implement json.Marshaler")
+}
+
+type fastJSON func(*jsonstream.Stream) error
+
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.Stream) error { return f(s) }
+
+// fastJSONTestState holds the shapes encoding/json treats differently: an empty account kept by
+// includeEmpty, code cleared to 0x, absent fields, and keys inserted out of their sorted order.
+func fastJSONTestState() state {
+	code, cleared := hexutil.Bytes{0x60, 0x00}, hexutil.Bytes{}
+	codeHash := common.HexToHash("0xc0de")
+	return state{
+		accounts.InternAddress(common.HexToAddress("0xff00")): {
+			Balance:  (*hexutil.U256)(uint256.NewInt(1 << 40)),
+			Code:     &code,
+			CodeHash: &codeHash,
+			Nonce:    7,
+			Storage: map[common.Hash]common.Hash{
+				common.HexToHash("0x02"): common.HexToHash("0xbb"),
+				common.HexToHash("0x01"): common.HexToHash("0xaa"),
+				common.HexToHash("0xf0"): {},
+			},
+		},
+		accounts.InternAddress(common.HexToAddress("0x00ff")): {Balance: new(hexutil.U256), Storage: map[common.Hash]common.Hash{}},
+		accounts.InternAddress(common.HexToAddress("0x0a00")): {Code: &cleared},
+		accounts.InternAddress(common.HexToAddress("0x00a0")): {Nonce: 1},
+	}
+}
+
+func TestPrestateTracerFastJSONMatchesGetResult(t *testing.T) {
+	t.Parallel()
+	for _, cfg := range []prestateTracerConfig{{}, {IncludeEmpty: true}, {DiffMode: true}} {
+		tr := newTestPrestateTracer(cfg)
+		tr.pre = fastJSONTestState()
+		if cfg.DiffMode {
+			tr.post = fastJSONTestState()
+		}
+		want, err := tr.GetResult()
+		require.NoError(t, err)
+		got, err := jsonstream.Marshal(fastJSON(tr.MarshalFastJSONTo))
+		require.NoError(t, err)
+		require.Equal(t, string(want), string(got), "config %+v", cfg)
+	}
+}
+
+func TestPrestateTracerFastJSONStoppedWritesNothing(t *testing.T) {
+	t.Parallel()
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.pre = fastJSONTestState()
+	tr.Stop(errors.New("stopped"))
+	var buf bytes.Buffer
+	s := jsonstream.New(&buf)
+	require.EqualError(t, tr.MarshalFastJSONTo(s), "stopped")
+	require.Empty(t, s.Buffer(), "a stopped tracer writes nothing")
 }

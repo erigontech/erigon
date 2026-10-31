@@ -57,7 +57,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.True(t, destroyed)
 		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		_, ok := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a destroyed pre-existing contract must project as absent")
@@ -80,7 +80,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.True(t, destroyed)
 		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		_, ok := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "an account created and destroyed in one tx must project as absent")
@@ -102,7 +102,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, ibs.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
 		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		_, ok := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a pre-existing account left empty must project as absent (EIP-161)")
@@ -124,7 +124,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, destroyed)
 		require.NoError(t, destroyer.FinalizeTx(sd, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true, "")
+		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true)
 
 		recreator := NewWithVersionMap(reader, vm)
 		t.Cleanup(recreator.Close)
@@ -134,7 +134,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 		require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
 		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true, "")
+		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
 
 		acc, ok := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "a recreated account must project as live after the recreate tx")
@@ -155,7 +155,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
 		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		acc, ok := vm.View(1, reader).GetAccount(addr)
 		require.True(t, ok, "a funded account must project as live")

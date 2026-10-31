@@ -323,6 +323,8 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 	return nil
 }
 
+var ErrStateStepHasMoreWork = errors.New("state step has more work")
+
 func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -358,11 +360,10 @@ func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.S
 			return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
 		}
 		if hasMore {
-			// should not ever happen since we exec blocks 1 by 1
 			if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
 				return err
 			}
-			return errors.New("unexpected state step has more work")
+			return ErrStateStepHasMoreWork
 		}
 	}
 	return nil

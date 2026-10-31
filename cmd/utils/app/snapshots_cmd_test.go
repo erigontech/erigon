@@ -55,7 +55,7 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
 		b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 		for i := range 10 {
-			createFiles(t, dirs, i*10, (i+1)*10, &b)
+			createFiles(t, i*10, (i+1)*10, &b)
 		}
 	}
 
@@ -157,7 +157,7 @@ func confirmDoesntExist(t *testing.T, filename string) {
 	}
 }
 
-func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *bundle) {
+func createFiles(t *testing.T, from, to int, b *bundle) {
 	t.Helper()
 	createSchemaFiles(t, b.domain, from, to)
 	if b.history != nil {
@@ -176,7 +176,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 	for i := range 3 {
-		createFiles(t, dirs, i*10, (i+1)*10, &b)
+		createFiles(t, i*10, (i+1)*10, &b)
 	}
 
 	touchFile := func(path string) {
@@ -217,7 +217,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 	for i := range 3 {
-		createFiles(t, dirs, i*10, (i+1)*10, &b)
+		createFiles(t, i*10, (i+1)*10, &b)
 	}
 
 	touchFile := func(path string) {
@@ -272,7 +272,7 @@ func Test_DeleteLatestStateSnaps_SubsetRemoval(t *testing.T) {
 		{224, 225},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// First call: should remove only the tip file 224-225
@@ -330,7 +330,7 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 		{223, 224},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// Use --step 192-224 to remove the merged file and its subsets
@@ -404,7 +404,7 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 		{223, 224},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// "192+" must behave like "192-224" because 224 is the highest available step.
@@ -439,7 +439,7 @@ func Test_DeleteStateSnaps_EmptyStepRange(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
 			b := bundle{}
 			b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.ReceiptDomain, dirs, 1)
-			createFiles(t, dirs, 0, 224, &b)
+			createFiles(t, 0, 224, &b)
 			file, _ := b.domain.DataFile(version.V1_0, 0, 224)
 			require.NoError(t, os.WriteFile(file+".torrent", []byte("torrent"), 0o644))
 			require.NoError(t, os.WriteFile(file+".123.tmp", []byte("tmp"), 0o644))
@@ -483,7 +483,7 @@ func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
 		{192, 193},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// Remove latest: should only remove 192-193
@@ -514,7 +514,7 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	acctBundle := bundle{}
 	acctBundle.domain, acctBundle.history, acctBundle.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.AccountsDomain, dirs, 1)
 	for _, r := range [][2]int{{0, 128}, {128, 192}, {192, 224}, {192, 208}, {208, 216}, {224, 225}} {
-		createFiles(t, dirs, r[0], r[1], &acctBundle)
+		createFiles(t, r[0], r[1], &acctBundle)
 	}
 
 	// Set up storage: NO merged 192-224, only has sub-range files + tip 224-225
@@ -522,7 +522,7 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	stoBundle := bundle{}
 	stoBundle.domain, stoBundle.history, stoBundle.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.StorageDomain, dirs, 1)
 	for _, r := range [][2]int{{0, 128}, {128, 192}, {192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224}, {224, 225}} {
-		createFiles(t, dirs, r[0], r[1], &stoBundle)
+		createFiles(t, r[0], r[1], &stoBundle)
 	}
 
 	// First --latest: remove tip 224-225 from both domains
@@ -578,7 +578,7 @@ func Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved(t *testing.T)
 		{64, 128},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// Use --step 64-192 to precisely target the merged file
@@ -623,7 +623,7 @@ func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
 		{256, 257},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// First dry-run call: targets tip 256-257 — should NOT delete anything

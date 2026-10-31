@@ -63,6 +63,7 @@ type StageHistoryReconstructionCfg struct {
 
 type historyDownloader interface {
 	Finished() bool
+	Processed() uint64
 	Progress() uint64
 	RequestMore(context.Context) error
 	SetBlockChecker(network.BlockChecker)
@@ -73,6 +74,7 @@ type historyDownloader interface {
 	SetOnInitialGloasBlock(common.Hash, func(*cltypes.SignedBeaconBlock) error)
 	SetSlotToDownload(uint64)
 	SetThrottle(time.Duration)
+	GloasEnvelopeSignatureVerifiable(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) bool
 }
 
 type blobHistoryDownloader interface {
@@ -118,6 +120,30 @@ func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64)
 	return false
 }
 
+func writeDownloadedBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope, inSnapshots, signatureVerifiable bool) error {
+	if !inSnapshots {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+	}
+	if block.Version() < clparams.GloasVersion || envelope == nil {
+		return nil
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if !inSnapshots {
+		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
+			return err
+		}
+	}
+	if !signatureVerifiable {
+		return nil
+	}
+	return beacon_indicies.WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx, block.Block.Slot, common.Hash(blockRoot), envelope.Signature)
+}
+
 // clampProgress derives (processed, total) for a backwards download, guarding the
 // unsigned subtractions against underflow when the floor and current counters
 // drift past the frozen highestBlockSeen. total grows to at least processed so a
@@ -129,6 +155,15 @@ func clampProgress(highestBlockSeen, floor, current uint64) (processed, total ui
 	processed = highestBlockSeen - current
 	total = max(highestBlockSeen-floor, processed)
 	return
+}
+
+func historyDownloadRate(d historyDownloader, start time.Time, startProcessed uint64, now time.Time) (speed float64, nextStart time.Time, nextStartProcessed uint64) {
+	processed := d.Processed()
+	speed = float64(processed-startProcessed) / now.Sub(start).Seconds()
+	if speed > 1000.0 {
+		return 0, now, processed
+	}
+	return speed, start, startProcessed
 }
 
 // SpawnStageBeaconsForward spawn the beacon forward stage
@@ -173,10 +208,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Set up onNewBlock callback
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
+		signatureVerifiable := false
 		if blk != nil && blk.Version() >= clparams.GloasVersion && envelope != nil {
 			if err := network.ValidateDownloadedGloasEnvelope(cfg.beaconCfg, blk, envelope); err != nil {
 				return false, fmt.Errorf("invalid downloaded Gloas envelope: %w", err)
 			}
+			signatureVerifiable = cfg.downloader.GloasEnvelopeSignatureVerifiable(blk, envelope)
 		}
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
 		if err != nil {
@@ -207,23 +244,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
-		// Skip blocks that are already in the snapshots
-		if !isInCLSnapshots {
-			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, blk, true); err != nil {
-				return false, err
-			}
-			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks
-			// because the payload is in the envelope, not the block body. Write them here now
-			// that we have the envelope.
-			if blk.Version() >= clparams.GloasVersion && envelope != nil {
-				blockRoot, hashErr := blk.Block.HashSSZ()
-				if hashErr != nil {
-					return false, hashErr
-				}
-				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
-					return false, err
-				}
-			}
+		if err := writeDownloadedBlock(tx, blk, envelope, isInCLSnapshots, signatureVerifiable); err != nil {
+			return false, err
 		}
 		// we need to backfill an equivalent number of blobs to the blocks
 		hasDownloadEnoughForImmediateBlobsBackfilling := true
@@ -317,7 +339,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	go func() {
 		startTimeLoop := time.Now()
-		initialProgress := cfg.downloader.Progress()
+		initialProcessed := cfg.downloader.Processed()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
 		for {
@@ -333,13 +355,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []any{}
 				currProgress := cfg.downloader.Progress()
-				speed := math.Abs(float64(currProgress)-float64(initialProgress)) / time.Since(startTimeLoop).Seconds()
-				if speed > 1000.0 { // to avoid spamming logs on fast syncs
-					initialProgress = currProgress
-					startTimeLoop = time.Now()
-					continue
-				}
-
+				var speed float64
+				speed, startTimeLoop, initialProcessed = historyDownloadRate(cfg.downloader, startTimeLoop, initialProcessed, time.Now())
 				if speed == 0 || initialBeaconBlock == nil {
 					continue
 				}

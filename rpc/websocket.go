@@ -231,7 +231,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 	if err != nil {
 		return nil, err
 	}
-	return newClient(ctx, cfg, connect, logger)
+	return newClient(ctx, connect, logger)
 }
 
 func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, error) {

@@ -248,7 +248,8 @@ func (p *ParallelPatriciaHashed) Process(
 	// Per-round, matching HexPatriciaHashed.Process: the counters published for
 	// a round have to describe that round alone.
 	p.metrics.Reset()
-	p.metrics.AddRoundKeys(updates.Size())
+	n := updates.Size()
+	p.metrics.AddRoundKeys(n)
 	roundStart := time.Now()
 	defer func() { observeRound(p.metrics, roundStart) }()
 
@@ -297,7 +298,6 @@ func (p *ParallelPatriciaHashed) Process(
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
-		n := updates.Size()
 		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
 	}
 	return out, nil

@@ -64,7 +64,7 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 	engine := &logEmittingSyscallEngine{
 		Engine:   ethash.NewFaker(),
 		contract: accounts.InternAddress(logIndexContract),
-		calls:    1,
+		calls:    3,
 	}
 
 	pe, roTx := newResumeTestExec(t, db, config)
@@ -107,7 +107,7 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 		}
 	}
 	require.NotNil(t, fin, "a finalize result must be sent")
-	require.NotEmpty(t, fin.logs, "the finalize result must carry the block-end syscall log")
+	require.Len(t, fin.logs, engine.calls, "the finalize result must carry each block-end syscall log once")
 
 	// Index it exactly as the apply loop does (skipReceiptCache for finalize), then
 	// flush and assert the block-end log is reachable in the log indexes.

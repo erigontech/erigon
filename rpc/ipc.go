@@ -47,7 +47,7 @@ func (s *Server) ServeListener(l net.Listener) error {
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
 func DialIPC(ctx context.Context, endpoint string, logger log.Logger) (*Client, error) {
-	return newClient(ctx, new(clientConfig), newClientTransportIPC(endpoint), logger)
+	return newClient(ctx, newClientTransportIPC(endpoint), logger)
 }
 
 func newClientTransportIPC(endpoint string) reconnectFunc {
