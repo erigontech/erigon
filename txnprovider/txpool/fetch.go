@@ -346,13 +346,16 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		return err
 	}
 
+	const (
+		maxBatchBytes    = 4 * 1024 * 1024
+		maxBatchMessages = 256
+	)
 	var (
-		batch      = make([]*sentryproto.InboundMessage, 0, 256)
+		batch      = make([]*sentryproto.InboundMessage, 0, maxBatchMessages)
 		batchBytes int
 		batchLock  sync.Mutex
 		flushLock  sync.Mutex
 	)
-	const maxBatchBytes = 4 * 1024 * 1024
 
 	// LRU cache for deduplication - filters duplicates before they enter the batch
 	// Uses maphash to avoid string allocations
@@ -370,7 +373,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return
 		}
 		toProcess := batch
-		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batch = make([]*sentryproto.InboundMessage, 0, maxBatchMessages)
 		batchBytes = 0
 		batchLock.Unlock()
 
@@ -454,7 +457,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		batchLock.Lock()
-		full := len(batch) >= 256 || batchBytes+len(req.Data) > maxBatchBytes
+		full := len(batch) >= maxBatchMessages || batchBytes+len(req.Data) > maxBatchBytes
 		batchLock.Unlock()
 		if full {
 			flushBatch()
@@ -462,11 +465,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		batchLock.Lock()
 		batch = append(batch, req)
 		batchBytes += len(req.Data)
-		full = batchBytes >= maxBatchBytes
 		batchLock.Unlock()
-		if full {
-			flushBatch()
-		}
 	}
 }
 

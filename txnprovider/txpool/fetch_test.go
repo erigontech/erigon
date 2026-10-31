@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -792,4 +794,49 @@ func toPeerIDs(h ...byte) (out []PeerID) {
 		out = append(out, gointerfaces.ConvertHashToH512(hash))
 	}
 	return out
+}
+
+type boundedBatchStream struct {
+	grpc.ClientStream
+	recv func() (*sentryproto.InboundMessage, error)
+}
+
+func (s *boundedBatchStream) Recv() (*sentryproto.InboundMessage, error) { return s.recv() }
+
+func TestFetchBoundsQueuedBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		bytes, messages int
+		wantFlushes     int32
+	}{
+		{"bytes", 1024 * 1024, 5, 1},
+		{"messages", 1, 257, 1},
+		{"bytes_before_append", 3 * 1024 * 1024, 3, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				pool := NewMockPool(ctrl)
+				var flushes atomic.Int32
+				pool.EXPECT().Started().DoAndReturn(func() bool { flushes.Add(1); return true }).AnyTimes()
+				client := sentryproto.NewMockSentryClient(ctrl)
+				var wg sync.WaitGroup
+				fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
+				received := 0
+				stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+					if received == tc.messages {
+						require.Equal(t, tc.wantFlushes, flushes.Load(), "unexpected flush count before stream closure")
+						return nil, nil
+					}
+					received++
+					wg.Add(1)
+					return &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: make([]byte, tc.bytes)}, nil
+				}}
+				client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+				require.NoError(t, fetch.receiveMessage(t.Context(), client))
+				wg.Wait()
+				require.Equal(t, tc.messages, received)
+			})
+		})
+	}
 }
