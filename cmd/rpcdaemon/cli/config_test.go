@@ -268,19 +268,34 @@ func TestAuthenticatedRpcServerRequiresJwtForGraphQL(t *testing.T) {
 }
 
 func TestAuthenticatedRpcServerListensOnIPv6(t *testing.T) {
-	cfg := &httpcfg.HttpCfg{
-		AuthRpcHTTPListenAddress: "::1",
-		JWTSecretPath:            filepath.Join(t.TempDir(), "jwt.hex"),
+	for _, listenAddr := range []string{"::1", "[::1]"} {
+		t.Run(listenAddr, func(t *testing.T) {
+			cfg := &httpcfg.HttpCfg{
+				AuthRpcHTTPListenAddress: listenAddr,
+				JWTSecretPath:            filepath.Join(t.TempDir(), "jwt.hex"),
+			}
+			listener, engineSrv, addr, err := createEngineListener(cfg, nil, log.New())
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				engineSrv.Stop()
+				_ = listener.Close()
+			})
+			host, _, err := net.SplitHostPort(addr)
+			require.NoError(t, err)
+			require.Equal(t, "::1", host)
+		})
 	}
-	listener, engineSrv, addr, err := createEngineListener(cfg, nil, log.New())
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		engineSrv.Stop()
-		_ = listener.Close()
-	})
-	host, _, err := net.SplitHostPort(addr)
-	require.NoError(t, err)
-	require.Equal(t, "::1", host)
+}
+
+func TestListenHostPort(t *testing.T) {
+	for _, tc := range []struct{ host, want string }{
+		{"::1", "[::1]:8545"},
+		{"[::1]", "[::1]:8545"},
+		{"127.0.0.1", "127.0.0.1:8545"},
+		{"", ":8545"},
+	} {
+		require.Equal(t, tc.want, listenHostPort(tc.host, 8545), tc.host)
+	}
 }
 
 func TestGraphQLHandlerAdmissionControl(t *testing.T) {
