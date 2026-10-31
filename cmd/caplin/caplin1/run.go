@@ -438,7 +438,17 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, emitters)
+	columnDBPath := path.Join(dirs.CaplinColumnData, "chaindata")
+	if err := os.MkdirAll(columnDBPath, 0o700); err != nil {
+		return err
+	}
+	columnDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(columnDBPath).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Durable().MustOpen()
+	go func() {
+		<-ctx.Done()
+		columnDB.Close()
+	}()
+	columnStorage := blob_storage.NewDataColumnStore(columnDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, emitters)
 	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,

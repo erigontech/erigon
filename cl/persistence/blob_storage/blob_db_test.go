@@ -209,6 +209,30 @@ func TestBlobStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
 	require.True(t, found, "the floor itself remains writable")
 }
 
+func TestBlobStorePruneDropsTheCountRowsOfPrunedBuckets(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	pruned, prunedToo, kept := common.Hash{1}, common.Hash{3}, common.Hash{2}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), pruned, []*cltypes.BlobSidecar{testSidecar(100, 0, 1), testSidecar(100, 1, 1)}))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), prunedToo, []*cltypes.BlobSidecar{testSidecar(200, 0, 3)}))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), kept, []*cltypes.BlobSidecar{testSidecar(subdivisionSlot, 0, 2)}))
+
+	require.NoError(t, bs.PruneBelow(subdivisionSlot))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		for _, root := range []common.Hash{pruned, prunedToo} {
+			row, err := tx.GetOne(kv.BlockRootToKzgCommitments, root[:])
+			require.NoError(t, err)
+			require.Nil(t, row, "a pruned block must not keep its count row")
+		}
+		row, err := tx.GetOne(kv.BlockRootToKzgCommitments, kept[:])
+		require.NoError(t, err)
+		require.NotNil(t, row, "a block above the floor keeps its row")
+		return nil
+	}))
+}
+
 type blockingBlobRemoveFs struct {
 	afero.Fs
 	path    string

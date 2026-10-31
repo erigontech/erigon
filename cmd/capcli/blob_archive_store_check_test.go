@@ -167,7 +167,7 @@ func TestBlobArchiveStoreCheckExposesTheRemoveFlag(t *testing.T) {
 	require.True(t, b.RemoveMismatched, "parsing --remove-mismatched must set the field")
 }
 
-// PruneBelow removes sidecar files but leaves their BlockRootToKzgCommitments rows, so a count can
+// A BlockRootToKzgCommitments row does not prove its sidecar files are on disk, so a count can
 // match for a slot whose files are gone. Accepting metadata equality as completeness makes the audit
 // report a clean datadir right before it is published from. The old wrong-root lookup missed every
 // count and flagged these by accident; reading the canonical root removes that accident.
@@ -193,7 +193,7 @@ func TestBlobArchiveStoreCheckFlagsCountEqualSlotsWithNoFiles(t *testing.T) {
 	}
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), canonical, []*cltypes.BlobSidecar{sidecar}))
-	require.NoError(t, storage.PruneBelow(10_000))
+	require.NoError(t, fs.RemoveAll("0"))
 
 	// The state: the count row survives, the file does not.
 	count, err := storage.KzgCommitmentsCount(t.Context(), canonical)

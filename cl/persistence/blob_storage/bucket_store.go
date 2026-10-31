@@ -17,10 +17,12 @@
 package blob_storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -56,7 +59,9 @@ type bucketStore struct {
 	pruneFloor uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
-	bucketLocks []sync.RWMutex
+	bucketLocks    []sync.RWMutex
+	dropRows       func(roots []common.Hash) error
+	durableBuckets sync.Map
 }
 
 func (b *bucketStore) init(fs afero.Fs) {
@@ -137,6 +142,36 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 		return false, nil
 	}
 	return created, nil
+}
+
+func (b *bucketStore) syncBucket(slot uint64) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, _ := b.path(slot, common.Hash{}, 0)
+	if err := b.syncDir(dir); err != nil {
+		return err
+	}
+	if _, ok := b.durableBuckets.Load(dir); ok {
+		return nil
+	}
+	if err := b.syncDir("."); err != nil {
+		return err
+	}
+	b.durableBuckets.Store(dir, struct{}{})
+	return nil
+}
+
+func (b *bucketStore) syncDir(name string) error {
+	d, err := b.fs.Open(name)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // removeTemp best-effort deletes the temp file; the caller already holds the
@@ -325,10 +360,63 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 }
 
 func (b *bucketStore) removeBucket(bucket uint64, name string) error {
+	if b.dropRows != nil {
+		roots, err := b.bucketRoots(name)
+		if err != nil {
+			return err
+		}
+		if err := b.dropRows(roots); err != nil {
+			return err
+		}
+	}
 	l := b.forBucket(bucket)
 	l.Lock()
 	defer l.Unlock()
 	return b.fs.RemoveAll(name)
+}
+
+func (b *bucketStore) bucketRoots(dir string) ([]common.Hash, error) {
+	f, err := b.fs.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	seen := map[common.Hash]struct{}{}
+	var roots []common.Hash
+	for {
+		names, err := f.Readdirnames(listBatch)
+		for _, name := range names {
+			hex, _, _ := strings.Cut(name, "_")
+			root := common.HexToHash(hex)
+			if _, ok := seen[root]; ok || root.String() != hex {
+				continue
+			}
+			seen[root] = struct{}{}
+			roots = append(roots, root)
+		}
+		if errors.Is(err, io.EOF) {
+			return roots, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+func deleteRootRows(db kv.RwDB, table string) func(roots []common.Hash) error {
+	return func(roots []common.Hash) error {
+		if len(roots) == 0 {
+			return nil
+		}
+		return db.Update(context.Background(), func(tx kv.RwTx) error {
+			for _, root := range roots {
+				if err := tx.Delete(table, root[:]); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
 }
 
 type slotLocks struct {

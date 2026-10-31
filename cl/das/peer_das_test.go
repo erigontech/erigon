@@ -331,7 +331,7 @@ func TestPeerDasPruneBelowDoesNotAdvertiseColumnsPrunedUnderAShorterWindow(t *te
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
 	fs := afero.NewMemMapFs()
-	before := blob_storage.NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())
+	before := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), fs, &cfg, beaconevents.NewEventEmitter())
 	for _, slot := range []uint64{15_000, 25_000, 35_000, 45_000} {
 		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
 		sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
@@ -340,7 +340,7 @@ func TestPeerDasPruneBelowDoesNotAdvertiseColumnsPrunedUnderAShorterWindow(t *te
 	require.NoError(t, before.PruneBelow(32_000))
 
 	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
-	d := &peerdas{state: state, columnStorage: blob_storage.NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())}
+	d := &peerdas{state: state, columnStorage: blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), fs, &cfg, beaconevents.NewEventEmitter())}
 	require.NoError(t, d.PruneBelow(5_000))
 
 	require.Equal(t, uint64(30_000), state.GetEarliestAvailableSlot())
@@ -349,7 +349,7 @@ func TestPeerDasPruneBelowDoesNotAdvertiseColumnsPrunedUnderAShorterWindow(t *te
 func TestPeerDasPruneBelowFollowsBackfilledColumnsDown(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
-	store := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	store := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	write := func(slot uint64) {
 		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
 		sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
@@ -468,7 +468,7 @@ func TestPeerDasPruneBelowPreventsActiveRecoveryFromRecreatingColumns(t *testing
 	require.NotEmpty(t, custodyColumns)
 
 	columnFS := afero.NewMemMapFs()
-	baseColumnStorage := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), columnFS, &cfg, beaconevents.NewEventEmitter())
 	seeded := 0
 	for index, sidecar := range columns {
 		if custodyColumns[uint64(index)] {
@@ -537,7 +537,7 @@ func TestPeerDasPruneBelowPreventsActiveRecoveryFromRecreatingColumns(t *testing
 		t.Fatal("blob recovery did not finish its column persistence suffix")
 	}
 
-	freshColumns := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	freshColumns := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), columnFS, &cfg, beaconevents.NewEventEmitter())
 	storedColumns, err := freshColumns.GetSavedColumnIndex(t.Context(), slot, root)
 	require.NoError(t, err)
 	require.Empty(t, storedColumns)
@@ -573,7 +573,7 @@ func TestGloasRecoveryPersistsGeneratedCustodyColumnAtOriginalIdentity(t *testin
 	require.NotEmpty(t, custodyColumns)
 
 	columnFS := afero.NewMemMapFs()
-	columnStorage := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), columnFS, &cfg, beaconevents.NewEventEmitter())
 	seeded := 0
 	for index, sidecar := range columns {
 		if custodyColumns[uint64(index)] {
@@ -616,9 +616,10 @@ func TestGloasRecoveryPersistsGeneratedCustodyColumnAtOriginalIdentity(t *testin
 	t.Cleanup(func() { cancel(); <-done })
 
 	var stored *cltypes.DataColumnSidecar
+	freshDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	for index := range custodyColumns {
 		require.Eventually(t, func() bool {
-			fresh := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+			fresh := blob_storage.NewDataColumnStore(freshDB, columnFS, &cfg, beaconevents.NewEventEmitter())
 			var readErr error
 			stored, readErr = fresh.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, int64(index))
 			return readErr == nil
@@ -664,7 +665,7 @@ func assertDownloadColumnsOverwritesBlobStorage(t *testing.T, initialSidecars fu
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, initialSidecars(sidecars)))
 	notifying := &writeNotifyingBlobStorage{BlobStorage: storage, written: make(chan struct{})}
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -720,7 +721,7 @@ func TestDownloadColumnsAndRecoverBlobsRetriesTransientInitialRecoveryRead(t *te
 	initTestBeaconConfig(&cfg)
 	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
 
-	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -789,7 +790,7 @@ func TestDownloadColumnsAndRecoverBlobsDoesNotRetryCanceledInitialRecoveryRead(t
 	initTestBeaconConfig(&cfg)
 	block, root, _, columns := recoverableFuluData(t, &cfg)
 
-	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -863,7 +864,7 @@ func TestDownloadColumnsAndRecoverBlobsRetriesTransientColumnReadWithoutRemoving
 	}
 
 	columnFS := afero.NewMemMapFs()
-	baseColumnStorage := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), columnFS, &cfg, beaconevents.NewEventEmitter())
 	require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(targetColumn), columns[targetColumn]))
 	seeded := 1
 	for column, sidecar := range columns {
@@ -942,7 +943,7 @@ func TestDownloadColumnsAndRecoverBlobsRemovesMissingColumnAndReleasesOwner(t *t
 	initTestBeaconConfig(&cfg)
 	block, root, _, columns := recoverableFuluData(t, &cfg)
 
-	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for column := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(column), columns[column]))
 	}
@@ -1005,7 +1006,7 @@ func TestDownloadColumnsAndRecoverBlobsDoesNotRetryCanceledColumnRead(t *testing
 	initTestBeaconConfig(&cfg)
 	block, root, _, columns := recoverableFuluData(t, &cfg)
 
-	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for column := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(column), columns[column]))
 	}
@@ -1073,7 +1074,7 @@ func TestBlobRecoveryRetriesTransientFinalWrite(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	baseBlobStorage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
 	blobStorage := &transientBlobWriteStorage{BlobStorage: baseBlobStorage, succeeded: make(chan struct{})}
-	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	columnStorage := &savedColumnReadCountingStorage{DataColumnStorage: baseColumnStorage}
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
@@ -1122,7 +1123,7 @@ func TestDownloadColumnsAndRecoverBlobsRetainsAllDelayedRootsAndAdmitsHealthyRoo
 		roots:       make(map[common.Hash]struct{}),
 		started:     make(chan struct{}),
 	}
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -1283,7 +1284,7 @@ func TestBlobsRecoverWorkerRechecksDurableCompletionBeforeWrite(t *testing.T) {
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
 	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -1350,7 +1351,7 @@ func TestMetadataFreeBlobRecoveryRechecksConcurrentCompletionBeforeWrite(t *test
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
 	block, root, _, columns := recoverableFuluData(t, &cfg)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -1400,7 +1401,7 @@ func TestBlobsRecoverWorkerContinuesAfterTransientAdmissionValidation(t *testing
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
 	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -1726,7 +1727,7 @@ func TestBlobRecoveryMetadataUpgradeRepairsInvalidEqualCountStorage(t *testing.T
 			cfg.InitializeForkSchedule()
 			initTestBeaconConfig(&cfg)
 			block, root, sidecars, columns := recoverableFuluData(t, &cfg)
-			columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+			columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 			for i := range (cfg.NumberOfColumns + 1) / 2 {
 				require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 			}
@@ -1907,7 +1908,7 @@ func assertBlobsRecoverWorkerPrewriteUnavailable(t *testing.T, persistent bool) 
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
 	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
-	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
 	columnStorage := &savedColumnReadCountingStorage{DataColumnStorage: baseColumnStorage}
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
