@@ -117,8 +117,8 @@ type parallelExecutor struct {
 	// the explicit ordered halt the exec loop calls once it has produced up to the
 	// coalesce block.
 	cancelWorkers context.CancelFunc
-	// runSem holds the idle worker contexts; runWG tracks in-flight task goroutines
-	// for teardown.
+	// runSem holds the idle worker contexts; runWG tracks task goroutines, busy or
+	// idle, for teardown.
 	runSem chan *exec.WorkerContext
 	// execSem decouples the CPU-parallelism gate (sized to the worker count) from the
 	// WorkerContext-object pool (runSem). A worker resting mid-EVM on a dependency
@@ -128,8 +128,10 @@ type parallelExecutor struct {
 	execSem chan struct{}
 	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
 	// open and close one; like applyTx it lives for one exec loop.
-	slotTxs    chan kv.TemporalTx
-	runWG      sync.WaitGroup
+	slotTxs chan kv.TemporalTx
+	runWG   sync.WaitGroup
+	// idleGo hands a task to a finished task goroutine, so its grown stack is reused.
+	idleGo     chan func()
 	workersCtx context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
 	results        chan *exec.TxResult
@@ -1638,6 +1640,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 	pe.workersCtx = workersCtx
+	pe.idleGo = make(chan func())
 
 	// The pool runs one worker beyond the configured count, except for a count
 	// of one (--exec.serial), which must run one transaction at a time.
@@ -1797,6 +1800,30 @@ type balTx struct {
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
 
+// goReused runs f on an idle task goroutine when there is one, so f starts on an
+// already grown stack instead of growing a new one.
+func (pe *parallelExecutor) goReused(f func()) {
+	// If a goroutine is idle and waiting for a task, send f to it by this channel.
+	// If none is idle, start a new goroutine.
+	select {
+	case pe.idleGo <- f:
+		return
+	default:
+	}
+	idle, done := pe.idleGo, pe.workersCtx.Done()
+	pe.runWG.Go(func() {
+		for {
+			f()
+			f = nil
+			select {
+			case f = <-idle:
+			case <-done:
+				return
+			}
+		}
+	})
+}
+
 // dispatchRunSelfLoop runs one task on a worker context, looping until its result
 // is stable-valid: execute, flush its writes to the versionMap so downstream workers
 // read them speculatively, validate its own read-set, and — when valid but a
@@ -1804,7 +1831,7 @@ const elasticWorkerCap = 4096
 // re-validate. Only a stable-valid result is sent to the exec loop, which commits it
 // in order. The context is released while parked so dependencies can run.
 func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
-	pe.runWG.Go(func() {
+	pe.goReused(func() {
 		// The roTx is bound to the execution slot, not the goroutine: opened on slot
 		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
 		// count rather than the far larger parked-goroutine count, so idle parked
@@ -2714,8 +2741,12 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
 		Val:         u256.Sub(acc.Balance, charge),
 	})
+	nonceReason := tracing.NonceChangeEoACall
+	if msg.To().IsNil() {
+		nonceReason = tracing.NonceChangeContractCreator
+	}
 	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
-		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: nonceReason},
 		Val:         acc.Nonce + 1,
 	})
 	return ws, acc, nil

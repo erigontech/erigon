@@ -390,6 +390,26 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 // this covers the partial-unwind round trip the ValidateChain parent-link
 // comment guards.
 func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
+	validateForkPayloadOffNonTipCanonicalBlock(t)
+}
+
+// With READ_AHEAD_WAIT on, validation that unwinds must not wait for the warmup
+// suspension it holds itself.
+func TestValidateForkPayloadOffNonTipCanonicalBlockWithReadAheadWait(t *testing.T) {
+	prevWait, prevParallel := dbg.ReadAheadWait, dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.ReadAheadWait, dbg.Exec3Parallel = prevWait, prevParallel })
+	dbg.ReadAheadWait = true
+	for name, parallel := range map[string]bool{"parallel": true, "serial": false} {
+		t.Run(name, func(t *testing.T) {
+			dbg.Exec3Parallel = parallel
+			hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
+			defer hang.Stop()
+			validateForkPayloadOffNonTipCanonicalBlock(t)
+		})
+	}
+}
+
+func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -4083,8 +4103,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Same-sender txs that send value, revert with value and read the sender's
-// balance must reach the state root of serial execution, whether parallel exec
+// Same-sender txs that send value, revert with value, read the sender's balance and
+// create contracts must reach the state root of serial execution, whether parallel exec
 // charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
@@ -4105,9 +4125,13 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
-		for n := range uint64(24) {
+		// Init codes: store a constant; store the creator's balance; revert.
+		storeOne := []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}
+		storeCallerBalance := []byte{byte(vm.CALLER), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}
+		revertInit := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)}
+		for n := range uint64(35) {
 			to, value := reader, uint64(0)
-			switch n % 4 {
+			switch n % 7 {
 			case 1:
 				to, value = sink, 1
 			case 2:
@@ -4116,8 +4140,13 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 				to, value = common.Address{0xdd, byte(n)}, 7
 			}
 			slot := common.BigToHash(new(big.Int).SetUint64(n))
-			tx, err := types.SignTx(types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:]),
-				*types.LatestSignerForChainID(nil), privKey)
+			txn := types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:])
+			for k, initCode := range [][]byte{storeOne, storeCallerBalance, revertInit} {
+				if n%7 == uint64(4+k) {
+					txn = types.NewContractCreation(n, uint256.NewInt(0), 100_000, uint256.NewInt(10*common.GWei), initCode)
+				}
+			}
+			tx, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), privKey)
 			require.NoError(t, err)
 			b.AddTx(tx)
 		}
@@ -4139,9 +4168,11 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		name               string
 		senderNonce, nonce uint64
 		value, feeCap      uint256.Int
+		create             bool
 		wantErr            error
 	}{
 		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
+		{name: "creation nonce too high", nonce: 1, feeCap: feeCap, create: true, wantErr: protocol.ErrNonceTooHigh},
 		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
 		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
 		{name: "gas above balance", feeCap: *uint256.NewInt(100_000 * common.GWei), wantErr: protocol.ErrInsufficientFunds},
@@ -4155,9 +4186,13 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 				Alloc:  types.GenesisAlloc{crypto.PubkeyToAddress(privKey.PublicKey): {Balance: balance, Nonce: tc.senderNonce}},
 			}
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+			to, gas := &common.Address{0xaa}, uint64(21_000)
+			if tc.create {
+				to, gas = nil, 60_000
+			}
 			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 				tx, err := types.SignTx(&types.DynamicFeeTransaction{
-					CommonTx: types.CommonTx{Nonce: tc.nonce, GasLimit: 21_000, To: &common.Address{0xaa}, Value: tc.value},
+					CommonTx: types.CommonTx{Nonce: tc.nonce, GasLimit: gas, To: to, Value: tc.value},
 					ChainID:  *chain.TestChainOsakaConfig.ChainID,
 					TipCap:   *uint256.NewInt(common.GWei),
 					FeeCap:   tc.feeCap,
