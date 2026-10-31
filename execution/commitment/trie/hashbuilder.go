@@ -55,6 +55,36 @@ type HashBuilder struct {
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 
 	topHashesCopy []byte
+
+	// leafHashes, when set, answers the hash of the n-th leaf where leafHashSet[n] is true instead of
+	// hashing it; leafKeys, when set, records every leaf's key suffix.
+	leafHashes  [][length2.Hash]byte
+	leafHashSet []bool
+	leafKeys    *[][]byte
+	leafN       int
+}
+
+// SetLeafHashes makes the builder take the hash of its n-th leaf from hashes[n] where set[n].
+func (hb *HashBuilder) SetLeafHashes(hashes [][length2.Hash]byte, set []bool) {
+	hb.leafHashes, hb.leafHashSet, hb.leafN = hashes, set, 0
+}
+
+// RecordLeafKeys appends every leaf's key suffix to dst, in leaf order.
+func (hb *HashBuilder) RecordLeafKeys(dst *[][]byte) { hb.leafKeys, hb.leafN = dst, 0 }
+
+// LeafHash returns the hash of the leaf node with key suffix key and value val, and false if the
+// node is short enough to be embedded in its parent.
+func (hb *HashBuilder) LeafHash(key []byte, val rlp.RlpSerializable) ([length2.Hash]byte, bool, error) {
+	hb.Reset()
+	if err := hb.leafHashWithKeyVal(key, val); err != nil {
+		return [length2.Hash]byte{}, false, err
+	}
+	var h [length2.Hash]byte
+	if hb.hashBuf[0] != 0x80+length2.Hash {
+		return h, false, nil
+	}
+	copy(h[:], hb.hashBuf[1:])
+	return h, true, nil
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -133,8 +163,15 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) e
 		kl = 1
 	}
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
-	if err != nil {
+	n := hb.leafN
+	hb.leafN++
+	if hb.leafKeys != nil {
+		*hb.leafKeys = append(*hb.leafKeys, bytes.Clone(key))
+	}
+	if n < len(hb.leafHashSet) && hb.leafHashSet[n] {
+		hb.hashBuf[0] = 0x80 + length2.Hash
+		copy(hb.hashBuf[1:], hb.leafHashes[n][:])
+	} else if err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val); err != nil {
 		return err
 	}
 	if hb.trace {
