@@ -77,7 +77,7 @@ An L1 reorg that drops settlements moves the head and the safe block back to wha
 
 ## Halting
 
-The node exits with status `3` when a settled block contradicts canonical L1: the block it derives does not hash to the root L1 committed to, the DA payload cannot be read, or an L2-to-L1 call L1 settled was never made on L2. It logs `[eez] local chain diverged from L1` at critical level (`CRIT`), with an `event` naming the failed check. The same evidence on an L1 block that has since been reorged is not a divergence; the follower logs a warning, rewinds and continues. Every condition that stops the node, including the reorgs above, logs `[eez] follower halted, stopping the node` at critical level. Other failures, such as an unreachable L1 node, are retried.
+The node exits with status `3` when a settled block contradicts canonical L1: the block it derives does not hash to the root L1 committed to, the DA payload cannot be read, or an L2-to-L1 call L1 settled was never made on L2. It logs `[eez] local chain diverged from L1` at critical level (`CRIT`), with an `event` naming the failed check. The same evidence on an L1 block that has since been reorged is not a divergence; the follower logs a warning, rewinds and continues. Every condition that stops the node, including the reorgs above, logs `[eez] follower halted, stopping the node` at critical level. Other failures, such as an unreachable L1 node, are retried. A failed L1 poll logs `[eez] L1 poll failed, retrying` (`eez.l1_watcher.poll.failed`) as a warning, at error level once polls have failed for a minute, and the first poll that succeeds logs `[eez] L1 poll recovered`.
 
 ## RPC
 

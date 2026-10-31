@@ -197,7 +197,7 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		l2:      l2,
 		reader:  reader,
 		scanner: scanner,
-		watcher: l1.NewWatcher(reader, c.ReorgDepth),
+		watcher: l1.NewWatcher(reader, c.ReorgDepth, logger),
 		chain:   chain,
 		deriver: d,
 		logger:  logger,

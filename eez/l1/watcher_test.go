@@ -16,9 +16,13 @@
 package l1_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/recording"
 )
@@ -76,7 +81,7 @@ func fork(t *testing.T, c *recording.MemoryChain, ancestor, head uint64, branch 
 
 func seeded(t *testing.T, c *recording.MemoryChain, at uint64, depth int) *l1.Watcher {
 	t.Helper()
-	w := l1.NewWatcher(c, depth)
+	w := l1.NewWatcher(c, depth, log.New())
 	require.NoError(t, w.Seed(context.Background(), at))
 	return w
 }
@@ -223,6 +228,49 @@ func TestWatcherRun(t *testing.T) {
 	require.ErrorIs(t, <-done, l1.ErrReorgTooDeep)
 }
 
+// down fails head reads until fails reads have failed, as an unreachable L1
+// node.
+type down struct {
+	*recording.MemoryChain
+	fails atomic.Int32
+}
+
+func (d *down) Head(ctx context.Context) (*l1.Header, error) {
+	if d.fails.Add(-1) >= 0 {
+		return nil, errors.New("connection refused")
+	}
+	return d.MemoryChain.Head(ctx)
+}
+
+// TestWatcherRunLogsFailures logs each failed poll, at error level past the
+// grace, and the recovery.
+func TestWatcherRunLogsFailures(t *testing.T) {
+	c := linear(t, 3)
+	r := &down{MemoryChain: c}
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	w := l1.NewWatcher(r, l1.DefaultReorgDepth, logger)
+	require.NoError(t, w.Seed(t.Context(), 3))
+	w.SetGrace(20 * time.Millisecond)
+	extend(t, c, 4, 0)
+	r.fails.Store(6)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	out := make(chan l1.Event, 1)
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx, 10*time.Millisecond, 0, nil, out) }()
+	require.Equal(t, l1.NewHead{Head: header(4, 0)}, <-out)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	logs := buf.String()
+	require.Equal(t, 6, strings.Count(logs, `msg="[eez] L1 poll failed, retrying" event=eez.l1_watcher.poll.failed err="connection refused"`))
+	require.Contains(t, logs, `lvl=warn msg="[eez] L1 poll failed, retrying"`)
+	require.Contains(t, logs, `lvl=eror msg="[eez] L1 poll failed, retrying"`)
+	require.Contains(t, logs, `lvl=info msg="[eez] L1 poll recovered" failedFor=`)
+}
+
 // TestSeedAtFirstServedBlock seeds the ring with the ancestors the source
 // serves, as a recording that starts above genesis does.
 func TestSeedAtFirstServedBlock(t *testing.T) {
@@ -231,7 +279,7 @@ func TestSeedAtFirstServedBlock(t *testing.T) {
 	for n := uint64(6); n <= 8; n++ {
 		require.NoError(t, c.Append(&recording.Block{Header: l1.Header{Number: n, Hash: hashOf(n, 0), ParentHash: hashOf(n-1, 0)}}))
 	}
-	w := l1.NewWatcher(c, l1.DefaultReorgDepth)
+	w := l1.NewWatcher(c, l1.DefaultReorgDepth, log.New())
 	require.NoError(t, w.Seed(context.Background(), 8))
 	require.Equal(t, hashOf(8, 0), w.Tip().Hash)
 	require.NoError(t, c.Reorg(6, &recording.Block{Header: l1.Header{Number: 7, Hash: hashOf(7, 1), ParentHash: hashOf(6, 0)}}))
@@ -258,10 +306,10 @@ func (l lagging) HeaderByHash(ctx context.Context, hash common.Hash) (*l1.Header
 // fails the seed, which is retried, instead of shortening the ring.
 func TestSeedMissingAncestor(t *testing.T) {
 	c := linear(t, 8)
-	w := l1.NewWatcher(lagging{c, hashOf(5, 0)}, l1.DefaultReorgDepth)
+	w := l1.NewWatcher(lagging{c, hashOf(5, 0)}, l1.DefaultReorgDepth, log.New())
 	require.ErrorIs(t, w.Seed(context.Background(), 8), l1.ErrNotFound)
 
-	w = l1.NewWatcher(c, l1.DefaultReorgDepth)
+	w = l1.NewWatcher(c, l1.DefaultReorgDepth, log.New())
 	require.NoError(t, w.Seed(context.Background(), 8))
 	fork(t, c, 1, 9, 1)
 	events, err := w.Poll(context.Background())
@@ -272,7 +320,7 @@ func TestSeedMissingAncestor(t *testing.T) {
 // TestRunOnHeads polls as soon as the source announces a head.
 func TestRunOnHeads(t *testing.T) {
 	c := linear(t, 3)
-	w := l1.NewWatcher(c, l1.DefaultReorgDepth)
+	w := l1.NewWatcher(c, l1.DefaultReorgDepth, log.New())
 	require.NoError(t, w.Seed(context.Background(), 3))
 	heads := make(chan struct{}, 1)
 	out := make(chan l1.Event, 4)

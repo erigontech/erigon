@@ -30,3 +30,6 @@ var MapRPCError = mapError
 func NewRemoteHeads(backend remoteproto.ETHBACKENDClient, pause time.Duration) *Remote {
 	return &Remote{backend: backend, logger: log.New(), headRetry: pause}
 }
+
+// SetGrace sets how long w's polls may fail before they log at error level.
+func (w *Watcher) SetGrace(d time.Duration) { w.grace = d }
