@@ -18,6 +18,7 @@ package state
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -185,6 +186,47 @@ func TestValSkip_LifecyclePromotionBumpsStamp(t *testing.T) {
 			require.False(t, vm.QuietBelow(5, stamp), "promotion of a %s cell must bump", name)
 		})
 	}
+}
+
+func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x0b"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	promotions := map[string]func(vm *VersionMap, ws *WriteSet){
+		"validated": func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesValidated(ws, nil) },
+		"complete":  func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesComplete(ws) },
+	}
+	for name, promote := range promotions {
+		vm := newStampedMap(32)
+		flushLifecycle(vm, addr, 1, SelfDestructPath)
+		ws := newWriteSet(&VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
+			Val:         *uint256.NewInt(1),
+		})
+		vm.FlushVersionedWrites(ws, false)
+		stamp := vm.WriteSeq()
+		promote(vm, ws)
+		require.False(t, vm.QuietBelow(5, stamp), "%s: a storage-only promotion on an entry with lifecycle cells must bump", name)
+	}
+}
+
+func TestQuietBelow_FlushInFlightBeforeEntryLock(t *testing.T) {
+	t.Parallel()
+	vm := newStampedMap(32)
+	addr := accounts.InternAddress(common.HexToAddress("0x0c"))
+	flushLifecycle(vm, addr, 1, BalancePath)
+	stamp := vm.WriteSeq()
+	e := vm.load(addr)
+	e.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		flushLifecycle(vm, addr, 3, BalancePath)
+	}()
+	require.Eventually(t, func() bool { return !vm.QuietBelow(5, stamp) }, time.Second, time.Millisecond,
+		"the stamp bracket must open before the flush takes the entry lock")
+	e.mu.Unlock()
+	<-done
 }
 
 func TestValSkip_CompleteOnLifecycleCellBumps(t *testing.T) {

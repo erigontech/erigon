@@ -274,10 +274,6 @@ func (vm *VersionMap) InitStamps(lastTxIndex int) {
 func (vm *VersionMap) WriteSeq() uint64 { return vm.writeSeq.Load() }
 
 func (st *writeStamps) slot(txIdx int) int {
-	return min(max(txIdx+1, 0), st.n-1)
-}
-
-func (st *writeStamps) writerSlot(txIdx int) int {
 	if txIdx < -1 || txIdx > st.n-2 {
 		panic(fmt.Sprintf("write stamp: txIdx %d outside [-1, %d]", txIdx, st.n-2))
 	}
@@ -286,7 +282,7 @@ func (st *writeStamps) writerSlot(txIdx int) int {
 
 func (vm *VersionMap) mutBegin(txIdx int) {
 	if st := vm.stamps; st != nil {
-		for k := st.writerSlot(txIdx) + 1; k <= st.n; k += k & -k {
+		for k := st.slot(txIdx) + 1; k <= st.n; k += k & -k {
 			st.inflight[k].Add(1)
 		}
 	}
@@ -298,7 +294,7 @@ func (vm *VersionMap) mutEnd(txIdx int) {
 		return
 	}
 	seq := vm.writeSeq.Add(1)
-	slot := st.writerSlot(txIdx)
+	slot := st.slot(txIdx)
 	for k := slot + 1; k <= st.n; k += k & -k {
 		for {
 			old := st.last[k].Load()
@@ -333,42 +329,6 @@ func (vm *VersionMap) QuietBelow(txIdx int, stamp uint64) bool {
 		}
 	}
 	return true
-}
-
-func (ws *WriteSet) txIndex() int {
-	for _, vw := range ws.address {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.balance {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.nonce {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.incarnation {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.selfDestruct {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.createContract {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.code {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.codeHash {
-		return vw.Version.TxIndex
-	}
-	for _, vw := range ws.codeSize {
-		return vw.Version.TxIndex
-	}
-	for _, inner := range ws.storage {
-		for _, vw := range inner {
-			return vw.Version.TxIndex
-		}
-	}
-	panic("write stamp: empty write set")
 }
 
 type originStorageKey struct {
