@@ -103,6 +103,26 @@ func TestArrivalValidSkipsOnlyWhenNoLowerWrite(t *testing.T) {
 	require.Equal(t, 1, be.cntValidationSkip)
 }
 
+func TestArrivalValidOracleIgnoresLowerWriteAfterSkip(t *testing.T) {
+	armAssert(t)
+	be, res := newArrivalExecutor(t)
+	be.oracleHook = func() { writeBalanceBelowReader(be.versionMap) }
+	require.NotPanics(t, func() { require.True(t, be.arrivalValid(arrivalReader, res.ValStamp)) },
+		"a lower write landing after the skip decision is finalize's to catch, not the oracle's")
+}
+
+func TestDeliveredStampedResultSkipsArrivalValidation(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b}, []accounts.Address{c, d}))
+	s.stamp = true
+	s.deliverTx(0, 0, state.ReadSet{})
+	require.True(t, s.be.validateTasks.checkComplete(0))
+	require.Equal(t, 1, s.be.cntValidationSkip, "a stamped result with no lower write since must skip arrival validation")
+}
+
 func TestArrivalValidOraclePanicsOnStaleSkip(t *testing.T) {
 	armAssert(t)
 	be, _ := newArrivalExecutor(t)

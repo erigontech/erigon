@@ -2876,6 +2876,8 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
 
+	oracleHook func()
+
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
 	// between finalize and publish.
@@ -3411,13 +3413,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 			continue
 		}
 		txVersion := txResult.Task.Version()
-		if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-			func(rv, wv state.Version) state.VersionValidity {
-				if rv != wv {
-					return state.VersionInvalid
-				}
-				return state.VersionValid
-			}, false, "") == state.VersionValid {
+		if be.validateNow(txVersion.TxIndex) {
 			continue
 		}
 		be.cntValidationFail++
@@ -3475,8 +3471,13 @@ func (be *blockExecutor) arrivalValid(txIdx int, valStamp uint64) bool {
 		return be.validateNow(txIdx)
 	}
 	be.cntValidationSkip++
-	if dbg.AssertEnabled && !be.validateNow(txIdx) && be.versionMap.QuietBelow(txIdx, valStamp) {
-		panic(fmt.Sprintf("validation skip oracle: tx %d skipped arrival validation but is stale", txIdx))
+	if dbg.AssertEnabled {
+		if be.oracleHook != nil {
+			be.oracleHook()
+		}
+		if !be.validateNow(txIdx) && be.versionMap.QuietBelow(txIdx, valStamp) {
+			panic(fmt.Sprintf("validation skip oracle: tx %d skipped arrival validation but is stale", txIdx))
+		}
 	}
 	return true
 }
