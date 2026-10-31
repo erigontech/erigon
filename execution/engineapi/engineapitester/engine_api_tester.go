@@ -25,6 +25,7 @@ import (
 	"net"
 	"path"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -402,7 +403,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if args.EngineApiClientTimeout != nil {
 		engineApiClientOpts = append(engineApiClientOpts, engineapi.WithJsonRpcClientTimeout(*args.EngineApiClientTimeout))
 	}
-	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
+	engineApiUrl := "http://" + net.JoinHostPort(httpConfig.AuthRpcHTTPListenAddress, strconv.Itoa(httpConfig.AuthRpcPort))
 	engineApiClient, err := engineapi.DialJsonRpcClient(
 		engineApiUrl,
 		jwtSecret,

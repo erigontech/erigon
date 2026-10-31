@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -733,7 +734,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 
 	// Separate Websocket handler if websocket port flag specified
 	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
-		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.WebsocketPort)
 		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isWebsocket(r) {
 				wsHandler.ServeHTTP(w, r)
@@ -753,7 +754,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	if cfg.HttpServerEnabled {
-		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+		httpEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
 			httpEndpoint = cfg.HttpURL
 		}
@@ -779,7 +780,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if cfg.HttpsPort == 0 {
 			cfg.HttpsPort = cfg.HttpPort + 363
 		}
-		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
+		httpsEndpoint := "tcp://" + listenHostPort(cfg.HttpsListenAddress, cfg.HttpsPort)
 		if cfg.HttpsURL != "" {
 			httpsEndpoint = cfg.HttpsURL
 		}
@@ -808,7 +809,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		grpcEndpoint string
 	)
 	if cfg.GRPCServerEnabled {
-		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		grpcEndpoint = listenHostPort(cfg.GRPCListenAddress, cfg.GRPCPort)
 		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil { //nolint:noctx
 			return fmt.Errorf("could not start GRPC listener: %w", err)
 		}
@@ -936,8 +937,16 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 // server and is invoked only after the same JWT check as authenticated JSON-RPC.
 var AuthenticatedEngineRESTHandler http.Handler
 
+// listenHostPort accepts IPv6 hosts with or without brackets.
+func listenHostPort(host string, port int) string {
+	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
 func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
-	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
+	engineHttpEndpoint := "tcp://" + listenHostPort(cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)

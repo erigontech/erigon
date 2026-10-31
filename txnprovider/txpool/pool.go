@@ -1510,12 +1510,15 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 	return reasons, goodTxns, nil
 }
 
-// punishSpammer by drop half of it's transactions with high nonce
+// punishSpammer drops high-nonce transactions without breaking local nonce chains.
 func (p *TxPool) punishSpammer(spammer uint64) {
 	count := p.all.count(spammer) / 2
 	if count > 0 {
 		txnsToDelete := make([]*metaTxn, 0, count)
 		p.all.descend(spammer, func(mt *metaTxn) bool {
+			if mt.subPool&IsLocal != 0 {
+				return false
+			}
 			txnsToDelete = append(txnsToDelete, mt)
 			count--
 			return count > 0
