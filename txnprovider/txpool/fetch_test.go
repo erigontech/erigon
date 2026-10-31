@@ -934,3 +934,30 @@ func TestAlternateAnnouncementIsRecorded(t *testing.T) {
 	slot := &TxnSlot{IDHash: hash, Size: 100, Txn: &types.DynamicFeeTransaction{}}
 	require.Error(t, a.fetch.checkPooledTxnAnnouncement(gointerfaces.ConvertHashToH512(peerB), slot))
 }
+
+func TestExpiredPeerReannouncementLetsAlternateBeAsked(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	*a.now = a.now.Add(txFetchTimeout)
+	a.announce(t, peerA, hash)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
+}
+
+func TestPooledTxnRequestHoldsAtMost256Hashes(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, 300)
+	for i := range hashes {
+		hashes[i] = [32]byte{byte(i), byte(i >> 8), 0xcc}
+	}
+	a.announce(t, peerA, hashes[:150]...)
+	a.announce(t, peerA, hashes[150:]...)
+	a.announce(t, peerB, hashes...)
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerA, peerB, peerB}, a.requestedFrom)
+}

@@ -185,6 +185,9 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 			}
 			continue
 		}
+		if ok && peer == r.peer && len(r.alternates) > 0 {
+			continue
+		}
 		if ok {
 			r.alternates = slices.DeleteFunc(r.alternates, func(a fetchPeer) bool { return a == peer })
 			r.at, r.peer = now, peer
@@ -240,16 +243,21 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 }
 
+// requestPooledTxns splits hashes into requests of 256, because a responder answers only the first 256.
 func (f *Fetch) requestPooledTxns(sentryClient sentryproto.SentryClient, peerID *typesproto.H512, hashes Hashes) error {
-	encodedRequest, err := EncodeGetPooledTransactions66(hashes, uint64(1), nil)
-	if err != nil {
-		return err
+	for chunk := range slices.Chunk(hashes, 256*32) {
+		encodedRequest, err := EncodeGetPooledTransactions66(chunk, uint64(1), nil)
+		if err != nil {
+			return err
+		}
+		if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
+			Data:   &sentryproto.OutboundMessageData{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
+			PeerId: peerID,
+		}, &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
 	}
-	_, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
-		Data:   &sentryproto.OutboundMessageData{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
-		PeerId: peerID,
-	}, &grpc.EmptyCallOption{})
-	return err
+	return nil
 }
 
 // recordAnnouncement remembers the (type, size) a peer promised for each
