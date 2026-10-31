@@ -660,6 +660,13 @@ func TestBLSRepeatedPointScalars(t *testing.T) {
 	}
 }
 
+// A point addition computes in microseconds while a hit costs tens of nanoseconds.
+func TestPointAdditionsAreCached(t *testing.T) {
+	for _, p := range []PrecompiledContract{&bn254AddIstanbul{}, &bn254AddByzantium{}, &bls12381G1Add{}, &bls12381G2Add{}} {
+		require.NotNil(t, precompileCacheKey(p), p.Name())
+	}
+}
+
 func TestPrecompileCacheKeyNormalizes(t *testing.T) {
 	key, ok := zeroPaddedKey(128)(append([]byte{1, 2}, make([]byte, 300)...))
 	require.True(t, ok)

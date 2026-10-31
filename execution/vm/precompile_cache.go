@@ -99,12 +99,18 @@ func precompileCacheKey(p PrecompiledContract) func([]byte) ([]byte, bool) {
 		return zeroPaddedKey(128)
 	case *bigModExp:
 		return modExpKey
+	case *bn254AddIstanbul, *bn254AddByzantium:
+		return zeroPaddedKey(128)
 	case *bn254ScalarMulIstanbul, *bn254ScalarMulByzantium:
 		return zeroPaddedKey(96)
 	case *bn254PairingIstanbul, *bn254PairingByzantium:
 		return func(input []byte) ([]byte, bool) { return input, len(input)%192 == 0 }
 	case *blake2F:
 		return lengthKey(blake2FInputLength)
+	case *bls12381G1Add:
+		return lengthKey(256)
+	case *bls12381G2Add:
+		return lengthKey(512)
 	case *bls12381G1MultiExp:
 		return lengthMultipleKey(160)
 	case *bls12381G2MultiExp:
