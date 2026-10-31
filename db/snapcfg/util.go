@@ -397,12 +397,19 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 }
 
 func fromToml(in []byte) PreverifiedItems {
-	var outMap map[string]string
-	if err := toml.Unmarshal(in, &outMap); err != nil {
+	items, err := parseToml(in)
+	if err != nil {
 		panic(err)
 	}
+	return items
+}
 
-	return preverified.ItemsFromMap(outMap)
+func parseToml(in []byte) (PreverifiedItems, error) {
+	var outMap map[string]string
+	if err := toml.Unmarshal(in, &outMap); err != nil {
+		return nil, err
+	}
+	return preverified.ItemsFromMap(outMap), nil
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
@@ -616,6 +623,7 @@ func FetchTomlFromURL(ctx context.Context, url string) ([]byte, error) {
 // precedence over both forceChainTomlURL and the default path.
 func LoadRemotePreverified(ctx context.Context, chainName string, forceChainTomlURL string) error {
 	var hashes []byte
+	var items PreverifiedItems
 	switch {
 	case os.Getenv(RemotePreverifiedEnvKey) != "":
 		path := os.Getenv(RemotePreverifiedEnvKey)
@@ -625,6 +633,10 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
+		items, err = parseToml(b)
+		if err != nil {
+			return fmt.Errorf("parsing remote preverified override file %q: %w", path, err)
+		}
 		hashes = b
 	case forceChainTomlURL != "":
 		log.Info("Loading snapshot hashes from forced URL", "chain", chainName, "url", forceChainTomlURL)
@@ -633,24 +645,40 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		if err != nil {
 			return fmt.Errorf("fetching forced chain.toml URL %q: %w", forceChainTomlURL, err)
 		}
+		items, err = parseToml(b)
+		if err != nil {
+			return fmt.Errorf("parsing forced chain.toml URL %q: %w", forceChainTomlURL, err)
+		}
 		hashes = b
 	default:
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
 		var err error
-		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		hashes, items, err = fetchChainTomlItems(ctx, R2, chainName)
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
-			hashes, err = FetchChainToml(ctx, Github, snapshotGitBranch, chainName)
+			hashes, items, err = fetchChainTomlItems(ctx, Github, chainName)
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	registry.Set(chainName, Preverified{Items: fromToml(hashes)}, hashes)
+	registry.Set(chainName, Preverified{Items: items}, hashes)
 	return nil
+}
+
+func fetchChainTomlItems(ctx context.Context, source SnapshotSource, chainName string) ([]byte, PreverifiedItems, error) {
+	b, err := FetchChainToml(ctx, source, snapshotGitBranch, chainName)
+	if err != nil {
+		return nil, nil, err
+	}
+	items, err := parseToml(b)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing snapshot hashes for chain %q: %w", chainName, err)
+	}
+	return b, items, nil
 }
 
 func SetToml(networkName string, toml []byte, local bool) {
