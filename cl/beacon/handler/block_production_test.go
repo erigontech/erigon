@@ -3932,6 +3932,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
+	startBuilderHandoffWindow(handler, fixture.block.Slot)
 	forkEpoch := state.Epoch(fixture.productionState)
 	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
 	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
@@ -4045,6 +4046,7 @@ func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.B
 	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
 	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
 	handler.beaconChainCfg.InitializeForkSchedule()
+	startBuilderHandoffWindow(handler, fixture.block.Slot)
 	sinceCutoff := proposalWaitCutoff(time.Unix(0, 0), handler.beaconChainCfg, clparams.GloasVersion).Sub(time.Unix(0, 0))
 	handler.ethClock = slotTimeClock{EthereumClock: handler.ethClock, slotStart: time.Now().Add(time.Second - sinceCutoff)}
 
