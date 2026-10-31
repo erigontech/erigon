@@ -393,7 +393,7 @@ func (b *builderClient) builderEndpoint(ctx context.Context, policy BuilderTarge
 		return builderTarget{}, errors.New("builder URL must be an HTTP(S) URL without user information")
 	}
 	hostname := target.Hostname()
-	addresses := []net.IPAddr(nil)
+	var addresses []net.IPAddr
 	if ip := net.ParseIP(hostname); ip != nil {
 		addresses = []net.IPAddr{{IP: ip}}
 	} else {
