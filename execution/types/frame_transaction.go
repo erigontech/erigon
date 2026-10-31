@@ -44,6 +44,7 @@ const (
 	FrameDefault = iota
 	FrameVerify
 	FrameSender
+	FramePostTx
 )
 
 const (
@@ -226,8 +227,11 @@ func (tx *FrameTransaction) Validate() error {
 	var expirySeen bool
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
-		if frame.Mode > FrameSender || frame.Flags >= 8 {
+		if frame.Mode > FramePostTx || frame.Flags >= 8 {
 			return fmt.Errorf("invalid frame %d mode or flags", i)
+		}
+		if i > 0 && tx.Frames[i-1].Mode == FramePostTx && frame.Mode != FramePostTx {
+			return fmt.Errorf("invalid frame %d mode or flags: POST_TX frames must form a trailing suffix", i)
 		}
 		if frame.Mode != FrameSender && !frame.Value.IsZero() {
 			return fmt.Errorf("frame %d value requires sender mode", i)
@@ -236,7 +240,7 @@ func (tx *FrameTransaction) Validate() error {
 			return fmt.Errorf("frame %d execution approval requires sender target", i)
 		}
 		atomic := frame.Flags&FrameAtomicBatch != 0
-		if atomic && (frame.Mode == FrameVerify || i+1 == len(tx.Frames) || tx.Frames[i+1].Mode == FrameVerify) {
+		if atomic && (frame.Mode == FrameVerify || frame.Mode == FramePostTx || i+1 == len(tx.Frames) || tx.Frames[i+1].Mode == FrameVerify || tx.Frames[i+1].Mode == FramePostTx) {
 			return fmt.Errorf("invalid atomic batch at frame %d", i)
 		}
 		if (atomic || i > 0 && tx.Frames[i-1].Flags&FrameAtomicBatch != 0) && frame.Flags&FrameApproveBoth != 0 {

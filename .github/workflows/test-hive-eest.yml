@@ -223,7 +223,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 282 # 280 EIP-7906 + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -232,7 +232,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 282 # 280 EIP-7906 + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
         shell: bash
         run: |

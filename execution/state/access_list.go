@@ -32,6 +32,8 @@ import (
 type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
+	// TXDIFF may warm a slot without warming its address (EIP-7906).
+	slotsOnly map[frameStorageSlot]struct{}
 
 	// Memo of the last resolved (address -> slot set) and the last slot known
 	// warm within it: repeated AddSlot on the same addr skips the addresses
@@ -45,8 +47,9 @@ type accessList struct {
 	// A cleared, truncated or reverted map keeps its buckets for the next call
 	// to reuse, so what a pooled list pins is the largest each has been, not
 	// what it holds now. Every shrink records it: see markPeak.
-	peak     []int
-	addrPeak int
+	peak          []int
+	addrPeak      int
+	slotsOnlyPeak int
 }
 
 // newAccessList creates a new accessList.
@@ -67,6 +70,7 @@ func (al *accessList) Reset() {
 	al.markAddrPeak()
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	clear(al.slotsOnly)
 	al.dropMemo()
 }
 
@@ -76,7 +80,7 @@ func (al *accessList) entries() int {
 		al.markPeak(i, len(s))
 	}
 	al.markAddrPeak()
-	total := al.addrPeak
+	total := al.addrPeak + al.slotsOnlyPeak
 	for _, n := range al.peak {
 		total += n
 	}
@@ -113,6 +117,9 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
+	if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
+		return al.ContainsAddress(address), true
+	}
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return true, true
@@ -134,8 +141,10 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
-		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		addresses:     maps.Clone(al.addresses),
+		slotsOnly:     maps.Clone(al.slotsOnly),
+		slotsOnlyPeak: len(al.slotsOnly),
+		slots:         make([]map[accounts.StorageKey]struct{}, len(al.slots)),
 	}
 	for i, slotMap := range al.slots {
 		cp.slots[i] = maps.Clone(slotMap)
@@ -159,6 +168,9 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
+	if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
+		return al.AddAddress(address), false
+	}
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return false, false
@@ -174,6 +186,18 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		return false, true
 	}
 	return al.addSlotSlow(address, slot)
+}
+
+func (al *accessList) AddSlotOnly(address accounts.Address, slot accounts.StorageKey) bool {
+	if _, present := al.Contains(address, slot); present {
+		return false
+	}
+	if al.slotsOnly == nil {
+		al.slotsOnly = make(map[frameStorageSlot]struct{})
+	}
+	al.slotsOnly[frameStorageSlot{address, slot}] = struct{}{}
+	al.slotsOnlyPeak = max(al.slotsOnlyPeak, len(al.slotsOnly))
+	return true
 }
 
 func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {

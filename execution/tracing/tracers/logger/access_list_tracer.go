@@ -239,6 +239,7 @@ var accessListOpcodes = tracing.NewOpcodeMask(
 	byte(vm.BALANCE), byte(vm.SELFDESTRUCT),
 	byte(vm.DELEGATECALL), byte(vm.CALL), byte(vm.STATICCALL), byte(vm.CALLCODE),
 	byte(vm.CREATE), byte(vm.CREATE2),
+	byte(vm.TXDIFF),
 )
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
@@ -252,6 +253,24 @@ func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, c
 	// StackData crosses an interface, so it cannot inline: keep it off the
 	// opcodes that don't read the stack.
 	switch op := vm.OpCode(opcode); op {
+	case vm.TXDIFF:
+		stack := scope.StackData()
+		if err != nil || len(stack) < 3 {
+			return
+		}
+		param := &stack[len(stack)-1]
+		if !param.IsUint64() || param.Uint64() > 5 {
+			return
+		}
+		address := common.Address(stack[len(stack)-2].Bytes20())
+		if param.Uint64() <= 1 {
+			a.list.addSlot(address, stack[len(stack)-3].Bytes32())
+			if _, created := a.createdContracts[address]; !created {
+				a.markUsedBeforeCreation(address)
+			}
+		} else {
+			a.addTouchedAddress(address)
+		}
 	case vm.SLOAD, vm.SSTORE:
 		stackData := scope.StackData()
 		if len(stackData) < 1 {

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -457,4 +458,108 @@ func TestFrameFlatCallTracerFailedFrame(t *testing.T) {
 	require.NotNil(t, result[0].Result)
 	require.NotZero(t, result[0].Result.GasUsed)
 	require.Nil(t, result[2].Result)
+}
+
+func TestPostTxParityTracer(t *testing.T) {
+	evm, tx := frameTraceTestEnv(t)
+	body := accounts.InternAddress(*tx.Frames[1].Target)
+	code := program.New().Push(0xaabbccdd).Push0().Op(vm.MSTORE).Push(4).Push(28).Op(vm.LOG0).Bytes()
+	require.NoError(t, evm.IntraBlockState().SetCode(body, code, tracing.CodeChangeUnspecified))
+	assertion := common.HexToAddress("0x3000")
+	code = program.New().Push0().Push0().Op(vm.TXTRACE, vm.POP).
+		Push0().Push(tx.SenderAddress).Push(0x0a).Op(vm.TXDIFF, vm.POP).
+		Push(4).Push0().Push(32).Push0().Op(vm.EVENTDATACOPY, vm.STOP).Bytes()
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(assertion), code, tracing.CodeChangeUnspecified))
+	tx.Frames = append(tx.Frames, types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}})
+	result, receipt := traceParityFrame(t, evm, tx, true)
+	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+	seen := 0
+	for _, op := range result.VmTrace.Ops[2].Sub.Ops {
+		switch op.Op {
+		case "TXTRACE":
+			require.Equal(t, []string{"0x0"}, op.Ex.Push)
+			seen++
+		case "TXDIFF":
+			require.Equal(t, []string{"0x1"}, op.Ex.Push)
+			seen++
+		case "EVENTDATACOPY":
+			require.Equal(t, &VmTraceMem{Off: 32, Data: "0xaabbccdd"}, op.Ex.Mem)
+			seen++
+		}
+	}
+	require.Equal(t, 3, seen)
+}
+
+func TestPostTxPrestateTracer(t *testing.T) {
+	evm, tx := frameTraceTestEnv(t)
+	queried := common.HexToAddress("0x3000")
+	key := common.HexToHash("0x07")
+	ibs := evm.IntraBlockState()
+	require.NoError(t, ibs.SetBalance(accounts.InternAddress(queried), uint256.Int{1}, tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetState(accounts.InternAddress(queried), accounts.InternKey(key), uint256.Int{42}))
+	code := program.New().Push(key).Push(queried).Push0().Op(vm.TXDIFF, vm.POP, vm.STOP).Bytes()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(*tx.Frames[1].Target), code, tracing.CodeChangeUnspecified))
+	tx.Frames[1].Mode = types.FramePostTx
+	var trace map[common.Address]struct {
+		Storage map[common.Hash]common.Hash `json:"storage"`
+	}
+	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{}`)), &trace))
+	require.Contains(t, trace, queried)
+	require.Equal(t, common.HexToHash("0x2a"), trace[queried].Storage[key])
+}
+
+func TestPostTxPrestateTracerStorageWipe(t *testing.T) {
+	for _, tc := range []struct {
+		balance          uint64
+		constructorReads bool
+	}{{1, false}, {1, true}, {0, false}, {0, true}} {
+		for _, diffMode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("balance=%d/constructor-read=%v/diff=%v", tc.balance, tc.constructorReads, diffMode), func(t *testing.T) {
+				evm, tx := frameTraceTestEnv(t)
+				ibs := evm.IntraBlockState()
+				factory := *tx.Frames[1].Target
+				key := common.HexToHash("0x07")
+				constructor := program.New()
+				if tc.constructorReads {
+					constructor.Push(key).Op(vm.SLOAD, vm.POP)
+				}
+				initcode := constructor.ReturnData([]byte{byte(vm.STOP)}).Bytes()
+				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(initcode))
+				created := types.CreateAddress2(factory, common.Hash{}, codeHash)
+				createdAccount := accounts.InternAddress(created)
+				require.NoError(t, ibs.SetBalance(createdAccount, uint256.Int{tc.balance}, tracing.BalanceChangeUnspecified))
+				require.NoError(t, ibs.SetState(createdAccount, accounts.InternKey(key), uint256.Int{42}))
+				require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), program.New().Create2(initcode, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+				assertion := common.HexToAddress("0x4000")
+				// A wrong before-value makes the assertion jump to an invalid destination.
+				code := program.New().Push(key).Push(created).Push0().Op(vm.TXDIFF).Push(42).Op(vm.EQ, vm.ISZERO).Push0().Op(vm.JUMPI, vm.STOP).Bytes()
+				require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code, tracing.CodeChangeUnspecified))
+				tx.Frames[1].Limits = mdgas.MdGas{Execution: 200_000, State: 200_000}
+				tx.Frames = append(tx.Frames, types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}})
+				cfg := json.RawMessage(`{}`)
+				if diffMode {
+					cfg = json.RawMessage(`{"diffMode":true}`)
+				}
+				result := traceFrameRPC(t, evm, tx, "prestateTracer", cfg)
+				runtime, err := ibs.GetCode(createdAccount)
+				require.NoError(t, err)
+				require.Equal(t, []byte{byte(vm.STOP)}, runtime, "creation must survive the POST_TX assertion that reads the original value 42")
+				live, err := ibs.GetState(createdAccount, accounts.InternKey(key))
+				require.NoError(t, err)
+				require.True(t, live.IsZero(), "creation must clear the live storage")
+				if diffMode {
+					var diff map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal(result, &diff))
+					result = diff["pre"]
+				}
+				var pre map[common.Address]struct {
+					Storage map[common.Hash]common.Hash `json:"storage"`
+				}
+				require.NoError(t, json.Unmarshal(result, &pre))
+				require.Contains(t, pre, created)
+				require.Contains(t, pre[created].Storage, key, "the trace must include the cleared slot")
+				require.Equal(t, common.HexToHash("0x2a"), pre[created].Storage[key], "the trace must report the pre-creation value")
+			})
+		}
+	}
 }

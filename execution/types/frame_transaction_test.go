@@ -106,7 +106,7 @@ func TestFrameTransactionConstraints(t *testing.T) {
 		"chain ID":                  func(tx *FrameTransaction) { tx.ChainID.SetUint64(2) },
 		"empty frames":              func(tx *FrameTransaction) { tx.Frames = nil },
 		"too many frames":           func(tx *FrameTransaction) { tx.Frames = make([]Frame, 65) },
-		"mode":                      func(tx *FrameTransaction) { tx.Frames[0].Mode = 3 },
+		"mode":                      func(tx *FrameTransaction) { tx.Frames[0].Mode = 4 },
 		"flags":                     func(tx *FrameTransaction) { tx.Frames[0].Flags = 8 },
 		"value in verify":           func(tx *FrameTransaction) { tx.Frames[0].Value.SetUint64(1) },
 		"execution approval target": func(tx *FrameTransaction) { tx.Frames[0].Target = &expiry },
@@ -389,17 +389,25 @@ func TestFrameTransactionSigner(t *testing.T) {
 
 func TestFrameTransactionJSON(t *testing.T) {
 	t.Parallel()
-	input := []byte(`{"type":"0x6","chainId":"0x1","nonce":"0x7","nonceKeys":["0x1","0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],"sender":"0x0000000000000000000000000000000000001234","frames":[{"mode":"0x1","flags":"0x3","target":null,"gasLimit":"0x64","stateGasLimit":"0x0","value":"0x0","data":"0x0102"}],"signatures":[{"scheme":"0x0","signer":"0x","msg":"0x","signature":"0xaabb"}],"maxPriorityFeePerGas":"0x2","maxFeePerGas":"0x14","maxFeePerBlobGas":"0x0","blobVersionedHashes":[]}`)
+	input := []byte(`{"type":"0x6","chainId":"0x1","nonce":"0x7","nonceKeys":["0x1","0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],"sender":"0x0000000000000000000000000000000000001234","frames":[{"mode":"0x1","flags":"0x3","target":null,"gasLimit":"0x64","stateGasLimit":"0x0","value":"0x0","data":"0x0102"},{"mode":"0x3","flags":"0x0","target":null,"gasLimit":"0x64","stateGasLimit":"0x0","value":"0x0","data":"0x0304"}],"signatures":[{"scheme":"0x0","signer":"0x","msg":"0x","signature":"0xaabb"}],"maxPriorityFeePerGas":"0x2","maxFeePerGas":"0x14","maxFeePerBlobGas":"0x0","blobVersionedHashes":[]}`)
 	tx, err := UnmarshalTransactionFromJSON(input)
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), tx.GetNonce())
 	require.Equal(t, []byte{1, 2}, tx.(*FrameTransaction).Frames[0].Data)
+	require.Len(t, tx.(*FrameTransaction).Frames, 2)
+	require.EqualValues(t, FramePostTx, tx.(*FrameTransaction).Frames[1].Mode)
 	require.Equal(t, []uint256.Int{{1}, *new(uint256.Int).SetAllOne()}, tx.(*FrameTransaction).NonceKeys)
 	out, err := json.Marshal(tx)
 	require.NoError(t, err)
 	decoded, err := UnmarshalTransactionFromJSON(out)
 	require.NoError(t, err)
 	require.Equal(t, tx.Hash(), decoded.Hash())
+}
+
+func TestFrameJSONRejectsUnknownMode(t *testing.T) {
+	t.Parallel()
+	var frame Frame
+	require.EqualError(t, json.Unmarshal([]byte(`{"mode":"0x4"}`), &frame), "invalid frame mode or flags")
 }
 
 func TestFrameTransactionBlobWrapper(t *testing.T) {

@@ -49,11 +49,11 @@
   commitment-parallel: true
 - shard: statetests-devnet-sequential
   workers: 12
-  max-allowed-failures: 274 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: statetests-devnet-parallel
   workers: 12
-  max-allowed-failures: 274 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: transactiontests-stable-race
   workers: 12
@@ -108,11 +108,11 @@
   commitment-parallel: true
 - shard: blocktests-devnet-sequential
   workers: 12
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: blocktests-devnet-parallel
   workers: 12
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
@@ -365,11 +365,11 @@
   commitment-parallel: true
 - shard: enginextests-devnet-sequential
   workers: 8
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: enginextests-devnet-parallel
   workers: 8
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: enginextests-benchmark-1m-sequential
   workers: 1

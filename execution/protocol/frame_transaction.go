@@ -151,6 +151,12 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
+	bodyStart, bodySnapshot := -1, -1
+	defer func() {
+		if bodySnapshot >= 0 {
+			st.state.PopSnapshot(bodySnapshot)
+		}
+	}()
 	for i := 0; i < len(tx.Frames); i++ {
 		frame := &tx.Frames[i]
 		ctx.Index = i
@@ -191,8 +197,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			ctx.Receipts[i].Logs = st.state.LogsSince(logStart)
 		} else {
 			lastErr = frameErr
-			// A failed VERIFY rejects the transaction. Other frame failures remain
-			// receipt outcomes and allow later frames to run, subject to atomic batches.
+			// A failed VERIFY rejects the transaction. Other failures affect the
+			// receipts and the rollback boundary without invalidating the transaction.
 			if frame.Mode == types.FrameVerify {
 				return nil, fmt.Errorf("verification frame %d failed: %w", i, frameErr)
 			}
@@ -207,6 +213,22 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			if i == validation.end {
 				return nil, nil
 			}
+		}
+		if frame.Mode == types.FramePostTx && frameErr != nil {
+			if bodySnapshot < 0 {
+				return nil, errors.New("frame transaction without payment approval")
+			}
+			// Assertions preserve the complete payment-approval frame, including
+			// its state changes after APPROVE returns from a nested call.
+			st.state.RevertToSnapshot(bodySnapshot, frameErr)
+			for j := bodyStart; j <= i; j++ {
+				ctx.Receipts[j].Logs = nil
+			}
+			for j := i + 1; j < len(tx.Frames); j++ {
+				ctx.Receipts[j].Status = types.ReceiptStatusSkipped
+				st.evm.TraceSkippedFrame(j)
+			}
+			break
 		}
 		if batchStart >= 0 {
 			if frameErr != nil {
@@ -227,6 +249,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				st.state.PopSnapshot(batchSnapshot)
 				batchStart, batchSnapshot = -1, -1
 			}
+		}
+		if bodySnapshot < 0 && !ctx.Payer.IsNil() && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx {
+			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}
 	if ctx.Payer.IsNil() {
