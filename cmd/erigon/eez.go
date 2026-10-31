@@ -128,7 +128,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 	}
 	api.Attach(f)
 	svc := follower.NewService(f, func(err error) {
-		logger.Error("[eez] follower halted, stopping the node", "err", err)
+		logger.Crit("[eez] follower halted, stopping the node", "err", err)
 		go n.Close()
 	})
 	n.RegisterLifecycle(svc)

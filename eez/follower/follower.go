@@ -516,6 +516,7 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 		return fmt.Errorf("%w (L1 block %d unreadable: %w)", retryable{err}, div.L1Block, herr)
 	}
 	if herr == nil && h.Hash == div.L1BlockHash {
+		f.logger.Crit("[eez] local chain diverged from L1", "event", div.Event, "err", err)
 		return err
 	}
 	f.logger.Warn("[eez] divergence on a reorged L1 block, rewinding", "l1Block", div.L1Block, "err", err)

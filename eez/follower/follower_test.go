@@ -81,6 +81,8 @@ type node struct {
 	chain    *countingChain
 	follower *follower.Follower
 	dir      string
+	// logs holds the follower's log lines in logfmt.
+	logs *syncBuffer
 }
 
 func newNode(t *testing.T, reader l1.ChainReader) *node {
@@ -96,12 +98,13 @@ func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain)
 	t.Helper()
 	cfg := testConfig
 	cfg.Dir = n.dir
+	logs := &syncBuffer{}
 	logger := log.New()
-	logger.SetHandler(log.DiscardHandler())
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(logs, log.LogfmtFormat())))
 	counting := &countingChain{Chain: chain}
 	f, err := follower.New(reader, counting, derivertest.Config(), cfg, logger)
 	require.NoError(t, err)
-	return &node{m: n.m, chain: counting, follower: f, dir: n.dir}
+	return &node{m: n.m, chain: counting, follower: f, dir: n.dir, logs: logs}
 }
 
 // requireBlocks waits for the node's chain to hold want.
@@ -280,6 +283,7 @@ func TestHaltOnDivergence(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("follower did not halt")
 	}
+	require.Regexp(t, `lvl=crit msg="\[eez\] local chain diverged from L1" event=eez.deriver.state.diverged_post err=`, n.logs.String())
 
 	// A boot that meets the divergence halts too.
 	again := n.restart(t, c.L1, n.chain.Chain)
@@ -356,6 +360,8 @@ func TestRetryOnReorgedDivergence(t *testing.T) {
 	require.NoError(t, n.follower.Boot(t.Context()))
 	require.True(t, reader.used, "the stale logs were read")
 	n.requireBlocks(t, append(first.Blocks, replacement.Blocks...)...)
+	require.Contains(t, n.logs.String(), `lvl=warn msg="[eez] divergence on a reorged L1 block, rewinding"`)
+	require.NotContains(t, n.logs.String(), "lvl=crit")
 }
 
 // TestResume is T-DRV-4 on restart: a usable checkpoint resumes derivation

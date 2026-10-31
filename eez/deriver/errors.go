@@ -33,7 +33,9 @@ type DivergenceError struct {
 	TxHash      common.Hash
 	L2Block     uint64
 	Reason      string
-	cause       error
+	// Event is the reference client's log event for the failed check.
+	Event string
+	cause error
 }
 
 func (e *DivergenceError) Error() string {

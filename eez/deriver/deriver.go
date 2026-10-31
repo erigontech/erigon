@@ -546,12 +546,10 @@ func (d *Deriver) diverged(b *l1.ScannedBatch, l2Block uint64, format string, ar
 	return d.divergedAt("eez.deriver.diverged", b, l2Block, format, args...)
 }
 
-// divergedAt is diverged logged as event.
+// divergedAt is diverged reported as event.
 func (d *Deriver) divergedAt(event string, b *l1.ScannedBatch, l2Block uint64, format string, args ...any) error {
 	cause := fmt.Errorf(format, args...)
-	err := &DivergenceError{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, TxHash: b.TxHash, L2Block: l2Block, Reason: cause.Error(), cause: cause}
-	d.logger.Error("[eez] local chain diverged from L1", "event", event, "err", err)
-	return err
+	return &DivergenceError{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, TxHash: b.TxHash, L2Block: l2Block, Reason: cause.Error(), Event: event, cause: cause}
 }
 
 // effectsApplied counts the applied entries with a cross-chain effect.
