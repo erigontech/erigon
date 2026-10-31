@@ -94,3 +94,13 @@ func TestNewPayloadWithDownloadedParentBeyondLoopBlockLimitIsAccepted(t *testing
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
 }
+
+func TestNewPayloadOfCanonicalUnexecutedBlockIsNotValid(t *testing.T) {
+	const lag = 12
+	srv, chainPack := newExecLagEngineServer(t, 5, lag)
+
+	block := chainPack.Blocks[lag]
+	status, err := srv.getQuickPayloadStatusIfPossible(t.Context(), block.Hash(), block.NumberU64(), block.ParentHash(), nil, true, defaultReadinessWait)
+	require.NoError(t, err)
+	require.Nil(t, status)
+}

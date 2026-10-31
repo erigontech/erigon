@@ -203,7 +203,7 @@ type ExecutionModule interface {
 	// --- Hash / number queries --------------------------------------------
 
 	// IsCanonicalHash reports whether blockHash belongs to the canonical
-	// chain.
+	// chain and is executed.
 	IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error)
 
 	// IsValidated reports whether a payload with blockHash already passed
