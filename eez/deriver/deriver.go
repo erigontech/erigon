@@ -91,10 +91,27 @@ func New(chain Chain, cfg *chain.Config, dir string, blobs l1.BlobSource, header
 }
 
 // Seed starts derivation after settlement r, whose block the local chain
-// holds, before any batch is reconciled.
-func (d *Deriver) Seed(r Record) {
+// holds, before any batch is reconciled. The local chain's finalized block
+// stays finalized up to r's: L1 finality below r settles nothing the index
+// holds, so OnFinalized cannot restore it.
+func (d *Deriver) Seed(ctx context.Context, r Record) error {
+	fin, err := d.chain.Finalized(ctx)
+	if err != nil {
+		return err
+	}
+	var finalized uint64
+	if fin != (common.Hash{}) {
+		n, ok, err := d.chain.CanonicalNumber(ctx, fin)
+		if err != nil {
+			return err
+		}
+		if ok {
+			finalized = min(n, r.LastL2Block)
+		}
+	}
 	d.index.Seed(r)
-	d.safe, d.seed = r.LastL2Block, &r
+	d.safe, d.finalized, d.seed = r.LastL2Block, finalized, &r
+	return nil
 }
 
 // Settlement returns the settlement that settled L2 block number. It is

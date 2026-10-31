@@ -392,8 +392,7 @@ func (f *Follower) seed(ctx context.Context, r *deriver.Record) error {
 		return err
 	}
 	r.L1Time, r.L1MixDigest = h.Time, h.MixDigest
-	f.deriver.Seed(*r)
-	return nil
+	return f.deriver.Seed(ctx, *r)
 }
 
 // checkpointSeed returns the checkpoint's settlement when L1 and the local

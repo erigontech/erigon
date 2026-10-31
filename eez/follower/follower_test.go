@@ -139,7 +139,8 @@ func transfers(c *derivertest.Composer, n int) [][]byte {
 }
 
 // TestFollow boots from the registry's deploy block, follows new
-// settlements and L1 finality, and stops with its context.
+// settlements and L1 finality, and stops with its context. A restart keeps
+// the finalized block while L1 finality is below the checkpoint.
 func TestFollow(t *testing.T) {
 	c := derivertest.NewComposer(t)
 	first := c.Compose(nil,
@@ -180,6 +181,15 @@ func TestFollow(t *testing.T) {
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+
+	again := n.restart(t, c.L1, n.chain.Chain)
+	require.NoError(t, again.follower.Boot(t.Context()))
+	s := again.follower.Status()
+	require.Equal(t, uint64(2), s.Finalized)
+	require.Equal(t, uint64(3), s.Safe)
+	fc, err := n.m.ExecModule.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, first.Blocks[1].Hash(), fc.FinalizedHash)
 }
 
 // observing reports the follower's status on every log query.

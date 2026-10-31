@@ -72,6 +72,9 @@ type Chain interface {
 	Insert(ctx context.Context, blocks []*types.Block) error
 	// ForkChoice sets the head, safe and finalized blocks.
 	ForkChoice(ctx context.Context, head, safe, finalized common.Hash) error
+	// Finalized returns the finalized block of the last fork choice, the
+	// zero hash before any.
+	Finalized(ctx context.Context) (common.Hash, error)
 }
 
 // ExecChain is the Chain of an execution module that derivation drives
@@ -125,6 +128,14 @@ func (c *ExecChain) Head(ctx context.Context) (h *types.Header, err error) {
 		return err
 	})
 	return h, err
+}
+
+func (c *ExecChain) Finalized(ctx context.Context) (hash common.Hash, err error) {
+	err = c.db.View(ctx, func(tx kv.Tx) error {
+		hash = rawdb.ReadForkchoiceFinalized(tx)
+		return nil
+	})
+	return hash, err
 }
 
 func (c *ExecChain) HeaderByNumber(ctx context.Context, number uint64) (h *types.Header, err error) {

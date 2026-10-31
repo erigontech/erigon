@@ -71,7 +71,7 @@ With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block 
 
 ## Restarts and L1 reorgs
 
-The follower records its latest settlement in `<datadir>/eez/eez-reconcile-checkpoint`. On restart it resumes there when L1 and the local chain still hold that settlement; otherwise it resumes at the newest settlement whose block the local chain holds, and failing that from the registry's deploy block.
+The follower records its latest settlement in `<datadir>/eez/eez-reconcile-checkpoint`. On restart it resumes there when L1 and the local chain still hold that settlement; otherwise it resumes at the newest settlement whose block the local chain holds, and failing that from the registry's deploy block. The finalized block stays finalized across the restart, up to the settlement it resumes at.
 
 An L1 reorg that drops settlements moves the head and the safe block back to what the remaining settlements settled, and the replacement branch is derived. A reorg deeper than `--eez.l1.reorgdepth`, or one that drops a finalized settlement, stops the node.
 
