@@ -527,17 +527,22 @@ func UnderlyingTx(tx TemporalTx) TemporalTx {
 	return nil
 }
 
-type TemporalTx interface {
-	Tx
-	TemporalGetter
-	WithFreezeInfo
-	GetLatestValSize(name Domain, k []byte) (size int, found bool, err error)
-
+// AsOfGetter reads state as of a txNum.
+type AsOfGetter interface {
 	// GetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - returns account's value before `txNum` transaction changed it
 	// To re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
 	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
+}
+
+type TemporalTx interface {
+	Tx
+	TemporalGetter
+	AsOfGetter
+	WithFreezeInfo
+	GetLatestValSize(name Domain, k []byte) (size int, found bool, err error)
+
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
@@ -548,6 +553,9 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
+
+	// IndexJoin - return iterator over the timestamps that match query `q`, see IndexQuery
+	IndexJoin(q IndexQuery) (timestamps stream.U64, err error)
 
 	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
 	// `ok == true && v != nil && len(v) == 0` means key-creation even

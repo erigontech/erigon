@@ -315,13 +315,21 @@ func readCrashRecoveryCheckpoint(t *testing.T, db kv.TemporalRoDB) crashRecovery
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	lastBlock, _, err := rawdbv3.TxNums.Last(tx)
-	require.NoError(t, err)
-	require.Less(t, lastBlock, uint64(stateChurnReorgDepthBudget), "the fixture must stay below the changeset pruning range")
-	require.Empty(t, tx.Debug().DomainFiles(), "crash recovery is checked without snapshot files")
+	for domain := range kv.DomainLen {
+		require.Empty(t, tx.Debug().DomainFiles(domain), "crash recovery is checked without %s files", domain)
+	}
 	pruneMode, err := prune.Get(tx)
 	require.NoError(t, err)
 	require.Equal(t, prune.ArchiveMode, pruneMode, "background pruning must preserve the oracle's data")
+	checkpoint := readCrashRecoveryTx(t, tx)
+	require.Less(t, uint64(len(checkpoint.Canonical)-1), uint64(stateChurnReorgDepthBudget), "the fixture must stay below the changeset pruning range")
+	return checkpoint
+}
+
+func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
+	t.Helper()
+	lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+	require.NoError(t, err)
 	state := crashRecoveryState{
 		HeadBlock:      rawdb.ReadHeadBlockHash(tx),
 		HeadHeader:     rawdb.ReadHeadHeaderHash(tx),
@@ -582,14 +590,19 @@ func runUnwindCrashChild(t *testing.T) {
 	// A prevalidated tip FCU may return VALID before its commit. Bulk import
 	// clears that validation, so a catch-up response before the barrier is a failure.
 	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response, request.CatchupCycle == 0), "replacement FCU, catch-up cycle %d", request.CatchupCycle)
+	waitForCrashKill(t, ctx, request.ControlAddress, request.Deadline, int(boundary.point))
+}
+
+func waitForCrashKill(t *testing.T, ctx context.Context, address string, deadline time.Time, point int) {
+	t.Helper()
 	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
+	conn, err := dialer.DialContext(ctx, "tcp", address)
 	require.NoError(t, err)
 	defer conn.Close()
-	require.NoError(t, conn.SetWriteDeadline(request.Deadline))
-	require.NoError(t, json.NewEncoder(conn).Encode(boundary.point))
+	require.NoError(t, conn.SetWriteDeadline(deadline))
+	require.NoError(t, json.NewEncoder(conn).Encode(point))
 	<-ctx.Done()
-	t.Fatalf("parent did not kill the child at transition %d: %v", boundary.point, ctx.Err())
+	t.Fatalf("parent did not kill the child at transition %d: %v", point, ctx.Err())
 }
 
 func crashRecoveryAttemptDeadline(now, testDeadline time.Time) time.Time {
@@ -658,6 +671,14 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 		replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
 		require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
 	}
+	killAtCrashBoundary(t, "TestEngineApiCrashRecovery", unwindCrashChild, int(request.Point), func(address string, deadline time.Time) any {
+		request.ControlAddress, request.Deadline = address, deadline
+		return request
+	})
+}
+
+func killAtCrashBoundary(t *testing.T, testName, childEnv string, point int, request func(string, time.Time) any) {
+	t.Helper()
 	testDeadline, _ := t.Deadline()
 	deadline := crashRecoveryAttemptDeadline(time.Now(), testDeadline)
 	ctx, cancel := context.WithDeadline(t.Context(), deadline)
@@ -669,15 +690,13 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	defer listener.Close()
 	stopClosing := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	defer stopClosing()
-	request.ControlAddress = listener.Addr().String()
-	request.Deadline = deadline
-	input, err := json.Marshal(request)
+	input, err := json.Marshal(request(listener.Addr().String(), deadline))
 	require.NoError(t, err)
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	// The parent owns timeout and boundary kills; CommandContext would race them.
-	cmd := exec.Command(executable, "-test.run=^TestEngineApiCrashRecovery$", "-test.v", "-test.timeout="+(time.Until(deadline)+time.Minute).String()) //nolint:noctx
-	cmd.Env = append(os.Environ(), unwindCrashChild+"=1")
+	cmd := exec.Command(executable, "-test.run=^"+testName+"$", "-test.v", "-test.timeout="+(time.Until(deadline)+time.Minute).String()) //nolint:noctx
+	cmd.Env = append(os.Environ(), childEnv+"=1")
 	cmd.Stdin = bytes.NewReader(input)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
@@ -700,9 +719,9 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	require.NoError(t, err, "child exited or timed out before the crash boundary")
 	defer conn.Close()
 	require.NoError(t, conn.SetReadDeadline(deadline))
-	var reached execmodule.StateTransitionPoint
+	var reached int
 	require.NoError(t, json.NewDecoder(conn).Decode(&reached))
-	require.Equal(t, request.Point, reached)
+	require.Equal(t, point, reached)
 	require.NoError(t, ctx.Err(), "only a boundary-triggered kill counts as a crash test")
 	require.NoError(t, cmd.Process.Kill(), "child must remain alive at the reported boundary")
 	<-done

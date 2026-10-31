@@ -290,7 +290,6 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 func benchState(b *testing.B, reader state.StateReader) *state.IntraBlockState {
 	b.Helper()
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
 	statedb.SetNoConflictDetection()
 	return statedb
 }

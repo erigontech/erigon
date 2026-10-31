@@ -20,10 +20,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -32,12 +35,32 @@ import (
 
 func TestAlignFilesToStepSize(t *testing.T) {
 	t.Parallel()
+	for _, tc := range []struct {
+		name                  string
+		merge                 bool
+		factor                uint64
+		refsAtBuild, refsOnly bool
+	}{
+		{"merged files", true, 10, false, false},
+		{"one file per step", false, 5, false, false},
+		{"referenced commitment inputs", true, 10, true, false},
+		{"references on", false, 5, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			testAlignFilesToStepSize(t, tc.merge, tc.factor, tc.refsAtBuild, tc.refsOnly)
+		})
+	}
+}
+
+func testAlignFilesToStepSize(t *testing.T, merge bool, factor uint64, refsAtBuild, refsAtAlign bool) {
 	const stepSize = uint64(10)
-	const newStepSize = 10 * stepSize
+	newStepSize := factor * stepSize
 	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, refsAtBuild)
 	keys := mkAddrs(0x10, 16)
 	writeStepsKeys(t, db, agg, keys, 0, 23)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, true))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, merge))
 	agg.WaitForFiles()
 	dirs := agg.Dirs()
 
@@ -52,6 +75,7 @@ func TestAlignFilesToStepSize(t *testing.T) {
 	}
 	before := readAlignedState(t, db, agg, keys, commitmentKeys, wantEnd)
 
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, refsAtAlign)
 	end, err := agg.AlignFilesToStepSize(t.Context(), newStepSize)
 	require.NoError(t, err)
 	require.Equal(t, wantEnd, end)
@@ -70,6 +94,68 @@ func TestAlignFilesToStepSize(t *testing.T) {
 			require.Zerof(t, parsed.To*stepSize%newStepSize, "%s ends off a %d-tx boundary", entry.Name(), newStepSize)
 		}
 	}
+}
+
+func TestAlignFilesToStepSizeIntegratesMergesThatSucceeded(t *testing.T) {
+	t.Parallel()
+	const stepSize, factor = uint64(10), uint64(5)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 23)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	dirs := agg.Dirs()
+	inputs, err := filepath.Glob(filepath.Join(dirs.SnapIdx, "*-logaddrs.0-1.ef"))
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	blocked := strings.Replace(inputs[0], ".0-1.ef", ".0-5.ef", 1)
+	require.NoError(t, os.MkdirAll(filepath.Join(blocked, "x"), 0o755))
+
+	_, err = agg.AlignFilesToStepSize(t.Context(), factor*stepSize)
+	require.Error(t, err)
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		parsed, _, ok := snaptype.ParseFileName(dirs.SnapDomain, entry.Name())
+		if !ok || parsed.TypeString != "accounts" || parsed.Ext != ".kv" || parsed.To > 20 {
+			continue
+		}
+		require.Equalf(t, factor, parsed.To-parsed.From, "%s was not integrated", entry.Name())
+	}
+}
+
+func TestAlignFilesToStepSizeIntegratesEachMergeOnCompletion(t *testing.T) {
+	const stepSize, factor = uint64(10), uint64(5)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 23)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	dirs := agg.Dirs()
+	aligned := func() (n int) {
+		for _, dir := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx} {
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			for _, entry := range entries {
+				parsed, _, ok := snaptype.ParseFileName(dir, entry.Name())
+				if ok && slices.Contains([]string{".kv", ".v", ".ef"}, parsed.Ext) && parsed.To-parsed.From == factor {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	atFirstDelete := -1
+	agg.OnFilesChange(func([]string) {}, func([]string) {
+		if atFirstDelete < 0 {
+			atFirstDelete = aligned()
+		}
+	})
+	mergeWorkers := dbg.MergeWorkers
+	dbg.MergeWorkers = 1 << 20
+	defer func() { dbg.MergeWorkers = mergeWorkers }()
+
+	_, err := agg.AlignFilesToStepSize(t.Context(), factor*stepSize)
+	require.NoError(t, err)
+	require.Less(t, atFirstDelete, aligned())
 }
 
 func readAlignedState(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, accounts, commitmentKeys [][]byte, end uint64) map[string][]byte {

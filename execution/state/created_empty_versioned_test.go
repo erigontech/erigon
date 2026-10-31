@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -34,12 +33,11 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 	_, hasBalance := writes.GetBalance(addr)
@@ -50,21 +48,54 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	vm.FlushVersionedWrites(writes, true)
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
-	next.SetNoMaterialize(true)
 	next.SetTxContext(1, 1)
 	exists, err := next.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
 }
 
+// TestFinalizedWritesEmptyRemovalClearsWholeAccountCell pins item 1's write-side
+// invariant: when an EIP-161 account that existed at base is (re)created empty and
+// removed, the removal must drop the whole-account AddressPath write too — not only the
+// account fields. Otherwise the tx flushes both a SelfDestruct(true) and an AddressPath
+// cell at the SAME tx index, which is the exact cell layout of a same-tx SD+CREATE2
+// metamorphic recreate. AccountLifecycleAt then reads the removed account as Revived
+// (its AddressPath-at-destroyedAt branch), undoing the removal and diverging the root.
+// The fix must be write-side: the two cases are indistinguishable from cells, so
+// tightening AccountLifecycleAt's >= would instead regress genuine metamorphic recreate.
+func TestFinalizedWritesEmptyRemovalClearsWholeAccountCell(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe2})
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	base := accounts.NewAccount() // existing empty EOA: bal 0, nonce 0, EmptyCodeHash
+	reader.accounts[addr] = &base
+
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+
+	require.NoError(t, ibs.CreateAccount(addr, false))
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
+
+	_, hasDelete := writes.GetSelfDestruct(addr)
+	require.True(t, hasDelete, "empty removal must emit a SelfDestruct delete")
+	_, hasAddress := writes.GetAddress(addr)
+	require.False(t, hasAddress,
+		"empty removal must not leave a whole-account AddressPath cell alongside the delete "+
+			"(same layout as a metamorphic recreate -> AccountLifecycleAt would read it as Revived)")
+}
+
 func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xe2})
 	vm := NewVersionMap(nil)
+	// Model a real create+SELFDESTRUCT: the destroying tx marks the account
+	// destructed and zeroes its balance at the same version.
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
 
 	empty, err := ibs.Empty(addr)
@@ -80,7 +111,7 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	vm.WriteAddress(addr, Version{TxIndex: 1}, &account, true)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, account.Balance, true)
 
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 func TestDestroyedAccountReadRemainsValid(t *testing.T) {
@@ -93,7 +124,6 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
 
 	exists, err := ibs.Exist(addr)
@@ -102,7 +132,7 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 
 	io := NewVersionedIO(3)
 	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
-	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 // An account that exists before a tx and that the tx touches and leaves empty
@@ -117,7 +147,6 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	newTx := func(txIndex int) *IntraBlockState {
 		ibs := NewWithVersionMap(reader, vm)
 		t.Cleanup(ibs.Close)
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, txIndex)
 		return ibs
 	}
@@ -134,12 +163,12 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, 0))
-	vm.FlushVersionedWrites(toucher.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true}), true)
+	vm.FlushVersionedWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true)
 
 	exists, err = newTx(2).Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 // Sequential executors run FinalizeTx, which clears the journal, before
@@ -173,24 +202,21 @@ func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
 			return ibs.AddBalance(addr, *uint256.NewInt(1), 0)
 		}, false},
 	} {
-		for _, materialize := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/materialize=%v", tc.name, materialize), func(t *testing.T) {
-				t.Parallel()
-				addr := accounts.InternAddress([20]byte{0xe6})
-				empty := accounts.NewAccount()
-				ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
-				t.Cleanup(ibs.Close)
-				ibs.SetNoMaterialize(!materialize)
-				ibs.SetTxContext(1, 0)
-				rules := &chain.Rules{IsSpuriousDragon: true}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xe6})
+			empty := accounts.NewAccount()
+			ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(1, 0)
+			rules := &chain.Rules{IsSpuriousDragon: true}
 
-				require.NoError(t, tc.apply(ibs, addr))
-				require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+			require.NoError(t, tc.apply(ibs, addr))
+			require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
 
-				sd, ok := ibs.FinalizedWrites(rules).GetSelfDestruct(addr)
-				require.Equal(t, tc.removed, ok && sd.Val)
-			})
-		}
+			sd, ok := finalizedWrites(t, ibs, rules).GetSelfDestruct(addr)
+			require.Equal(t, tc.removed, ok && sd.Val)
+		})
 	}
 }
 
@@ -214,13 +240,12 @@ func TestFinalizedWritesRemovalFollowsEIP161(t *testing.T) {
 			empty := accounts.NewAccount()
 			ibs := NewWithVersionMap(&emptyAccountReader{addr: tc.addr, acc: &empty}, NewVersionMap(nil))
 			t.Cleanup(ibs.Close)
-			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(1, 0)
 			_, err := ibs.Exist(tc.addr)
 			require.NoError(t, err)
 			require.NoError(t, ibs.AddBalance(tc.addr, uint256.Int{}, 0))
 
-			sd, ok := ibs.FinalizedWrites(tc.rules).GetSelfDestruct(tc.addr)
+			sd, ok := finalizedWrites(t, ibs, tc.rules).GetSelfDestruct(tc.addr)
 			require.Equal(t, tc.removed, ok && sd.Val)
 		})
 	}
@@ -231,13 +256,12 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 
@@ -327,13 +351,12 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{})
+	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -341,13 +364,12 @@ func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -355,12 +377,11 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(params.SystemAddress))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{
+	writes := finalizedWrites(t, ibs, &chain.Rules{
 		IsSpuriousDragon: true,
 		IsAura:           true,
 	})

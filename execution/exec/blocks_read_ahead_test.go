@@ -74,6 +74,39 @@ type firstAccountReadErrorTx struct {
 	accountReads int
 }
 
+type cancelOnReadTx struct {
+	kv.TemporalTx
+	cancel context.CancelFunc
+	domain kv.Domain
+	reads  int
+}
+
+func (tx *cancelOnReadTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == tx.domain {
+		tx.reads++
+		tx.cancel()
+	}
+	return nil, 0, nil
+}
+
+func TestBALWarmupStopsWithinStorageChunk(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counted := &cancelOnReadTx{TemporalTx: tx, cancel: cancel, domain: kv.StorageDomain}
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: make([]common.Hash, 64)}}
+	for i := range bal[0].StorageReads {
+		bal[0].StorageReads[i] = common.Hash{31: byte(i)}
+	}
+	tasks, workers := makeBALWarmupPlan(bal, 1)
+	err = NewBlockReadAheader().warmBALState(ctx, &singleTxRoDB{tx: counted}, bal, tasks, balCodeWarmupNone, nil, workers)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, counted.reads, "cancellation must stop before the next storage read")
+}
+
 func (g *countingGetter) GetOne(string, []byte) ([]byte, error) {
 	g.getOneCalls++
 	return nil, nil
@@ -255,7 +288,7 @@ func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
 			}
 			getter := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16}
 			reader := state.NewReaderV3(getter)
-			require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{}, test.mode, destinations))
+			require.NoError(t, warmBALStateTask(t.Context(), reader, accountChanges, balWarmupTask{}, test.mode, destinations))
 			require.Equal(t, 1, source.accountReads)
 			require.Equal(t, test.wantCodeReads, source.codeReads)
 		})
@@ -270,7 +303,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	address := accounts.InternAddress(common.Address{19: 1})
 	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]common.Hash, 65)}
 	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
-	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
+	require.NoError(t, warmBALStateTask(t.Context(), reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
 	require.Zero(t, source.codeReads)
 }
@@ -327,6 +360,41 @@ func TestWarmTxnsContinuesAfterReadError(t *testing.T) {
 	}
 	require.NoError(t, NewBlockReadAheader().warmTxns(ctx, readDB, txns, 1))
 	require.Equal(t, 2, tx.accountReads)
+}
+
+func TestWarmTxnsStopsWithinAccessListStorage(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counted := &cancelOnReadTx{TemporalTx: tx, cancel: cancel, domain: kv.StorageDomain}
+	accessList := types.AccessList{{Address: common.Address{19: 1}, StorageKeys: make([]common.Hash, 64)}}
+	for i := range accessList[0].StorageKeys {
+		accessList[0].StorageKeys[i] = common.Hash{31: byte(i)}
+	}
+	txns := types.Transactions{&types.AccessListTx{AccessList: accessList}}
+
+	err = NewBlockReadAheader().warmTxns(ctx, &singleTxRoDB{tx: counted}, txns, 1)
+	require.Equal(t, 1, counted.reads, "cancellation must stop before the next storage read")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestWarmTxnsStopsWithinAccessListAccounts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counted := &cancelOnReadTx{TemporalTx: tx, cancel: cancel, domain: kv.AccountsDomain}
+	accessList := types.AccessList{{Address: common.Address{19: 1}}, {Address: common.Address{19: 2}}}
+	txns := types.Transactions{&types.AccessListTx{AccessList: accessList}}
+
+	err = NewBlockReadAheader().warmTxns(ctx, &singleTxRoDB{tx: counted}, txns, 1)
+	require.Equal(t, 1, counted.reads, "cancellation must stop before the next account read")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
@@ -490,6 +558,29 @@ func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
 	require.NoError(t, result.err)
 	result.resume()
 	<-warmupDone
+}
+
+func TestBlockReadAheaderSuspendWarmupCancelsActiveWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupCtx, cancel := context.WithCancel(t.Context())
+	bra.cancelWarmup = cancel
+	defer func() {
+		cancel()
+		waitCtx, stopWaiting := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopWaiting()
+		bra.WaitForWarmup(waitCtx)
+		require.NoError(t, waitCtx.Err(), "warmup did not stop after cancellation")
+	}()
+	require.True(t, bra.startWarmup(func() { <-warmupCtx.Done() }))
+	waitCtx, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+
+	resume, err := bra.SuspendWarmup(waitCtx)
+	if resume != nil {
+		defer resume()
+	}
+	require.NoError(t, err, "suspension must cancel active warmup before waiting for it")
+	require.ErrorIs(t, warmupCtx.Err(), context.Canceled)
 }
 
 func TestBlockReadAheaderSuspendWarmupSkipsNewWarmup(t *testing.T) {
@@ -808,4 +899,99 @@ func TestStartSendersRecoveryCancelled(t *testing.T) {
 	bra.AddSendersRecovery(common.HexToHash("0x01"), StartSendersRecovery(ctx, signer, types.Transactions{txn}))
 	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
 	require.False(t, ok)
+}
+
+// Execution recovers senders only for a block whose access list it can load; a header
+// that commits to a BAL whose sidecar is missing keeps the Senders stage path.
+func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+	balHash := common.Hash{0x01}
+	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
+	require.True(t, RecoversSenders(header))
+
+	bra := NewBlockReadAheader()
+	require.False(t, bra.ExecRecoversSenders(header), "no sidecar")
+	bra.bals.Add(header.Hash(), types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0x02}}}))
+	require.True(t, bra.ExecRecoversSenders(header))
+
+	dbg.StagesOnlyBlocks = true
+	t.Cleanup(func() { dbg.StagesOnlyBlocks = false })
+	require.False(t, bra.ExecRecoversSenders(header), "execution is disabled, so the Senders stage recovers")
+
+	dbg.StagesOnlyBlocks = false
+	dbg.Exec3Parallel = false
+	require.False(t, bra.ExecRecoversSenders(header), "serial exec has no workers, so the Senders stage recovers")
+}
+
+// Validation suspends warmup before an unwind and then executes; waiting for a running warmup must not wait for that suspension.
+func TestBlockReadAheaderWaitForRunningWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+	}))
+	<-warmupStarted
+	waited := make(chan struct{})
+	go func() {
+		bra.WaitForRunningWarmup(t.Context())
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("returned while a warmup was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(finishWarmup)
+	<-waited
+
+	resume, err := bra.SuspendWarmup(t.Context())
+	require.NoError(t, err)
+	defer resume()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	bra.WaitForRunningWarmup(ctx)
+	require.NoError(t, ctx.Err(), "waited for the suspension")
+}
+
+type blockedBeginRoDB struct {
+	kv.RoDB
+	started chan struct{}
+}
+
+func (db *blockedBeginRoDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	select {
+	case db.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	db := &blockedBeginRoDB{started: make(chan struct{}, 1)}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	body := &types.Body{Transactions: types.Transactions{types.NewTransaction(0, common.Address{19: 1}, nil, 0, nil, nil)}}
+	bra := NewBlockReadAheader()
+	bra.AddHeaderAndBody(t.Context(), db, struct{ kv.Getter }{}, header, body)
+	<-db.started
+
+	waited := make(chan struct{})
+	go func() {
+		bra.WaitForRunningWarmup(t.Context())
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("returned while the body warmup was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	bra.CancelWarmup()
+	<-waited
 }

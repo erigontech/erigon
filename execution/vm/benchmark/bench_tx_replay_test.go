@@ -113,7 +113,6 @@ func (r *txReplay) run(tb testing.TB) *evmtypes.ExecutionResult {
 	ibs := state.NewPooled(r.reader)
 	defer state.ReleasePooled(ibs)
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetNoConflictDetection()
 	msg, err := r.txn.AsMessage(r.signer, &r.blockCtx.BaseFee, r.rules)

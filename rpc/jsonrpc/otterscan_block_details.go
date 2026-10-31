@@ -84,11 +84,11 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
+	getBlockRes, err := delegateGetBlockByNumber(b, number, false)
 	if err != nil {
 		return nil, err
 	}
-	getIssuanceRes, err := delegateIssuance(tx, b, chainConfig, api.engine())
+	getIssuanceRes, err := delegateIssuance(b, chainConfig, api.engine())
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	if err != nil {
 		return nil, err
 	}
-	feesRes, err := delegateBlockFees(ctx, tx, b, chainConfig, receipts)
+	feesRes, err := delegateBlockFees(b, chainConfig, receipts)
 	if err != nil {
 		return nil, err
 	}

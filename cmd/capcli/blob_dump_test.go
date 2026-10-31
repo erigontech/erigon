@@ -19,6 +19,7 @@ package main
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -191,6 +192,35 @@ func TestDumpBlobSegmentKeepsOldFilesWhenTheDumpFails(t *testing.T) {
 	for _, name := range old {
 		require.FileExists(t, filepath.Join(dirs.Snap, name))
 	}
+}
+
+func TestDumpBlobSegmentKeepsOldFilesWhenCompressFails(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	segName := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	idxName := snaptype.IdxFileName(version.V1_1, 30_000, 40_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	old := []string{segName, idxName, segName + ".torrent", idxName + ".torrent"}
+	for _, name := range old {
+		writeSegment(t, dirs, name)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(slot uint64) (uint64, error) {
+		if slot == 40_000-1 {
+			cancel()
+		}
+		return 0, nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+
+	for _, name := range old {
+		require.FileExists(t, filepath.Join(dirs.Snap, name))
+	}
+	data, err := os.ReadFile(filepath.Join(dirs.Snap, segName))
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, data)
 }
 
 func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {

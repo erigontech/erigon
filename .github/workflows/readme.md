@@ -270,18 +270,18 @@ All `qa-*` workflows run on self-hosted runners and upload results to a centrali
 
 ### 16. RPC Performance Comparison Tests (`qa-rpc-performance-comparison-tests`)
 
-**Goal:** Compare Erigon RPC performance against Geth or Nethermind under identical coordinated load, using variable QPS patterns.
+**Goal:** Compare Erigon RPC performance against Geth, Nethermind or Reth under identical coordinated load, using variable QPS patterns.
 
 **Database:** Pre-built DB
 
-**Triggers:** Daily 02:00 UTC, Sunday 02:30 UTC (Nethermind), manual (with `run_geth` or `run_nethermind` flag)
+**Triggers:** Daily 02:00 UTC, Sunday 02:30 UTC (Nethermind), manual (with one of the `run_geth`, `run_nethermind` or `run_reth` flags)
 
 **Measures:**
 - Latency at loads from 1 to 20,000 QPS
 - HDR latency analysis and distributions
 - 5 repetitions per test for statistical stability
 
-**Notes:** Redis-based `coordinated_start.py` synchronises Erigon and the peer client startup; on Sundays the 02:00 run compares with Geth and the 02:30 run with Nethermind. A final job summarises the comparison.
+**Notes:** Redis-based `coordinated_start.py` synchronises Erigon and the peer client startup; the 02:00 run compares with Reth on Saturdays and with Geth on Sundays, the Sunday 02:30 run with Nethermind. A final job summarises the comparison.
 
 ---
 

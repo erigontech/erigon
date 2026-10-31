@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -26,56 +25,30 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-type failingSerialWorkerDB struct {
-	kv.TemporalRoDB
-	err error
+type rulesEngineWithErrors struct {
+	rules.Engine
+	finalizeErr error
 }
 
-func (db failingSerialWorkerDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
-	return nil, db.err
-}
-
-func TestSerialTaskOperationalErrorPassesThrough(t *testing.T) {
-	cause := errors.New("worker database unavailable")
-	config := chain.TestChainBerlinConfig
-	logger := log.New()
-	worker := exec.NewWorker(context.Background(), true, exec.NewWorkerMetrics(), failingSerialWorkerDB{err: cause}, nil,
-		nil, config, nil, nil, nil, datadir.Dirs{}, logger)
-	t.Cleanup(worker.Close)
-	require.NoError(t, worker.ResetState(nil, nil, state.NewNoopReader(), state.NewNoopWriter(), nil))
-
-	se := &serialExecutor{
-		txExecutor: txExecutor{
-			cfg: ExecuteBlockCfg{
-				chainConfig: config,
-			},
-			logger: logger,
-		},
-		worker: worker,
-	}
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-	task := &exec.TxTask{Header: header, TxNum: 1, TxIndex: 0}
-	block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
-
-	_, err := se.executeBlock(context.Background(), block, []exec.Task{task}, false)
-
-	require.ErrorIs(t, err, cause)
-	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	return nil, e.finalizeErr
 }
 
 func newSerialFinalizeTestExec(t *testing.T, engine rules.Engine) (*serialExecutor, *exec.TxTask) {
@@ -87,9 +60,9 @@ func newSerialFinalizeTestExec(t *testing.T, engine rules.Engine) (*serialExecut
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
-	worker := exec.NewWorker(t.Context(), false, exec.NewWorkerMetrics(), db, nil,
-		nil, config, nil, nil, engine, dirs, logger)
-	t.Cleanup(worker.Close)
+	worker := exec.NewWorkerContext(t.Context(), false, exec.NewWorkerMetrics(), db,
+		nil, config, nil, engine, dirs, logger)
+	t.Cleanup(func() { _ = worker.ResetTx(nil) })
 	require.NoError(t, worker.ResetState(rs, nil, state.NewNoopReader(), state.NewNoopWriter(), nil))
 
 	se := &serialExecutor{
@@ -116,46 +89,53 @@ func newSerialFinalizeTestExec(t *testing.T, engine rules.Engine) (*serialExecut
 	return se, task
 }
 
-func TestSerialFinalizeStateReadErrorPassesThrough(t *testing.T) {
-	se, task := newSerialFinalizeTestExec(t, merge.New(ethash.NewFaker()))
-	cause := errors.New("withdrawal account read failed")
-	beneficiary := common.Address{19: 0x42}
-	se.applyTx = failingAccountTemporalTx{TemporalTx: se.applyTx, address: beneficiary, err: cause}
-	task.Withdrawals = []*types.Withdrawal{{Address: beneficiary, Amount: 1}}
-	block := types.NewBlockFromStorage(common.Hash{}, task.Header, nil, nil, task.Withdrawals, nil)
-
-	_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, false)
-
-	require.ErrorIs(t, err, cause)
-	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-}
-
+// A plain rules-engine finalize error becomes ErrInvalidBlock (block verdict); one
+// already carrying ErrInvalidBlock keeps it. Either way the underlying cause survives.
 func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		engineErr func(error) error
 	}{
-		{
-			name:      "plain error",
-			engineErr: func(cause error) error { return cause },
-		},
-		{
-			name: "preclassified invalid block",
-			engineErr: func(cause error) error {
-				return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, cause)
-			},
-		},
+		{name: "plain error", engineErr: func(cause error) error { return cause }},
+		{name: "preclassified invalid block", engineErr: func(cause error) error {
+			return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, cause)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cause := errors.New("rules engine finalize failed")
 			engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), finalizeErr: tc.engineErr(cause)}
 			se, task := newSerialFinalizeTestExec(t, engine)
-			block := types.NewBlockFromStorage(common.Hash{}, task.Header, nil, nil, nil, nil)
 
-			_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, false)
+			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
 
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
+}
+
+func TestWarmTxsHashesSkipsAuthListAboveGasLimit(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	chainID := uint256.NewInt(1)
+	signer := types.LatestSignerForChainID(chainID)
+	to := common.Address{1}
+	setCode := func(gasLimit uint64, auths int) *types.Message {
+		txn, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{GasLimit: gasLimit, To: &to},
+				ChainID:  *chainID,
+				FeeCap:   *uint256.NewInt(1),
+			},
+			Authorizations: make([]types.Authorization, auths),
+		}, *signer, key)
+		require.NoError(t, err)
+		block := types.NewBlock(&types.Header{GasLimit: 60_000_000}, []types.Transaction{txn}, nil, nil, nil, nil)
+		warmTxsHashes(block, chainID)
+		msg, err := block.Transactions()[0].AsMessage(*signer, nil, &chain.Rules{IsPrague: true})
+		require.NoError(t, err)
+		return msg
+	}
+	require.NotNil(t, setCode(1_000_000, 100).RecoveredAuthorities(), "a list the gas limit can pay for is warmed")
+	require.Nil(t, setCode(21_000, 1_000).RecoveredAuthorities(), "a list above the gas limit is left to the executor")
 }

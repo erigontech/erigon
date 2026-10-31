@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -56,7 +55,7 @@ func setup2CacheTest(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Cleanup(func() { _ = dir.RemoveAll(tmpDir) })
 
 	dirs := datadir.New(tmpDir)
-	rawDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, lgr), dirs.Chaindata).MustOpen()
+	rawDb := mdbx.New(dbcfg.ChainDB, lgr).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(lgr).Open(context.Background())
@@ -171,7 +170,7 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 		t.Skip("requires mdbx")
 	}
 
-	_, domains := setup2CacheTest(t)
+	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
@@ -190,12 +189,12 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xBEEF"))
 
 	original := &accounts.Account{}
-	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3, Incarnation: 1}
+	code := []byte{0x60, 0x00}
+	codeHash := accounts.NewCode(code).Hash
+	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3, Incarnation: 1, CodeHash: codeHash}
 	err := collector.UpdateAccountData(addr, original, account)
 	require.NoError(t, err)
 
-	code := []byte{0x60, 0x00}
-	codeHash := accounts.InternCodeHash(common.BytesToHash(code))
 	err = collector.UpdateAccountCode(addr, 1, codeHash, code)
 	require.NoError(t, err)
 
@@ -209,17 +208,146 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	err = collector.WriteAccountStorage(addr, 1, storageKey, storageVal, storageVal)
 	require.NoError(t, err)
 
-	// Now drive the accumulator from the collected writes —
-	// this is what the apply loop does after ApplyStateWrites.
 	writes := collector.Writes()
-	state.NotifyAccumulator(accumulator, writes)
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 1, writes, nil, &chain.Rules{}))
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, []state.WriteSetView{writes}))
 
 	changes := accumulator.Changes()
 	require.Len(t, changes, 1, "one StateChange batch expected")
 	require.Len(t, changes[0].Changes, 1, "one AccountChange expected (all merged for same address)")
 	require.NotEmpty(t, changes[0].Changes[0].Data, "ChangeAccount must populate Data field")
+	require.Equal(t, uint64(1), changes[0].Changes[0].Incarnation)
+	var notified accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&notified, changes[0].Changes[0].Data))
+	require.Equal(t, uint64(1000), notified.Balance.Uint64())
+	require.Equal(t, uint64(3), notified.Nonce)
+	require.Equal(t, uint64(1), notified.Incarnation)
+	require.Equal(t, codeHash, notified.CodeHash)
 	require.Equal(t, code, changes[0].Changes[0].Code, "ChangeCode must populate Code field")
 	require.Len(t, changes[0].Changes[0].StorageChanges, 1, "one StorageChange expected (no-op skipped)")
 	require.Equal(t, storageVal.Bytes(), changes[0].Changes[0].StorageChanges[0].Data,
 		"ChangeStorage must populate StorageChange.Data")
+}
+
+func notifyAccumulatorFromAppliedWrites(t *testing.T, addr accounts.Address, seed accounts.Account, writes ...state.WriteSetView) *shards.Accumulator {
+	t.Helper()
+
+	tx, domains := setup2CacheTest(t)
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New()))
+	addrVal := addr.Value()
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&seed), 0, nil))
+
+	for i, writeSet := range writes {
+		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(i+1), writeSet, nil, &chain.Rules{}))
+	}
+
+	accumulator := shards.NewAccumulator()
+	var hdr types.Header
+	hdr.Number.SetUint64(1)
+	accumulator.StartChange(&hdr, nil, false)
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, writes))
+	return accumulator
+}
+
+func TestNotifyAccumulatorUsesFinalAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xacc0"))
+	codeHash := accounts.NewCode([]byte{0x60, 0x01}).Hash
+	seed := accounts.Account{
+		Nonce:       5,
+		Balance:     *uint256.NewInt(100),
+		CodeHash:    codeHash,
+		Incarnation: 1,
+	}
+	writes := newWS().
+		bal(addr, state.Version{}, *uint256.NewInt(200)).
+		build()
+
+	accumulator := notifyAccumulatorFromAppliedWrites(t, addr, seed, writes)
+	changes := accumulator.Changes()
+	require.Len(t, changes, 1)
+	require.Len(t, changes[0].Changes, 1)
+	change := changes[0].Changes[0]
+	require.Equal(t, addr.Value(), change.Address)
+	require.Equal(t, uint64(1), change.Incarnation)
+
+	var got accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&got, change.Data))
+	require.Equal(t, uint64(5), got.Nonce)
+	require.Equal(t, uint64(200), got.Balance.Uint64())
+	require.Equal(t, codeHash, got.CodeHash)
+	require.Equal(t, uint64(1), got.Incarnation)
+}
+
+func TestNotifyAccumulatorMergesBalanceAndStorageAtFinalIncarnation(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xacc1"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
+	storage := *uint256.NewInt(7)
+	writes := newWS().
+		bal(addr, state.Version{}, *uint256.NewInt(200)).
+		stor(addr, key, state.Version{}, storage).
+		build()
+
+	accumulator := notifyAccumulatorFromAppliedWrites(t, addr, seed, writes)
+	changes := accumulator.Changes()
+	require.Len(t, changes, 1)
+	require.Len(t, changes[0].Changes, 1)
+	change := changes[0].Changes[0]
+	require.Equal(t, uint64(1), change.Incarnation)
+	require.Len(t, change.StorageChanges, 1)
+	require.Equal(t, key.Value(), change.StorageChanges[0].Location)
+	require.Equal(t, storage.Bytes(), change.StorageChanges[0].Data)
+
+	var got accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&got, change.Data))
+	require.Equal(t, uint64(1), got.Incarnation)
+}
+
+func TestNotifyAccumulatorKeepsFinalIncarnationAcrossWriteSets(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xacc2"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
+	storage := *uint256.NewInt(8)
+	balanceWrites := newWS().
+		bal(addr, state.Version{}, *uint256.NewInt(200)).
+		build()
+	storageWrites := newWS().
+		stor(addr, key, state.Version{}, storage).
+		build()
+
+	accumulator := notifyAccumulatorFromAppliedWrites(t, addr, seed, balanceWrites, storageWrites)
+	changes := accumulator.Changes()
+	require.Len(t, changes, 1)
+	require.Len(t, changes[0].Changes, 1)
+	change := changes[0].Changes[0]
+	require.Equal(t, uint64(1), change.Incarnation)
+	require.Len(t, change.StorageChanges, 1)
+	require.Equal(t, key.Value(), change.StorageChanges[0].Location)
+	require.Equal(t, storage.Bytes(), change.StorageChanges[0].Data)
+
+	var got accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&got, change.Data))
+	require.Equal(t, uint64(1), got.Incarnation)
+}
+
+func TestNotifyAccumulatorMergesBalanceAndCodeAtFinalIncarnation(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xacc3"))
+	seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
+	code := []byte{0x60, 0x02}
+	writes := newWS().
+		bal(addr, state.Version{}, *uint256.NewInt(200)).
+		code(addr, state.Version{}, accounts.NewCode(code)).
+		build()
+
+	accumulator := notifyAccumulatorFromAppliedWrites(t, addr, seed, writes)
+	changes := accumulator.Changes()
+	require.Len(t, changes, 1)
+	require.Len(t, changes[0].Changes, 1)
+	change := changes[0].Changes[0]
+	require.Equal(t, uint64(1), change.Incarnation)
+	require.Equal(t, code, change.Code)
+
+	var got accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&got, change.Data))
+	require.Equal(t, uint64(1), got.Incarnation)
 }

@@ -75,7 +75,7 @@ func TestGetChainNameFromChainData_OldSchema(t *testing.T) {
 	writeChainMetadata(t, ctx, db, "mainnet", 1)
 	db.Close()
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err, "should not fail on a DB with only metadata tables")
 	require.True(t, result.Ok, "chain name should be detected")
 	require.Equal(t, "mainnet", result.Value)
@@ -98,7 +98,7 @@ func TestGetChainNameFromChainData_CurrentSchema(t *testing.T) {
 	writeChainMetadata(t, ctx, db, "mainnet", 1)
 	db.Close()
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err, "should not fail on a current-schema DB")
 	require.True(t, result.Ok)
 	require.Equal(t, "mainnet", result.Value)
@@ -120,7 +120,7 @@ func TestGetChainNameFromChainData_NonMainnet(t *testing.T) {
 	writeChainMetadata(t, ctx, db, "sepolia", 11155111)
 	db.Close()
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err)
 	require.True(t, result.Ok)
 	require.Equal(t, "sepolia", result.Value)
@@ -142,7 +142,7 @@ func TestGetChainNameFromChainData_EmptyDB(t *testing.T) {
 	db.Close()
 
 	// No chain metadata written — the function should return Ok=false with no error.
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.NoError(t, err)
 	require.False(t, result.Ok, "empty DB should not yield a chain name")
 }
@@ -154,7 +154,7 @@ func TestGetChainNameFromChainData_NonExistentDir(t *testing.T) {
 	logger := log.New()
 	chainDataDir := filepath.Join(t.TempDir(), "nonexistent", "chaindata")
 
-	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
+	result, err := getChainNameFromChainData(ctx, logger, chainDataDir)
 	require.Error(t, err)
 	require.False(t, result.Ok)
 }

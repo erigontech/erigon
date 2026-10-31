@@ -20,9 +20,17 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type historyGateDebugTx struct {
@@ -72,4 +80,83 @@ func TestRequireStateHistory(t *testing.T) {
 			require.ErrorIs(t, err, ErrPruned)
 		})
 	}
+}
+
+type countingAsOfTx struct {
+	kv.TemporalTx
+	reads int
+	err   error
+}
+
+func (tx *countingAsOfTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	tx.reads++
+	if tx.err != nil {
+		return nil, false, tx.err
+	}
+	return tx.TemporalTx.GetAsOf(domain, key, ts)
+}
+
+// An account committed before the read's txNum is served from the shared state cache, without a history lookup.
+func TestHistoryReaderV3ReadsUnchangedAccountFromStateCache(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	b := 1 * datasize.MB
+	stateCache := cache.NewStateCache(b, b, b, b)
+	t.Cleanup(stateCache.Close)
+	addr := common.Address{0xcc}
+	enc := accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	writer, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer writer.Close()
+	writer.BindStateCache(stateCache)
+	writer.SetTxNum(5)
+	require.NoError(t, writer.DomainPut(kv.AccountsDomain, rwTx, addr[:], enc, 5, nil))
+	require.NoError(t, writer.Commit(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+
+	tx := &countingAsOfTx{TemporalTx: roTx}
+	acc, err := NewHistoryReaderV3WithSharedDomains(tx, sd, 10).ReadAccountData(accounts.InternAddress(addr))
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, uint64(1), acc.Nonce)
+	require.Zero(t, tx.reads)
+}
+
+// SetTx rebinds the in-batch read, so a later read is served by the new tx; a tx read error is not retried.
+func TestHistoryReaderV3SetTxRebindsTheAsOfRead(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	first, second := &countingAsOfTx{TemporalTx: roTx}, &countingAsOfTx{TemporalTx: roTx}
+	r := NewHistoryReaderV3WithSharedDomains(first, sd, 10)
+	_, err = r.ReadAccountData(accounts.InternAddress(common.Address{0xdd}))
+	require.NoError(t, err)
+	r.SetTx(second)
+	_, err = r.ReadAccountData(accounts.InternAddress(common.Address{0xdd}))
+	require.NoError(t, err)
+	require.Equal(t, 1, first.reads)
+	require.Equal(t, 1, second.reads)
+
+	second.err = errors.New("pruned")
+	_, err = r.ReadAccountData(accounts.InternAddress(common.Address{0xee}))
+	require.ErrorIs(t, err, second.err)
+	require.Equal(t, 2, second.reads, "a tx read error must not be retried")
 }

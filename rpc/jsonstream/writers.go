@@ -55,20 +55,8 @@ func ArrayValue[S ~[]E, E any](s *Stream, items S, elem func(*Stream, *E)) {
 	s.WriteArrayEnd()
 }
 
-// HexUint64 writes 0x and the shortest lowercase hex of v. The digits go straight into
-// the buffer, so no hexutil value is built for the call and nothing can escape. Which fields
-// are written this way is the caller's rule, not the stream's: see rpc/jsonstream/ethjson.
-func HexUint64(s *Stream, v uint64) {
-	s.beforeValue()
-	buf := s.stream.Buffer()
-	start := len(buf)
-	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
-	s.commit(append(buf, '"'), start)
-	s.afterValue()
-}
-
-// HexUint64Field writes a field name and its HexUint64 value in one step, so the name is never
-// left on the stack waiting for a value.
+// HexUint64Field writes a field name and v as a 0x-prefixed hex quantity in one step, so the name
+// is never left on the stack waiting for a value.
 func HexUint64Field(s *Stream, name string, v uint64) {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, name)
@@ -92,7 +80,8 @@ func HexField(s *Stream, name string, b []byte) {
 	flushIfFull(s.stream)
 }
 
-// HexUint256Field writes a field name and its HexUint256 value in one step, null for a nil one.
+// HexUint256Field writes a field name and v as a 0x-prefixed hex quantity in one step, or null
+// when v is nil.
 func HexUint256Field(s *Stream, name string, v *uint256.Int) {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, name)
@@ -109,16 +98,11 @@ func HexUint256Field(s *Stream, name string, v *uint256.Int) {
 	flushIfFull(s.stream)
 }
 
-// HexUint256 does the same for a 256-bit value, null for a nil one.
-func HexUint256(s *Stream, v *uint256.Int) {
-	if v == nil {
-		s.WriteNil()
-		return
-	}
+// HexKey writes the 0x-prefixed hex of b as a field name, for an object keyed by hashes or
+// addresses, without building the name as a string first.
+func HexKey(s *Stream, b []byte) {
 	s.beforeValue()
-	buf := s.stream.Buffer()
-	start := len(buf)
-	buf, _ = hexutil.U256(*v).AppendText(append(buf, '"'))
-	s.commit(append(buf, '"'), start)
-	s.afterValue()
+	buf := hexutil.AppendQuoted(slices.Grow(s.stream.Buffer(), hexutil.QuotedLen(len(b))+1), b)
+	s.stream.SetBuffer(append(buf, ':'))
+	s.push(ItemField)
 }

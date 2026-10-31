@@ -301,7 +301,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	txNum, _, err := domains.SeekCommitment(ctx, tx)
@@ -330,14 +330,11 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
 	blockRules := blockContext.Rules(fx.config)
-	domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
-	for i, ws := range ba.BalIO().Outputs() {
+	for _, ws := range ba.BalIO().Outputs() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		normalized, err := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, fx.config.IsEIP161Enabled(1), fx.config.Aura != nil, blockRules.IsAmsterdam)
-		require.NoError(t, err)
-		require.NoError(t, normalized.Apply(domains, tx, 1, txNum, nil, blockRules, nil, false))
+		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, nil, blockRules, false))
 	}
 	root, err := domains.ComputeCommitment(ctx, tx, false, 1, txNum, "resume-bal", nil)
 	require.NoError(t, err)
@@ -465,14 +462,12 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	require.NoError(t, err)
 	parentRLP, err := rlp.EncodeToBytes(fx.genesis.Header())
 	require.NoError(t, err)
-	balBytes, err := types.EncodeBlockAccessListBytes(block.BlockAccessList())
-	require.NoError(t, err)
 	senders := make([][20]byte, len(fx.senders))
 	for i, sender := range fx.senders {
 		senders[i] = sender
 	}
 	blockReader, err := blockreplay.NewMemBlockReader(&blockreplay.Fixture{
-		BlockRLP: blockRLP, ParentHeaderRLP: parentRLP, Senders: senders, BALBytes: balBytes,
+		BlockRLP: blockRLP, ParentHeaderRLP: parentRLP, Senders: senders,
 	})
 	require.NoError(t, err)
 
@@ -483,7 +478,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
 	if fx.fromStateFiles {
@@ -499,7 +494,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
-	out, err := execV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
+	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err

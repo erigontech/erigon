@@ -99,25 +99,25 @@ func logRangeLatestOnly(tx kv.Tx, crit filters.FilterCriteria) (begin, end uint6
 	if err != nil {
 		return 0, 0, err
 	}
-	begin, err = resolveLogBound(crit.FromBlock, 0, "FromBlock")
+	begin, err = resolveLogBound(crit.FromBlock, 0, latest, "FromBlock")
 	if err != nil {
 		return 0, 0, err
 	}
-	end, err = resolveLogBound(crit.ToBlock, latest, "ToBlock")
+	end, err = resolveLogBound(crit.ToBlock, latest, latest, "ToBlock")
 	if err != nil {
 		return 0, 0, err
 	}
 	return begin, end, nil
 }
 
-func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
+func resolveLogBound(bound *big.Int, def, latest uint64, name string) (uint64, error) {
 	switch {
 	case bound == nil:
 		return def, nil
 	case bound.Sign() >= 0:
 		return bound.Uint64(), nil
 	case bound.IsInt64() && bound.Int64() == int64(rpc.LatestBlockNumber):
-		return def, nil
+		return latest, nil
 	default:
 		return 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for %s: %v", name, bound), Code: rpc.ErrCodeInvalidParams}
 	}
@@ -296,7 +296,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -325,6 +325,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			timestamp = header.Time
 			blockCount++
 		}
+		if isSystemTxn {
+			continue
+		}
 		var logIndex uint
 		var blockLogs types.Logs
 
@@ -333,7 +336,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, err
 		}
 		if !ok {
-			continue
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 		}
 
 		if rangeErr != nil && logOptions.LogCount != 0 {

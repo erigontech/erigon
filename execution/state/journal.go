@@ -503,7 +503,8 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// stale reads to pass validation and produce incorrect results.
 		//
 		// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
-		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
+		// lets the EIP-161 removal in FinalizedWrites delete an account whose touch was
+		// rolled back.
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
 		//

@@ -62,12 +62,6 @@ func mutateU32(b []byte, off int, v uint32) []byte {
 	return out
 }
 
-func mutateU64(b []byte, off int, v uint64) []byte {
-	out := append([]byte(nil), b...)
-	binary.BigEndian.PutUint64(out[off:], v)
-	return out
-}
-
 func TestNewReaderOnBytes_RejectsCorrupt(t *testing.T) {
 	require := require.New(t)
 	good := validBlob(t, 1000)

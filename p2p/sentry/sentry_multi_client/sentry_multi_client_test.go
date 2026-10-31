@@ -263,15 +263,6 @@ func (m *mockStatusDataProvider) GetStatusData(ctx context.Context) (*proto_sent
 	return m.getStatusDataFunc(ctx)
 }
 
-type mockFullBlockReader struct {
-	dbservices.FullBlockReader
-	readyFunc func(ctx context.Context) <-chan error
-}
-
-func (m *mockFullBlockReader) Ready(ctx context.Context) <-chan error {
-	return m.readyFunc(ctx)
-}
-
 // balHeaderNumberReader is a minimal dbservices.FullBlockReader stub that resolves
 // hash → block-number via an explicit map. AnswerGetBlockAccessListsQuery only
 // reads HeaderNumber; every other method falls through to the embedded nil

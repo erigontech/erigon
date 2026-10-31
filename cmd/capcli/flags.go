@@ -265,7 +265,7 @@ func (c *DumpBlobsSnapshots) command() *cli.Command {
 	overwrite := &cli.BoolFlag{Name: "overwrite", Usage: "rewrite current-version segments already on disk; refuse ranges pinned by the preverified lock or covered by other-version segments"}
 	return &cli.Command{
 		Name:  "dump-blobs-snapshots",
-		Usage: "dump the blob segments missing from disk and from the preverified lock, up to the frozen beacon-block frontier; existing segments are skipped without verification, even if damaged: run 'erigon snapshots integrity' to check them, then use --overwrite to repair eligible segments",
+		Usage: "dump the blob segments missing from disk and from the preverified lock, up to the frozen beacon-block frontier; existing segments are skipped without verification, even if damaged: run 'erigon snapshots integrity --check=CaplinBlobSidecars' to check them, then use --overwrite to repair eligible segments",
 		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, from, toSlotFlag, overwrite},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			c.chainCfg.fromCmd(cmd)

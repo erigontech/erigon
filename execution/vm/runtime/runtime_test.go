@@ -506,43 +506,6 @@ func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 	}
 }
 
-// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
-type FakeChainHeaderReader struct{}
-
-func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-
-func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
-}
-func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
-func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
-
-// GetHeader returns a fake header with the parentHash equal to the number - 1
-func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return &types.Header{
-		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     *uint256.NewInt(number),
-		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
-		Time:       number,
-		Nonce:      types.BlockNonce{0x1},
-		Extra:      []byte{},
-		GasLimit:   100000,
-	}
-}
-
-func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return nil
-}
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	return nil
-}
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64 { return 0 }
-
 type dummyChain struct {
 	counter int
 }
@@ -1196,7 +1159,6 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 	}
 	versioned := func() *state.IntraBlockState {
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		return ibs
 	}
 	was := dbg.TraceTransactionIO

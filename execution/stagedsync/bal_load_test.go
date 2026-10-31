@@ -97,7 +97,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	}
 
 	csBAL := newTestCalcState()
-	csBAL.LoadFromBAL(bal, true, false, true)
+	csBAL.LoadFromBAL(bal, true, false)
 
 	// Incremental equivalent: the same values fed as a multi-write stream
 	// in ascending tx order — ApplyWrites' last-write-wins must land on
@@ -117,9 +117,12 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	incWrites.SetStorage(addrB, slotS2, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addrB, Path: state.StoragePath, Key: slotS2}, Val: *uint256.NewInt(42)})
 	incWrites.SetBalance(addrC, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrC, state.BalancePath), Val: *uint256.NewInt(1000)})
 	incWrites.SetCode(addrC, &state.VersionedWrite[accounts.Code]{WriteHeader: bal2(addrC, state.CodePath), Val: accounts.NewCode(codeC)})
+	// codeHash rides with code as the trio (matching the real incremental path);
+	// codeHash is single-sourced from CodeHashes() on both paths.
+	incWrites.SetCodeHash(addrC, &state.VersionedWrite[accounts.CodeHash]{WriteHeader: bal2(addrC, state.CodeHashPath), Val: accounts.NewCode(codeC).Hash})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(200)})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(500)})
-	csInc.ApplyWrites(incWrites, true)
+	csInc.ApplyWrites(incWrites)
 
 	assert.Equal(t, csInc.accounts, csBAL.accounts, "accounts: BAL load diverged from the write stream")
 	assert.Equal(t, csInc.storageState, csBAL.storageState, "storageState: BAL load diverged from the write stream")
@@ -146,7 +149,7 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false, true) // spuriousDragon on, non-AuRa
+	cs.LoadFromBAL(bal, true, false) // spuriousDragon on, non-AuRa
 
 	require.True(t, cs.accounts[emptied].Deleted,
 		"an EIP-161 empty account in the BAL must be reconstructed as a delete, not a zero-valued update")
@@ -167,7 +170,7 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	csPre := newTestCalcState()
 	csPre.LoadFromBAL(types.BlockAccessList{
 		{Address: emptied.Value(), BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
-	}, false, false, false)
+	}, false, false)
 	require.False(t, csPre.accounts[emptied].Deleted,
 		"pre-SpuriousDragon, an empty touched account is not removed")
 }
@@ -193,7 +196,7 @@ func TestLoadFromBAL_SelfDestructKeepsCodeNotDeleted(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false, true) // SpuriousDragon on
+	cs.LoadFromBAL(bal, true, false) // SpuriousDragon on
 
 	require.False(t, cs.accounts[contract].Deleted,
 		"a zero-balance account that still has code must not be reconstructed as a delete")
@@ -220,7 +223,7 @@ func TestLoadFromBAL_CreatedThenDestroyedHasNoLeaf(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false, true)
+	cs.LoadFromBAL(bal, true, false)
 
 	_, ok := cs.accounts[transient]
 	require.False(t, ok, "a created-then-destroyed account absent from the BAL must not enter calcState")

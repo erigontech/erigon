@@ -55,7 +55,7 @@ type syncContributionService struct {
 	syncedDataManager              *synced_data.SyncedDataManager
 	beaconCfg                      *clparams.BeaconChainConfig
 	syncContributionPool           sync_contribution_pool.SyncContributionPool
-	seenSyncCommitteeContributions sync.Map //  map[seenSyncCommitteeContribution]struct{}
+	seenSyncCommitteeContributions *lru.Cache[seenSyncCommitteeContribution, struct{}]
 	emitters                       *beaconevents.EventEmitter
 	ethClock                       eth_clock.EthereumClock
 	batchSignatureVerifier         *BatchSignatureVerifier
@@ -74,6 +74,10 @@ type SignedContributionAndProofForGossip struct {
 }
 
 // NewSyncContributionService creates a new sync contribution service
+// seenContributionSlots sizes the seen set in slots of SyncCommitteeSize keys each: a key stays
+// admitted while the clock admits its slot and the two adjacent ones, plus one slot of margin.
+const seenContributionSlots = 4
+
 func NewSyncContributionService(
 	syncedDataManager *synced_data.SyncedDataManager,
 	beaconCfg *clparams.BeaconChainConfig,
@@ -88,11 +92,15 @@ func NewSyncContributionService(
 	if err != nil {
 		panic(err)
 	}
+	seenSyncCommitteeContributions, err := lru.New[seenSyncCommitteeContribution, struct{}]("seenSyncCommitteeContributions", int(beaconCfg.SyncCommitteeSize)*seenContributionSlots)
+	if err != nil {
+		panic(err)
+	}
 	return &syncContributionService{
 		syncedDataManager:              syncedDataManager,
 		beaconCfg:                      beaconCfg,
 		syncContributionPool:           syncContributionPool,
-		seenSyncCommitteeContributions: sync.Map{},
+		seenSyncCommitteeContributions: seenSyncCommitteeContributions,
 		ethClock:                       ethClock,
 		emitters:                       emitters,
 		batchSignatureVerifier:         batchSignatureVerifier,
@@ -321,18 +329,21 @@ func (s *syncContributionService) wasContributionSeen(contribution *cltypes.Cont
 		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
 	}
 
-	_, ok := s.seenSyncCommitteeContributions.Load(key)
-	return ok
+	return s.seenSyncCommitteeContributions.Contains(key)
 }
 
-// markContributionAsSeen marks the contribution as seen.
+// markContributionAsSeen marks the contribution as seen. A late verification callback for a
+// slot the clock no longer admits is skipped, so it cannot evict a key that is still live.
 func (s *syncContributionService) markContributionAsSeen(contribution *cltypes.ContributionAndProof) {
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contribution.Contribution.Slot) {
+		return
+	}
 	key := seenSyncCommitteeContribution{
 		aggregatorIndex:   contribution.AggregatorIndex,
 		slot:              contribution.Contribution.Slot,
 		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
 	}
-	s.seenSyncCommitteeContributions.Store(key, struct{}{})
+	s.seenSyncCommitteeContributions.Add(key, struct{}{})
 }
 
 // verifySyncContributionProof verifies the sync contribution proof.

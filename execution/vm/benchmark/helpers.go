@@ -61,13 +61,13 @@ func cancunConfig() *chain.Config {
 // interns into.
 func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
-	return newBenchEnv(b, gasLimit, true)
+	return newBenchEnv(b, gasLimit)
 }
 
 // newBenchEnv returns the env, not the runtime.Config it built: NewEnv ignores
 // Config.Value — only runtime.Call reads it — so a Value set here would never
-// reach the call.
-func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
+// reach the call. It builds the cache-free versioned path staged sync runs.
+func newBenchEnv(t testing.TB, gasLimit uint64) *vm.EVM {
 	t.Helper()
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -76,11 +76,8 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	statedb := state.NewWithVersionMap(
-		state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})),
-		state.NewVersionMap(nil),
-	)
-	statedb.SetNoMaterialize(noMaterialize)
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }
@@ -101,7 +98,6 @@ func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraB
 	vmenv := envFor(seeded, gasLimit)
 	require.NoError(t, seeded.CommitBlock(vmenv.ChainRules(), state.NewWriter(domains.AsPutDel(tx), nil, 1)))
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
 	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }

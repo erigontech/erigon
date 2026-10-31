@@ -418,6 +418,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				return nil, err
 			}
 		}
+		if err := migrator.StampVersion(db, dbPath); err != nil {
+			return nil, err
+		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
 			return rawdb.SetErigonVersion(tx, version.VersionKeyCreated)
 		}); err != nil {

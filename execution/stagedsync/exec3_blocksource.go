@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/exec"
@@ -62,12 +63,21 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		return nil, nil, fmt.Errorf("nil block %d", blockNum)
 	}
 
+	if sidecar := b.BlockAccessListSidecar(); !dbg.IgnoreBAL && len(sidecar.BlockAccessList()) > 0 {
+		if err := sidecar.ValidateForHeader(b.GasLimit()); err != nil {
+			return nil, nil, fmt.Errorf("invalid block access list: %w", err)
+		}
+		return b, sidecar.BlockAccessList(), nil
+	}
 	blockBAL, err := blockAccessList(s.blockTx, b, blockNum)
 	if err != nil {
 		return nil, nil, err
 	}
 	if b.BlockAccessList() == nil && blockBAL != nil {
 		b = b.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(blockBAL))
+	}
+	if dbg.IgnoreBAL {
+		return b, nil, nil
 	}
 	return b, blockBAL, nil
 }

@@ -30,6 +30,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// computeAndCheckCommitmentV3 on the serial path advances the Execution stage progress
+// (e.Update) but must NOT bump the durable state version a second time — the state
+// version is bumped once by the SharedDomains flush on Commit; a second bump here would
+// double-count it. Exercised in exec-only (DiscardCommitment) mode so no trie work runs
+// against the empty overlay.
 func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
 	overlay, err := membatchwithdb.NewMemoryBatch(tx)

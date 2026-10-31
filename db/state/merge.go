@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -565,7 +566,26 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		kveiPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
-		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		budget := dt.d.btBudget
+		var inputs []*btindex.BtIndex
+		if budget != nil {
+			// The merged index replaces the inputs; their bytes leave the budget when they close.
+			for _, item := range domainFiles {
+				inputs = append(inputs, item.bindex)
+			}
+			budget.setRetiring(inputs, true)
+			defer func() {
+				if err != nil {
+					budget.setRetiring(inputs, false)
+				}
+			}()
+		}
+		valuesIn.bindex, err = dt.d.buildBtIndex(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps)
+		if err == nil && budget != nil {
+			// Closing a merged index that was never integrated (another domain's merge failed) gives its inputs
+			// back; after integration the inputs close first and this does nothing.
+			valuesIn.bindex.OnClose(func() { budget.setRetiring(inputs, false) })
+		}
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
@@ -920,7 +940,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 
-		if historyIn.index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
+		if historyIn.vAccessor, err = posidx.Open(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
 	}

@@ -153,7 +153,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
-	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
+	timeout := capEVMTimeout(api.evmCallTimeout, timeoutMilliSeconds)
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()

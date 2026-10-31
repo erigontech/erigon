@@ -121,11 +121,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-// Config contains the configuration options of the ETH protocol.
-//
-// Deprecated: use ethconfig.Config instead.
-type Config = ethconfig.Config
-
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *ethconfig.Config
@@ -205,7 +200,7 @@ type Ethereum struct {
 	kzgWarmupDone  chan struct{}
 }
 
-func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
+func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, dirs datadir.Dirs, cfg *ethconfig.Config) error {
 	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return err
@@ -322,7 +317,7 @@ func New(
 			statecfg.EnableHistoricalRCache()
 		}
 
-		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+		if err := checkAndSetCommitmentHistoryFlag(tx, dirs, config); err != nil {
 			return err
 		}
 
@@ -430,7 +425,7 @@ func New(
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -620,7 +615,7 @@ func New(
 		rulesConfig = &config.Ethash
 	}
 
-	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, blockReader, false /* readonly */, logger)
+	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, false /* readonly */, logger)
 
 	// ForkValidator is created later, after pipelineStagedSync and PipelineExecutor are ready.
 
@@ -643,7 +638,7 @@ func New(
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// construction above.
@@ -1032,7 +1027,7 @@ func New(
 	return backend, nil
 }
 
-func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
+func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
@@ -1236,7 +1231,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 	blockReader := freezeblocks.NewBlockReader(allSnapshots)
@@ -1271,7 +1266,8 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			Logger(logger).
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
-			WithErigonDBSettings(erigonDBSettings)
+			WithErigonDBSettings(erigonDBSettings).
+			BtIndexInMem() // only the node opens here: integration and other tools pass their own *temporal.DB
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
 			stepsStr := "Inf"

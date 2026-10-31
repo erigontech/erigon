@@ -37,12 +37,8 @@ import (
 
 func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 	var got [][]byte
-	cs := &calcState{
-		accounts:     map[accounts.Address]*calcAccountState{},
-		storageState: map[accounts.Address]map[accounts.StorageKey]uint256.Int{},
-		storageDirty: map[accounts.Address]map[accounts.StorageKey]bool{},
-		prefetch:     func(plainKey []byte) { got = append(got, plainKey) },
-	}
+	cs := newTestCalcState()
+	cs.prefetch = func(plainKey []byte) { got = append(got, plainKey) }
 	payer, contract := common.Address{19: 1}, common.Address{19: 2}
 	slot := accounts.InternKey(common.Hash{31: 9})
 	writes := func(v uint64) *state.WriteSet {
@@ -54,15 +50,15 @@ func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 		return ws
 	}
 	slotValue := slot.Value()
-	want := [][]byte{payer[:], append(contract[:], slotValue[:]...)}
+	want := [][]byte{payer[:], contract[:], append(contract[:], slotValue[:]...)}
 
-	cs.ApplyWrites(writes(1), false)
-	cs.ApplyWrites(writes(2), false)
+	cs.ApplyWrites(writes(1))
+	cs.ApplyWrites(writes(2))
 	require.ElementsMatch(t, want, got, "a key written twice in one block is prefetched once")
 
 	got = nil
 	cs.ResetBlockFlags()
-	cs.ApplyWrites(writes(3), false)
+	cs.ApplyWrites(writes(3))
 	require.ElementsMatch(t, want, got, "the next block prefetches the key again")
 }
 
@@ -85,7 +81,7 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 		require.NoError(t, err)
 		defer tx.Rollback()
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer doms.Close()
 		for _, addr := range addrs {
@@ -116,7 +112,7 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 
 		in := make(chan applyResult, 64)
 		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
 		require.NoError(t, err)
 
 		const lastTxNum = 1 + 64

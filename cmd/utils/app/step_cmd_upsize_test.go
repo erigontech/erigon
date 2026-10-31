@@ -18,6 +18,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,12 +32,14 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -124,6 +127,68 @@ func TestStepRebaseIncreaseMergesStateFiles(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+func TestStepRebaseIncreaseMergesReceiptCacheFiles(t *testing.T) {
+	const stepSize, factor, steps = uint64(10), uint64(10), uint64(23)
+	const newStepSize = stepSize * factor
+	saved := statecfg.Schema.RCacheDomain
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+	statecfg.EnableHistoricalRCache()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, stepSize, 64)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+
+	db, closeDB := openTestTemporalDB(t, dirs, settings)
+	writeAccountSteps(t, db, steps*stepSize)
+	writeReceiptCacheSteps(t, db, steps*stepSize)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(steps), execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
+	agg.WaitForFiles()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 7)
+	}))
+	closeDB()
+	statecfg.Schema.RCacheDomain = saved
+	unmerged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.16-20.v"))
+	require.NoError(t, err)
+	require.Len(t, unmerged, 1)
+
+	var end uint64
+	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
+		end, err = agg.StepAlignedEnd(newStepSize)
+		return err
+	}))
+	require.Equal(t, 20*stepSize, end)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, logger)
+	require.NoError(t, err)
+	require.NoError(t, applyStepRebasePlan(t.Context(), dirs, plan, logger))
+	merged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.0-2.v"))
+	require.NoError(t, err)
+	require.Len(t, merged, 1)
+}
+
+func writeReceiptCacheSteps(t *testing.T, db kv.TemporalRwDB, txNums uint64) {
+	t.Helper()
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	var prev []byte
+	for txNum := range txNums {
+		value := binary.BigEndian.AppendUint64(nil, txNum+1)
+		require.NoError(t, domains.DomainPut(kv.RCacheDomain, rwTx, []byte("receipt"), value, txNum, prev))
+		prev = value
+	}
+	require.NoError(t, kvcfg.PersistReceipts.ForceWrite(rwTx, true))
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
 }
 
 func openTestTemporalDB(t *testing.T, dirs datadir.Dirs, settings *state.ErigonDBSettings) (kv.TemporalRwDB, func()) {

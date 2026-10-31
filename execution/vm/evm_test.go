@@ -213,7 +213,6 @@ func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
 	t.Parallel()
 
 	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	defer ibs.Close()
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))

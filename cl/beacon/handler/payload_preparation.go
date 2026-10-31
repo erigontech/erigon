@@ -659,9 +659,9 @@ func isSettledPreparationOutcome(err error) bool {
 		errors.Is(err, errGloasPathNeedsForkChoice)
 }
 
-// A direct builder start cannot change the EL head, so these paths must wait for production's FCU.
+// A proposer-specific FULL-to-EMPTY decision must wait for production's FCU.
 func gloasPathRequiresForkChoiceUpdate(path gloasPayloadPath) bool {
-	return path == gloasPayloadPathFull || path == gloasPayloadPathReorgToEmpty
+	return path == gloasPayloadPathReorgToEmpty
 }
 
 // preparePayloadForWithScratch returns the inputs actually used, keeping sampled values for
@@ -773,7 +773,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	attrs := a.payloadBuildAttributes(
 		baseState, baseBlockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 	)
-	payloadID, err := a.startPayloadBuildForPreparation(ctx, targetSlot, baseBlockRoot, payloadSource.head, attrs)
+	payloadID, err := a.startPayloadBuildForPreparation(ctx, targetSlot, baseBlockRoot, payloadSource.head, payloadSource.gloasPath, attrs)
 	if err != nil {
 		return key, err
 	}
@@ -783,6 +783,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	selectedRoot, _, selected := a.syncedData.SelectedHead()
 	if !selected || selectedRoot != baseBlockRoot {
 		return key, errPreparationHeadChanged
+	}
+	if err := a.checkPreparationParent(baseBlockRoot, targetSlot, payloadSource.gloasPath); err != nil {
+		return key, err
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now())
@@ -845,6 +848,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 	targetSlot uint64,
 	baseBlockRoot common.Hash,
 	head common.Hash,
+	path gloasPayloadPath,
 	attrs *engine_types.PayloadAttributes,
 ) ([]byte, error) {
 	payloadBuilder, ok := a.engine.(execution_client.PayloadBuilder)
@@ -859,6 +863,9 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
 		if !selected || selectedRoot != baseBlockRoot {
 			return nil, errPreparationHeadChanged
+		}
+		if err := a.checkPreparationParent(baseBlockRoot, targetSlot, path); err != nil {
+			return nil, err
 		}
 		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, preparationSlot, selectedSlot, head, attrs)
 		if err == nil {
@@ -876,6 +883,20 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 			return nil, context.Cause(ctx)
 		}
 	}
+}
+
+func (a *ApiHandler) checkPreparationParent(root common.Hash, targetSlot uint64, path gloasPayloadPath) error {
+	if path == gloasPayloadPathPreFork {
+		return nil
+	}
+	currentPath, err := a.resolveGloasPayloadPath(root, targetSlot)
+	if err != nil {
+		return err
+	}
+	if currentPath != path {
+		return errGloasPayloadPending
+	}
+	return nil
 }
 
 func (a *ApiHandler) startPayloadBuildAttempt(
@@ -1063,7 +1084,11 @@ func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSl
 	if err != nil {
 		return gloasPayloadPathPending, err
 	}
-	return a.gloasPayloadPathForHead(head, targetSlot), nil
+	path := a.gloasPayloadPathForHead(head, targetSlot)
+	if path == gloasPayloadPathFull && !a.forkchoiceStore.IsPayloadVerified(head.Root) {
+		return gloasPayloadPathPending, errGloasPayloadPending
+	}
+	return path, nil
 }
 
 func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {
