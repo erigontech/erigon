@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -1604,12 +1605,12 @@ mainloop:
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
 			if len(result.sidecars) > result.reqLength {
 				log.Debug("rejecting over-cardinality column response", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
-				d.rpc.BanPeer(result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
 			}
 			resolved := make([]resolvedColumn, len(result.sidecars))
 			seen := make(map[requestedDataColumn]struct{}, len(result.sidecars))
-			validResponse := true
+			validResponse, unverifiedSignatureMismatch := true, false
 			for i, sidecar := range result.sidecars {
 				if sidecar == nil {
 					validResponse = false
@@ -1627,7 +1628,7 @@ mainloop:
 				}
 				metadata := req.recovery(blockRoot)
 				if sidecar.Version() < clparams.GloasVersion && metadata != nil && sidecar.SignedBlockHeader.Signature != metadata.signature {
-					validResponse = false
+					unverifiedSignatureMismatch = true
 					break
 				}
 				if _, duplicate := seen[key]; duplicate {
@@ -1637,9 +1638,19 @@ mainloop:
 				seen[key] = struct{}{}
 				resolved[i] = resolvedColumn{slot: slot, blockRoot: blockRoot}
 			}
+			if unverifiedSignatureMismatch {
+				// Backfill stores blocks without verifying their signature, so the stored one may be the forged side.
+				log.Debug("rejecting column response with a signature that differs from the stored block", "pid", result.pid)
+				if slices.ContainsFunc(result.sidecars, invalidFuluSidecar) {
+					d.rpc.BanPeerForInvalidData(ctx, result.pid)
+				} else {
+					d.rpc.BanPeer(result.pid)
+				}
+				continue
+			}
 			if !validResponse {
 				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
-				d.rpc.BanPeer(result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
 			}
 			var wg sync.WaitGroup
@@ -1662,7 +1673,6 @@ mainloop:
 					exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
 					if err != nil {
 						log.Debug("failed to check if column sidecar exists", "err", err)
-						d.rpc.BanPeer(result.pid)
 						return
 					}
 					if exist {
@@ -1672,7 +1682,7 @@ mainloop:
 					blobParameters := d.beaconConfig.GetBlobParameters(slot / d.beaconConfig.SlotsPerEpoch)
 					if sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
 						log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", sidecar.Index, "columnLen", sidecar.Column.Len())
-						d.rpc.BanPeer(result.pid)
+						d.rpc.BanPeerForInvalidData(ctx, result.pid)
 						return
 					}
 
@@ -1686,29 +1696,29 @@ mainloop:
 						}
 						if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitments) {
 							log.Debug("failed to verify column sidecar (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitments) {
 							log.Debug("failed to verify column sidecar kzg proofs (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 					} else {
 						// Fulu: kzg_commitments are in the sidecar
 						if !VerifyDataColumnSidecar(sidecar) {
 							log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarInclusionProof(sidecar) {
 							log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarKZGProofs(sidecar) {
 							log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 					}
@@ -2272,4 +2282,10 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			}
 		}()
 	}
+}
+
+// invalidFuluSidecar reports a pre-Gloas sidecar whose structure or proofs fail on their own, without the stored block.
+func invalidFuluSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+	return sidecar.Version() < clparams.GloasVersion &&
+		(!VerifyDataColumnSidecar(sidecar) || !VerifyDataColumnSidecarInclusionProof(sidecar) || !VerifyDataColumnSidecarKZGProofs(sidecar))
 }
