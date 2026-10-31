@@ -126,3 +126,27 @@ func TestFetchTxsWritesTheRestPastAFailure(t *testing.T) {
 	require.FileExists(t, filepath.Join(out, "0xgood.json"))
 	require.NoFileExists(t, filepath.Join(out, "0xbad.json"))
 }
+
+// A request shorter than one fgprof tick has no samples; stopping its wall profile must not panic.
+func TestRequestProfileHookSurvivesShortRequest(t *testing.T) {
+	stop := makeRequestProfileHook("", t.TempDir())("newpayload", "short")
+	require.NotPanics(t, stop)
+}
+
+func TestStopWallProfileRemovesOnlyAProfileWithoutSamples(t *testing.T) {
+	open := func() *os.File {
+		f, err := os.Create(filepath.Join(t.TempDir(), "wall.pprof"))
+		require.NoError(t, err)
+		return f
+	}
+	stopped := open()
+	stopWallProfile(func() error { return nil }, stopped)
+	require.FileExists(t, stopped.Name())
+
+	noSamples := open()
+	stopWallProfile(func() error { zero := 0; _ = 1 / zero; return nil }, noSamples)
+	require.NoFileExists(t, noSamples.Name())
+
+	other := open()
+	require.PanicsWithValue(t, "boom", func() { stopWallProfile(func() error { panic("boom") }, other) })
+}
