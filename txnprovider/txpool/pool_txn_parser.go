@@ -215,12 +215,14 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 3: Decode the transaction using standard types.
-	// For blob wrappers, we parse the wrapper structure manually (zero-copy for
+	// For blob wrappers, we parse the wrapper structure manually (one copy for
 	// large blob data) and decode only the inner tx_payload_body via the standard
 	// decoder, producing a *types.BlobTx (not *types.BlobTxWrapper).
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
 	if !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs {
+		// Blobs outlive the payload (often a whole p2p message), so they must not alias it.
+		txBytes = bytes.Clone(txBytes)
 		// Structure: type_byte || rlp([ rlp(tx_body), [wrapper_version], blobs, commitments, proofs ])
 		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
 		if err != nil {
@@ -265,7 +267,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			proofsPerBlob = int(params.CellsPerExtBlob)
 		}
 
-		// Parse blobs list (zero-copy: slices point into original payload).
+		// Parse blobs list (slices point into the cloned txBytes).
 		blobListPos, blobListLen, err := rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint

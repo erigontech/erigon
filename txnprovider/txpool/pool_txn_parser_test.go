@@ -881,3 +881,26 @@ func buildBlobWrapperPayload() []byte {
 
 	return wrapperRlp
 }
+
+func TestWrappedBlobTxnDoesNotAliasPayload(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	wire := bytes.Clone(wrapperBuf.Bytes())
+	packet := EncodeTransactions([][]byte{wire}, nil)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slots TxnSlots
+	_, err := ParseTransactions(packet, 0, ctx, &slots, nil)
+	require.NoError(t, err)
+	clear(packet)
+
+	slot := slots.Txns[0]
+	require.Len(t, slot.BlobBundles, len(wrapper.Blobs))
+	for i, bundle := range slot.BlobBundles {
+		require.True(t, bytes.Equal(wrapper.Blobs[i][:], bundle.Blob), "blob %d aliases the payload", i)
+	}
+	require.True(t, bytes.Equal(wire, slot.Rlp), "rlp aliases the payload")
+}
