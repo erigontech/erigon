@@ -168,10 +168,13 @@ func zeroPaddedKey(prefix int) func([]byte) ([]byte, bool) {
 	}
 }
 
-// bn254AddKey keeps an addition of two points at infinity out of the cache: it answers faster than a lookup.
+// bn254AddKey keeps an addition with a point at infinity out of the cache: it answers faster than a lookup.
 func bn254AddKey(input []byte) ([]byte, bool) {
 	in, _ := zeroPaddedKey(128)(input)
-	return in, len(in) != 0
+	var points [128]byte
+	copy(points[:], in)
+	var infinity [64]byte
+	return in, [64]byte(points[:64]) != infinity && [64]byte(points[64:]) != infinity
 }
 
 const modExpHeaderLength = 96

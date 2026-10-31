@@ -671,8 +671,14 @@ func TestPointAdditionsAreCached(t *testing.T) {
 }
 
 func TestPrecompileCacheKeyNormalizes(t *testing.T) {
-	_, ok := precompileCacheKey(&bn254AddIstanbul{})(make([]byte, 128))
-	require.False(t, ok, "an addition of two points at infinity is cheaper than a lookup")
+	addKey := precompileCacheKey(&bn254AddIstanbul{})
+	point := common.FromHex("0x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002")
+	for _, in := range [][]byte{make([]byte, 128), slices.Concat(point, make([]byte, 64)), slices.Concat(make([]byte, 64), point)} {
+		_, ok := addKey(in)
+		require.False(t, ok, "an addition with a point at infinity is cheaper than a lookup")
+	}
+	_, ok := addKey(slices.Concat(point, point))
+	require.True(t, ok)
 
 	key, ok := zeroPaddedKey(128)(append([]byte{1, 2}, make([]byte, 300)...))
 	require.True(t, ok)
