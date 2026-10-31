@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -39,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/shards"
 )
 
 type BlockTimings [2]time.Duration
@@ -51,15 +52,16 @@ const (
 
 const timingsCacheSize = 16
 
+const retainedCandidateLimit = 4
+
+type validatedCandidate struct {
+	domains       *execctx.SharedDomains
+	notifications *Accumulation
+}
+
 type ForkValidator struct {
-	// current memory batch containing chain head that extend canonical fork.
-	sharedDom *execctx.SharedDomains
-	// notifications accumulated for the extending fork
-	extendingForkNotifications *shards.Notifications
-	// hash of chain head that extend canonical fork.
-	extendingForkHeadHash common.Hash
-	extendingForkNumber   uint64
-	maxReorgDepth         uint64
+	candidates    *simplelru.LRU[common.Hash, *validatedCandidate]
+	maxReorgDepth uint64
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
 	blockReader dbservices.FullBlockReader
@@ -97,7 +99,12 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 			panic(err)
 		}
 	}
+	candidates, err := simplelru.NewLRU(retainedCandidateLimit, func(_ common.Hash, c *validatedCandidate) { c.domains.Close() })
+	if err != nil {
+		panic(err)
+	}
 	return &ForkValidator{
+		candidates:        candidates,
 		executor:          executor,
 		currentHeight:     currentHeight,
 		blockReader:       blockReader,
@@ -109,17 +116,22 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 	}
 }
 
-// ExtendingForkHeadHash return the fork head hash of the fork that extends the canonical chain.
-func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.extendingForkHeadHash
-}
-
 // IsValidated reports whether a payload with this hash already passed validation.
 func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
 	_, ok := fv.validHashes.Get(hash)
 	return ok
+}
+
+func (fv *ForkValidator) touchValidated(hash common.Hash) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.isKnownOrRetained(hash)
+}
+
+func (fv *ForkValidator) isKnownOrRetained(hash common.Hash) bool {
+	_, known := fv.validHashes.Get(hash)
+	_, retained := fv.candidates.Get(hash)
+	return known || retained
 }
 
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
@@ -130,48 +142,56 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
-	// If the head changed, previous assumptions on head are incorrect now.
-	if fv.sharedDom != nil {
-		fv.sharedDom.Close()
-	}
-	fv.sharedDom = nil
-	fv.extendingForkNotifications = nil
-	fv.extendingForkNumber = 0
-	fv.extendingForkHeadHash = common.Hash{}
+	fv.candidates.Purge()
 }
 
-// MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
-func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation) error {
+func (fv *ForkValidator) HasValidatedState(hash common.Hash) bool {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	return fv.candidates.Contains(hash)
+}
+
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, hash common.Hash, target *Accumulation) error {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	candidate, ok := fv.candidates.Get(hash)
+	if !ok {
+		return fmt.Errorf("validated state unavailable for %s", hash)
+	}
 	start := time.Now()
-	if fv.sharedDom != nil {
-		if err := fv.sharedDom.FlushPendingUpdates(tx); err != nil {
-			return err
-		}
-		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err := candidate.domains.FlushPendingUpdates(tx); err != nil {
+		return err
+	}
+	sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	otherTxNum, _, err := candidate.domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if overlay := candidate.domains.BlockOverlay(); overlay != nil {
+		sequence, err := tx.ReadSequence(kv.EthTx)
 		if err != nil {
 			return err
 		}
-		otherTxNum, _, err := fv.sharedDom.SeekCommitment(ctx, tx)
+		candidateSequence, err := overlay.NewReadView(tx).ReadSequence(kv.EthTx)
 		if err != nil {
 			return err
 		}
-		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum)
-		if err != nil {
+		// Later insertions may have allocated transaction IDs since validation.
+		if err := overlay.ResetSequence(kv.EthTx, max(sequence, candidateSequence)); err != nil {
 			return err
 		}
 	}
-	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
+	if err := sd.Merge(ctx, sdTxNum, candidate.domains, otherTxNum); err != nil {
+		return err
+	}
+	timings, _ := fv.timingsCache.Get(hash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
-	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
-	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
-	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
-	// Clean extending fork data
-	fv.sharedDom = nil
-	fv.extendingForkHeadHash = common.Hash{}
-	fv.extendingForkNumber = 0
-	fv.extendingForkNotifications = nil
+	fv.timingsCache.Add(hash, timings)
+	candidate.notifications.CopyAndReset(target)
+	fv.candidates.Remove(hash)
 	return nil
 }
 
@@ -188,6 +208,12 @@ type HasDiff interface {
 func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	retained := false
+	defer func() {
+		if !retained && sd != nil {
+			sd.Close()
+		}
+	}()
 	if fv.executor == nil {
 		status = engine_types.AcceptedStatus
 		return
@@ -196,7 +222,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(hash); ok {
+	if fv.isKnownOrRetained(hash) {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
@@ -272,45 +298,32 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 			return
 		}
 	}
-	if fv.sharedDom != nil {
-		fv.sharedDom.Close()
-	}
-	fv.sharedDom = sd
-	// Use the validation pipeline's own notifications object so that state
-	// changes accumulated by exec3 during ValidateBlock are visible here.
-	// Reset accumulator and receipts to match main's behaviour of creating
-	// a fresh Sync (and thus fresh notifications) per validation call.
-	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
-	fv.extendingForkNotifications.Accumulator.Reset(0)
-	fv.extendingForkNotifications.RecentReceipts.Clear()
-	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
-
-	if fv.sharedDom != nil &&
-		(criticalError != nil || status == engine_types.InvalidStatus || status == engine_types.AcceptedStatus) {
-		fv.sharedDom.Close()
-		fv.sharedDom = nil
+	notifications := fv.executor.ValidationNotifications()
+	notifications.Accumulator.Reset(0)
+	notifications.RecentReceipts.Clear()
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(sd, tx, header, body, unwindPoint, headersChain, bodiesChain)
+	if status == engine_types.ValidStatus && criticalError == nil && validationError == nil {
+		owned := NewAccumulation()
+		notifications.Accumulator.CopyAndReset(owned.Accumulator)
+		notifications.RecentReceipts.CopyAndReset(owned.RecentReceipts)
+		for _, ancestor := range headersChain {
+			fv.candidates.Remove(ancestor.Hash())
+		}
+		if overlay := sd.BlockOverlay(); overlay != nil {
+			overlay.DetachDB()
+		}
+		fv.candidates.Add(hash, &validatedCandidate{domains: sd, notifications: owned})
+		retained = true
 	}
 
 	return
 }
 
-// clear wipes out current extending fork data, this method is called after fcu is called,
-// because fcu decides what the head is and after the call is done all the non-chosen forks are
-// to be considered obsolete.
-func (fv *ForkValidator) clear() {
-	fv.extendingForkHeadHash = common.Hash{}
-	fv.extendingForkNumber = 0
-	if fv.sharedDom != nil {
-		fv.sharedDom.Close()
-	}
-	fv.sharedDom = nil
-}
-
-// ClearWithUnwind wipes out current extending fork data.
+// ClearWithUnwind releases all retained candidate states.
 func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	fv.clear()
+	fv.candidates.Purge()
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
@@ -343,8 +356,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation, fv.executor.lastValidationExecStageTiming())
 
 	latestValidHash = hash
-	fv.extendingForkHeadHash = hash
-	fv.extendingForkNumber = number
 	if validationError != nil {
 		var latestValidNumber uint64
 		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.Execution)
@@ -362,8 +373,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 			return
 		}
 		status = engine_types.InvalidStatus
-		fv.extendingForkHeadHash = common.Hash{}
-		fv.extendingForkNumber = 0
 		return
 	}
 	fv.validHashes.Add(hash, true)
@@ -423,8 +432,12 @@ func (fv *ForkValidator) TakeBlockMetrics(hash common.Hash) *blockmetrics.Record
 	return nil
 }
 
-func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {
+func (fv *ForkValidator) ValidatedState(hash common.Hash) *execctx.SharedDomains {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	return fv.extendingForkHeadHash, fv.extendingForkNumber, fv.sharedDom
+	candidate, ok := fv.candidates.Peek(hash)
+	if !ok {
+		return nil
+	}
+	return candidate.domains
 }

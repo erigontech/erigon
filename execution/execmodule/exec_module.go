@@ -242,6 +242,8 @@ type ExecModule struct {
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
+	pendingBlocks  map[common.Hash]pendingBlock
+	retainedBlocks *membatchwithdb.MemoryMutation
 	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
@@ -366,9 +368,10 @@ func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
 	return cache.NewDefaultStateCache()
 }
 
-// Close releases the domain state cache's reservation in the shared memory
-// envelope.
+// Close releases retained candidates and the domain state cache.
 func (e *ExecModule) Close() {
+	e.forkValidator.ClearWithUnwind()
+	e.dropPendingBlocks()
 	if e.stateCache != nil {
 		e.stateCache.Close()
 	}
@@ -522,7 +525,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
-	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
@@ -544,9 +546,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		return progress >= blockNumber, err
 	}
-	// Read header/body from the block overlay on currentContext if available
-	// (block data written by InsertBlocks hasn't been flushed to DB yet),
-	// falling back to a plain DB read otherwise.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)
@@ -571,6 +570,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
+			if view := e.pendingBlocksView(tx); view != nil {
+				tx = view
+			}
 			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
@@ -600,7 +602,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
-	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
+	if payloadExecuted || (!canonical && e.forkValidator.touchValidated(blockHash)) {
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusSuccess,
 			LatestValidHash:  blockHash,
@@ -629,9 +631,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		return ValidationResult{}, err
 	}
-	// Do not defer doms.Close(): on the success path ownership transfers to
-	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
-	// so we Close explicitly only on the early-return error paths below.
+	// ValidatePayload takes ownership of doms; close it on earlier errors.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
@@ -647,18 +647,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
-	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
-	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
-	// and the parallel exec goroutine via NewReadView — see this block data.
-	// The InsertBlocks overlay on e.currentContext retains its data unchanged.
-	// Do NOT UpdateTxn on e.currentContext.BlockOverlay() here — that would
-	// reassign its backing db to our soon-to-be-rolled-back roTx and leave
-	// e.currentContext in an inconsistent state for UpdateForkChoice.
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			doms.Close()
-			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
-		}
+	if _, err := e.copyPendingChain(roTx, tx, blockHash); err != nil {
+		doms.Close()
+		return ValidationResult{}, fmt.Errorf("ValidateChain: copy pending blocks to validation tx: %w", err)
 	}
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
@@ -700,6 +691,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
 	// pages against concurrent readers.
 	if isInvalidChain {
+		e.forkValidator.ClearWithUnwind()
 		purgeTx, err := e.db.BeginTemporalRwNosync(ctx)
 		if err != nil {
 			return ValidationResult{}, err
@@ -717,6 +709,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
+		e.dropBadChain(blockHash, lvh)
+		if e.retainedBlocks != nil {
+			if err := e.retainSideBlocks(roTx, nil, nil, 0, 0); err != nil {
+				return ValidationResult{}, err
+			}
+		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
 		}
@@ -871,11 +869,11 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if blockHash == nil {
 		return false, errors.New("block hash is nil, HasBlock supports lookup by hash only")
 	}
-	tx, err := e.db.BeginRo(ctx)
+	tx, done, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer done()
 
 	num, _ := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
 	if num == nil {

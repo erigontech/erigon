@@ -225,9 +225,8 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validationReceipt.ValidationStatus)
 	require.Equal(t, "", validationReceipt.ValidationError)
-	extendingHash, extendingNum, extendingSd := m.ForkValidator.ExtendingFork()
-	require.Equal(t, chainPack.Blocks[0].Hash(), extendingHash)
-	require.Equal(t, uint64(1), extendingNum)
+	extendingSd := m.ForkValidator.ValidatedState(chainPack.Blocks[0].Hash())
+	require.NotNil(t, extendingSd)
 	var inMemBlockNum, inMemTxNum uint64
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
@@ -469,10 +468,7 @@ func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	validation, err := m.ValidateChain(t.Context(), fork.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	extendingHash, extendingNumber, extendingDomains := m.ForkValidator.ExtendingFork()
-	require.Equal(t, fork.Blocks[0].Hash(), extendingHash)
-	require.Equal(t, fork.Blocks[0].NumberU64(), extendingNumber)
-	require.NotNil(t, extendingDomains)
+	require.NotNil(t, m.ForkValidator.ValidatedState(fork.Blocks[0].Hash()))
 	fcuResult, err := m.UpdateForkChoice(t.Context(), fork.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)

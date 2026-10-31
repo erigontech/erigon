@@ -82,10 +82,6 @@ func NewPipelineExecutor(
 	}
 }
 
-// ValidationNotifications returns the notifications object used by the
-// validation pipeline. The ForkValidator uses this as extendingForkNotifications
-// so that state changes accumulated during ValidateBlock are available for
-// MergeExtendingFork to copy to the main accumulator.
 func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
 	return pe.validationNotifications
 }
