@@ -205,7 +205,7 @@ func keyWithHashPrefix(size int, prefix []byte, next *uint64) []byte {
 }
 
 func convertTestDomains(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
-	return convertTestDomainsWithParallel(t, stepSize, true)
+	return convertTestDomainsWithParallel(t, stepSize, false)
 }
 
 func convertTestDomainsWithParallel(t *testing.T, stepSize uint64, parallel bool) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
@@ -253,7 +253,7 @@ func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 }
 
 func buildRecreatedOwnerFiles(t *testing.T, stepSize, steps uint64, accounts int, laterSlot bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
-	return buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, accounts, laterSlot, true)
+	return buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, accounts, laterSlot, false)
 }
 
 func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, accounts int, laterSlot, parallel bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {

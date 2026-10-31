@@ -150,7 +150,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	const stepSize, steps = 4, 2
-	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	db, agg, rwTx, domains := convertTestDomainsWithParallel(t, stepSize, true)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
 
@@ -306,7 +306,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	const stepSize, steps = 4, 3
-	db, agg, _ := buildRecreatedOwnerFiles(t, stepSize, steps, 4, true)
+	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, 4, true, true)
 	ctx := t.Context()
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
@@ -330,8 +330,12 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, 4, 3, 4, true, false)
 	beforeDomain := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain)
 	beforeHistory := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory)
-	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
-	_, err := os.Stat(backupDir)
+	beforeIdx := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapIdx)
+	beforeAccessors := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapAccessors)
+	require.NotEmpty(t, beforeIdx)
+	require.NotEmpty(t, beforeAccessors)
+	backupRoot := filepath.Join(agg.Dirs().Snap, "backup")
+	_, err := os.Stat(backupRoot)
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -343,7 +347,9 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 
 	require.Equal(t, beforeDomain, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain))
 	require.Equal(t, beforeHistory, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory))
-	_, err = os.Stat(backupDir)
+	require.Equal(t, beforeIdx, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapIdx))
+	require.Equal(t, beforeAccessors, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapAccessors))
+	_, err = os.Stat(backupRoot)
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
