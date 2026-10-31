@@ -106,6 +106,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+func storageFanOutMin(initialCycle bool) int {
+	if initialCycle {
+		return 1024
+	}
+	return 128
+}
+
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
 }
@@ -207,7 +214,6 @@ func ExecV3(ctx context.Context,
 	// panic on the dropped sequential-buffer keys.
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		// Deferred commitment updates batch commitment to block boundaries rather than
 		// per-transaction, cutting re-org validation overhead.
@@ -215,6 +221,7 @@ func ExecV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForRunningWarmup(ctx)
@@ -345,12 +352,12 @@ func execV3Serial(ctx context.Context,
 	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup.
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		if isForkValidation {
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForRunningWarmup(ctx)

@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -466,7 +467,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	group.Go(func() error {
 		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
 	})
-	if dbg.TrieBALWarmupers > 0 {
+	if dbg.TrieBALWarmupers > 0 && !statecfg.ExperimentalCommitmentV3 {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
 		})

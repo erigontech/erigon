@@ -53,7 +53,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
 
@@ -239,6 +239,12 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			fileInfo, _, _ := snaptype.ParseFileName("", name)
 
 			currentFileVersion := fileInfo.Version
+
+			if dir := filepath.Dir(path); statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
+				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major < 3 {
+				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
+					"convert the datadir with `integration commitment convert --v3`", fileInfo.Name(), currentFileVersion.Major)
+			}
 
 			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]
 			if !ok {

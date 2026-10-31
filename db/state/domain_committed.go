@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
@@ -103,7 +101,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+	if len(branch) == 0 || commitment.IsCommitmentStateKey(prefix) ||
 		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
 
 		return branch, nil // do not transform, return as is

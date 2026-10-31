@@ -79,5 +79,5 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		agg.Close()
 	}
 
-	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false)
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false, false)
 }

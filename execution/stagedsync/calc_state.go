@@ -3,10 +3,13 @@ package stagedsync
 import (
 	"fmt"
 	"math"
+	"slices"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/bal"
@@ -30,6 +33,35 @@ type calcAccountState struct {
 	Incarnation uint64
 	Deleted     bool
 	dirty       bool
+}
+
+type calcHashes struct {
+	accounts map[accounts.Address][32]byte
+	slots    map[accounts.StorageKey][32]byte
+}
+
+func newCalcHashes() *calcHashes {
+	return &calcHashes{accounts: map[accounts.Address][32]byte{}, slots: map[accounts.StorageKey][32]byte{}}
+}
+
+func (h *calcHashes) account(addr accounts.Address) [32]byte {
+	hash, ok := h.accounts[addr]
+	if !ok {
+		address := addr.Value()
+		hash = keccak.Sum256(address[:])
+		h.accounts[addr] = hash
+	}
+	return hash
+}
+
+func (h *calcHashes) slot(key accounts.StorageKey) [32]byte {
+	hash, ok := h.slots[key]
+	if !ok {
+		k := key.Value()
+		hash = keccak.Sum256(k[:])
+		h.slots[key] = hash
+	}
+	return hash
 }
 
 // calcDomainReader provides lazy-load reads for calcState through the
@@ -89,7 +121,14 @@ type calcState struct {
 	logger    log.Logger
 	logPrefix string
 
-	prefetch func(plainKey []byte)
+	feedUpdates []commitment.Update
+	feedSlots   []commitment.FeedSlot
+	feedValues  []byte
+	deleted     [][]byte
+
+	prefetch       func(plainKey []byte)
+	branchPrefetch *branchPrefetcher
+	hashes         *calcHashes
 }
 
 // LazyLoadErr returns the first lazy-load error, or nil. The calculator must
@@ -146,6 +185,9 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	if cs.hashes != nil {
+		cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr)})
+	}
 	if cs.prefetch != nil {
 		address := addr.Value()
 		cs.prefetch(address[:])
@@ -255,9 +297,14 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView) {
 			cs.storageDirty[addr] = dirty
 		}
 		for key := range inner {
-			if cs.prefetch != nil && !dirty[key] {
-				address, slot := addr.Value(), key.Value()
-				cs.prefetch(append(address[:], slot[:]...))
+			if !dirty[key] {
+				if cs.hashes != nil {
+					cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr), slot: cs.hashes.slot(key), storage: true})
+				}
+				if cs.prefetch != nil {
+					address, slot := addr.Value(), key.Value()
+					cs.prefetch(append(address[:], slot[:]...))
+				}
 			}
 			dirty[key] = true
 		}
@@ -345,40 +392,16 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 }
 
 func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
+	cs.deleted = nil
+	n := len(cs.dirtyAccounts)
+	for _, dirtySlots := range cs.storageDirty {
+		n += len(dirtySlots)
+	}
+	updates.Grow(n)
 	for _, addr := range cs.dirtyAccounts {
-		acc := cs.accounts[addr]
 		address := addr.Value()
-		key := string(address[:])
-
-		// A Deleted account encodes as a leaf-removing DeleteUpdate only when every
-		// field is zero; one that still holds a non-zero balance/nonce/code (or a
-		// retained incarnation) keeps its leaf via a regular UPDATE.
-		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
-		var u commitment.Update
-		// A deleted account removes its leaf (DeleteUpdate) only when it is fully
-		// zero AND holds no retained incarnation; a retained incarnation keeps the
-		// leaf via the default zero-valued UPDATE (which, under isAllZero, writes the
-		// same zeros).
-		switch {
-		case acc.Deleted && acc.Incarnation == 0 && isAllZero:
-			u = commitment.Update{
-				Flags:    commitment.DeleteUpdate,
-				CodeHash: empty.CodeHash,
-			}
-		default:
-			u = commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash,
-			}
-		}
-		// Self-destructed this block: drop the old storage subtree and rebuild
-		// from only this block's slots.
-		if cs.sdSubtree[addr] {
-			u.DeleteStorageSubtree = true
-		}
-		updates.TouchPlainKeyDirect(key, &u)
+		update := cs.accountUpdateOf(addr, cs.accounts[addr])
+		updates.TouchPlainKeyUnique(string(address[:]), &update)
 	}
 
 	for addr, dirtySlots := range cs.storageDirty {
@@ -387,22 +410,88 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
 		for key := range dirtySlots {
 			val := slots[key]
 			keyVal := key.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, address[:])
+			var composite [20 + 32]byte
+			copy(composite[:], address[:])
 			copy(composite[20:], keyVal[:])
 
-			vBytes := val.Bytes()
 			var u commitment.Update
-			if len(vBytes) == 0 {
+			if n := val.ByteLen(); n == 0 {
 				u.Flags = commitment.DeleteUpdate
 			} else {
 				u.Flags = commitment.StorageUpdate
-				u.StorageLen = int8(len(vBytes))
-				copy(u.Storage[:], vBytes)
+				u.StorageLen = int8(n)
+				val.WriteToSlice(u.Storage[:n])
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyUnique(string(composite[:]), &u)
 		}
 	}
+}
+
+func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
+	slots := 0
+	for _, dirty := range cs.storageDirty {
+		slots += len(dirty)
+	}
+	cs.deleted = [][]byte{}
+	feed.Keys = len(cs.dirtyAccounts) + slots
+	feed.Accounts = slices.Grow(feed.Accounts[:0], len(cs.dirtyAccounts)+len(cs.storageDirty))
+	cs.feedUpdates = slices.Grow(cs.feedUpdates[:0], len(cs.dirtyAccounts))
+	cs.feedSlots = slices.Grow(cs.feedSlots[:0], slots)
+	cs.feedValues = slices.Grow(cs.feedValues[:0], length.Hash*slots)
+	for addr, dirty := range cs.storageDirty {
+		if len(dirty) == 0 {
+			continue
+		}
+		slots := cs.storageState[addr]
+		start := len(cs.feedSlots)
+		for key := range dirty {
+			value := slots[key]
+			at, n := len(cs.feedValues), value.ByteLen()
+			if n == 0 {
+				address, slot := addr.Value(), key.Value()
+				cs.deleted = append(cs.deleted, append(address[:], slot[:]...))
+			}
+			cs.feedValues = cs.feedValues[:at+n]
+			value.WriteToSlice(cs.feedValues[at:])
+			cs.feedSlots = append(cs.feedSlots, commitment.FeedSlot{Hash: cs.hashes.slot(key), Value: cs.feedValues[at : at+n : at+n]})
+		}
+		account := commitment.FeedAccount{Hash: cs.hashes.account(addr), Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
+		if acc := cs.accounts[addr]; acc != nil && acc.dirty {
+			account.Update = cs.feedUpdate(addr, acc)
+		}
+		feed.Accounts = append(feed.Accounts, account)
+	}
+	for _, addr := range cs.dirtyAccounts {
+		if len(cs.storageDirty[addr]) != 0 {
+			continue
+		}
+		acc := cs.accounts[addr]
+		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: cs.hashes.account(addr), Update: cs.feedUpdate(addr, acc)})
+	}
+}
+
+func (cs *calcState) feedUpdate(addr accounts.Address, acc *calcAccountState) *commitment.Update {
+	cs.feedUpdates = append(cs.feedUpdates, cs.accountUpdateOf(addr, acc))
+	u := &cs.feedUpdates[len(cs.feedUpdates)-1]
+	if u.Deleted() {
+		address := addr.Value()
+		cs.deleted = append(cs.deleted, address[:])
+	}
+	return u
+}
+
+func (cs *calcState) accountUpdateOf(addr accounts.Address, acc *calcAccountState) commitment.Update {
+	u := commitment.Update{
+		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+		Balance:  acc.Balance,
+		Nonce:    acc.Nonce,
+		CodeHash: acc.CodeHash,
+	}
+	if acc.Deleted && acc.Incarnation == 0 && acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash {
+		u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash}
+	}
+	u.DeleteStorageSubtree = cs.sdSubtree[addr]
+	return u
 }
 
 // ResetBlockFlags clears the per-block dirty flags while keeping the accumulated

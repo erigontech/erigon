@@ -18,6 +18,8 @@ package commands
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -40,6 +42,11 @@ import (
 )
 
 func dbWithStateTail(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, func() uint64) {
+	t.Helper()
+	return dbWithState(t, true)
+}
+
+func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, func() uint64) {
 	t.Helper()
 	const stepSize, txs, filed = 16, 64, 48
 	dirs := datadir.New(t.TempDir())
@@ -64,7 +71,9 @@ func dbWithStateTail(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, func() uint64
 	require.NoError(t, domains.Flush(ctx, tx))
 	domains.Close()
 	require.NoError(t, tx.Commit())
-	require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	if buildFiles {
+		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	}
 
 	accountTables := db.Debug().DomainTables(kv.AccountsDomain)
 	countTail := func() (n uint64) {
@@ -108,6 +117,29 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 
 	require.NoError(t, commitmentRebuild(db, t.Context(), log.New()))
 	requireExecutionReset(t, db, countTail)
+}
+
+func TestCommitmentConvertV3DropsTheDBTail(t *testing.T) {
+	db, _, countTail := dbWithStateTail(t)
+	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	requireExecutionReset(t, db, countTail)
+}
+
+func TestCommitmentConvertV3RefusedKeepsTheDBTail(t *testing.T) {
+	db, dirs, countTail := dbWithStateTail(t)
+	before := countTail()
+	backup := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, "stale"), []byte{1}, 0o644))
+	require.Error(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Equal(t, before, countTail())
+}
+
+func TestCommitmentConvertV3WithoutFilesKeepsTheDBTail(t *testing.T) {
+	db, _, countTail := dbWithState(t, false)
+	before := countTail()
+	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Equal(t, before, countTail())
 }
 
 func TestCommitmentClearKeepsTheDBTail(t *testing.T) {

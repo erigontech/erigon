@@ -2437,6 +2437,14 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+func (hph *HexPatriciaHashed) RootExtension() (ext, hash []byte) {
+	r := &hph.root
+	if r.accountAddrLen != 0 || r.storageAddrLen != 0 || r.extLen == 0 || r.hashLen != length.Hash {
+		return nil, nil
+	}
+	return bytes.Clone(r.extension[:r.extLen]), bytes.Clone(r.hash[:r.hashLen])
+}
+
 // unfoldKeyPath drives hph.unfold in a loop until the trie is unfolded
 // far enough that the cell at hashedKey can be updated — i.e. until
 // needUnfolding returns 0. This is the per-key traversal primitive
@@ -2746,7 +2754,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.metrics.updates.Store(updatesCount)
 	hph.metrics.AddRoundKeys(updatesCount)
 	roundStart := time.Now()
-	defer func() { observeRound(hph.metrics, roundStart) }()
+	defer func() { ObserveRound(hph.metrics, roundStart) }()
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)

@@ -29,6 +29,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -136,9 +139,12 @@ func checkCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, has
 // builder goroutine; released and re-opened as the tip rolls forward.
 type rollingPin struct {
 	tx   kv.TemporalTx
+	warm []kv.TemporalTx
 	num  uint64
 	hash common.Hash
 }
+
+const headCaptureWarmTxs = 4
 
 // close rolls back the pinned tx and clears it, so a second call is a no-op.
 func (p *rollingPin) close() {
@@ -146,6 +152,21 @@ func (p *rollingPin) close() {
 		p.tx.Rollback()
 		p.tx = nil
 	}
+	if p != nil {
+		for _, tx := range p.warm {
+			tx.Rollback()
+		}
+		p.warm = nil
+	}
+}
+
+func pinHead(tx kv.TemporalTx) (uint64, common.Hash, error) {
+	num, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil || num == 0 {
+		return 0, common.Hash{}, err
+	}
+	hash, err := rawdb.ReadCanonicalHash(tx, num)
+	return num, hash, err
 }
 
 // openRollingPin opens a fresh RO temporal tx pinned at the current committed head and
@@ -159,22 +180,30 @@ func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, tx)
-	num, err := stages.GetStageProgress(tx, stages.Finish)
+	num, hash, err := pinHead(tx)
 	if err != nil {
 		return nil, err
 	}
-	if num == 0 {
-		return nil, nil
-	}
-	hash, err := rawdb.ReadCanonicalHash(tx, num)
-	if err != nil {
-		return nil, err
-	}
-	if hash == (common.Hash{}) {
+	if num == 0 || hash == (common.Hash{}) {
 		return nil, nil
 	}
 	ok = true
-	return &rollingPin{tx: tx, num: num, hash: hash}, nil
+	p := &rollingPin{tx: tx, num: num, hash: hash}
+	if execctx.PickTrieVariant() != commitment.VariantCommitmentV3 {
+		return p, nil
+	}
+	for range headCaptureWarmTxs - 1 {
+		w, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			break
+		}
+		if n, h, err := pinHead(w); err != nil || n != num || h != hash {
+			w.Rollback()
+			break
+		}
+		p.warm = append(p.warm, w)
+	}
+	return p, nil
 }
 
 // pinVerdict is decidePin's ruling on whether the held rolling pin can serve as the
@@ -248,6 +277,10 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 		return
 	}
 	headCapture := dbg.witnessCache.HeadCapture()
+	if headCapture && execctx.PickTrieVariant() == commitment.VariantCommitmentV3 {
+		commitmentdb.WantParentReads(true)
+		defer commitmentdb.WantParentReads(false)
+	}
 	// pin is the one-block-lag parent snapshot for head-capture builds; nil in the
 	// durable path. The deferred close releases whichever pin is held at shutdown.
 	var pin *rollingPin
@@ -472,8 +505,12 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
+	records := commitmentdb.ParentRecordsFor(num, hash, parentHash)
+	if records != nil {
+		witnessCacheParentRecordsCounter.Inc()
+	}
 	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
-		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin, records, info, witnessModeLegacy)
 	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()

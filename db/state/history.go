@@ -1202,6 +1202,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
+	return ht.historyValueAt(key, seek, txNum)
+}
+
+func (ht *HistoryRoTx) historyValueAt(key []byte, seek iiSeekResult, txNum uint64) ([]byte, bool, error) {
 	histTxNum := seek.txNum
 	historyItem, ok := ht.pairedFile(ht.iit.files[seek.fileIdx])
 	if !ok {

@@ -355,6 +355,12 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) { testRebuildCommitmentBasedOnFiles(t, v3) })
+	}
+}
+
+func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
@@ -383,10 +389,11 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		//db.Close()
 	}
 
-	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true)
+	useCommitmentSchema(t, v3)
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true, v3)
 }
 
-func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, rootInFiles []byte, fPaths []string, rebuildFiles bool) {
+func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, rootInFiles []byte, fPaths []string, rebuildFiles, foldV3 bool) {
 	t.Helper()
 	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
@@ -422,6 +429,12 @@ func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.A
 	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
+	if foldV3 {
+		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		require.NoError(t, err)
+		require.Zero(t, check.Orphans)
+		require.Equal(t, finalRoot, check.Root)
+	}
 }
 
 type rebuildHeaders map[uint64]common.Hash
@@ -456,19 +469,29 @@ func TestAggregator_RebuildCommitmentWithHistory(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	for _, c := range []struct {
-		filedSteps uint64
-		resume     bool
-	}{{5, false}, {4, false}, {5, true}} {
-		t.Run(fmt.Sprintf("filedSteps=%d/resume=%t", c.filedSteps, c.resume), func(t *testing.T) {
-			testRebuildCommitmentWithHistory(t, c.filedSteps, c.resume)
-		})
+	for _, v3 := range []bool{false, true} {
+		for _, c := range []struct {
+			filedSteps uint64
+			resume     bool
+		}{{5, false}, {4, false}, {5, true}} {
+			t.Run(fmt.Sprintf("v3=%t/filedSteps=%d/resume=%t", v3, c.filedSteps, c.resume), func(t *testing.T) {
+				testRebuildCommitmentWithHistory(t, v3, c.filedSteps, c.resume)
+			})
+		}
 	}
 }
 
-func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bool) {
-	schema := statecfg.Schema
-	t.Cleanup(func() { statecfg.Schema = schema })
+func useCommitmentSchema(t *testing.T, v3 bool) {
+	schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
+	if v3 {
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		statecfg.ExperimentalCommitmentV3 = true
+	}
+}
+
+func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
+	useCommitmentSchema(t, v3)
 	statecfg.EnableHistoricalCommitment()
 	const stepSize = 16
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -612,6 +635,20 @@ func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bo
 	}
 	require.Equal(t, direct, rebuild(lastBlock), "steps with state files go straight to files, the rest and a resumed step through the DB")
 	require.Equal(t, history, commitmentHistory(t, tdb, txNum), "the rebuilt commitment history reads as the original")
+	if !v3 {
+		return
+	}
+	filesEnd := txNum / stepSize * stepSize
+	for b, last := range lastTxNums {
+		if last >= filesEnd {
+			break
+		}
+		check, err := state.FoldCommitmentV3(ctx, agg, last+1)
+		require.NoError(t, err, "block %d", b)
+		require.Zero(t, check.Orphans, "block %d", b)
+		require.Equal(t, uint64(b), check.BlockNum)
+		require.Equal(t, roots[uint64(b)], common.Hash(check.Root), "block %d", b)
+	}
 }
 
 func TestDumpCommitmentStepClosesCollationOnBuildError(t *testing.T) {
@@ -660,53 +697,6 @@ func TestRebuildCommitmentShardSkipsEmptyKeyOfExhaustedIterator(t *testing.T) {
 	keys, err := state.RebuildCommitmentShardKeysForTest(ctx, domains, rwTx, next)
 	require.NoError(t, err)
 	require.Equal(t, uint64(n), keys, "the (false, nil) that ends the iterator is not a key")
-}
-
-func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
-	t.Helper()
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	it, err := tx.HistoryRange(kv.CommitmentDomain, 0, int(toTxNum), order.Asc, -1)
-	require.NoError(t, err)
-	keys := map[string]struct{}{}
-	for it.HasNext() {
-		k, _, err := it.Next()
-		require.NoError(t, err)
-		if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-			keys[string(k)] = struct{}{}
-		}
-	}
-	it.Close()
-	require.NotEmpty(t, keys)
-	values := map[string][]byte{}
-	for k := range keys {
-		for ts := uint64(0); ts < toTxNum; ts += 3 {
-			v, _, err := tx.HistorySeek(kv.CommitmentDomain, []byte(k), ts)
-			require.NoError(t, err)
-			values[fmt.Sprintf("%x@%d", k, ts)] = bytes.Clone(v)
-		}
-	}
-	return values
-}
-
-func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
-	tb.Helper()
-	byNibble := map[byte][][]byte{}
-	for i := uint64(1); ; i++ {
-		slot := make([]byte, length.Hash)
-		binary.BigEndian.PutUint64(slot[length.Hash-8:], i)
-		nibble := crypto.Keccak256(slot)[0] >> 4
-		byNibble[nibble] = append(byNibble[nibble], slot)
-		if len(byNibble[nibble]) < 2 {
-			continue
-		}
-		for other := range byte(16) {
-			if other != nibble && len(byNibble[other]) != 0 {
-				return [][]byte{byNibble[nibble][0], byNibble[nibble][1], byNibble[other][0]}
-			}
-		}
-	}
 }
 
 func composite(k, k2 []byte) []byte {
@@ -1230,4 +1220,38 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
 	}
+}
+
+func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
+	useCommitmentSchema(t, true)
+	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
+	require.NoError(t, agg.MergeLoop(t.Context()))
+}
+
+func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	it, err := tx.HistoryRange(kv.CommitmentDomain, 0, int(toTxNum), order.Asc, -1)
+	require.NoError(t, err)
+	keys := map[string]struct{}{}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		if !commitment.IsCommitmentStateKey(k) {
+			keys[string(k)] = struct{}{}
+		}
+	}
+	it.Close()
+	require.NotEmpty(t, keys)
+	values := map[string][]byte{}
+	for k := range keys {
+		for ts := uint64(0); ts < toTxNum; ts += 3 {
+			v, _, err := tx.HistorySeek(kv.CommitmentDomain, []byte(k), ts)
+			require.NoError(t, err)
+			values[fmt.Sprintf("%x@%d", k, ts)] = bytes.Clone(v)
+		}
+	}
+	return values
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -917,4 +918,77 @@ func TestApplyWrites_ReadsBaselineWhenWritesIncomplete(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "the write wins over the baseline")
 	assert.Equal(t, uint64(7), acc.Nonce, "the untouched nonce comes from the baseline")
+}
+
+func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
+	cs := newTestCalcState()
+	cs.hashes = newCalcHashes()
+	a := accounts.InternAddress(common.Address{0xa1})
+	b := accounts.InternAddress(common.Address{0xb2})
+	c := accounts.InternAddress(common.Address{0xc3})
+	d := accounts.InternAddress(common.Address{0xd4})
+	s1, s2, s3 := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2}), accounts.InternKey(common.Hash{3})
+	cs.ApplyWrites(newWS().
+		stor(d, s1, state.Version{}, *uint256.NewInt(9)).
+		bal(d, state.Version{}, *uint256.NewInt(4)).
+		build())
+	cs.ResetBlockFlags()
+	cs.ApplyWrites(newWS().
+		bal(a, state.Version{}, *uint256.NewInt(1)).
+		stor(a, s1, state.Version{}, *uint256.NewInt(0x1234)).
+		stor(a, s2, state.Version{}, uint256.Int{}).
+		nonce(b, state.Version{}, 3).
+		stor(c, s3, state.Version{}, *uint256.NewInt(7)).
+		selfDestruct(d, state.Version{}, true).
+		build())
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	require.Nil(t, cs.deleted, "a flush to updates leaves the deletions unknown")
+	want := map[string]commitment.Update{}
+	wantDeleted := map[string]struct{}{}
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		if u.Deleted() {
+			wantDeleted[string(k)] = struct{}{}
+		}
+		hash := crypto.Keccak256(k[:20])
+		if len(k) > 20 {
+			hash = append(hash, crypto.Keccak256(k[20:])...)
+		}
+		want[string(hash)] = *u
+		return nil
+	}))
+
+	var feed commitment.Feed
+	cs.FlushToFeed(&feed)
+	got := map[string]commitment.Update{}
+	for _, account := range feed.Accounts {
+		if account.Update != nil {
+			got[string(account.Hash[:])] = *account.Update
+		}
+		for _, slot := range account.Slots {
+			u := commitment.Update{Flags: commitment.DeleteUpdate}
+			if len(slot.Value) != 0 {
+				u = commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(slot.Value))}
+				copy(u.Storage[:], slot.Value)
+			}
+			got[string(append(account.Hash[:], slot.Hash[:]...))] = u
+		}
+	}
+	distinct := map[[32]byte]struct{}{}
+	for _, account := range feed.Accounts {
+		distinct[account.Hash] = struct{}{}
+	}
+	require.Len(t, want, 8)
+	require.Len(t, distinct, len(feed.Accounts))
+	require.Equal(t, len(want), feed.Keys)
+	require.Equal(t, want, got)
+
+	gotDeleted := map[string]struct{}{}
+	for _, key := range cs.deleted {
+		gotDeleted[string(key)] = struct{}{}
+	}
+	require.NotEmpty(t, wantDeleted)
+	require.Len(t, cs.deleted, len(wantDeleted))
+	require.Equal(t, wantDeleted, gotDeleted, "the feed's deleted keys are the deletions FlushToUpdates emits")
 }
