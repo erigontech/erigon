@@ -41,11 +41,12 @@ const (
 	deferredColumnSyncMaxTick = time.Second
 )
 
-// BlockGetter is an interface for getting blocks by root.
+// BlockGetter is an interface for getting blocks by root and the fork-choice slot.
 // Used to avoid import cycle with forkchoice package.
 // [New in Gloas:EIP7732]
 type BlockGetter interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	Slot() uint64
 }
 
 // gloasBlockData holds only the fields needed from a block for GLOAS sidecar verification.
@@ -67,7 +68,7 @@ type PeerDas interface {
 	// between fromSlot and toSlot without them.
 	BackfillCustodyColumns(fromSlot, toSlot uint64)
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
-	ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) error
+	ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error)
 	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
@@ -176,15 +177,29 @@ func NewPeerDas(
 
 func (d *peerdas) Start(ctx context.Context) {
 	d.startOnce.Do(func() {
-		var storedCgc uint64
+		var storedCgc, raiseSlot uint64
 		if err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
 			var err error
-			storedCgc, err = beacon_indicies.ReadHighestCustodyGroupCount(tx)
+			if storedCgc, err = beacon_indicies.ReadHighestCustodyGroupCount(tx); err != nil {
+				return err
+			}
+			raiseSlot, err = beacon_indicies.ReadCustodyRaiseSlot(tx)
 			return err
 		}); err != nil {
-			log.Warn("[peerdas] failed to read highest custody group count", "err", err)
+			log.Warn("[peerdas] failed to read highest custody group count and custody raise slot", "err", err)
 		} else {
 			d.state.RaiseAdvertisedCgc(storedCgc)
+			if raiseSlot == 0 && storedCgc > d.beaconConfig.SamplesPerSlot {
+				raiseSlot = d.nextSlot()
+				d.state.SetCustodyRaiseSlot(raiseSlot)
+				if err := d.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+					return beacon_indicies.WriteCustodyRaiseSlot(tx, raiseSlot)
+				}); err != nil {
+					log.Warn("[peerdas] failed to write custody raise slot", "err", err)
+				}
+			} else {
+				d.state.SetCustodyRaiseSlot(raiseSlot)
+			}
 		}
 		d.resubscribeGossip()
 		for range numOfBlobRecoveryWorkers {
@@ -461,13 +476,27 @@ func (d *peerdas) resubscribeGossip() {
 	}
 }
 
+// nextSlot is the custody raise slot of a raise made now: a block up to the current slot may
+// already be checked with the old custody columns. Fork choice admits blocks up to its own slot,
+// which does not follow the wall clock back.
+func (d *peerdas) nextSlot() uint64 {
+	slot := d.ethClock.GetCurrentSlot()
+	if d.forkChoice != nil {
+		slot = max(slot, d.forkChoice.Slot())
+	}
+	return slot + 1
+}
+
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
-	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
+	adCgcChanged := d.state.SetCustodyGroupCount(cgc, d.nextSlot)
 	if adCgcChanged {
 		if err := d.indiciesDB.Update(context.Background(), func(tx kv.RwTx) error {
-			return beacon_indicies.WriteHighestCustodyGroupCount(tx, cgc)
+			if err := beacon_indicies.WriteHighestCustodyGroupCount(tx, cgc); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteCustodyRaiseSlot(tx, d.state.GetCustodyRaiseSlot())
 		}); err != nil {
-			log.Warn("[peerdas] failed to write highest custody group count", "err", err)
+			log.Warn("[peerdas] failed to write highest custody group count and custody raise slot", "err", err)
 		}
 		if !d.IsArchivedMode() {
 			// subscribe more topics, advertised cgc is increased

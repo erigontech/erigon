@@ -1328,46 +1328,30 @@ func TestDeferredSyncLeavesATipSizedCommitUnsynced(t *testing.T) {
 }
 
 func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
-	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncPeriod(10 * time.Millisecond).SyncInCommitIfUnsyncedFor(300 * time.Millisecond).
+	period := time.Second
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncPeriod(time.Hour).SyncInCommitIfUnsyncedFor(period).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 	t.Cleanup(db.Close)
-	val := make([]byte, 4000)
-	write := func(i int) error {
-		return db.Update(context.Background(), func(tx kv.RwTx) error {
-			for j := range 80 {
-				if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i*80+j)), val); err != nil {
-					return err
-				}
-			}
-			time.Sleep(40 * time.Millisecond)
-			return nil
-		})
-	}
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	var writeErr error
-	wg.Go(func() {
-		for i := 0; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if writeErr = write(i); writeErr != nil {
-				return
-			}
+	env := db.(*mdbx.MdbxKV).Env()
+	val := make([]byte, 4096)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.HeaderTD, []byte("first"), val)
+	}))
+	before, err := env.Info(nil)
+	require.NoError(t, err)
+	require.NotZero(t, before.UnsyncedBytes, "the first commit already synced")
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Put(kv.HeaderTD, []byte("second"), val); err != nil {
+			return err
 		}
-	})
-	var worst time.Duration
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
-		require.NoError(t, err)
-		worst = max(worst, info.SinceSync)
-	}
-	close(stop)
-	wg.Wait()
-	require.NoError(t, writeErr)
-	require.Less(t, worst, time.Second, "a writer that re-takes the lock at once kept its data unsynced")
+		time.Sleep(2 * period)
+		return nil
+	}))
+	after, err := env.Info(nil)
+	require.NoError(t, err)
+	require.Greater(t, after.PageOps.Fsync, before.PageOps.Fsync,
+		"no sync ran inside the commit of a writer that held the lock past the deadline")
 }
 
 func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {

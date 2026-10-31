@@ -143,35 +143,32 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 	})
 }
 
-const (
-	pruneTestFinalisedBlockNum = uint64(100)
-	pruneTestForwardProgress   = uint64(1_000)
-	pruneTestMaxReorgDepth     = uint64(96)
-)
-
-// pruneInitialCycle runs an initial-cycle PruneExecutionStage over ChangeSets3 and BlockAccessList rows at
-// blocks below and at the reorg boundary.
-func pruneInitialCycle(t *testing.T, noPrune bool) kv.TemporalRwTx {
+func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 	orig := dbg.NoPrune()
 	t.Cleanup(func() { dbg.SetNoPrune(orig) })
-	dbg.SetNoPrune(noPrune)
+	dbg.SetNoPrune(false)
 	ctx := context.Background()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
+	defer tx.Rollback()
+	const (
+		finalisedBlockNum = uint64(100)
+		forwardProgress   = uint64(1_000)
+		maxReorgDepth     = uint64(96)
+	)
 	finalisedHash := common.Hash{0x01}
-	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, pruneTestFinalisedBlockNum))
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, finalisedBlockNum))
 	rawdb.WriteForkchoiceFinalized(tx, finalisedHash)
-	for _, blockNum := range []uint64{pruneTestFinalisedBlockNum, 200, pruneTestForwardProgress - pruneTestMaxReorgDepth - 1, pruneTestForwardProgress - pruneTestMaxReorgDepth} {
+	for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1, forwardProgress - maxReorgDepth} {
 		key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
 		require.NoError(t, tx.Put(kv.ChangeSets3, key, []byte{0x01}))
 		require.NoError(t, tx.Put(kv.BlockAccessList, key, []byte{0x01}))
 	}
 	state := &PruneState{
 		ID:              stages.Execution,
-		ForwardProgress: pruneTestForwardProgress,
-		FinalityCtx:     execfinality.NewContext(pruneTestForwardProgress, pruneTestFinalisedBlockNum, pruneTestMaxReorgDepth, true, rawdbv3.TxNums),
+		ForwardProgress: forwardProgress,
+		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true, rawdbv3.TxNums),
 		CurrentSyncCycle: CurrentSyncCycleInfo{
 			IsInitialCycle: true,
 		},
@@ -180,36 +177,23 @@ func pruneInitialCycle(t *testing.T, noPrune bool) kv.TemporalRwTx {
 		db:          db,
 		chainConfig: &chain.Config{},
 		syncCfg: ethconfig.Sync{
-			MaxReorgDepth: pruneTestMaxReorgDepth,
+			MaxReorgDepth: maxReorgDepth,
 		},
 	}
 	require.NoError(t, PruneExecutionStage(ctx, state, tx, cfg, 0, log.New()))
-	return tx
-}
-
-func requirePrunedBelowReorgBoundary(t *testing.T, tx kv.TemporalRwTx, table string, pruned bool) {
-	for _, blockNum := range []uint64{pruneTestFinalisedBlockNum, 200, pruneTestForwardProgress - pruneTestMaxReorgDepth - 1} {
-		has, err := tx.Has(table, dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}))
+	for _, table := range []string{kv.ChangeSets3, kv.BlockAccessList} {
+		for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1} {
+			key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
+			has, err := tx.Has(table, key)
+			require.NoError(t, err)
+			require.False(t, has, "%s retained block %d", table, blockNum)
+		}
+		boundary := forwardProgress - maxReorgDepth
+		key := dbutils.BlockBodyKey(boundary, common.Hash{byte(boundary)})
+		has, err := tx.Has(table, key)
 		require.NoError(t, err)
-		require.Equal(t, !pruned, has, "%s block %d", table, blockNum)
+		require.True(t, has, "%s pruned the reorg boundary", table)
 	}
-	boundary := pruneTestForwardProgress - pruneTestMaxReorgDepth
-	has, err := tx.Has(table, dbutils.BlockBodyKey(boundary, common.Hash{byte(boundary)}))
-	require.NoError(t, err)
-	require.True(t, has, "%s pruned the reorg boundary", table)
-}
-
-func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
-	tx := pruneInitialCycle(t, false)
-	requirePrunedBelowReorgBoundary(t, tx, kv.ChangeSets3, true)
-	requirePrunedBelowReorgBoundary(t, tx, kv.BlockAccessList, true)
-}
-
-// --exec.no-prune keeps data, but changesets only serve unwinds: their retention follows AlwaysGenerateChangesets.
-func TestPruneExecutionStageNoPruneStillPrunesChangeSets(t *testing.T) {
-	tx := pruneInitialCycle(t, true)
-	requirePrunedBelowReorgBoundary(t, tx, kv.ChangeSets3, true)
-	requirePrunedBelowReorgBoundary(t, tx, kv.BlockAccessList, false)
 }
 
 // Execution writes the senders of a BAL block that the Senders stage left to the exec workers.

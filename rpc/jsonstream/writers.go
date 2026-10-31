@@ -97,3 +97,12 @@ func HexUint256Field(s *Stream, name string, v *uint256.Int) {
 	s.separatorPending = true
 	flushIfFull(s.stream)
 }
+
+// HexKey writes the 0x-prefixed hex of b as a field name, for an object keyed by hashes or
+// addresses, without building the name as a string first.
+func HexKey(s *Stream, b []byte) {
+	s.beforeValue()
+	buf := hexutil.AppendQuoted(slices.Grow(s.stream.Buffer(), hexutil.QuotedLen(len(b))+1), b)
+	s.stream.SetBuffer(append(buf, ':'))
+	s.push(ItemField)
+}

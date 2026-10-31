@@ -550,6 +550,131 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 	}))
 }
 
+func newForkChoicePublicationFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock, common.Hash) {
+	t.Helper()
+	cfg, _, block, _ := newForwardSyncPersistenceFixture(t)
+	cfg.syncedData = cfg.syncedData.(*pausingHeadView).SyncedData
+	cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	cfg.dirs = datadir.New(t.TempDir())
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), block, false, true, false))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	head, _, err := cfg.forkChoice.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(root), head.Root)
+	return cfg, block, root
+}
+
+func TestForkChoiceWakesOnIndexCommit(t *testing.T) {
+	for _, delay := range []time.Duration{20 * time.Millisecond, 250 * time.Millisecond} {
+		t.Run(delay.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg, block, root := newForkChoicePublicationFixture(t)
+				require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}))
+				require.True(t, cfg.forkChoiceWaitingForIndices)
+				written := make(chan error, 1)
+				go func() {
+					time.Sleep(delay)
+					written <- persistAcceptedBlock(t.Context(), cfg, block)
+				}()
+
+				started := time.Now()
+				err := ConsensusClStages().Stages[SleepForSlot].ActionFunc(t.Context(), log.New(), cfg, Args{})
+				elapsed := time.Since(started)
+
+				require.NoError(t, <-written)
+				require.NoError(t, err)
+				require.Equal(t, delay, elapsed, "a committed write should wake publication without waiting for a timer")
+				require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}))
+				require.Equal(t, root, cfg.syncedData.HeadRoot())
+				require.False(t, cfg.forkChoiceWaitingForIndices)
+				require.NoError(t, cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {
+					canonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, block.Block.Slot)
+					require.NoError(t, err)
+					require.Equal(t, root, canonical)
+					return nil
+				}))
+			})
+		})
+	}
+}
+
+func TestForkChoiceWaitsForHeadIndicesBeforePublishing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, block, root := newForkChoicePublicationFixture(t)
+		parentRoot := cfg.syncedData.HeadRoot()
+		require.Less(t, block.Version(), clparams.GloasVersion)
+		events := make(chan *beaconevents.EventStream, 16)
+		subscription := cfg.emitter.State().Subscribe(events)
+		defer subscription.Unsubscribe()
+		args := Args{hasDownloaded: true, peers: 1, seenSlot: block.Block.Slot, targetSlot: block.Block.Slot, headUnpublished: true}
+
+		started := time.Now()
+		require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, args), "missing indices are an expected wait")
+		require.Zero(t, time.Since(started), "checking missing indices must not poll or sleep")
+		require.Equal(t, parentRoot, cfg.syncedData.HeadRoot())
+		require.Empty(t, events, "do not publish the head before its indices exist")
+
+		stages := ConsensusClStages().Stages
+		cfg.forkChoiceRerunAt = time.Now()
+		require.Equal(t, CleanupAndPruning, stages[ForkChoice].TransitionFunc(cfg, args, nil))
+		require.Equal(t, SleepForSlot, stages[CleanupAndPruning].TransitionFunc(cfg, args, nil))
+		require.NoError(t, persistAcceptedBlock(t.Context(), cfg, block))
+		ctx, cancel := context.WithTimeout(t.Context(), 2*sleepForSlotRewakeInterval)
+		defer cancel()
+		started = time.Now()
+		require.NoError(t, stages[SleepForSlot].ActionFunc(ctx, log.New(), cfg, args), "retry before the next slot, including before Gloas")
+		require.Zero(t, time.Since(started), "a commit between checking the indices and waiting must not be missed")
+		require.Equal(t, ForkChoice, stages[SleepForSlot].TransitionFunc(cfg, args, nil))
+		require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, args))
+		require.Equal(t, root, cfg.syncedData.HeadRoot())
+		require.NotEmpty(t, events)
+		require.NoError(t, cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {
+			canonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, block.Block.Slot)
+			require.NoError(t, err)
+			require.Equal(t, root, canonical)
+			return nil
+		}))
+	})
+}
+
+func TestForkChoiceCancelsHeadIndexWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, _, _ := newForkChoicePublicationFixture(t)
+		parentRoot := cfg.syncedData.HeadRoot()
+		require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			cancel()
+		}()
+
+		started := time.Now()
+		err := ConsensusClStages().Stages[SleepForSlot].ActionFunc(ctx, log.New(), cfg, Args{})
+		elapsed := time.Since(started)
+		<-ctx.Done()
+
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 20*time.Millisecond, elapsed)
+		require.Equal(t, parentRoot, cfg.syncedData.HeadRoot())
+	})
+}
+
+func TestForkChoiceIndexWaitKeepsRetryDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, _, _ := newForkChoicePublicationFixture(t)
+		require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}))
+		started := time.Now()
+		stages := ConsensusClStages().Stages
+		require.NoError(t, stages[SleepForSlot].ActionFunc(t.Context(), log.New(), cfg, Args{}))
+		require.Equal(t, time.Second, time.Since(started))
+		require.Equal(t, ForkChoice, stages[SleepForSlot].TransitionFunc(cfg, Args{}, nil))
+		require.Equal(t, CleanupAndPruning, stages[ForkChoice].TransitionFunc(cfg, Args{}, nil))
+	})
+}
+
 func TestPayloadAttributesStageOwnershipAtGloas(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	config.AltairForkEpoch = 0
@@ -774,7 +899,7 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 			err := db.Update(t.Context(), func(tx kv.RwTx) error {
 				return updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
 			})
-			require.Error(t, err, "canonical publication must wait for the pending block write")
+			require.ErrorIs(t, err, errBlockIndicesPending, "canonical publication must wait for the pending block write")
 			requireCanonical(root101a, root102a)
 
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
