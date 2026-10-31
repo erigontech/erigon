@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -1611,7 +1612,11 @@ mainloop:
 			if unverifiedSignatureMismatch {
 				// Backfill stores blocks without verifying their signature, so the stored one may be the forged side.
 				log.Debug("rejecting column response with a signature that differs from the stored block", "pid", result.pid)
-				d.rpc.BanPeer(result.pid)
+				if slices.ContainsFunc(result.sidecars, invalidFuluSidecar) {
+					d.rpc.BanPeerForInvalidData(ctx, result.pid)
+				} else {
+					d.rpc.BanPeer(result.pid)
+				}
 				continue
 			}
 			if !validResponse {
@@ -2248,4 +2253,10 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			}
 		}()
 	}
+}
+
+// invalidFuluSidecar reports a pre-Gloas sidecar whose structure or proofs fail on their own, without the stored block.
+func invalidFuluSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+	return sidecar.Version() < clparams.GloasVersion &&
+		(!VerifyDataColumnSidecar(sidecar) || !VerifyDataColumnSidecarInclusionProof(sidecar) || !VerifyDataColumnSidecarKZGProofs(sidecar))
 }
