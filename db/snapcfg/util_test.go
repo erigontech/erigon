@@ -1,6 +1,8 @@
 package snapcfg
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 func typedNames(t *testing.T, items PreverifiedItems) []string {
@@ -245,4 +248,19 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 			require.Empty(t, typed.Items)
 		})
 	}
+}
+
+// A 200 response that is not TOML (a captive portal, a proxy error page, a wrong override URL)
+// is a failed load like any other, not a crash.
+func TestLoadRemotePreverifiedRejectsMalformedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html><body>Access denied</body></html>"))
+	}))
+	defer srv.Close()
+
+	var err error
+	require.NotPanics(t, func() {
+		err = LoadRemotePreverified(t.Context(), networkname.Mainnet, srv.URL)
+	})
+	require.Error(t, err)
 }
