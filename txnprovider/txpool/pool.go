@@ -308,15 +308,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	defer coreTx.Rollback()
 
-	var poolTx kv.Tx
-	if p.poolDB != nil {
-		poolTx, err = p.poolDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer poolTx.Rollback()
-	}
-
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 
@@ -354,6 +345,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 		p.lock.Unlock()
 	}()
+
+	// Opened under the lock, so the snapshot sees every flush, which commits under the same lock.
+	var poolTx kv.Tx
+	if p.poolDB != nil {
+		poolTx, err = p.poolDB.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer poolTx.Rollback()
+	}
 
 	pendingPre := p.pending.Len()
 	defer func() {
@@ -425,7 +426,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(poolTx, minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
@@ -2106,7 +2107,7 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs in the finalized block and older, loop through all entries
 	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
@@ -2121,15 +2122,34 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 	}
 
 	// Add mined blobs
-	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
+		p.minedBlobTxnsByBlock[minedBlock] = nil
+	}
 	for _, txn := range minedTxns {
-		if txn.TxType() == BlobTxnType {
-			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
-			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
-			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
-			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
+		if txn.TxType() != BlobTxnType {
+			continue
 		}
+		hash := string(txn.IDHash[:])
+		// Mined txns arrive without blobs; the pooled or an earlier cached copy still has them.
+		if pooled, ok := p.byHash[hash]; ok {
+			txn = pooled.TxnSlot
+			// A flushed txn keeps its Rlp only in the db row, which the next flush deletes.
+			if txn.Rlp == nil && poolTx != nil {
+				rlp, _, _, err := p.getRlpLocked(poolTx, txn.IDHash[:])
+				if err != nil {
+					return err
+				}
+				withRlp := *txn
+				withRlp.Rlp = bytes.Clone(rlp)
+				txn = &withRlp
+			}
+		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
+			txn = cached.TxnSlot
+		}
+		p.deleteMinedBlobTxn(hash)
+		mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(p.minedBlobTxnsByBlock[minedBlock])}
+		p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
+		p.minedBlobTxnsByHash[hash] = mt
 	}
 	return nil
 }
