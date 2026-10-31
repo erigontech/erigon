@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -149,4 +150,17 @@ func TestStopWallProfileRemovesOnlyAProfileWithoutSamples(t *testing.T) {
 
 	other := open()
 	require.PanicsWithValue(t, "boom", func() { stopWallProfile(func() error { panic("boom") }, other) })
+}
+
+func TestProfileFilenameFitsTheFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("test_mixed_dependency_graph[fork_Amsterdam-blockchain_test_engine_x]", 5)
+	a, b := profileFilename(dir, "newpayload", long+"_0xaa", "pprof.cpu"), profileFilename(dir, "newpayload", long+"_0xbb", "pprof.cpu")
+	require.NotEqual(t, a, b)
+	for _, p := range []string{a, b} {
+		require.True(t, strings.HasSuffix(p, ".pprof.cpu"))
+		f, err := os.Create(p)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
 }
