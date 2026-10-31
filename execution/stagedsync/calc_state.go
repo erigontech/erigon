@@ -81,6 +81,7 @@ type calcState struct {
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
+	curView      state.WriteSetView
 
 	// lazyLoadErr is the first error from a lazy-load, sticky so the calculator
 	// fails the next compute instead of computing on a missing baseline.
@@ -118,6 +119,18 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
+	}
+	if cs.curView != nil {
+		if o, ok := state.OriginAccount(cs.curView, addr); ok {
+			if o != nil {
+				acc.Balance = o.Balance
+				acc.Nonce = o.Nonce
+				acc.CodeHash = o.CodeHash.Value()
+				acc.Incarnation = o.Incarnation
+			}
+			cs.accounts[addr] = acc
+			return acc
+		}
 	}
 	if cs.domainReader != nil {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
@@ -160,6 +173,8 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 // not revive a self-destructed address; for any other address a field write
 // (even zero) clears Deleted.
 func (cs *calcState) ApplyWrites(writes state.WriteSetView) {
+	cs.curView = writes
+	defer func() { cs.curView = nil }()
 	sdThisCall := make(map[accounts.Address]bool)
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
