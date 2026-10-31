@@ -105,6 +105,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view     cache.ReadView
+	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
@@ -118,13 +119,17 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	if !kv.UnderlyingTxIsWritable(ttx) {
+		getter.snapshot = frontier
+	}
+	return getter
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
-		readTxNum := step.LastTxNum(cpg.stepSize)
+		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
 			var codeHash common.Hash
