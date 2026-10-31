@@ -1330,6 +1330,27 @@ func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
 	require.ErrorIs(t, missing.lastErr, reason)
 }
 
+// The fetched envelope of a FULL parent that is only in the batch is validated against that batch block.
+func TestChainTipBatchImportsChildOfBatchParentWithPeerEnvelope(t *testing.T) {
+	cfg, graph, parentRoot, fullChild, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	parent := graph.parents[parentRoot]
+	delete(graph.parents, parentRoot)
+	graph.insertOnAdd = true
+	peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, graph.envelopes[parentRoot])
+	cfg.rpc = peerRPC
+	delete(graph.envelopes, parentRoot)
+	fullRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	processChainTipBatch(ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{parent, fullChild}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+
+	require.Equal(t, 1, graph.added[parentRoot])
+	require.Equal(t, 1, graph.added[common.Hash(fullRoot)])
+	require.Equal(t, 1, sentinel.calls)
+}
+
 // A parent envelope that no peer serves stalls the batch until its deadline; the child is reported
 // under the missing envelope, not under the deadline that ended its processing.
 func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
