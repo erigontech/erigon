@@ -556,7 +556,7 @@ func TestCachedPrecompileAdmission(t *testing.T) {
 	require.Equal(t, 2, run(3, &countingPrecompile{output: []byte{1}, gas: 200}, input(300), zeroPaddedKey(128)), "gas above the normalized key length not cached")
 	require.Equal(t, 1, run(2, &countingPrecompile{output: make([]byte, 1024)}, input(64), wholeInputKey), "1024-byte output not cached")
 	require.Equal(t, 2, run(2, &countingPrecompile{output: make([]byte, 1025)}, input(64), wholeInputKey), "1025-byte output cached")
-	require.Equal(t, 2, run(2, &countingPrecompile{output: []byte{1}}, make([]byte, 128), zeroPaddedKey(128)), "all-zero input cached")
+	require.Equal(t, 1, run(2, &countingPrecompile{output: []byte{1}, gas: 6000}, make([]byte, 96), zeroPaddedKey(96)), "all-zero input not cached")
 }
 
 func TestCachedPrecompileDomainAndErrors(t *testing.T) {
@@ -671,6 +671,9 @@ func TestPointAdditionsAreCached(t *testing.T) {
 }
 
 func TestPrecompileCacheKeyNormalizes(t *testing.T) {
+	_, ok := precompileCacheKey(&bn254AddIstanbul{})(make([]byte, 128))
+	require.False(t, ok, "an addition of two points at infinity is cheaper than a lookup")
+
 	key, ok := zeroPaddedKey(128)(append([]byte{1, 2}, make([]byte, 300)...))
 	require.True(t, ok)
 	require.Equal(t, []byte{1, 2}, key, "trailing zeros and bytes past the read prefix must not split entries")

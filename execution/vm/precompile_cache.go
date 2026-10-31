@@ -80,9 +80,8 @@ func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
 	gas := c.RequiredGas(input)
-	// Below its key length a call costs less than the insert a miss pays, and the precompiles that
-	// zero-pad answer an all-zero input without computing.
-	if !ok || len(in) == 0 || len(in) > maxCachedPrecompileInput || gas < uint64(len(in)) {
+	// Below its key length a call costs less than the insert a miss pays.
+	if !ok || len(in) > maxCachedPrecompileInput || gas < uint64(len(in)) {
 		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
@@ -118,7 +117,7 @@ func precompileCacheKey(p PrecompiledContract) func([]byte) ([]byte, bool) {
 	case *bigModExp:
 		return modExpKey
 	case *bn254AddIstanbul, *bn254AddByzantium:
-		return zeroPaddedKey(128)
+		return bn254AddKey
 	case *bn254ScalarMulIstanbul, *bn254ScalarMulByzantium:
 		return zeroPaddedKey(96)
 	case *bn254PairingIstanbul, *bn254PairingByzantium:
@@ -167,6 +166,12 @@ func zeroPaddedKey(prefix int) func([]byte) ([]byte, bool) {
 		}
 		return input[:end], true
 	}
+}
+
+// bn254AddKey keeps an addition of two points at infinity out of the cache: it answers faster than a lookup.
+func bn254AddKey(input []byte) ([]byte, bool) {
+	in, _ := zeroPaddedKey(128)(input)
+	return in, len(in) != 0
 }
 
 const modExpHeaderLength = 96
