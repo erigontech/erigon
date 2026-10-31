@@ -319,3 +319,36 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 		})
 	}
 }
+
+func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	sender := common.Address{1}
+	var local TxnSlots
+	for nonce := range uint64(2) {
+		slot := makeBlobSlot(byte(nonce+1), false)
+		slot.Nonce = nonce
+		slot.Txn.(*types.BlobTx).Nonce = nonce
+		slot.Txn.(*types.BlobTx).GasLimit = 100_000
+		local.Append(&slot, sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	pool.cfg.BlobSlots = pool.totalBlobsInPool.Load()
+	overflow := makeBlobSlot(3, false)
+	overflow.Nonce = 2
+	overflow.Txn.(*types.BlobTx).Nonce = 2
+	overflow.Txn.(*types.BlobTx).GasLimit = 100_000
+	var remote TxnSlots
+	remote.Append(&overflow, sender[:], false)
+	pool.AddRemoteTxns(ctx, remote, nil, nil)
+	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	require.NoError(t, err)
+	require.Len(t, pool.byHash, 2)
+	require.Equal(t, txpoolcfg.BlobSlotsOverflow, reasons[0])
+	for _, slot := range local.Txns {
+		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+	}
+}
