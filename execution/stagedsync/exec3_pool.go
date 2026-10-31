@@ -27,6 +27,7 @@ type poolTask struct {
 	result     *exec.TxResult
 	finalExec  bool
 	aborted    bool
+	reruns     int
 
 	mu      sync.Mutex
 	parked  bool
@@ -183,6 +184,17 @@ func (pt *poolTask) waitThen(t, next int) bool {
 	return !pt.be.requeueAt(pt.tv.index, t, pt)
 }
 
+const poolNamedReruns = 3
+
+func (pt *poolTask) rerunAfter(named int) bool {
+	t := pt.tv.index - 1
+	if pt.reruns < poolNamedReruns {
+		t = named
+	}
+	pt.reruns++
+	return pt.waitThen(t, psReexec)
+}
+
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 	be, tv := pt.be, pt.tv
 	defer func() {
@@ -199,9 +211,9 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 			}
 			pt.next = psRun
 		case psRecheck:
-			valid, _, _ := be.selfLoopEvaluate(tv, pt.result)
+			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
-				if !pt.waitThen(tv.index-1, psReexec) {
+				if !pt.rerunAfter(blocker) {
 					return
 				}
 				continue
@@ -213,7 +225,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 			if pt.pending {
 				pt.pending = false
 				pt.mu.Unlock()
-				if !pt.waitThen(tv.index-1, psReexec) {
+				if !pt.rerunAfter(tv.index - 1) {
 					return
 				}
 				continue
@@ -258,24 +270,24 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
-		return pt.waitThen(tv.index-1, psReexec)
+		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Err != nil {
 		if pt.finalExec {
 			pt.send(p, result)
 			return false
 		}
-		return pt.waitThen(tv.index-1, psReexec)
+		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Dep >= 0 {
-		return pt.waitThen(tv.index-1, psReexec)
+		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
 	pt.prevWrites = result.TxOut
 
-	valid, target, _ := be.selfLoopEvaluate(tv, result)
+	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {
-		return pt.waitThen(tv.index-1, psReexec)
+		return pt.rerunAfter(blocker)
 	}
 	return pt.settle(result, target)
 }

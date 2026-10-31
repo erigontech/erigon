@@ -118,16 +118,17 @@ func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
 	require.LessOrEqual(t, opens, int64(workers+1), "pool opened more read txs than it has workers (%d txs in the block)", len(b.Transactions()))
 }
 
-// Every re-run waits for the predecessor to commit and so reads committed state: a tx
-// runs once speculatively and at most once more, however long the dependent chain. A
-// re-run that does not wait spins towards the incarnation limit (tasks+8) and fails the block.
-func TestPoolDependencyChainRunsEachTxAtMostTwice(t *testing.T) {
+// A task's first poolNamedReruns re-runs wait for their named writer; every later re-run
+// waits for the predecessor to commit and so reads committed state: a tx runs at most
+// poolNamedReruns+2 times, however long the dependent chain. A re-run that never waits for
+// the predecessor scales with the chain towards the incarnation limit (tasks+8) and fails the block.
+func TestPoolDependencyChainRunsBoundedByNamedReruns(t *testing.T) {
 	fx := counterChainFixture(t, poolTestTxs)
 	for _, workers := range []string{"4", "16"} {
 		resetPoolCounters()
 		require.NoError(t, runPoolReplay(t, context.Background(), fx, workers))
 		require.Positive(t, poolRoTxOpens.Load(), "no pool worker ran: the run measured nothing")
-		require.LessOrEqual(t, poolMaxRuns.Load(), int64(2), "a tx in a %d-call chain ran more than twice with %s workers", poolTestTxs, workers)
+		require.LessOrEqual(t, poolMaxRuns.Load(), int64(poolNamedReruns+2), "a tx in a %d-call chain ran more than %d times with %s workers", poolTestTxs, poolNamedReruns+2, workers)
 	}
 }
 
