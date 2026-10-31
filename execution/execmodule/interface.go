@@ -232,4 +232,8 @@ type ExecutionModule interface {
 
 	// InclusionList builds an inclusion list for EIP-7805 from its view of the mempool.
 	InclusionList(ctx context.Context) (types.Transactions, error)
+
+	// InclusionListSatisfied checks il against an executed canonical block. It
+	// returns nil when the answer cannot be determined from stored data.
+	InclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error)
 }

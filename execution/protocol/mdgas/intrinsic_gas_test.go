@@ -527,6 +527,34 @@ func TestEIP7981NotActive(t *testing.T) {
 	assert.Equal(t, params.TxGas+32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, result.FloorGasCost)
 }
 
+func TestIntrinsicGasAccessListOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		accessListLen  uint64
+		storageKeysLen uint64
+		amsterdam      bool
+	}{
+		{"storage keys", 1, 1 << 55, false},
+		{"storage keys after amsterdam", 1, 1 << 55, true},
+		{"addresses", 1 << 55, 0, false},
+		{"addresses after amsterdam", 1 << 55, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				AccessListLen:  tc.accessListLen,
+				StorageKeysLen: tc.storageKeysLen,
+				IsEIP2:         true,
+				IsEIP2028:      true,
+				IsEIP7623:      true,
+				IsEIP7976:      tc.amsterdam,
+				IsEIP7981:      tc.amsterdam,
+				IsEIP2780:      tc.amsterdam,
+			})
+			assert.True(t, overflow)
+		})
+	}
+}
+
 // TestMinTxGas pins MinTxGas to the cheapest transaction the intrinsic gas
 // rules allow, a zero-value self-transfer, on both sides of EIP-2780.
 func TestMinTxGas(t *testing.T) {

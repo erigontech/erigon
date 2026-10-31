@@ -65,6 +65,9 @@ type stubExecutionModule struct {
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
+	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
+	ilSatisfiedFunc        func(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error)
+	isValidatedFunc        func(hash common.Hash) bool
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -157,11 +160,17 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 	return nil, nil
 }
 
-func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
+func (s *stubExecutionModule) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
+	if s.isCanonicalHashFunc != nil {
+		return s.isCanonicalHashFunc(ctx, hash)
+	}
 	return false, nil
 }
 
-func (s *stubExecutionModule) IsValidated(_ common.Hash) bool {
+func (s *stubExecutionModule) IsValidated(hash common.Hash) bool {
+	if s.isValidatedFunc != nil {
+		return s.isValidatedFunc(hash)
+	}
 	return false
 }
 
@@ -183,6 +192,13 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {
 	if s.inclusionListFunc != nil {
 		return s.inclusionListFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (s *stubExecutionModule) InclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error) {
+	if s.ilSatisfiedFunc != nil {
+		return s.ilSatisfiedFunc(ctx, blockHash, blockNumber, il)
 	}
 	return nil, nil
 }
@@ -1611,6 +1627,42 @@ func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	var invalidParams *rpc.InvalidParamsError
 	require.ErrorAs(t, err, &invalidParams)
 	require.Equal(t, "blockAccessList missing", invalidParams.Message)
+}
+
+func TestNewPayloadV5RejectsBogotaPayload(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	srv := NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	status, err := srv.NewPayloadV5(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.Nil(t, status)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+}
+
+func TestNewPayloadV6RejectsPreBogotaPayload(t *testing.T) {
+	t.Parallel()
+
+	cfg := allForksChainConfig()
+	srv := NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.Nil(t, status)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+}
+
+func TestNewPayloadV6RequiresInclusionList(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), bogotaChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, nil)
+	require.Nil(t, status)
+	require.Error(t, err)
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
 }
 
 func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {

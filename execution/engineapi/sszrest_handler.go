@@ -85,6 +85,8 @@ func sszNewPayloadVersion(version int) (clparams.StateVersion, bool) {
 		return clparams.ElectraVersion, true
 	case 5:
 		return clparams.GloasVersion, true
+	case 6:
+		return clparams.HezeVersion, true
 	default:
 		return 0, false
 	}
@@ -175,7 +177,7 @@ func writeEngineError(w http.ResponseWriter, err error) {
 }
 
 func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, version int) {
-	if version < 1 || version > 5 {
+	if version < 1 || version > 6 {
 		writeSSZError(w, http.StatusNotFound, "unsupported new payload version")
 		return
 	}
@@ -185,7 +187,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	payload, blobHashes, parentRoot, executionRequests, err := decodeNewPayloadRequest(body, sv)
+	payload, blobHashes, parentRoot, executionRequests, inclusionList, err := decodeNewPayloadRequest(body, sv)
 	if err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
@@ -202,6 +204,8 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
 	case 5:
 		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
+	case 6:
+		status, err = e.NewPayloadV6(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests), transactionsBytes(inclusionList))
 	}
 	if err != nil {
 		writeEngineError(w, err)

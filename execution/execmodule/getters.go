@@ -26,13 +26,149 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var errNotFound = errors.New("notfound")
+
+func inclusionListGasPools(header *types.Header, maxBlobGas uint64) []*protocol.GasPool {
+	limit, used := header.GasLimit, header.GasUsed
+	blobLeft := maxBlobGas - *header.BlobGasUsed
+	return []*protocol.GasPool{
+		protocol.NewBlockGasPool(limit-used, limit-used, blobLeft),
+		protocol.NewBlockGasPool(limit-used, limit, blobLeft),
+		protocol.NewBlockGasPool(limit, limit-used, blobLeft),
+	}
+}
+
+func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error) {
+	if len(il) == 0 {
+		satisfied := true
+		return &satisfied, nil
+	}
+	ilHash := exec.InclusionListHash(il)
+	if satisfied, ok := e.readAheader.ReadInclusionListResult(blockHash, ilHash); ok {
+		return &satisfied, nil
+	}
+
+	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	canonical, err := e.isCanonicalHash(ctx, tx, blockHash)
+	if err != nil || !canonical {
+		return nil, err
+	}
+	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil || execProgress < blockNumber {
+		return nil, err
+	}
+	block, _, err := e.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNumber)
+	if err != nil || block == nil {
+		return nil, err
+	}
+	blockEndTxNum, err := e.blockReader.TxnumReader().Max(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	blockStartTxNum, err := e.blockReader.TxnumReader().Min(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	covered, err := e.stateHistoryCovers(ctx, tx, blockNumber, blockStartTxNum, blockEndTxNum+1)
+	if err != nil || !covered {
+		return nil, err
+	}
+
+	header := block.Header()
+	reader := state.NewHistoryReaderV3(tx, blockEndTxNum)
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return e.blockReader.Header(ctx, tx, hash, number)
+	}
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), e.engine, accounts.NilAddress, e.config)
+
+	var result *bool
+	for _, gasPool := range inclusionListGasPools(header, e.config.GetMaxBlobGasPerBlock(header.Time)) {
+		satisfied, err := protocol.CheckInclusionListTransactions(gasPool, block.Transactions(), il, reader, &blockContext, e.config, &vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		if result != nil && *result != satisfied {
+			result = nil
+			break
+		}
+		result = &satisfied
+	}
+	if result == nil {
+		gasPool, err := e.replayBlockGasPool(tx, block, blockStartTxNum, getHeader)
+		if err != nil {
+			return nil, err
+		}
+		satisfied, err := protocol.CheckInclusionListTransactions(gasPool, block.Transactions(), il, reader, &blockContext, e.config, &vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		result = &satisfied
+	}
+	e.readAheader.SetInclusionListResult(blockHash, ilHash, *result)
+	return result, nil
+}
+
+// replayBlockGasPool re-executes block on the state before it to recover the
+// per-dimension gas left, which the header's max-of-dimensions GasUsed hides.
+func (e *ExecModule) replayBlockGasPool(tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, getHeader func(common.Hash, uint64) (*types.Header, error)) (*protocol.GasPool, error) {
+	header := block.Header()
+	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
+	defer ibs.Close()
+	chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
+	if err := protocol.InitializeBlockExecution(e.engine, chainReader, header, e.config, ibs, state.NewNoopWriter(), e.logger, nil); err != nil {
+		return nil, err
+	}
+	gasPool := protocol.NewGasPool(header.GasLimit, e.config.GetMaxBlobGasPerBlock(header.Time))
+	blockHashFunc := protocol.GetHashFn(header, getHeader)
+	for i, txn := range block.Transactions() {
+		ibs.SetTxContext(block.NumberU64(), i)
+		if _, err := protocol.ApplyTransaction(e.config, blockHashFunc, e.engine, accounts.NilAddress, gasPool, ibs, state.NewNoopWriter(), header, txn, new(protocol.GasUsed), vm.Config{}); err != nil {
+			return nil, err
+		}
+	}
+	return gasPool, nil
+}
+
+func (e *ExecModule) stateHistoryCovers(ctx context.Context, tx kv.TemporalTx, blockNumber, fromTxNum, toTxNum uint64) (bool, error) {
+	err := state.RequireStateHistory(tx.Debug(), fromTxNum, toTxNum)
+	if !errors.Is(err, state.ErrPruned) {
+		return err == nil, err
+	}
+	if !inMemHistoryReads {
+		return false, nil
+	}
+	if overlay, _ := membatchwithdb.ViewOverlay(tx); overlay == nil {
+		return false, nil
+	}
+	dbTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer dbTx.Rollback()
+	committed, err := stages.GetStageProgress(dbTx, stages.Execution)
+	if err != nil {
+		return false, err
+	}
+	return blockNumber > committed, nil
+}
 
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a
 // persistent SharedDomains with an active overlay exists) or a plain DB RO tx.

@@ -54,6 +54,154 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	require.Equal(t, "no", out.ValidationError.Error().Error())
 }
 
+func TestSSZRESTPayloadStatusInclusionListSatisfiedRoundTrip(t *testing.T) {
+	satisfied, unsatisfied := true, false
+	for _, tc := range []struct {
+		name        string
+		ilSatisfied *bool
+	}{
+		{"satisfied", &satisfied},
+		{"unsatisfied", &unsatisfied},
+		{"null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			latest := common.HexToHash("0x1234")
+			wire := &engine_types.PayloadStatus{
+				Status:                 engine_types.ValidStatus,
+				LatestValidHash:        &latest,
+				InclusionListSatisfied: tc.ilSatisfied,
+				SSZVersion:             clparams.HezeVersion,
+			}
+			enc, err := wire.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			var out engine_types.PayloadStatus
+			require.NoError(t, out.DecodeSSZ(enc, int(clparams.HezeVersion)))
+			require.Equal(t, engine_types.ValidStatus, out.Status)
+			require.NotNil(t, out.LatestValidHash)
+			require.Equal(t, latest, *out.LatestValidHash)
+			require.Equal(t, tc.ilSatisfied, out.InclusionListSatisfied)
+		})
+	}
+}
+
+func TestSSZRESTPayloadStatusDecodeClearsReusedReceiver(t *testing.T) {
+	latest := common.HexToHash("0x1234")
+	satisfied := true
+	valid, err := (&engine_types.PayloadStatus{
+		Status:                 engine_types.ValidStatus,
+		LatestValidHash:        &latest,
+		ValidationError:        engine_types.NewStringifiedErrorFromString("stale"),
+		InclusionListSatisfied: &satisfied,
+		SSZVersion:             clparams.HezeVersion,
+	}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	syncing, err := (&engine_types.PayloadStatus{Status: engine_types.SyncingStatus, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var out engine_types.PayloadStatus
+	require.NoError(t, out.DecodeSSZ(valid, int(clparams.HezeVersion)))
+	require.NoError(t, out.DecodeSSZ(syncing, int(clparams.HezeVersion)))
+	require.Equal(t, engine_types.SyncingStatus, out.Status)
+	require.Nil(t, out.LatestValidHash)
+	require.Nil(t, out.ValidationError)
+	require.Nil(t, out.InclusionListSatisfied)
+}
+
+func TestSSZRESTPayloadStatusRejectsNonBooleanInclusionListSatisfied(t *testing.T) {
+	satisfied := true
+	enc, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	enc[len(enc)-1] = 2
+
+	var out engine_types.PayloadStatus
+	require.Error(t, out.DecodeSSZ(enc, int(clparams.HezeVersion)))
+}
+
+func TestSSZRESTPayloadStatusPreHezeIgnoresInclusionListSatisfied(t *testing.T) {
+	latest := common.HexToHash("0x1234")
+	satisfied := true
+	want, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, version := range []clparams.StateVersion{
+		clparams.Phase0Version,
+		clparams.BellatrixVersion,
+		clparams.CapellaVersion,
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			enc, err := (&engine_types.PayloadStatus{
+				Status:                 engine_types.ValidStatus,
+				LatestValidHash:        &latest,
+				InclusionListSatisfied: &satisfied,
+				SSZVersion:             version,
+			}).EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Equal(t, want, enc)
+
+			var out engine_types.PayloadStatus
+			require.NoError(t, out.DecodeSSZ(enc, int(version)))
+			require.Equal(t, version, out.SSZVersion)
+			require.Nil(t, out.InclusionListSatisfied)
+		})
+	}
+}
+
+func TestSSZRESTPayloadStatusHezeAppendsInclusionListSatisfied(t *testing.T) {
+	satisfied := true
+	pre, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, SSZVersion: clparams.GloasVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	null, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	set, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	require.Len(t, null, len(pre)+4)
+	require.Len(t, set, len(pre)+5)
+	require.Equal(t, byte(1), set[len(set)-1])
+}
+
+func TestSSZRESTPayloadStatusClonePreservesVersion(t *testing.T) {
+	heze, ok := (&engine_types.PayloadStatus{SSZVersion: clparams.HezeVersion}).Clone().(*engine_types.PayloadStatus)
+	require.True(t, ok)
+	require.Equal(t, clparams.HezeVersion, heze.SSZVersion)
+
+	untagged, ok := (&engine_types.PayloadStatus{}).Clone().(*engine_types.PayloadStatus)
+	require.True(t, ok)
+	require.Equal(t, clparams.BellatrixVersion, untagged.SSZVersion)
+}
+
+func TestSSZRESTNewPayloadRequestSchemaByVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		version  clparams.StateVersion
+		fields   int
+		hasIList bool
+	}{
+		{"bellatrix", clparams.BellatrixVersion, 1, false},
+		{"capella", clparams.CapellaVersion, 1, false},
+		{"deneb", clparams.DenebVersion, 3, false},
+		{"electra", clparams.ElectraVersion, 4, false},
+		{"fulu", clparams.FuluVersion, 4, false},
+		{"gloas", clparams.GloasVersion, 4, false},
+		{"heze", clparams.HezeVersion, 5, true},
+		{"after heze", clparams.HezeVersion + 1, 5, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inclusionList := &solid.TransactionsSSZ{}
+			schema := newPayloadRequestSchema(tc.version, engine_types.NewExecutionPayloadSSZ(tc.version), solid.NewHashList(sszMaxBlobHashes), &common.Hash{}, &solid.TransactionsSSZ{}, inclusionList)
+			require.Len(t, schema, tc.fields)
+			if tc.hasIList {
+				require.Same(t, inclusionList, schema[len(schema)-1])
+			}
+		})
+	}
+}
+
 func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -65,6 +213,7 @@ func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 		{"newPayloadV2", clparams.CapellaVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
 		{"newPayloadV3", clparams.DenebVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
 		{"newPayloadV5", clparams.GloasVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
+		{"newPayloadV6", clparams.HezeVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
 		{"forkchoiceV1", clparams.BellatrixVersion, encodeEmptyForkchoiceRequest, decodeEmptyForkchoiceRequest},
 		{"forkchoiceV4", clparams.GloasVersion, encodeEmptyForkchoiceRequest, decodeEmptyForkchoiceRequest},
 	} {
@@ -86,11 +235,11 @@ func TestSSZRESTBeaconChainConfigPrefersRuntimeConfig(t *testing.T) {
 }
 
 func encodeEmptyNewPayloadRequest(version clparams.StateVersion) ([]byte, error) {
-	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
+	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{}, &solid.TransactionsSSZ{})
 }
 
 func decodeEmptyNewPayloadRequest(buf []byte, version clparams.StateVersion) error {
-	_, _, _, _, err := decodeNewPayloadRequest(buf, version)
+	_, _, _, _, _, err := decodeNewPayloadRequest(buf, version)
 	return err
 }
 
@@ -202,6 +351,7 @@ func TestSSZRESTAdvertisedRoutes(t *testing.T) {
 		{http.MethodPost, "/engine/v3/payloads", http.StatusBadRequest},
 		{http.MethodPost, "/engine/v4/payloads", http.StatusBadRequest},
 		{http.MethodPost, "/engine/v5/payloads", http.StatusBadRequest},
+		{http.MethodPost, "/engine/v6/payloads", http.StatusBadRequest},
 		{http.MethodGet, "/engine/v1/payloads/not-a-payload-id", http.StatusBadRequest},
 		{http.MethodGet, "/engine/v2/payloads/not-a-payload-id", http.StatusBadRequest},
 		{http.MethodGet, "/engine/v3/payloads/not-a-payload-id", http.StatusBadRequest},
@@ -238,6 +388,7 @@ func TestSSZRESTEndpointVersionMapping(t *testing.T) {
 		{"newPayloadV3", sszNewPayloadVersion, 3, clparams.DenebVersion},
 		{"newPayloadV4", sszNewPayloadVersion, 4, clparams.ElectraVersion},
 		{"newPayloadV5", sszNewPayloadVersion, 5, clparams.GloasVersion},
+		{"newPayloadV6", sszNewPayloadVersion, 6, clparams.HezeVersion},
 		{"getPayloadV1", sszGetPayloadVersion, 1, clparams.BellatrixVersion},
 		{"getPayloadV2", sszGetPayloadVersion, 2, clparams.CapellaVersion},
 		{"getPayloadV3", sszGetPayloadVersion, 3, clparams.DenebVersion},
@@ -264,18 +415,41 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 	bal := hexutil.Bytes{0x01, 0x02, 0x03}
 	payload.BlockAccessList = &bal
 
-	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
+	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{}, &solid.TransactionsSSZ{})
 	require.NoError(t, err)
 
 	wireVersion, ok := sszNewPayloadVersion(5)
 	require.True(t, ok)
-	out, _, _, _, err := decodeNewPayloadRequest(enc, wireVersion)
+	out, _, _, _, _, err := decodeNewPayloadRequest(enc, wireVersion)
 	require.NoError(t, err)
 
 	require.NotNil(t, out.SlotNumber)
 	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
 	require.NotNil(t, out.BlockAccessList)
 	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
+}
+
+func TestSSZRESTNewPayloadV6UsesHezeSchema(t *testing.T) {
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.HezeVersion)
+	slot := hexutil.Uint64(123)
+	payload.SlotNumber = &slot
+	bal := hexutil.Bytes{0x01, 0x02, 0x03}
+	payload.BlockAccessList = &bal
+	inclusionList := [][]byte{{0x02, 0xaa}, {0xf8, 0xbb, 0xcc}}
+
+	enc, err := encodeNewPayloadRequest(clparams.HezeVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{}, solid.NewTransactionsSSZFromTransactions(inclusionList))
+	require.NoError(t, err)
+
+	wireVersion, ok := sszNewPayloadVersion(6)
+	require.True(t, ok)
+	out, _, _, _, outInclusionList, err := decodeNewPayloadRequest(enc, wireVersion)
+	require.NoError(t, err)
+
+	require.NotNil(t, out.SlotNumber)
+	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
+	require.NotNil(t, out.BlockAccessList)
+	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
+	require.Equal(t, []hexutil.Bytes{{0x02, 0xaa}, {0xf8, 0xbb, 0xcc}}, transactionsBytes(outInclusionList))
 }
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
@@ -389,8 +563,10 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")
 	require.Contains(t, caps, "engine_getBlobsV4")
+	require.Contains(t, caps, "engine_newPayloadV6")
 	require.Contains(t, caps, "engine_getInclusionListV1")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
+	require.Contains(t, caps, "POST /engine/v6/payloads")
 	require.Contains(t, caps, "GET /engine/v1/inclusion-list")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")

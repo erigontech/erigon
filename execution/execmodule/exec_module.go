@@ -587,6 +587,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
+	if e.inclusionListPending(blockHash) {
+		e.forkValidator.ForgetValidHash(blockHash)
+	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
 		return ValidationResult{
@@ -721,6 +724,15 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		result.ValidationError = validationError.Error()
 	}
 	return result, nil
+}
+
+func (e *ExecModule) inclusionListPending(blockHash common.Hash) bool {
+	_, ilHash, ok := e.readAheader.ReadInclusionList(blockHash)
+	if !ok {
+		return false
+	}
+	_, checked := e.readAheader.ReadInclusionListResult(blockHash, ilHash)
+	return !checked
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {

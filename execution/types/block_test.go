@@ -184,6 +184,69 @@ func TestWithBlockAccessListSidecarPreservesCaches(t *testing.T) {
 	require.Equal(t, block.size.Load(), withSidecar.size.Load())
 }
 
+func testInclusionList() Transactions {
+	return Transactions{NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21000, uint256.NewInt(1), nil)}
+}
+
+func TestWithInclusionListLeavesOriginalUntouched(t *testing.T) {
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil)
+	il := testInclusionList()
+
+	withIL := block.WithInclusionList(il)
+
+	require.Equal(t, il, withIL.InclusionList())
+	require.Nil(t, block.InclusionList())
+}
+
+func TestWithInclusionListPreservesSidecarAndCaches(t *testing.T) {
+	sidecar := NewBlockAccessListSidecar(BlockAccessList{{Address: common.Address{1}}})
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, sidecar)
+	block.binaryTransactions = BinaryTransactions{{1, 2, 3}}
+	block.size.Store(123)
+
+	withIL := block.WithInclusionList(testInclusionList())
+
+	require.Same(t, sidecar, withIL.BlockAccessListSidecar())
+	require.Same(t, block.header, withIL.header)
+	require.Equal(t, block.binaryTransactions, withIL.binaryTransactions)
+	require.Equal(t, block.size.Load(), withIL.size.Load())
+}
+
+func TestWithBlockAccessListSidecarPreservesInclusionList(t *testing.T) {
+	il := testInclusionList()
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil).WithInclusionList(il)
+
+	withSidecar := block.WithBlockAccessListSidecar(NewBlockAccessListSidecar(BlockAccessList{}))
+
+	require.Equal(t, il, withSidecar.InclusionList())
+}
+
+func TestWithSealPreservesInclusionList(t *testing.T) {
+	il := testInclusionList()
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil).WithInclusionList(il)
+
+	sealed := block.WithSeal(&Header{Extra: []byte("sealed")})
+
+	require.Equal(t, il, sealed.InclusionList())
+}
+
+func TestCopyKeepsNilInclusionList(t *testing.T) {
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil)
+
+	require.Nil(t, block.Copy().InclusionList())
+}
+
+func TestCopyDeepCopiesInclusionList(t *testing.T) {
+	il := testInclusionList()
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil).WithInclusionList(il)
+
+	copied := block.Copy().InclusionList()
+
+	require.Len(t, copied, len(il))
+	require.Equal(t, il[0].Hash(), copied[0].Hash())
+	require.NotSame(t, il[0], copied[0])
+}
+
 func TestEIP1559BlockEncoding(t *testing.T) {
 	t.Parallel()
 	blockEnc := common.FromHex("f9030bf901fea083cafc574e1f51ba9dc0568fc617a08ea2429fb384059c972f13b19fa1c8dd55a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a05fe50b260da6308036625b850b5d6ced6d0a9f814c0688bc91ffb7b7a3a54b67a0bc37d79753ad738a6dac4921e57392f145d8887476de3f783dfa7edae9283e52b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001832fefd8825208845506eb0780a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff49888a13a5a8c8f2bb1c4843b9aca00f90106f85f800a82c35094095e7baea6a6c7c4c2dfeb977efac326af552d870a801ba09bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094fa08a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b1b8a302f8a0018080843b9aca008301e24194095e7baea6a6c7c4c2dfeb977efac326af552d878080f838f7940000000000000000000000000000000000000001e1a0000000000000000000000000000000000000000000000000000000000000000080a0fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b0a06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a8c0")

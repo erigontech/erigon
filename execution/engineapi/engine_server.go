@@ -281,7 +281,7 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
@@ -420,13 +420,33 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
+	var il types.Transactions
+	if version >= clparams.HezeVersion {
+		if inclusionList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "inclusion list missing"}
+		}
+
+		il = make(types.Transactions, 0, len(inclusionList))
+		for _, enc := range inclusionList {
+			if types.TypedTransactionMarshalledAsRlpString(enc) {
+				continue
+			}
+			txn, decodeErr := types.UnmarshalTransactionFromBinary(enc, false)
+			if decodeErr != nil {
+				continue
+			}
+			il = append(il, txn)
+		}
+	}
 
 	if (!e.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(e.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!e.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
 		(e.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!e.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
-		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) ||
+		(!e.config.IsBogota(header.Time) && version >= clparams.HezeVersion) ||
+		(e.config.IsBogota(header.Time) && version < clparams.HezeVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -543,7 +563,26 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if possibleStatus != nil {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		return possibleStatus, nil
+		status := &engine_types.PayloadStatus{
+			Status:          possibleStatus.Status,
+			ValidationError: possibleStatus.ValidationError,
+			LatestValidHash: possibleStatus.LatestValidHash,
+			CriticalError:   possibleStatus.CriticalError,
+		}
+		if err := e.resolveInclusionListSatisfied(ctx, status, blockHash, uint64(req.BlockNumber), il); err != nil {
+			return nil, err
+		}
+		if possibleStatus.Status != engine_types.ValidStatus || status.Status != engine_types.SyncingStatus {
+			return status, nil
+		}
+		canonical, err := e.chainRW.IsCanonicalHash(ctx, blockHash)
+		if err != nil {
+			return nil, err
+		}
+		if canonical {
+			return status, nil
+		}
+		e.logger.Debug("[NewPayload] re-executing validated side block for an unchecked inclusion list", "hash", blockHash)
 	}
 
 	e.lock.Lock()
@@ -556,6 +595,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	block = block.WithInclusionList(il)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
@@ -571,7 +611,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
-
+	if err := e.resolveInclusionListSatisfied(ctx, payloadStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
+		return nil, err
+	}
 	return payloadStatus, nil
 }
 
@@ -1106,7 +1148,6 @@ func (e *EngineServer) HandleNewPayload(
 				}
 				return nil, err
 			}
-
 			if status == execmodule.ExecutionStatusBusy || status == execmodule.ExecutionStatusTooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -1167,6 +1208,28 @@ func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmod
 	}
 
 	return resp
+}
+
+func (e *EngineServer) resolveInclusionListSatisfied(ctx context.Context, resp *engine_types.PayloadStatus, blockHash common.Hash, blockNumber uint64, il types.Transactions) error {
+	if il == nil || resp.Status != engine_types.ValidStatus {
+		return nil
+	}
+	if len(il) == 0 {
+		satisfied := true
+		resp.InclusionListSatisfied = &satisfied
+		return nil
+	}
+	satisfied, err := e.executionService.InclusionListSatisfied(ctx, blockHash, blockNumber, il)
+	if err != nil {
+		return err
+	}
+	if satisfied == nil {
+		resp.Status = engine_types.SyncingStatus
+		resp.LatestValidHash = nil
+		return nil
+	}
+	resp.InclusionListSatisfied = satisfied
+	return nil
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {

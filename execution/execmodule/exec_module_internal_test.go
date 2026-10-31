@@ -230,3 +230,22 @@ func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
 	require.True(t, e.lock.TryLock(), "the read lock is still held after the panic")
 	e.lock.Unlock()
 }
+
+func TestInclusionListGasPoolsCoverBothGasDimensions(t *testing.T) {
+	blobGasUsed := uint64(131072)
+	header := &types.Header{GasLimit: 30_000_000, GasUsed: 10_000_000, BlobGasUsed: &blobGasUsed}
+
+	pools := inclusionListGasPools(header, 786432)
+
+	require.Len(t, pools, 3)
+	want := [][2]uint64{
+		{20_000_000, 20_000_000},
+		{20_000_000, 30_000_000},
+		{30_000_000, 20_000_000},
+	}
+	for i, pool := range pools {
+		require.Equal(t, want[i][0], pool.ExecutionGasAvailable())
+		require.Equal(t, want[i][1], pool.StateGasAvailable())
+		require.Equal(t, uint64(655360), pool.BlobGas())
+	}
+}

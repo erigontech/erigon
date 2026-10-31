@@ -140,6 +140,12 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.extendingForkHeadHash = common.Hash{}
 }
 
+func (fv *ForkValidator) ForgetValidHash(hash common.Hash) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.validHashes.Remove(hash)
+}
+
 // MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
 func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation) error {
 	fv.lock.Lock()
