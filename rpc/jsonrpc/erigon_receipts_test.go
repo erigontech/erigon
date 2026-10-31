@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -793,6 +795,76 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 		}
 	}
 	require.NotZero(t, seen)
+}
+
+// newLatestLogsTestChain inserts one block with three txs that each emit one log.
+func newLatestLogsTestChain(t *testing.T) *execmoduletester.ExecModuleTester {
+	t.Helper()
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		for _, topic := range []common.Hash{{0x11}, {0x22}, {0x33}} {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	return m
+}
+
+func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+	want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
+	require.NoError(t, err)
+	require.Len(t, want, 3)
+	slices.Reverse(want)
+
+	got, err := NewErigonAPI(newBaseApiForTest(m), m.DB, nil).GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+type pinnedHeaderByNumberReader struct {
+	dbservices.FullBlockReader
+}
+
+func (r pinnedHeaderByNumberReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNumber uint64) (*types.Header, error) {
+	if !carriesOverlayView(tx) {
+		return nil, errors.New("header read outside the pinned overlay view")
+	}
+	return r.FullBlockReader.HeaderByNumber(ctx, tx, blockNumber)
+}
+
+// TestErigonGetLatestLogsPinsOverlayView pins that headers and receipts come
+// from one view: a header read from the committed tx next to a receipt read
+// through a newer overlay can mix two forks during a reorg.
+func TestErigonGetLatestLogsPinsOverlayView(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	base, _, _, _ := newPublishedOverlayTestBase(t, m)
+	base._blockReader = pinnedHeaderByNumberReader{FullBlockReader: base._blockReader}
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+
+	t.Run("erigon_getLatestLogs", func(t *testing.T) {
+		got, err := NewErigonAPI(base, m.DB, nil).GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+	})
+	t.Run("eth_getLogs", func(t *testing.T) {
+		got, err := newEthApiForTest(base, m.DB, nil, nil).GetLogs(m.Ctx, crit)
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+	})
 }
 
 func TestErigonGetLogsFromLatest(t *testing.T) {
