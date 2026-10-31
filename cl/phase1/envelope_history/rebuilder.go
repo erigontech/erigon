@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -196,7 +195,7 @@ func (r *Rebuilder) rebuild(ctx context.Context, prepared *PreparedRebuild) (*cl
 		},
 		Signature: prepared.signature,
 	}
-	if err := network.ValidateGloasEnvelopeAgainstBid(r.beaconCfg, prepared.blockRoot, prepared.bid, envelope); err != nil {
+	if err := cltypes.ValidateGloasEnvelopeAgainstBid(r.beaconCfg, prepared.blockRoot, prepared.bid, envelope); err != nil {
 		log.Warn("rebuilt execution payload envelope failed verification", "blockRoot", prepared.blockRoot, "err", err)
 		return nil, nil
 	}
