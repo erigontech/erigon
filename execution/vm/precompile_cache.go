@@ -80,9 +80,12 @@ func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, 
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
 	in, ok := c.normalize(input)
+	if !ok || len(in) > maxCachedPrecompileInput {
+		return c.PrecompiledContract.Run(input)
+	}
 	gas := c.RequiredGas(input)
 	// Below its key length a call costs less than the insert a miss pays.
-	if !ok || len(in) > maxCachedPrecompileInput || gas < uint64(len(in)) {
+	if gas < uint64(len(in)) {
 		return c.PrecompiledContract.Run(input)
 	}
 	key, check := maphash.Bytes(precompileSeed, in)^c.domainHash, maphash.Bytes(precompileCheckSeed, in)
