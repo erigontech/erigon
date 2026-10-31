@@ -862,14 +862,11 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;
 // callers must first validate the list with validateSetCodePrerequisites.
-// recipientCreditedAtValidation reports whether a value transfer runs no frame: the recipient is
-// an existing account without code, so validation credits it after every lower tx.
+// recipientCreditedAtValidation reports whether a value transfer runs no frame: the recipient has
+// no code, so validation credits it after every lower tx, or reruns the tx if it does not exist.
 func (st *TxnExecutor) recipientCreditedAtValidation(coinbase accounts.Address) bool {
 	to := st.to()
 	if st.value.IsZero() || to == coinbase || to == st.msg.From() || st.evm.Config().Tracer.HasEnterHook() || slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), to) {
-		return false
-	}
-	if exist, err := st.state.Exist(to); err != nil || !exist {
 		return false
 	}
 	codeHash, err := st.state.GetCodeHash(to)
