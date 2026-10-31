@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -471,19 +472,50 @@ func decodeHashListTo(s *rlp.Stream, dst []common.Hash) ([]common.Hash, error) {
 //
 // Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
+	fields, err := s.ViewList()
 	if err != nil {
 		return err
 	}
-	if l.Address, err = s.Addr(); err != nil {
+	return (*Log)(l).decodeStoredFields(fields)
+}
+
+// decodeStoredFields decodes the fields of a stored log from the content of its list.
+// The input is parsed in place rather than through rlp.Stream, whose per-value
+// bookkeeping dominates decoding a receipt's logs; topics and data are still copied.
+func (l *Log) decodeStoredFields(b []byte) error {
+	addr, b, err := rlp.SplitString(b)
+	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	l.Topics, err = decodeHashListTo(s, nil)
-	if err != nil {
-		return err
+	if len(addr) != length.Addr {
+		return fmt.Errorf("read Address: input value has wrong size %d, want %d", len(addr), length.Addr)
 	}
-	if l.Data, err = s.Bytes(); err != nil {
+	l.Address = common.Address(addr)
+
+	topics, b, err := rlp.SplitList(b)
+	if err != nil {
+		return fmt.Errorf("read Topics: %w", err)
+	}
+	// An encoded topic is 33 bytes, so the count is bounded by bytes already in memory.
+	l.Topics = make([]common.Hash, 0, len(topics)/(1+length.Hash))
+	for len(topics) > 0 {
+		var h []byte
+		if h, topics, err = rlp.SplitString(topics); err != nil {
+			return fmt.Errorf("read Topics: %w", err)
+		}
+		if len(h) != length.Hash {
+			return fmt.Errorf("read Topics: input value has wrong size %d, want %d", len(h), length.Hash)
+		}
+		l.Topics = append(l.Topics, common.Hash(h))
+	}
+
+	data, b, err := rlp.SplitString(b)
+	if err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	return s.ListEnd()
+	l.Data = bytes.Clone(data)
+	if len(b) != 0 {
+		return errors.New("stored log: trailing data")
+	}
+	return nil
 }

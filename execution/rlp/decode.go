@@ -782,6 +782,33 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 	}
 }
 
+// ViewList returns the content of the next RLP list and moves past it. On a stream
+// from NewBytesStream the result aliases the input, so callers must not retain it;
+// on any other reader it is a copy.
+func (s *Stream) ViewList() ([]byte, error) {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return nil, err
+	}
+	if kind != List {
+		return nil, ErrExpectedList
+	}
+	if s.sliceRdr == nil {
+		b := make([]byte, size)
+		return b, s.readFull(b)
+	}
+	sr := &s.sliceRdr
+	if err := s.willRead(size); err != nil {
+		return nil, err
+	}
+	if uint64(len(*sr)) < size {
+		return nil, io.ErrUnexpectedEOF
+	}
+	content := (*sr)[:size:size]
+	*sr = (*sr)[size:]
+	return content, nil
+}
+
 // ReadBytes reads an RLP string into b, which must match the exact decoded value size.
 func (s *Stream) ReadBytes(b []byte) error {
 	kind, size, err := s.Kind()

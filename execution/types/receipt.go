@@ -470,34 +470,35 @@ func (s *storedReceiptScratch) release() {
 }
 
 func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
-	l, err := s.List()
+	content, err := s.ViewList()
 	if err != nil {
 		return nil, err
 	}
-	if l == 0 {
-		return Logs{}, s.ListEnd()
+	if len(content) == 0 {
+		return Logs{}, nil
 	}
 	// One arena backs every Log, so a log costs no allocation of its own.
 	// CountItems is exact for a well-formed list but counts items, not logs, so
 	// minStoredLogSize bounds what a crafted payload can size.
 	const minStoredLogSize = 24 // list header, 21-byte address, empty topics, empty data
-	var arena []Log
-	if raw := s.Peek(); uint64(len(raw)) >= l {
-		arena = make([]Log, min(rlp.CountItems(raw[:l]), int(l/minStoredLogSize)))
-	}
+	arena := make([]Log, min(rlp.CountItems(content), len(content)/minStoredLogSize))
 	logs := make(Logs, 0, len(arena))
-	for s.MoreDataInList() {
+	for len(content) > 0 {
+		var fields []byte
+		if fields, content, err = rlp.SplitList(content); err != nil {
+			return nil, err
+		}
 		if len(arena) == 0 {
 			arena = make([]Log, 1)
 		}
 		log := &arena[0]
 		arena = arena[1:]
-		if err := (*LogForStorage)(log).DecodeRLP(s); err != nil {
+		if err := log.decodeStoredFields(fields); err != nil {
 			return nil, err
 		}
 		logs = append(logs, log)
 	}
-	return logs, s.ListEnd()
+	return logs, nil
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation

@@ -505,6 +505,96 @@ func TestStreamViewBytesErrors(t *testing.T) {
 	}
 }
 
+func TestStreamViewList(t *testing.T) {
+	input := unhex("C88301020483050607")
+
+	s := NewBytesStream(input)
+	defer PutStream(s)
+	b, err := s.ViewList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := unhex("8301020483050607"); !bytes.Equal(b, want) {
+		t.Fatalf("content mismatch: got %x, want %x", b, want)
+	}
+	if &b[0] != &input[1] {
+		t.Fatal("ViewList must alias a bytes-backed input, not copy it")
+	}
+	if cap(b) != len(b) {
+		t.Fatalf("view cap %d must be clamped to len %d so appends cannot scribble the input", cap(b), len(b))
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("stream not advanced past the list: %d bytes remaining", s.Remaining())
+	}
+}
+
+func TestStreamViewListInsideList(t *testing.T) {
+	s := NewBytesStream(unhex("C8C301020383040506"))
+	defer PutStream(s)
+	if _, err := s.List(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.ViewList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, unhex("010203")) {
+		t.Fatalf("got %x, want 010203", b)
+	}
+	v, err := s.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(v, unhex("040506")) {
+		t.Fatalf("value after the list: got %x, want 040506", v)
+	}
+	if err := s.ListEnd(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamViewListOtherReader(t *testing.T) {
+	s := NewStream(bytes.NewReader(unhex("C301020305")), 0)
+	b, err := s.ViewList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, unhex("010203")) {
+		t.Fatalf("got %x, want 010203", b)
+	}
+	if v, err := s.Bytes(); err != nil || !bytes.Equal(v, []byte{5}) {
+		t.Fatalf("value after the list: v=%x err=%v", v, err)
+	}
+}
+
+func TestStreamViewListErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		inList  bool
+		wantErr error
+	}{
+		{"string", "8401020304", false, ErrExpectedList},
+		{"single byte", "05", false, ErrExpectedList},
+		{"size exceeds input", "C40102", false, ErrValueTooLarge},
+		{"larger than enclosing list", "C2C3010203", true, ErrElemTooLarge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewBytesStream(unhex(tt.input))
+			defer PutStream(s)
+			if tt.inList {
+				if _, err := s.List(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.ViewList(); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestDecodeErrors(t *testing.T) {
 	r := bytes.NewReader(nil)
 
