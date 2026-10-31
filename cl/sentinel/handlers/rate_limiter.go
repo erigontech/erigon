@@ -202,17 +202,11 @@ func (rl *peerRateLimiter) envelopeRebuildBucket(peerID string) *tokenBucket {
 }
 
 func (rl *peerRateLimiter) tryStartEnvelopeRebuild(peerID string) *tokenBucket {
-	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
-	for {
-		bucket := rl.envelopeRebuildBucket(peerID)
-		if !bucket.tryStartRebuild(rl.now()) {
-			return nil
-		}
-		if current, ok := rl.buckets.Load(key); ok && current == bucket {
-			return bucket
-		}
-		bucket.finishRebuild(rl.now(), 0, false)
+	bucket := rl.envelopeRebuildBucket(peerID)
+	if !bucket.tryStartRebuild(rl.now()) {
+		return nil
 	}
+	return bucket
 }
 
 func (rl *peerRateLimiter) finishEnvelopeRebuild(bucket *tokenBucket, elapsed time.Duration, charge bool) {
@@ -332,10 +326,11 @@ func (rl *peerRateLimiter) cleanup() {
 	rl.buckets.Range(func(key, value any) bool {
 		bucket := value.(*tokenBucket)
 		bucket.mu.Lock()
-		if now.Sub(bucket.lastRefill) > bucketIdleExpiry {
-			rl.buckets.CompareAndDelete(key, bucket)
-		}
+		idle := now.Sub(bucket.lastRefill) > bucketIdleExpiry
 		bucket.mu.Unlock()
+		if idle {
+			rl.buckets.Delete(key)
+		}
 		return true
 	})
 

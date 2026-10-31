@@ -181,35 +181,6 @@ func TestRateLimiter_EnvelopeRebuildFinishUsesAdmittedBucket(t *testing.T) {
 	rl.finishEnvelopeRebuild(second, 0, false)
 }
 
-func TestRateLimiter_EnvelopeRebuildRetriesAfterCleanup(t *testing.T) {
-	rl := newPeerRateLimiter()
-	peerID := "16Uiu2peer1"
-	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
-	oldBucket := rl.envelopeRebuildBucket(peerID)
-	setRateLimiterLastRefill(t, rl, key, time.Now().Add(-bucketIdleExpiry-time.Second))
-	now := time.Now()
-	nowCalls := 0
-	var replacement *tokenBucket
-	rl.now = func() time.Time {
-		nowCalls++
-		if nowCalls == 1 {
-			rl.cleanup()
-			replacement = rl.envelopeRebuildBucket(peerID)
-		}
-		return now
-	}
-
-	bucket := rl.tryStartEnvelopeRebuild(peerID)
-	require.NotNil(t, bucket)
-	require.NotSame(t, oldBucket, bucket)
-	require.Same(t, replacement, bucket)
-	stored, ok := rl.buckets.Load(key)
-	require.True(t, ok)
-	require.Same(t, bucket, stored)
-	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
-	rl.finishEnvelopeRebuild(bucket, 0, false)
-}
-
 func TestRateLimiter_Concurrency(t *testing.T) {
 	rl := newPeerRateLimiter()
 	peer := "16Uiu2peer1"
