@@ -62,6 +62,28 @@ func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
 }
 
+// AsSnapshotGetter reads this SD's in-memory values first. The shared cache
+// can advance independently of this SD, so entries newer than tx's snapshot
+// are ignored and the value is read from tx instead.
+// The queried domains must remain unchanged in memory while the getter is in use.
+func (sd *SharedDomains) AsSnapshotGetter(tx kv.TemporalTx) kv.TemporalGetter {
+	return &snapshotGetter{sd: sd, TemporalGetter: NewCachedTemporalTxStateGetter(tx, sd.stateCache)}
+}
+
+type snapshotGetter struct {
+	kv.TemporalGetter
+	sd *SharedDomains
+}
+
+func (g *snapshotGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	v, step, maxStep, ok := g.sd.latestFromMem(name, k)
+	maxStep = min(maxStep, opts.MaxStep())
+	if ok && servableUnderBound(step, maxStep) {
+		return v, step, nil
+	}
+	return g.TemporalGetter.GetLatest(name, k, opts.WithMaxStep(maxStep))
+}
+
 // AsOfGetter reads keys as of a txNum through sd.mem, the shared state cache, then its tx.
 type AsOfGetter struct {
 	sd   *SharedDomains
@@ -91,6 +113,7 @@ type TemporalTxStateGetter struct {
 	kv.TemporalTx
 	stateCache *cache.StateCache
 	view       cache.ReadView
+	frontier   cache.Frontier
 	stepSize   uint64
 }
 
@@ -107,11 +130,11 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	if stateCache == nil || !dbg.UseStateCache {
 		return g
 	}
-	// A writable tx's visible end comes from the SharedDomains flush memo, not
-	// from the tx, so only a read-only tx can vouch for a fill here. A read-only
-	// wrapper can hide a writable tx, so both ends are checked.
+	// Only a read-only backing tx has an exact visible end for cache fills.
+	// Overlay read views expose write methods, while read-only wrappers can
+	// hide a writable tx, so classify the underlying transaction.
 	generationTx := kv.UnderlyingTx(tx)
-	if generationTx == nil || writableTx(tx) || writableTx(generationTx) {
+	if generationTx == nil || kv.UnderlyingTxIsWritable(generationTx) {
 		return g
 	}
 	stateVersion, err := rawdb.GetStateVersion(generationTx)
@@ -119,14 +142,19 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 		return g
 	}
 	g.stateCache = stateCache
-	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	g.frontier = cache.FrontierWithStateVersion(tx.Debug(), stateVersion)
+	g.view = stateCache.View(g.frontier)
 	g.stepSize = tx.Debug().StepSize()
 	return g
 }
 
-func writableTx(tx kv.TemporalTx) bool {
-	_, writable := tx.(kv.TemporalRwTx)
-	return writable
+func (g *TemporalTxStateGetter) cacheReadView() cache.ReadView {
+	if g.view.NeedsFrontier() {
+		// Retain the binding across forward publications without changing
+		// the snapshot or its unwind epoch.
+		g.view = g.view.WithFrontier(g.frontier)
+	}
+	return g.view
 }
 
 func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
@@ -134,17 +162,14 @@ func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetL
 	if g.stateCache == nil || opts.MaxStep() != kv.NoStepBound {
 		return g.TemporalTx.GetLatest(name, k, opts)
 	}
-	if v, txNum, ok := g.view.GetVisible(name, k); ok {
+	view := g.cacheReadView()
+	if v, txNum, ok := view.GetVisible(name, k); ok {
 		return v, kv.Step(txNum / g.stepSize), nil
 	}
 	v, step, err := g.TemporalTx.GetLatest(name, k, opts)
 	if err == nil && g.stateCache.Caches(name) {
-		readTxNum := step.LastTxNum(g.stepSize)
-		// A read-only tx's visible end is exact, so its latest value was written below it.
-		if end, ok := g.Debug().DomainVisibleEnd(name); ok && end > 0 {
-			readTxNum = min(readTxNum, end-1)
-		}
-		g.view.Fill(name, k, v, readTxNum)
+		readTxNum := cache.ClampFillTxNum(g.Debug(), name, step.LastTxNum(g.stepSize))
+		view.Fill(name, k, v, readTxNum)
 	}
 	return v, step, err
 }
@@ -155,7 +180,7 @@ func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, er
 }
 
 func (g *TemporalTxStateGetter) GetCodeSize(addr []byte, _ uint64) (int, bool, error) {
-	if code, _, ok := g.view.GetVisible(kv.CodeDomain, addr); ok {
+	if code, _, ok := g.cacheReadView().GetVisible(kv.CodeDomain, addr); ok {
 		return len(code), len(code) > 0, nil
 	}
 	size, found, err := g.GetLatestValSize(kv.CodeDomain, addr)

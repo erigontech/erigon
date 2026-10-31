@@ -445,7 +445,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	}
 
 	body := executionPayload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
+	txs, err := execution_client.DecodePayloadTransactions(executionPayload)
 	if err != nil {
 		return nil, err
 	}
