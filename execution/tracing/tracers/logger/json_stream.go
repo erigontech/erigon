@@ -48,6 +48,7 @@ type JsonStreamLogger struct {
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
+	stackHex     []stackHexSlot
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
@@ -87,6 +88,26 @@ func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transactio
 
 func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
+}
+
+// stackHexSlot holds the quoted hex of the value last written for a stack slot.
+// Between steps only the top of the stack changes, so most slots hit.
+type stackHexSlot struct {
+	val    uint256.Int
+	quoted [68]byte // `"0x` + 64 digits + `"`
+	n      uint8    // 0 until the slot is first written
+}
+
+func (l *JsonStreamLogger) writeStackValue(i int, v *uint256.Int) {
+	if i == len(l.stackHex) {
+		l.stackHex = append(l.stackHex, stackHexSlot{})
+	}
+	slot := &l.stackHex[i]
+	if slot.n == 0 || slot.val != *v {
+		slot.val = *v
+		slot.n = uint8(copy(slot.quoted[:], l.hexQuoted(v)))
+	}
+	l.stream.WriteRaw(common.ToStringZeroCopy(slot.quoted[:slot.n]))
 }
 
 // hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
@@ -210,7 +231,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 		l.stream.Field("stack")
 		l.stream.WriteArrayStart()
 		for i := range stack {
-			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
+			l.writeStackValue(i, &stack[i])
 		}
 		l.stream.WriteArrayEnd()
 	}

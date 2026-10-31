@@ -629,6 +629,41 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 	}
 }
 
+// Consecutive steps reuse a slot's encoding while its value is unchanged, so a
+// slot whose value changes, including back to zero, must be re-encoded.
+func TestJsonStreamLogger_StackFollowsValueChanges(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStorage: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	steps := [][]uint64{{0, 1}, {0, 1}, {0, 2}, {5, 0}, {5, 0, 7}, {5}}
+	for i, step := range steps {
+		stack := make([]uint256.Int, len(step))
+		for j, v := range step {
+			stack[j].SetUint64(v)
+		}
+		l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, &mockOpContext{stack: stack}, nil, 1, nil)
+	}
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var decoded struct {
+		StructLogs []struct {
+			Stack []string `json:"stack"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "produced %s", buf.Bytes())
+	require.Len(t, decoded.StructLogs, len(steps))
+	for i, step := range steps {
+		want := make([]string, len(step))
+		for j, v := range step {
+			want[j] = uint256.NewInt(v).Hex()
+		}
+		require.Equal(t, want, decoded.StructLogs[i].Stack, "step %d", i)
+	}
+}
+
 func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
