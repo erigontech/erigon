@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"runtime/pprof"
 	"slices"
 	"strings"
@@ -398,10 +399,15 @@ func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfi
 // fgprof v0.9.5 divides by its zero sample rate there, and such a profile has no samples.
 func stopWallProfile(stop func() error, f *os.File) {
 	defer func() {
-		if recover() != nil {
-			f.Close()
-			_ = dir.RemoveFile(f.Name())
+		r := recover()
+		if r == nil {
+			return
 		}
+		if err, ok := r.(runtime.Error); !ok || !strings.Contains(err.Error(), "divide by zero") {
+			panic(r)
+		}
+		f.Close()
+		_ = dir.RemoveFile(f.Name())
 	}()
 	if err := stop(); err != nil {
 		fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
