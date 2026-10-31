@@ -1637,6 +1637,24 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
 }
 
+// A value written at txNum 5 is the value as of any later txNum, not as of 5 itself.
+func TestStateCache_GetAsOfServesValuesWrittenBefore(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
+	view := sc.View(FrontierWithStateVersion(FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true }), 2))
+
+	v, ok := view.GetAsOf(kv.AccountsDomain, key, 6)
+	require.True(t, ok)
+	require.Equal(t, makeValue(1), v)
+	_, ok = view.GetAsOf(kv.AccountsDomain, key, 5)
+	require.False(t, ok)
+}
+
 func TestAccountCodeHashes(t *testing.T) {
 	addr := makeAddr(1)
 	code := []byte{0x60, 0x00}

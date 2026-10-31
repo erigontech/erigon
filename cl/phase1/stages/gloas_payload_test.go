@@ -1545,6 +1545,7 @@ type testExecutionEngine struct {
 	newPayloadFn     func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error)
 	forkChoiceHeads  []common.Hash
 	forkChoiceErr    error
+	forkChoiceFn     func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error)
 }
 
 func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
@@ -1570,8 +1571,11 @@ func admitted(ctx context.Context) func(execution_client.PayloadStatus, error) (
 	}
 }
 
-func (t *testExecutionEngine) ForkChoiceUpdate(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+func (t *testExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error) {
 	t.forkChoiceHeads = append(t.forkChoiceHeads, head)
+	if t.forkChoiceFn != nil {
+		return t.forkChoiceFn(ctx, finalized, safe, head, attr, version)
+	}
 	return nil, t.forkChoiceErr
 }
 

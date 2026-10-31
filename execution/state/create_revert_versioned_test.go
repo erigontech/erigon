@@ -96,10 +96,10 @@ func TestNoMaterialize_RevivedCreateRevertReadsCellBalance(t *testing.T) {
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
 	ibs = newNoMaterializeTx(vm, 1)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
 
 	ibs = newNoMaterializeTx(vm, 2)
 	snap := ibs.PushSnapshot()
@@ -124,7 +124,7 @@ func TestMaterialized_CreditedCreateRevertKeepsBalance(t *testing.T) {
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	finalizeTx := func() {
 		require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true, "")
+		vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 		ibs.ResetVersionedIO()
 	}
 
@@ -155,7 +155,7 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	funder := NewWithVersionMap(&emptyReader{}, vm)
 	funder.SetTxContext(1, 0)
 	require.NoError(t, funder.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(finalizedWrites(t, funder, rules), true, "")
+	vm.FlushVersionedWrites(finalizedWrites(t, funder, rules), true)
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	ibs.SetTxContext(1, 1)
@@ -164,7 +164,7 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	ibs.RevertToSnapshot(snap, nil)
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true, "")
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 2)
@@ -184,7 +184,7 @@ func TestNoMaterialize_BurnedCreditCreateRevertReadsZeroBalance(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
 
 	ibs = newNoMaterializeTx(vm, 1)
 	snap := ibs.PushSnapshot()
@@ -207,7 +207,7 @@ func TestNoMaterialize_CreateAfterBurnedCreditAndDestructValidates(t *testing.T)
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 
 	ibs = newNoMaterializeTx(vm, 2)
@@ -229,7 +229,7 @@ func TestNoMaterialize_CreateAfterBurnedCreditDependsOnDestruct(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 
 	ibs = newNoMaterializeTx(vm, 2)

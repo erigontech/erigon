@@ -474,7 +474,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var sendersRecovery *exec.SendersRecovery
-	if invalidTransactionStatus == nil && len(transactions) > 0 {
+	// With a non-empty BAL the exec workers recover the senders themselves.
+	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
+	if invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
@@ -524,7 +526,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
-				LatestValidHash: &latestValidHash,
+				LatestValidHash: latestValidOrNull(latestValidHash),
 			}, nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
@@ -690,7 +692,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			e.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
 		} else {
 			e.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
-			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash), ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
 		}
 	}
 
@@ -1089,7 +1091,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1109,7 +1111,7 @@ func (e *EngineServer) HandleNewPayload(
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
-				return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
+				return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
 			}
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -1148,19 +1150,30 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
+	return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
+}
+
+func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmodule.ExecutionStatus, validationErr *string, latestValidHash common.Hash) *engine_types.PayloadStatus {
 	if status == execmodule.ExecutionStatusBadBlock {
 		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, common.Deref(validationErr))
 	}
 
-	resp := &engine_types.PayloadStatus{
-		Status:          convertGrpcStatusToEngineStatus(status),
-		LatestValidHash: &latestValidHash,
+	resp := &engine_types.PayloadStatus{Status: convertGrpcStatusToEngineStatus(status)}
+	if resp.Status == engine_types.ValidStatus || resp.Status == engine_types.InvalidStatus {
+		resp.LatestValidHash = &latestValidHash
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 
-	return resp, nil
+	return resp
+}
+
+func latestValidOrNull(h common.Hash) *common.Hash {
+	if h == (common.Hash{}) {
+		return nil
+	}
+	return &h
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {
@@ -1170,7 +1183,7 @@ func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_t
 	case execmodule.ExecutionStatusMissingSegment:
 		return engine_types.AcceptedStatus
 	case execmodule.ExecutionStatusTooFarAway:
-		return engine_types.AcceptedStatus
+		return engine_types.SyncingStatus
 	case execmodule.ExecutionStatusBadBlock:
 		return engine_types.InvalidStatus
 	case execmodule.ExecutionStatusBusy:
@@ -1260,7 +1273,7 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	if status == execmodule.ExecutionStatusMissingSegment && result.MissingHash != (common.Hash{}) {
 		if bad, lastValidHash, validationErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
-			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}
+			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash)}
 			if validationErr != "" {
 				invalid.ValidationError = engine_types.NewStringifiedErrorFromString(validationErr)
 			}

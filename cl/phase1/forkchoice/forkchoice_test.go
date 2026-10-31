@@ -608,6 +608,21 @@ type headerOnlyAnchorForkGraph struct {
 	slot uint64
 }
 
+type stateReadCountingForkGraph struct {
+	fork_graph.ForkGraph
+	reads int
+}
+
+func (g *stateReadCountingForkGraph) CurrentStateLocked(root common.Hash) *state.CachingBeaconState {
+	g.reads++
+	return g.ForkGraph.CurrentStateLocked(root)
+}
+
+func (g *stateReadCountingForkGraph) ReplayState(root common.Hash) (*state.CachingBeaconState, error) {
+	g.reads++
+	return g.ForkGraph.ReplayState(root)
+}
+
 func (g headerOnlyAnchorForkGraph) AnchorRoot() common.Hash { return g.root }
 func (g headerOnlyAnchorForkGraph) AnchorSlot() uint64      { return g.slot }
 func (g headerOnlyAnchorForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -674,6 +689,174 @@ func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
 		require.Equal(t, anchorRoot, node.Root)
 		require.Equal(t, uint64(42), slot)
 	}
+}
+
+func TestGetHeadOnceReusesCachedHead(t *testing.T) {
+	store, graph := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = store.beaconCfg.FarFutureEpoch
+	store.beaconCfg.InitializeForkSchedule()
+
+	root := common.HexToHash("0xbb")
+	graph.headers[root] = &cltypes.BeaconBlockHeader{Slot: 10}
+	wantHead := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
+	store.headHash = root
+	store.headSlot = 10
+	store.headPayloadStatus = cltypes.PayloadStatusFull
+	store.weights = map[common.Hash]uint64{root: 17}
+
+	head, slot, ok, err := store.getHeadOnce(nil, store.JustifiedCheckpoint(), false)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, wantHead, head)
+	require.Equal(t, uint64(10), slot)
+	require.Equal(t, map[common.Hash]uint64{root: 17}, store.weights)
+	require.Equal(t, &wantHead, store.selectedHead.Load())
+}
+
+func TestTryGetHeadNodeDoesNotWaitForStoreLock(t *testing.T) {
+	store, _ := newHeadSnapshotTestStore()
+	want := ForkChoiceNode{Root: common.HexToHash("0xbb"), PayloadStatus: cltypes.PayloadStatusFull}
+	store.headHash = want.Root
+	store.headSlot = 10
+	store.headPayloadStatus = want.PayloadStatus
+
+	store.mu.Lock()
+	ok := tryGetHeadNodeWhileLockHeld(t, store, store.mu.Unlock)
+	require.False(t, ok)
+
+	got, ok := store.TryGetHeadNode()
+	require.True(t, ok)
+	require.Equal(t, want, got)
+
+	store.mu.Lock()
+	store.headHash = common.Hash{}
+	ok = tryGetHeadNodeWhileLockHeld(t, store, store.mu.Unlock)
+	require.False(t, ok)
+
+	store.mu.RLock()
+	ok = tryGetHeadNodeWhileLockHeld(t, store, store.mu.RUnlock)
+	require.False(t, ok)
+}
+
+func tryGetHeadNodeWhileLockHeld(t *testing.T, store *ForkChoiceStore, unlock func()) bool {
+	t.Helper()
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := store.TryGetHeadNode()
+		done <- ok
+	}()
+	select {
+	case ok := <-done:
+		unlock()
+		return ok
+	case <-time.After(100 * time.Millisecond):
+		unlock()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("TryGetHeadNode did not return after the lock was released")
+		}
+		t.Fatal("TryGetHeadNode waited for the store lock")
+		return false
+	}
+}
+
+func TestTryGetHeadNodeDoesNotWaitForPreGloasRecomputeLock(t *testing.T) {
+	store, _ := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = store.beaconCfg.FarFutureEpoch
+	store.beaconCfg.InitializeForkSchedule()
+	store.mu.RLock()
+
+	ok := tryGetHeadNodeWhileLockHeld(t, store, store.mu.RUnlock)
+
+	require.False(t, ok)
+}
+
+func TestTryGetHeadNodeDoesNotWaitForAnchorLock(t *testing.T) {
+	anchorRoot := common.HexToHash("0xa1")
+	store := &ForkChoiceStore{
+		forkGraph: headerOnlyAnchorForkGraph{root: anchorRoot, slot: 42},
+		beaconCfg: &clparams.MainnetBeaconConfig,
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
+	store.mu.RLock()
+
+	ok := tryGetHeadNodeWhileLockHeld(t, store, store.mu.RUnlock)
+
+	require.False(t, ok)
+}
+
+func TestTryGetHeadNodeRequiresCachedCheckpointState(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		preGloas bool
+	}{
+		{name: "Gloas"},
+		{name: "pre-Gloas", preGloas: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			if tc.preGloas {
+				store.beaconCfg.GloasForkEpoch = store.beaconCfg.FarFutureEpoch
+				store.beaconCfg.InitializeForkSchedule()
+			}
+			countingGraph := &stateReadCountingForkGraph{ForkGraph: graph}
+			store.forkGraph = countingGraph
+			checkpoint := store.JustifiedCheckpoint()
+			store.checkpointStates.Delete(checkpoint)
+
+			_, ok := store.TryGetHeadNode()
+
+			require.False(t, ok)
+			require.Zero(t, countingGraph.reads)
+			_, cached := store.checkpointStates.Load(checkpoint)
+			require.False(t, cached)
+		})
+	}
+}
+
+func TestTryGetHeadNodeRecomputesFromCachedCheckpointState(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		preGloas bool
+	}{
+		{name: "Gloas"},
+		{name: "pre-Gloas", preGloas: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, _ := newHeadSnapshotTestStore()
+			if tc.preGloas {
+				store.beaconCfg.GloasForkEpoch = store.beaconCfg.FarFutureEpoch
+				store.beaconCfg.InitializeForkSchedule()
+			}
+			want, _, err := store.GetHeadNode()
+			require.NoError(t, err)
+			store.mu.Lock()
+			store.headHash = common.Hash{}
+			store.mu.Unlock()
+
+			got, ok := store.TryGetHeadNode()
+
+			require.True(t, ok)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func TestTryGetHeadNodeRecomputesAnchorFallback(t *testing.T) {
+	anchorRoot := common.HexToHash("0xa1")
+	store := &ForkChoiceStore{
+		forkGraph: headerOnlyAnchorForkGraph{root: anchorRoot, slot: 42},
+		beaconCfg: &clparams.MainnetBeaconConfig,
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
+
+	head, ok := store.TryGetHeadNode()
+
+	require.True(t, ok)
+	require.Equal(t, anchorRoot, head.Root)
+	require.Equal(t, cltypes.PayloadStatusPending, head.PayloadStatus)
 }
 
 func TestBlockProcessingTracksQueuedAndOverlappingImports(t *testing.T) {

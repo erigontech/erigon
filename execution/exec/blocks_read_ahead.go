@@ -41,7 +41,10 @@ type BlockReadAheader struct {
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
 	// best-effort, and queued work would be stale by the time an unwind ends.
-	warmupGate *semaphore.Weighted
+	warmupGate   *semaphore.Weighted
+	warmupMu     sync.Mutex
+	cancelWarmup context.CancelFunc
+	warmupDone   chan struct{} // closed when the running warmup ends
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -161,6 +164,11 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	if !bra.warmupGate.TryAcquire(1) {
 		return
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	bra.warmupMu.Lock()
+	bra.cancelWarmup = cancel
+	bra.warmupMu.Unlock()
+	done := bra.markWarmupRunning()
 	var bal types.BlockAccessList
 	if header.HasNonEmptyBAL() {
 		balSidecar, ok := bra.bals.Get(blockHash)
@@ -181,30 +189,67 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	}
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer close(done)
+		defer cancel()
 		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
+}
+
+// CancelWarmup requests cancellation of the active warmup without waiting for it
+// to finish. It does not prevent later warmups from starting.
+func (bra *BlockReadAheader) CancelWarmup() {
+	bra.warmupMu.Lock()
+	defer bra.warmupMu.Unlock()
+	if bra.cancelWarmup != nil {
+		bra.cancelWarmup()
+	}
 }
 
 func (bra *BlockReadAheader) startWarmup(warm func()) bool {
 	if !bra.warmupGate.TryAcquire(1) {
 		return false
 	}
+	done := bra.markWarmupRunning()
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer close(done)
 		warm()
 	}()
 	return true
 }
 
-// SuspendWarmup waits for active state-cache warmup and prevents another
-// warmup from starting until the returned function is called. Keep it
-// suspended while staged unwind state is being read or published. If ctx is
-// cancelled first, no suspension remains pending.
+// SuspendWarmup cancels active warmup, waits for it to finish, and prevents
+// new warmups until the returned function is called. Keep it suspended while
+// staged unwind state is being read or published. If ctx is cancelled first,
+// no suspension remains pending.
 func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) {
+	bra.CancelWarmup()
 	if err := bra.warmupGate.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
 	return sync.OnceFunc(func() { bra.warmupGate.Release(1) }), nil
+}
+
+// WaitForRunningWarmup waits until no warmup is running, or until the context is cancelled.
+func (bra *BlockReadAheader) WaitForRunningWarmup(ctx context.Context) {
+	bra.warmupMu.Lock()
+	done := bra.warmupDone
+	bra.warmupMu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (bra *BlockReadAheader) markWarmupRunning() chan struct{} {
+	done := make(chan struct{})
+	bra.warmupMu.Lock()
+	bra.warmupDone = done
+	bra.warmupMu.Unlock()
+	return done
 }
 
 // WaitForWarmup waits until neither a warmup nor a suspension owns the permit,
@@ -341,7 +386,7 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 	return destinations
 }
 
-func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
+func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
 	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
@@ -353,6 +398,9 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 	}
 	storageChanges := uint32(len(account.StorageChanges))
 	for slotIndex := task.slotFrom; slotIndex < task.slotTo; slotIndex++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var slot accounts.StorageKey
 		if slotIndex < storageChanges {
 			slot = account.StorageChanges[slotIndex].Slot
@@ -450,7 +498,10 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 				}
 				task := tasks[taskIndex]
 				account := &bal[task.accountIndex]
-				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
+				if err := warmBALStateTask(workerCtx, stateReader, account, task, codeMode, txCodeDestinations); err != nil {
+					if workerCtx.Err() != nil {
+						return workerCtx.Err()
+					}
 					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
 				tasksProcessed++
@@ -512,6 +563,9 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 				}
 				// Warm transaction access list accounts and their code
 				for _, entry := range txn.GetAccessList() {
+					if err := workerCtx.Err(); err != nil {
+						return err
+					}
 					addr := accounts.InternAddress(entry.Address)
 					acct, err := stateReader.ReadAccountData(addr)
 					if err != nil {
@@ -522,6 +576,9 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 						}
 					}
 					for _, slot := range entry.StorageKeys {
+						if err := workerCtx.Err(); err != nil {
+							return err
+						}
 						if _, _, err := stateReader.ReadAccountStorage(addr, accounts.InternKey(slot)); err != nil {
 							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}
@@ -539,6 +596,26 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 	return bra.bodies.Get(blockHash)
 }
 
+// ExecRecoversBALSenders reports whether parallel exec workers recover the senders of
+// blocks with a non-empty BAL; the Execution stage then writes them.
+func ExecRecoversBALSenders() bool {
+	return dbg.Exec3Parallel && !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks
+}
+
+func RecoversSenders(header *types.Header) bool {
+	return ExecRecoversBALSenders() && header.HasNonEmptyBAL()
+}
+
+// ExecRecoversSenders is RecoversSenders for a cached block: execution recovers the
+// senders only when it can load the block's access list, else it takes the plain path.
+func (bra *BlockReadAheader) ExecRecoversSenders(header *types.Header) bool {
+	if !RecoversSenders(header) {
+		return false
+	}
+	bal, ok := bra.bals.Get(header.Hash())
+	return ok && len(bal.BlockAccessList()) > 0
+}
+
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
 	header, ok := bra.headers.Get(blockHash)
 	if header == nil || !ok {
@@ -549,7 +626,7 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 		return nil, false
 	}
 	senders, ok := bra.senders.Get(blockHash)
-	if len(senders) == 0 || !ok {
+	if (len(senders) == 0 || !ok) && !bra.ExecRecoversSenders(header) {
 		return nil, false
 	}
 	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)

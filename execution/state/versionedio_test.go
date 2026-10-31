@@ -1073,7 +1073,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		_, err := tx3.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
 		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx3.VersionedWrites(), true, "")
+		vm.FlushVersionedWrites(tx3.VersionedWrites(), true)
 
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)
@@ -2113,4 +2113,22 @@ func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
 
 	require.Len(t, bal, 1)
 	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
+}
+
+// The BAL builder keeps an account's read and written balances by value, so tracking them
+// does not allocate per account.
+func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
+	states := make([]accountState, 16)
+	balance := *uint256.NewInt(7)
+	allocs := testing.AllocsPerRun(10, func() {
+		for i := range states {
+			s := &states[i]
+			*s = accountState{}
+			s.updateReadBalance(balance)
+			s.applyWriteBalance(balance, 1)
+			*s = accountState{}
+			s.applyWriteBalance(*uint256.NewInt(0), 1)
+		}
+	})
+	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
 }

@@ -17,6 +17,8 @@
 package migrations
 
 import (
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -297,4 +299,40 @@ func TestCommitCallRequired(t *testing.T) {
 		require.Empty(applied)
 		return nil
 	}))
+}
+
+func TestDropCodeCacheTable(t *testing.T) {
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.CreateTable(kv.CodeCacheDeprecated); err != nil {
+			return err
+		}
+		return tx.Put(kv.CodeCacheDeprecated, []byte{1}, []byte{2})
+	}))
+	noop := func(kv.RwTx, []byte, bool) error { return nil }
+	for range 2 {
+		require.NoError(dropCodeCacheTable.Up(db, datadir.Dirs{}, nil, noop, log.New()))
+		require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+			exists, err := tx.ExistsTable(kv.CodeCacheDeprecated)
+			require.False(exists)
+			return err
+		}))
+	}
+}
+
+func TestVerifyVersionRefusesNewerDB(t *testing.T) {
+	cur := &kv.DBSchemaVersion
+	for _, newer := range [][2]uint32{{cur.Major, cur.Minor + 1}, {cur.Major + 1, 0}} {
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			var v [12]byte
+			binary.BigEndian.PutUint32(v[:], newer[0])
+			binary.BigEndian.PutUint32(v[4:], newer[1])
+			return tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, v[:])
+		}))
+		err := NewMigrator(dbcfg.ChainDB).VerifyVersion(db, "/data/chaindata")
+		require.ErrorContains(t, err, fmt.Sprintf("DB schema %d.%d", newer[0], newer[1]))
+		require.ErrorContains(t, err, fmt.Sprintf("supports %d.%d", cur.Major, cur.Minor))
+		require.ErrorContains(t, err, "remove /data/chaindata")
+	}
 }

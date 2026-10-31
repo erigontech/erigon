@@ -156,6 +156,45 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.C
 	return c
 }
 
+// ImportColumnsFromBlobs mocks base method.
+func (m *MockPeerDas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ImportColumnsFromBlobs", ctx, block, blobs, cellProofs)
+	ret0, _ := ret[0].([]*cltypes.DataColumnSidecar)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ImportColumnsFromBlobs indicates an expected call of ImportColumnsFromBlobs.
+func (mr *MockPeerDasMockRecorder) ImportColumnsFromBlobs(ctx, block, blobs, cellProofs any) *MockPeerDasImportColumnsFromBlobsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ImportColumnsFromBlobs", reflect.TypeOf((*MockPeerDas)(nil).ImportColumnsFromBlobs), ctx, block, blobs, cellProofs)
+	return &MockPeerDasImportColumnsFromBlobsCall{Call: call}
+}
+
+// MockPeerDasImportColumnsFromBlobsCall wrap *gomock.Call
+type MockPeerDasImportColumnsFromBlobsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasImportColumnsFromBlobsCall) Return(arg0 []*cltypes.DataColumnSidecar, arg1 error) *MockPeerDasImportColumnsFromBlobsCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasImportColumnsFromBlobsCall) Do(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasImportColumnsFromBlobsCall) DoAndReturn(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IsArchivedMode mocks base method.
 func (m *MockPeerDas) IsArchivedMode() bool {
 	m.ctrl.T.Helper()

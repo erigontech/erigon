@@ -165,9 +165,9 @@ func TestDepWait_ResumeSeesSelfDestruct(t *testing.T) {
 		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
 		return ws
 	}
-	mvhm.FlushVersionedWrites(writes(), false, "")
+	mvhm.FlushVersionedWrites(writes(), false)
 	ibs.SetWaitCommit(func(int) bool {
-		mvhm.FlushVersionedWrites(writes(), true, "")
+		mvhm.FlushVersionedWrites(writes(), true)
 		return true
 	})
 
@@ -192,10 +192,10 @@ func TestDepWait_InFlightSelfDestructIsWaitedOn(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
 	burn := &WriteSet{}
 	burn.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
-	mvhm.FlushVersionedWrites(destruct, false, "")
-	mvhm.FlushVersionedWrites(burn, true, "")
+	mvhm.FlushVersionedWrites(destruct, false)
+	mvhm.FlushVersionedWrites(burn, true)
 	ibs.SetWaitCommit(func(int) bool {
-		mvhm.FlushVersionedWrites(destruct, true, "")
+		mvhm.FlushVersionedWrites(destruct, true)
 		return true
 	})
 

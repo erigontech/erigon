@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -23,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
@@ -51,9 +54,22 @@ type serialExecutor struct {
 	accumulator *shards.Accumulator
 }
 
-func warmTxsHashes(block *types.Block) {
+// minAuthIntrinsicGas is the smallest intrinsic charge per authorization on any fork, so no valid tx or block applies
+// more authorizations than its gas limit divided by it.
+const minAuthIntrinsicGas = min(params.PerEmptyAccountCost, params.ExecutionPerAuthBaseCostEIP8038)
+
+func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
+	authBudget := block.GasLimit() / minAuthIntrinsicGas
 	for _, t := range block.Transactions() {
 		_ = t.Hash()
+		if sc, ok := t.(*types.SetCodeTransaction); ok {
+			n := uint64(len(sc.Authorizations))
+			if n > authBudget || n*minAuthIntrinsicGas > min(t.GetGasLimit(), block.GasLimit()) {
+				continue
+			}
+			authBudget -= n
+			sc.WarmAuthorities(chainID)
+		}
 	}
 	_ = block.Hash()
 }
@@ -118,7 +134,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
-		go warmTxsHashes(b)
+		go warmTxsHashes(b, se.cfg.chainConfig.ChainID)
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
@@ -174,7 +190,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		start := time.Now()
-		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
+		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle)
 
 		if took := time.Since(start); took > 50*time.Millisecond { // prevent logs spamming
 			log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, took))
@@ -338,7 +354,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 	return se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
 }
 
-func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 

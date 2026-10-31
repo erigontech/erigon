@@ -18,18 +18,8 @@ on:
         type: boolean
         required: false
         default: false
-      commitment_mode:
-        description: 'Erigon commitment mode ("default" leaves ERIGON_COMMITMENT_PARALLEL unset)'
-        type: choice
-        required: false
-        default: default
-        options:
-          - default
-          - serial
-          - parallel
   schedule:
     - cron: '0 2 * * *'   # Run daily at 02:00 UTC
-    - cron: '30 2 * * 0'  # Run on Sunday at 02:30 UTC, nethermind as peer
 
 concurrency:
   group: rpc-performance-latest-${{ github.ref }}
@@ -59,64 +49,52 @@ jobs:
           INPUT_RUN_GETH: ${{ github.event.inputs.run_geth }}
           INPUT_RUN_NETHERMIND: ${{ github.event.inputs.run_nethermind }}
           INPUT_RUN_RETH: ${{ github.event.inputs.run_reth }}
-          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
 
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Decide which client, if any, runs besides erigon:
-          # - schedule: reth with the daily cron on Saturday (UTC), geth with the daily cron on Sunday, nethermind with the Sunday one
-          # - workflow_dispatch: controlled by inputs, at most one of them
-          PEER=""
+          # Decide which clients, if any, run besides erigon:
+          # - schedule: all of them, every day
+          # - workflow_dispatch: controlled by inputs, any combination of them
+          PEERS=()
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ "$EVENT_SCHEDULE" = "30 2 * * 0" ]; then
-              PEER="nethermind"
-            else
-              case "$(date -u +%w)" in  # 0..6 = Sun..Sat
-                0) PEER="geth" ;;
-                6) PEER="reth" ;;
-              esac
-            fi
+            PEERS=(geth nethermind reth)
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             for input in "geth:$INPUT_RUN_GETH" "nethermind:$INPUT_RUN_NETHERMIND" "reth:$INPUT_RUN_RETH"; do
-              [ "${input#*:}" = "true" ] || continue
-              if [ -n "$PEER" ]; then
-                echo "::error::Select only one of run_geth, run_nethermind and run_reth: the start barrier synchronizes erigon with one client only"
-                exit 1
-              fi
-              PEER="${input%%:*}"
+              [ "${input#*:}" = "true" ] && PEERS+=("${input%%:*}")
             done
           fi
 
-          # coordinated_start.py knows only the erigon and geth participants: the peer client always joins the barrier as geth.
-          MATRIX='{"client":"erigon","barrier_role":"erigon","runs-on":["self-hosted","qa","Ethereum","rpc-latest-erigon"],"install_dir":""}'
-          case "$PEER" in
-            geth)       MATRIX+=',{"client":"geth","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-geth"],"install_dir":"/opt/go-ethereum"}' ;;
-            nethermind) MATRIX+=',{"client":"nethermind","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-nethermind"],"install_dir":"/opt/nethermind"}' ;;
-            reth)       MATRIX+=',{"client":"reth","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-reth"],"install_dir":"/opt/reth"}' ;;
-          esac
+          # Every client joins the start barrier with all the other clients as its remotes.
+          declare -A INSTALL_DIR=([erigon]="" [geth]=/opt/go-ethereum [nethermind]=/opt/nethermind [reth]=/opt/reth)
+          CLIENTS=(erigon "${PEERS[@]}")
+          MATRIX=""
+          for client in "${CLIENTS[@]}"; do
+            remotes=$(printf '%s\n' "${CLIENTS[@]}" | { grep -vx "$client" || true; } | paste -sd, -)
+            MATRIX+="${MATRIX:+,}{\"client\":\"$client\",\"remotes\":\"$remotes\",\"runs-on\":[\"self-hosted\",\"qa\",\"Ethereum\",\"rpc-latest-$client\"],\"install_dir\":\"${INSTALL_DIR[$client]}\"}"
+          done
 
           # Variables
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
           echo "matrix={\"include\":[${MATRIX}]}" >> "$GITHUB_OUTPUT"
-          echo "coordinated=$([ -n "$PEER" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "peer=${PEER}" >> "$GITHUB_OUTPUT"
+          echo "coordinated=$([ ${#PEERS[@]} -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "peers=$(IFS=,; echo "${PEERS[*]}")" >> "$GITHUB_OUTPUT"
 
       - name: Print configuration (for logs)
         shell: bash
         env:
           RUN_ID: ${{ steps.vars.outputs.run_id }}
           NETWORK: ${{ steps.vars.outputs.network }}
-          PEER: ${{ steps.vars.outputs.peer }}
+          PEERS: ${{ steps.vars.outputs.peers }}
         run: |
           set -euo pipefail
           echo "Run ID:             $RUN_ID"
           echo "Network:            $NETWORK"
           echo "Run Erigon:         true"
-          echo "Peer client:        ${PEER:-none}"
+          echo "Peer clients:       ${PEERS:-none}"
 
       - name: Prepare Redis database
         if: steps.vars.outputs.coordinated == 'true'
@@ -125,10 +103,13 @@ jobs:
         env:
           RUN_ID: ${{ steps.vars.outputs.run_id }}
           NETWORK: ${{ steps.vars.outputs.network }}
+          MATRIX: ${{ steps.vars.outputs.matrix }}
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "erigon" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
-          python3 coordinated_start.py --client "geth" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+          python3 -c 'import json, sys; [print(e["client"], e["remotes"]) for e in json.loads(sys.argv[1])["include"]]' "$MATRIX" |
+            while read -r client remotes; do
+              python3 coordinated_start.py --client "$client" --remote "$remotes" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+            done
 
   test:
     name: Benchmark Latest ${{ matrix.client }}
@@ -148,7 +129,7 @@ jobs:
       TOTAL_TIME_SECONDS: 1200 # 20 minutes
       CLIENT_INSTALL_DIR: ${{ matrix.install_dir }}
       CLIENT: ${{ matrix.client }}
-      BARRIER_ROLE: ${{ matrix.barrier_role }}
+      REMOTES: ${{ matrix.remotes }}
 
     steps:
       - name: Set reference data dir based on branch
@@ -185,7 +166,7 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
 
       - name: Checkout the rpc-tests version file
         if: matrix.client != 'erigon'
@@ -248,24 +229,9 @@ jobs:
         if: matrix.client == 'erigon'
         id: erigon_running_step
         working-directory: ${{ github.workspace }}/build/bin
-        env:
-          COMMITMENT_MODE: ${{ github.event.inputs.commitment_mode }}
         run: |
           set +e # Disable exit on error
           echo "Starting Erigon..."
-
-          # Only set ERIGON_COMMITMENT_PARALLEL on an explicit choice; otherwise ensure it's
-          # unset so erigon uses its built-in default (and doesn't inherit runner env).
-          if [ "$COMMITMENT_MODE" = "parallel" ]; then
-            export ERIGON_COMMITMENT_PARALLEL=true
-            echo "Set ERIGON_COMMITMENT_PARALLEL=true (parallel mode)"
-          elif [ "$COMMITMENT_MODE" = "serial" ]; then
-            export ERIGON_COMMITMENT_PARALLEL=false
-            echo "Set ERIGON_COMMITMENT_PARALLEL=false (serial mode)"
-          else
-            unset ERIGON_COMMITMENT_PARALLEL
-            echo "Leaving ERIGON_COMMITMENT_PARALLEL unset (default behavior)"
-          fi
 
           ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
@@ -409,7 +375,7 @@ jobs:
           echo "  RUN_ID=${RUN_ID}"
           echo "  NETWORK=${NETWORK}"
           # Wait for an agreement between all the clients
-          python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
+          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
 
       - name: Run RPC Performance Tests
         id: test_step
@@ -541,7 +507,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}-$label \
+              --test_name rpc-performance-test-latest-$label \
               --chain $CHAIN \
               --runner "$RUNNER_NAME" \
               --db_version $db_version \
@@ -567,7 +533,7 @@ jobs:
               return 0
             fi
             (cd "$ERIGON_QA_PATH/test_system/qa-tests/rpc-tests" &&
-              python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$RUN_ID-$1" --chain "$NETWORK") ||
+              python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-$1" --chain "$NETWORK") ||
               { echo "::error::No agreement with the other clients before $1"; exit 1; }
           }
 
@@ -635,7 +601,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
 
       - name: Stop Erigon
@@ -655,7 +621,7 @@ jobs:
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: erigon-logs-${{ env.CHAIN }}${{ (github.event.inputs.commitment_mode == 'parallel' && '-parallel') || (github.event.inputs.commitment_mode == 'serial' && '-serial') || '' }}
+          name: erigon-logs-${{ env.CHAIN }}
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Delete Erigon Testbed Data Directory
@@ -668,14 +634,14 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-      - name: Send an error status to the other client
+      - name: Send an error status to the other clients
         if: failure() && needs.setup.outputs.coordinated == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           for run_id in "$RUN_ID" "$RUN_ID-eth_call_gen" "$RUN_ID-eth_getLogs_gen" \
             "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide"; do
-            python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
+            python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
   compare:

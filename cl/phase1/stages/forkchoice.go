@@ -35,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
+var errBlockIndicesPending = errors.New("block indices are not yet available")
+
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
@@ -64,6 +66,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	if !ready {
 		executionHead = cfg.forkChoice.GetEth1Hash(headRoot)
 	}
+	recordExecutionHead := true
 
 	// Perform fork choice update if the engine is available
 	if engine := cfg.forkChoice.Engine(); engine != nil {
@@ -77,18 +80,25 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			executionHead, nil, headVersion,
 		); err != nil {
-			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
-			// to lose by carrying on: the next head will send another one.
-			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+			switch {
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
+				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+				// to lose by carrying on: the next head will send another one.
 				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
 				err = nil
-			} else {
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy):
+				logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
+				recordExecutionHead = false
+				err = nil
+			default:
 				err = fmt.Errorf("failed to run forkchoice: %w", err)
 				return
 			}
 		}
 	}
-	cfg.executionHead = executionHead
+	if recordExecutionHead {
+		cfg.executionHead = executionHead
+	}
 	// The stage's payload decision may differ from the poll that woke it.
 	// Keep the wake's throttle key current without changing its timestamp.
 	cfg.sleepForSlotLastWake.executionHead = executionHead
@@ -104,9 +114,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	return
 }
 
-// updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
-// It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
-// and then marks the new chain segments as canonical.
+// updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
+// block or the trusted anchor as canonical, once the required block indices are available.
 func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
 	type canonicalEntry struct {
 		slot uint64
@@ -114,6 +123,19 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	}
 	currentRoot := headRoot
 	currentSlot := headSlot
+	// The trusted anchor can come from a checkpoint state without block indices.
+	anchorRoot := cfg.forkChoice.AnchorRoot()
+	// Accepted blocks may not have their indices yet. Wait for the required ancestry
+	// before marking the head canonical: later updates stop at that head and would
+	// leave any canonical ancestors from the old fork unchanged.
+	storedSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, headRoot)
+	if err != nil {
+		return fmt.Errorf("failed to read block slot by block root: %w", err)
+	}
+	if storedSlot == nil && headRoot != anchorRoot {
+		return fmt.Errorf("%w for %s", errBlockIndicesPending, headRoot)
+	}
+
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
@@ -129,8 +151,8 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
-	// Trace back through the parent block roots until the current root matches the canonical root
-	for currentRoot != currentCanonical {
+	// Trace back to a canonical block or the trusted anchor.
+	for currentRoot != currentCanonical && currentRoot != anchorRoot {
 		var newFoundSlot *uint64
 
 		// Read the parent block root
@@ -143,7 +165,14 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 			return fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
-			break
+			if currentRoot != anchorRoot {
+				return fmt.Errorf("%w for %s", errBlockIndicesPending, currentRoot)
+			}
+			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
+			if !ok {
+				return fmt.Errorf("anchor header is not available for %s", anchorRoot)
+			}
+			newFoundSlot = &header.Slot
 		}
 
 		currentSlot = *newFoundSlot
@@ -480,6 +509,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
 func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+	cfg.forkChoiceWaitingForIndices = false
 	var (
 		headSlot uint64
 		headRoot common.Hash
@@ -489,12 +519,18 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
+	cfg.forkChoiceIndicesChanged = cfg.emitter.BlockIndicesChanged()
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 	if err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg); err != nil {
+		if errors.Is(err, errBlockIndicesPending) {
+			cfg.forkChoiceWaitingForIndices = true
+			logger.Debug("[Caplin] waiting to publish fork choice", "err", err)
+			return nil
+		}
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
 

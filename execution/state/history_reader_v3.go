@@ -32,11 +32,12 @@ import (
 var ErrPruned = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 implements StateReader and StateWriter. Reads chain from
-// most-recent to persisted: sd.GetAsOf (in-batch memory) → ttx.GetAsOf (DB
+// most-recent to persisted: sd's as-of read (in-batch memory, the shared state cache, ttx) → ttx.GetAsOf (DB
 // history + snapshots). When sd is nil the reader serves strictly persisted history.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
 	sd          execctx.DomainReader
+	asOf        kv.AsOfGetter // ttx, or sd's as-of read bound to ttx; built on the first read
 	tracePrefix string
 	txNum       uint64
 	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
@@ -56,24 +57,26 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainRea
 	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
 }
 
-// getAsOf chains sd.GetAsOf (in-batch memory) before ttx.GetAsOf (DB history
-// + snapshots). When sd is nil, or sd.mem has inMemHistoryReads disabled and
-// returns an error, it falls through to ttx so the same reader type serves
-// both the in-batch and persisted-history modes.
+// getAsOf reads through sd's as-of read (in-batch memory, the shared state cache, then ttx). When sd is nil, or
+// sd.mem has inMemHistoryReads disabled, it falls through to ttx so the same reader type
+// serves both the in-batch and persisted-history modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.sd != nil {
-		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
-		if err == nil && ok {
-			return enc, true, nil
+	if hr.asOf == nil {
+		hr.asOf = hr.ttx
+		if hr.sd != nil {
+			hr.asOf = hr.sd.AsOfGetter(hr.ttx)
 		}
 	}
-	return hr.ttx.GetAsOf(domain, key, hr.txNum)
+	if enc, ok, err = hr.asOf.GetAsOf(domain, key, hr.txNum); hr.sd != nil && errors.Is(err, kv.ErrInMemHistoryDisabled) {
+		return hr.ttx.GetAsOf(domain, key, hr.txNum)
+	}
+	return enc, ok, err
 }
 
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx, hr.asOf = tx, nil }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {

@@ -48,6 +48,24 @@ func TestPayloadPreparationYieldsToRelevantImports(t *testing.T) {
 	}
 }
 
+func TestPayloadImportInProgress(t *testing.T) {
+	var imports PayloadPreparationImports
+	finishFirst := imports.BeginImport(10)
+	finishSecond := imports.BeginImport(10)
+	finishOther := imports.BeginImport(11)
+
+	require.True(t, imports.ImportInProgress(10))
+	require.True(t, imports.ImportInProgress(11))
+	require.False(t, imports.ImportInProgress(12))
+
+	finishFirst()
+	require.True(t, imports.ImportInProgress(10))
+	finishSecond()
+	require.False(t, imports.ImportInProgress(10))
+	finishOther()
+	require.False(t, imports.ImportInProgress(11))
+}
+
 func TestOnBlockCancelsPayloadPreparationBeforeStoreLock(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	f := &ForkChoiceStore{beaconCfg: &cfg}

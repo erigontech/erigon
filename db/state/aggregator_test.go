@@ -465,7 +465,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
+			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 			Build()
 		return name, schema
 	})
@@ -524,7 +524,7 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	histRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
 		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
 			Data(dirs.SnapHistory, "commitment", DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
+			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 			Build()
 		return "commitment", schema
 	})
@@ -909,4 +909,31 @@ func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
 		require.NotEmpty(t, v)
 		return nil
 	}))
+}
+
+func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		opts := NewTest(datadir.New(t.TempDir())).StepSize(1)
+		if enabled {
+			opts = opts.BtIndexInMem()
+		}
+		agg := opts.MustOpen(t.Context())
+		var budget *btInMemBudget
+		for _, d := range agg.d {
+			if d == nil {
+				continue
+			}
+			if !enabled {
+				require.Nil(t, d.btBudget, "domain=%s", d.Name)
+				continue
+			}
+			require.NotNil(t, d.btBudget, "domain=%s", d.Name)
+			if budget == nil {
+				budget = d.btBudget
+			}
+			require.Same(t, budget, d.btBudget, "one budget for all domains")
+		}
+		agg.Close()
+	}
 }

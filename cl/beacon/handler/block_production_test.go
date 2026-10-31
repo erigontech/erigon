@@ -43,6 +43,7 @@ import (
 	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
@@ -57,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
@@ -2535,12 +2537,52 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	}
 	handler.forkchoiceStore = installing
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	for range 2 {
 		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
 		require.ErrorContains(t, err, "database unavailable")
+		var writeErr *clservices.AcceptedBlockWriteError
+		require.ErrorAs(t, err, &writeErr)
+		require.Same(t, block, writeErr.Block)
+	}
+	select {
+	case <-indicesChanged:
+		t.Fatal("failed writes must not notify index readers")
+	default:
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
+}
+
+func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = block
+	fcu.StateAtBlockRootVal[root] = postState
+	fcu.HeadVal = root
+	fcu.HeadSlotVal = block.Block.Slot
+	fcu.OnTickFn = func(uint64) {}
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
+	handler.engine = engine
+	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
+
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+
+	require.NoError(t, err)
+	select {
+	case <-indicesChanged:
+	default:
+		t.Fatal("the committed block indices must notify readers even if fork choice is busy")
+	}
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
@@ -3075,6 +3117,100 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
+	busy := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
+	failure := errors.New("payload finalization failed")
+	laterFailure := errors.New("later payload failure")
+	for _, tc := range []struct {
+		name         string
+		responses    []error
+		want         error
+		wantLogLevel string
+	}{
+		{
+			name:         "busy before unknown payload",
+			responses:    []error{busy, &engine_helpers.UnknownPayloadErr},
+			want:         &engine_helpers.UnknownPayloadErr,
+			wantLogLevel: "lvl=warn",
+		},
+		{
+			name:         "builder failure after busy",
+			responses:    []error{busy, failure, chainreader.ErrUnknownPayload},
+			want:         failure,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "first builder failure on equal priority",
+			responses:    []error{failure, laterFailure, chainreader.ErrUnknownPayload},
+			want:         failure,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "builder cancellation after busy",
+			responses:    []error{busy, context.Canceled, chainreader.ErrUnknownPayload},
+			want:         context.Canceled,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "builder cancellation before unknown payload",
+			responses:    []error{context.Canceled, &engine_helpers.UnknownPayloadErr},
+			want:         context.Canceled,
+			wantLogLevel: "lvl=eror",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			now := time.Now()
+			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+			calls := 0
+
+			payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					err := tc.responses[calls]
+					calls++
+					return nil, nil, nil, nil, err
+				})
+
+			require.ErrorIs(t, err, tc.want)
+			require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
+			require.NotErrorIs(t, err, laterFailure)
+			if errors.Is(tc.want, context.Canceled) {
+				require.ErrorContains(t, err, "canceled while request remained active")
+			}
+			require.Equal(t, execution_client.IsUnknownPayloadError(tc.want), execution_client.IsUnknownPayloadError(err))
+			require.ErrorContains(t, err, fmt.Sprintf("%d attempts, %d failed", len(tc.responses), len(tc.responses)))
+			require.Nil(t, payload)
+			require.Equal(t, len(tc.responses), calls)
+
+			reportProductionFailure(err, 123)
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "BlockProduction:"), "records:\n"+captured)
+			require.Contains(t, captured, tc.wantLogLevel)
+		})
+	}
+}
+
+func TestProductionReportsBuilderCancellationAfterPollDeadline(t *testing.T) {
+	logs := captureProductionLogs(t)
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+	calls := 0
+
+	_, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, context.Canceled
+		})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, calls)
+	reportProductionFailure(err, 123)
+
+	captured := logs()
+	require.Contains(t, captured, "lvl=eror")
+	require.Contains(t, captured, "no payload after 1 attempt, 1 failed: canceled while request remained active")
+}
+
 func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
@@ -3094,7 +3230,7 @@ func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 
-	err := produceBlockWithFailingCollection(t, t.Context(), &engine_helpers.UnknownPayloadErr)
+	err := produceBlockWithFailingCollection(t, t.Context(), &engine_helpers.UnknownPayloadErr, nil)
 	require.Error(t, err)
 
 	captured := logs()
@@ -4932,8 +5068,8 @@ func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
 
 	require.NotZero(t, calls)
 
-	// The reason goes to the caller, which knows the slot and owns the record, carrying the first
-	// failure - the one that says what went wrong - and how many there were.
+	// The returned error carries the highest-priority failure and poll counts.
+	// Logging belongs to the caller.
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "attempt")
 	require.Empty(t, logs(), "the poll does not report; its caller does")
@@ -4950,31 +5086,54 @@ func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
 			return nil, nil, nil, nil, context.Canceled
 		})
 
-	// A validator client that times out, or a node shutting down, takes the slot with it. Nothing
-	// failed that anyone can act on.
+	// Caller cancellation alone is not a production failure.
 	require.Error(t, err)
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
 func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "builder failure", err: errors.New("boom")},
+		{name: "builder cancellation", err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Second)}
 
-	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
-		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			calls++
-			if calls == 1 {
-				return nil, nil, nil, nil, errors.New("boom")
+			calls := 0
+			_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					calls++
+					if calls == 1 {
+						return nil, nil, nil, nil, tc.err
+					}
+					cancel()
+					return nil, nil, nil, nil, context.Canceled
+				})
+
+			// The caller may cancel because production is already failing. Reporting only the
+			// cancellation would hide the earlier failure.
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.Equal(t, 2, calls)
+			require.ErrorIs(t, err, tc.err)
+			if errors.Is(tc.err, context.Canceled) {
+				require.ErrorIs(t, err, errProductionOperationCanceled)
+			} else {
+				require.NotErrorIs(t, err, context.Canceled)
 			}
-			cancel()
-			return nil, nil, nil, nil, context.Canceled
-		})
+			require.ErrorContains(t, err, "2 attempts, 1 failed")
+			reportProductionFailure(err, 123)
 
-	// The client may well have given up because production was failing. Reporting only the
-	// cancellation would lose the only sign of it.
-	require.NotErrorIs(t, err, context.Canceled)
-	require.Contains(t, err.Error(), "boom")
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+			require.Contains(t, captured, err.Error())
+		})
+	}
 }
 
 func TestFeeRecipientForProposalUsesGenesisPreferences(t *testing.T) {
@@ -5055,9 +5214,9 @@ func TestFeeRecipientForProposalIgnoresUnrelatedPreferences(t *testing.T) {
 	}
 }
 
-func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
+func TestFeeRecipientDeduplicatesWarningsWhileCached(t *testing.T) {
 	logs := captureProductionLogs(t)
-	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
+	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 2)
 	require.NoError(t, err)
 	params := validator_params.NewValidatorParams()
 	a := &ApiHandler{validatorParams: params, unregisteredProposers: warned}
@@ -5067,8 +5226,7 @@ func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
 	require.Equal(t, registered, a.feeRecipientForProposal(nil, 1, 7, clparams.FuluVersion))
 	require.NotContains(t, logs(), "lvl=warn", "a registered proposer must stay quiet")
 
-	// Giving the fees away is worth saying, but only once: a chain whose validator never registers
-	// one would otherwise warn on every proposal.
+	// Repeated requests for a proposer share one warning while its entry remains cached.
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 2, 9, clparams.FuluVersion))
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 3, 9, clparams.FuluVersion))
 	require.Equal(t, 1, strings.Count(logs(), "lvl=warn"))
@@ -5076,12 +5234,17 @@ func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 4, 10, clparams.FuluVersion))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"), "a different proposer is worth saying again")
 
-	// Alternating proposers must not each reset the other: 9 has already been reported.
+	// Another proposer must not reset a cached warning while capacity remains.
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 5, 9, clparams.FuluVersion))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"))
+
+	// Once capacity evicts an entry, that proposer can produce another useful warning.
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 6, 11, clparams.FuluVersion))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 7, 9, clparams.FuluVersion))
+	require.Equal(t, 4, strings.Count(logs(), "lvl=warn"))
 }
 
-func TestFeeRecipientWarnsOncePerProposerUnderConcurrentRequests(t *testing.T) {
+func TestFeeRecipientDeduplicatesConcurrentWarnings(t *testing.T) {
 	logs := captureProductionLogs(t)
 	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
 	require.NoError(t, err)
@@ -5109,8 +5272,6 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Microsecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
-			// The execution module takes its semaphore before it looks at a context, so a request
-			// made after the caller has gone comes back as contention rather than cancellation.
 			return nil, nil, nil, nil, errors.New("execution module is busy")
 		})
 
@@ -5119,10 +5280,9 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
-// produceBlockWithFailingCollection drives a real production through to the payload collection and
-// makes that collection fail the given way, so the records the whole request emits are observable
-// rather than only those of the polling loop.
-func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collect error) error {
+// produceBlockWithFailingCollection exercises the production error boundary with controlled
+// execution-payload and sync-aggregate failures.
+func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collect, syncFailure error) error {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -5134,6 +5294,12 @@ func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collec
 		Return(nil, nil, nil, nil, collect).AnyTimes()
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
+	if syncFailure != nil {
+		syncPool := sync_pool_mock.NewMockSyncContributionPool(ctrl)
+		syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+			Return(nil, syncFailure).AnyTimes()
+		handler.syncMessagePool = syncPool
+	}
 
 	_, err := handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 		postState.Slot()+1, common.Bytes96{}, common.Hash{})
@@ -5144,7 +5310,7 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	ctx := t.Context()
 	logs := captureProductionLogs(t)
 
-	err := produceBlockWithFailingCollection(t, ctx, errors.New("boom"))
+	err := produceBlockWithFailingCollection(t, ctx, errors.New("boom"), nil)
 	require.Error(t, err)
 
 	// One record for the whole request, and it carries the cause: the generic failure the caller
@@ -5154,9 +5320,8 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	require.Contains(t, captured, "boom")
 }
 
-func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
-	ctx := t.Context()
-	logs := captureProductionLogs(t)
+func produceBlockWithForkChoiceResult(t *testing.T, ctx context.Context, forkChoiceErr error) error {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -5166,12 +5331,57 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).AnyTimes()
+		Return(nil, forkChoiceErr)
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
 
 	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
+	return err
+}
+
+func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "forkchoice update: canceled while request remained active")
+}
+
+func TestProductionReportsForkChoiceCallerCancellationAtDebug(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := produceBlockWithForkChoiceResult(t, ctx, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, errProductionOperationCanceled)
+	require.ErrorContains(t, err, "forkchoice update: context canceled")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "BlockProduction: abandoned by its caller"), "records:\n"+captured)
+	require.Contains(t, captured, `lvl=dbug msg="BlockProduction: abandoned by its caller"`)
+	require.NotContains(t, captured, "lvl=eror")
+	require.NotContains(t, captured, "lvl=warn")
+	require.NotContains(t, captured, "canceled while request remained active")
+}
+
+func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), chainreader.ErrExecutionBusy)
+	require.ErrorIs(t, err, chainreader.ErrExecutionBusy)
+	require.ErrorContains(t, err, "forkchoice update: execution module is busy")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "forkchoice update: execution module is busy")
+}
+
+func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), nil)
 	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
 
 	captured := logs()
@@ -5181,27 +5391,40 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 	require.NotContains(t, captured, "failed to produce execution payload")
 }
 
-func TestProductionCollectsTwoFailingBodyStepsWithoutRacing(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+func TestProductionPrefersExecutionFailureOnEqualPriority(t *testing.T) {
+	logs := captureProductionLogs(t)
+	executionErr := errors.New("boom")
+	syncAggregateErr := errors.New("no aggregate")
+	err := produceBlockWithFailingCollection(t, t.Context(), executionErr, syncAggregateErr)
+	require.ErrorIs(t, err, executionErr)
+	require.NotErrorIs(t, err, syncAggregateErr)
+	require.ErrorContains(t, err, "sync aggregate: no aggregate")
 
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil, nil, nil, errors.New("boom")).AnyTimes()
-	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
-	handler.engine = engine
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, executionErr.Error())
+	require.Contains(t, captured, syncAggregateErr.Error())
+}
 
-	// The body steps run concurrently, so each needs somewhere of its own to put its failure.
-	syncPool := sync_pool_mock.NewMockSyncContributionPool(ctrl)
-	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
-		Return(nil, errors.New("no aggregate")).AnyTimes()
-	handler.syncMessagePool = syncPool
+func TestProductionReportsActionableConcurrentFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		collectionErr error
+	}{
+		{name: "canceled payload collection", collectionErr: context.Canceled},
+		{name: "unknown execution payload", collectionErr: &engine_helpers.UnknownPayloadErr},
+		{name: "busy execution module", collectionErr: fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			err := produceBlockWithFailingCollection(t, t.Context(), tc.collectionErr, errors.New("no aggregate"))
+			require.ErrorContains(t, err, "no aggregate")
 
-	_, err := handler.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
-		postState.Slot()+1, common.Bytes96{}, common.Hash{})
-	require.Error(t, err)
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+			require.Contains(t, captured, "no aggregate")
+		})
+	}
 }
 
 func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
@@ -5209,12 +5432,12 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err := produceBlockWithFailingCollection(t, ctx, context.Canceled)
+	err := produceBlockWithFailingCollection(t, ctx, context.Canceled, nil)
 	require.Error(t, err)
 
-	// A validator client that disconnects, or a node shutting down, is routine. Nothing about it is
-	// actionable, at any layer. The unregistered fee recipient this fixture also warns about is a
-	// separate matter and not what this measures.
+	// Caller cancellation is logged at Debug. During node shutdown, the API drains
+	// active requests even if the builder has stopped, so builder cancellation can
+	// still log at Error. The fee-recipient warning is unrelated to this check.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
 }
 
@@ -5327,16 +5550,410 @@ func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T
 }
 
 type cachedAttestationDataProducer struct {
-	data   solid.AttestationData
-	cached bool
+	data         solid.AttestationData
+	cached       bool
+	calls        *int
+	produceCalls *int
+}
+
+type doneObservedContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
 }
 
 func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+	if p.calls != nil {
+		(*p.calls)++
+	}
+	if p.produceCalls != nil {
+		(*p.produceCalls)++
+	}
 	return p.data, nil
 }
 
 func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+	if p.calls != nil {
+		(*p.calls)++
+	}
 	return p.data, p.cached, nil
+}
+
+func requestAttestationData(t *testing.T, handler *ApiHandler, ctx context.Context, slot uint64) (int, solid.AttestationData) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", slot), http.NoBody))
+	if recorder.Code != http.StatusOK {
+		t.Logf("attestation data response: %s", recorder.Body.String())
+		return recorder.Code, solid.AttestationData{}
+	}
+	var response struct {
+		Data solid.AttestationData `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	return recorder.Code, response.Data
+}
+
+func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
+	const waitCap = 60 * time.Millisecond
+	fallbackRoot := common.HexToHash("0xfaaa")
+	forkChoiceRoot := common.HexToHash("0xfc01")
+
+	setup := func(t *testing.T) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock, uint64, *int) {
+		t.Helper()
+		_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+		slot := headState.Slot() + 1
+		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+		handler.ethClock = clock
+		handler.attestationDataImportWait = waitCap
+		produceCalls := 0
+		handler.attestationProducer = cachedAttestationDataProducer{
+			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
+			produceCalls: &produceCalls,
+		}
+		fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+			time.Sleep(3 * waitCap)
+			return forkchoice.ForkChoiceNode{}, 0, errors.New("head unavailable")
+		}
+		return handler, fcu, slot, &produceCalls
+	}
+
+	t.Run("falls back after cap and memoizes wait", func(t *testing.T) {
+		handler, fcu, slot, produceCalls := setup(t)
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			return forkchoice.ForkChoiceNode{}, false
+		}
+
+		start := time.Now()
+		status, data := requestAttestationData(t, handler, t.Context(), slot)
+		elapsed := time.Since(start)
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+		require.GreaterOrEqual(t, elapsed, waitCap)
+		require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
+		require.Equal(t, 1, *produceCalls)
+
+		start = time.Now()
+		status, data = requestAttestationData(t, handler, t.Context(), slot)
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+		require.Less(t, time.Since(start), waitCap)
+		require.Equal(t, 2, *produceCalls)
+	})
+
+	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
+		handler, fcu, slot, produceCalls := setup(t)
+		handler.attestationDataImportWait = defaultAttestationDataImportWait
+		var attempts atomic.Int64
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
+		}
+		fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+			return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+		}
+
+		start := time.Now()
+		status, data := requestAttestationData(t, handler, t.Context(), slot)
+		elapsed := time.Since(start)
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
+		require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
+		require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+		require.Zero(t, *produceCalls)
+	})
+
+	t.Run("request cancellation stops the wait", func(t *testing.T) {
+		handler, fcu, slot, _ := setup(t)
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			return forkchoice.ForkChoiceNode{}, false
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(15*time.Millisecond, cancel)
+
+		start := time.Now()
+		status, _ := requestAttestationData(t, handler, ctx, slot)
+		require.Equal(t, http.StatusInternalServerError, status)
+		require.Less(t, time.Since(start), waitCap)
+	})
+}
+
+func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
+	syncedHeadRoot := common.HexToHash("0x1234")
+	for _, tt := range []struct {
+		name               string
+		forkChoiceHeadRoot common.Hash
+		headAtSlot         bool
+	}{
+		{name: "empty slot", forkChoiceHeadRoot: syncedHeadRoot},
+		{name: "head imported but not published, selected head stale, epoch start", forkChoiceHeadRoot: common.HexToHash("0x5678"), headAtSlot: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, syncedHeadState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			syncedHeadSlot := syncedHeadState.Slot()
+			attestationSlot := syncedHeadSlot + 1
+			forkChoiceHeadSlot := syncedHeadSlot
+			if tt.headAtSlot {
+				attestationSlot = (syncedHeadSlot/handler.beaconChainCfg.SlotsPerEpoch + 1) * handler.beaconChainCfg.SlotsPerEpoch
+				syncedHeadSlot = attestationSlot - 1
+				forkChoiceHeadSlot = attestationSlot
+				require.NoError(t, syncedHeadState.SetSlot(syncedHeadSlot))
+			}
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(syncedHeadState, syncedHeadRoot))
+			if tt.headAtSlot {
+				syncedDataManager, ok := syncedData.(*synced_data.SyncedDataManager)
+				require.True(t, ok)
+				syncedDataManager.OnSelectedHead(syncedHeadRoot, syncedHeadSlot)
+				handler.enableMemoizedHeadState = true
+			}
+
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+			handler.ethClock = clock
+			calls := 0
+			handler.attestationProducer = cachedAttestationDataProducer{
+				data:  solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: syncedHeadRoot},
+				calls: &calls,
+			}
+			fcu.HeadVal = tt.forkChoiceHeadRoot
+			fcu.HeadSlotVal = forkChoiceHeadSlot
+			var queriedHeadRoot common.Hash
+			var queriedSlot uint64
+			fcu.AttestationDataFn = func(gotHeadRoot common.Hash, gotSlot uint64) (solid.AttestationData, bool) {
+				queriedHeadRoot = gotHeadRoot
+				queriedSlot = gotSlot
+				return solid.AttestationData{
+					Slot:            gotSlot,
+					BeaconBlockRoot: gotHeadRoot,
+					Source:          solid.Checkpoint{Epoch: 1, Root: common.HexToHash("0x1111")},
+					Target: solid.Checkpoint{
+						Epoch: gotSlot / handler.beaconChainCfg.SlotsPerEpoch,
+						Root:  gotHeadRoot,
+					},
+				}, true
+			}
+
+			status, data := requestAttestationData(t, handler, t.Context(), attestationSlot)
+			require.Equal(t, http.StatusOK, status)
+			require.Zero(t, calls)
+			require.Equal(t, tt.forkChoiceHeadRoot, queriedHeadRoot)
+			require.Equal(t, attestationSlot, queriedSlot)
+			require.Equal(t, tt.forkChoiceHeadRoot, data.BeaconBlockRoot)
+			require.Equal(t, attestationSlot/handler.beaconChainCfg.SlotsPerEpoch, data.Target.Epoch)
+			require.Equal(t, tt.forkChoiceHeadRoot, data.Target.Root)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
+	oldRoot := common.HexToHash("0x1234")
+	newRoot := common.HexToHash("0x5678")
+	for _, tt := range []struct {
+		name              string
+		claim             bool
+		claimNextSlot     bool
+		finishAfter       time.Duration
+		cancelAfter       time.Duration
+		highestSeenAtSlot bool
+		wantNewHead       bool
+		minWait           time.Duration
+		wantStatus        int
+	}{
+		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond},
+		{name: "no claim"},
+		{name: "claim for another slot", claim: true, claimNextSlot: true},
+		{name: "block already seen", claim: true, highestSeenAtSlot: true},
+		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, wantStatus: http.StatusInternalServerError},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			oldSlot := headState.Slot()
+			attestationSlot := oldSlot + 1
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+			handler.ethClock = clock
+			const importWait = time.Second
+			handler.attestationDataImportWait = importWait
+			calls := 0
+			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
+
+			oldHead := forkchoice.ForkChoiceNode{Root: oldRoot}
+			newHead := forkchoice.ForkChoiceNode{Root: newRoot}
+			var currentHead atomic.Pointer[forkchoice.ForkChoiceNode]
+			currentHead.Store(&oldHead)
+			fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+				head := currentHead.Load()
+				slot := oldSlot
+				if head.Root == newRoot {
+					slot = attestationSlot
+				}
+				return *head, slot, nil
+			}
+			fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{
+					Slot:            slot,
+					BeaconBlockRoot: headRoot,
+					Target:          solid.Checkpoint{Epoch: slot / handler.beaconChainCfg.SlotsPerEpoch, Root: headRoot},
+				}, true
+			}
+			fcu.HighestSeenVal = oldSlot
+			if tt.highestSeenAtSlot {
+				fcu.HighestSeenVal = attestationSlot
+			}
+
+			var finishImport func()
+			if tt.claim {
+				claimSlot := attestationSlot
+				if tt.claimNextSlot {
+					claimSlot++
+				}
+				finishImport = fcu.BeginPayloadImport(claimSlot)
+				if tt.finishAfter == 0 {
+					defer finishImport()
+				}
+			}
+
+			start := time.Now()
+			var importFinished chan struct{}
+			if tt.finishAfter > 0 {
+				importFinished = make(chan struct{})
+				go func() {
+					time.Sleep(tt.finishAfter)
+					currentHead.Store(&newHead)
+					finishImport()
+					close(importFinished)
+				}()
+			}
+			requestContext := t.Context()
+			if tt.cancelAfter > 0 {
+				var cancel context.CancelFunc
+				requestContext, cancel = context.WithTimeout(requestContext, tt.cancelAfter)
+				defer cancel()
+			}
+			status, data := requestAttestationData(t, handler, requestContext, attestationSlot)
+			elapsed := time.Since(start)
+			if importFinished != nil {
+				<-importFinished
+			}
+
+			require.GreaterOrEqual(t, elapsed, tt.minWait)
+			require.NotEqual(t, attestationSlot+1, handler.attestationDataWaitedSlot.Load(), "the response came from the import-wait cap")
+			require.Zero(t, calls)
+			wantStatus := tt.wantStatus
+			if wantStatus == 0 {
+				wantStatus = http.StatusOK
+			}
+			require.Equal(t, wantStatus, status)
+			if wantStatus != http.StatusOK {
+				return
+			}
+			wantRoot := oldRoot
+			if tt.wantNewHead {
+				wantRoot = newRoot
+			}
+			require.Equal(t, wantRoot, data.BeaconBlockRoot)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
+	const waitCap = 60 * time.Millisecond
+	root := common.HexToHash("0x1234")
+	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	headSlot := headState.Slot()
+	attestationSlot := headSlot + 1
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(attestationSlot + 1).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationDataImportWait = waitCap
+	calls := 0
+	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
+	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: root}, headSlot, nil
+	}
+	fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+	}
+	fcu.HighestSeenVal = headSlot
+	finishImport := fcu.BeginPayloadImport(attestationSlot)
+	defer finishImport()
+	finishNextImport := fcu.BeginPayloadImport(attestationSlot + 1)
+	defer finishNextImport()
+
+	request := func(slot uint64) time.Duration {
+		start := time.Now()
+		status, data := requestAttestationData(t, handler, t.Context(), slot)
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, root, data.BeaconBlockRoot)
+		return time.Since(start)
+	}
+
+	require.GreaterOrEqual(t, request(attestationSlot), waitCap)
+	require.Less(t, request(attestationSlot), waitCap)
+	require.GreaterOrEqual(t, request(attestationSlot+1), waitCap)
+	require.Zero(t, calls)
+}
+
+func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) {
+	const waitCap = 400 * time.Millisecond
+	root := common.HexToHash("0x1234")
+	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	headSlot := headState.Slot()
+	attestationSlot := headSlot + 1
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationDataImportWait = waitCap
+	calls := 0
+	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
+	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: root}, headSlot, nil
+	}
+	fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+	}
+	fcu.HighestSeenVal = headSlot
+	finishImport := fcu.BeginPayloadImport(attestationSlot)
+	defer finishImport()
+
+	type requestResult struct {
+		elapsed time.Duration
+		code    int
+		data    solid.AttestationData
+	}
+	request := func(ctx context.Context) requestResult {
+		start := time.Now()
+		status, data := requestAttestationData(t, handler, ctx, attestationSlot)
+		return requestResult{elapsed: time.Since(start), code: status, data: data}
+	}
+
+	firstEntered := make(chan struct{})
+	firstResult := make(chan requestResult, 1)
+	go func() {
+		firstResult <- request(&doneObservedContext{Context: t.Context(), entered: firstEntered})
+	}()
+	select {
+	case <-firstEntered:
+	case <-firstResult:
+		t.Fatal("first request returned without waiting")
+	}
+	secondResult := make(chan requestResult, 1)
+	time.AfterFunc(waitCap/2, func() { secondResult <- request(t.Context()) })
+	first := <-firstResult
+	second := <-secondResult
+	require.GreaterOrEqual(t, first.elapsed, waitCap)
+	require.Less(t, second.elapsed, waitCap)
+	for _, result := range []requestResult{first, second} {
+		require.Equal(t, http.StatusOK, result.code)
+		require.Equal(t, root, result.data.BeaconBlockRoot)
+	}
+	require.Zero(t, calls)
 }
 
 // Gloas attestation data uses index 1 for FULL blocks in the head's chain, 0 for EMPTY blocks or blocks from the
@@ -5352,6 +5969,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
 		cached     bool
 		headErr    bool
+		forkChoice bool
 		wantStatus int
 		wantIndex  string
 	}{
@@ -5364,18 +5982,29 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "head unavailable", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "head unavailable, block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "older FULL head from fork choice", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, forkChoice: true, wantStatus: http.StatusOK, wantIndex: "1"},
+		{name: "older EMPTY head from fork choice", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, forkChoice: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "block of the attestation slot from fork choice", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, forkChoice: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "optimistic FULL head from fork choice", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, forkChoice: true, wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.attestationDataImportWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
 			cfg.InitializeForkSchedule()
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
-			handler.attestationProducer = cachedAttestationDataProducer{
-				data:   solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root},
-				cached: tt.cached,
+			data := solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root}
+			handler.attestationProducer = cachedAttestationDataProducer{data: data, cached: tt.cached}
+			if tt.forkChoice {
+				handler.attestationProducer = cachedAttestationDataProducer{cached: true}
+				fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+					require.Equal(t, root, headRoot)
+					require.Equal(t, attestationSlot, slot)
+					return data, true
+				}
 			}
 			fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: tt.blockSlot}
 			fcu.VerifiedPayloads = map[common.Hash]bool{root: tt.verified}
@@ -5390,9 +6019,9 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			}
 			wantErr := "payload of the beacon block root is not verified"
 			if tt.headErr {
-				wantErr = "no slot for head is stored"
+				wantErr = "fork-choice head unavailable"
 				fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
-					return forkchoice.ForkChoiceNode{}, 0, errors.New(wantErr)
+					return forkchoice.ForkChoiceNode{}, 0, errors.New("head lookup failed")
 				}
 			}
 			// The served data is pinned in the aggregation pool, with the index the validator signs.
@@ -5422,6 +6051,158 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T) {
+	const attestationSlot = uint64(10)
+	root := common.HexToHash("0xabcd")
+	oldHeadRoot := common.HexToHash("0x1111")
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.aggregatePool = nil
+	cfg := handler.beaconChainCfg
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationProducer = cachedAttestationDataProducer{
+		data:   solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root},
+		cached: true,
+	}
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: attestationSlot - 1}
+	fcu.VerifiedPayloads = map[common.Hash]bool{root: true}
+	fcu.HeadVal = root
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{}, false
+	}
+	tryHeadCalls := 0
+	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+		tryHeadCalls++
+		if tryHeadCalls == 1 {
+			return forkchoice.ForkChoiceNode{Root: oldHeadRoot}, true
+		}
+		return forkchoice.ForkChoiceNode{Root: fcu.HeadVal, PayloadStatus: fcu.HeadPayloadStatusVal}, true
+	}
+
+	status, data := requestAttestationData(t, handler, t.Context(), attestationSlot)
+
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, uint64(1), data.CommitteeIndex)
+	require.Equal(t, 2, tryHeadCalls)
+}
+
+func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T) {
+	const (
+		attestationSlot = uint64(10)
+		waitCap         = 20 * time.Millisecond
+		maxWait         = waitCap + 100*time.Millisecond
+	)
+	root := common.HexToHash("0xabcd")
+
+	setup := func(t *testing.T) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock, func(), *atomic.Int32) {
+		t.Helper()
+		_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+		handler.attestationDataImportWait = waitCap
+		handler.aggregatePool = nil
+		cfg := handler.beaconChainCfg
+		cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
+		cfg.InitializeForkSchedule()
+		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+		handler.ethClock = clock
+		handler.attestationProducer = cachedAttestationDataProducer{
+			data:   solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root},
+			cached: true,
+		}
+		fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: attestationSlot - 1}
+		fcu.VerifiedPayloads = map[common.Hash]bool{root: true}
+
+		release := make(chan struct{})
+		releaseHead := sync.OnceFunc(func() { close(release) })
+		t.Cleanup(releaseHead)
+		getHeadCalls := &atomic.Int32{}
+		fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+			getHeadCalls.Add(1)
+			<-release
+			return forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}, attestationSlot - 1, nil
+		}
+		return handler, fcu, releaseHead, getHeadCalls
+	}
+
+	type result struct {
+		status  int
+		body    []byte
+		elapsed time.Duration
+	}
+	request := func(t *testing.T, handler *ApiHandler) <-chan result {
+		t.Helper()
+		done := make(chan result, 1)
+		go func() {
+			start := time.Now()
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody))
+			done <- result{status: recorder.Code, body: recorder.Body.Bytes(), elapsed: time.Since(start)}
+		}()
+		return done
+	}
+	wait := func(t *testing.T, done <-chan result, releaseHead func()) result {
+		t.Helper()
+		select {
+		case got := <-done:
+			return got
+		case <-time.After(maxWait):
+			releaseHead()
+			select {
+			case got := <-done:
+				t.Fatalf("request exceeded %s: status %d, body %s", maxWait, got.status, got.body)
+			case <-time.After(time.Second):
+				t.Fatal("request did not return after the head read was released")
+			}
+			return result{}
+		}
+	}
+
+	t.Run("unavailable", func(t *testing.T) {
+		handler, fcu, releaseHead, getHeadCalls := setup(t)
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			return forkchoice.ForkChoiceNode{}, false
+		}
+		fcu.HighestSeenVal = attestationSlot - 1
+		finishImport := fcu.BeginPayloadImport(attestationSlot)
+		defer finishImport()
+
+		got := wait(t, request(t, handler), releaseHead)
+
+		require.Equal(t, http.StatusServiceUnavailable, got.status, string(got.body))
+		require.GreaterOrEqual(t, got.elapsed, waitCap)
+		require.Less(t, got.elapsed, maxWait)
+		require.Zero(t, getHeadCalls.Load())
+	})
+
+	t.Run("available", func(t *testing.T) {
+		handler, fcu, releaseHead, getHeadCalls := setup(t)
+		var tryHeadCalls atomic.Int32
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			tryHeadCalls.Add(1)
+			return forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}, true
+		}
+		fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+			return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+		}
+
+		got := wait(t, request(t, handler), releaseHead)
+
+		require.Equal(t, http.StatusOK, got.status, string(got.body))
+		var response struct {
+			Data solid.AttestationData `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(got.body, &response))
+		require.Equal(t, uint64(1), response.Data.CommitteeIndex)
+		require.Equal(t, int32(1), tryHeadCalls.Load())
+		require.Zero(t, getHeadCalls.Load())
+	})
 }
 
 // Before Electra the served data carries the requested committee index, so pins would grow with the

@@ -390,6 +390,26 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 // this covers the partial-unwind round trip the ValidateChain parent-link
 // comment guards.
 func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
+	validateForkPayloadOffNonTipCanonicalBlock(t)
+}
+
+// With READ_AHEAD_WAIT on, validation that unwinds must not wait for the warmup
+// suspension it holds itself.
+func TestValidateForkPayloadOffNonTipCanonicalBlockWithReadAheadWait(t *testing.T) {
+	prevWait, prevParallel := dbg.ReadAheadWait, dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.ReadAheadWait, dbg.Exec3Parallel = prevWait, prevParallel })
+	dbg.ReadAheadWait = true
+	for name, parallel := range map[string]bool{"parallel": true, "serial": false} {
+		t.Run(name, func(t *testing.T) {
+			dbg.Exec3Parallel = parallel
+			hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
+			defer hang.Stop()
+			validateForkPayloadOffNonTipCanonicalBlock(t)
+		})
+	}
+}
+
+func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -4084,8 +4104,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 }
 
 // Same-sender txs that send value, revert with value and read the sender's
-// balance must reach the state root of serial execution when parallel exec
-// charges the sender at validation.
+// balance must reach the state root of serial execution, whether parallel exec
+// charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true
@@ -4144,6 +4164,7 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
 		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
 		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas above balance", feeCap: *uint256.NewInt(100_000 * common.GWei), wantErr: protocol.ErrInsufficientFunds},
 		{name: "gas limit times fee cap overflows", feeCap: *new(uint256.Int).SetAllOne(), wantErr: protocol.ErrInsufficientFunds},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4168,4 +4189,25 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 			require.ErrorContains(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks), tc.wantErr.Error())
 		})
 	}
+}
+
+func TestValidateChainAnswersTooFarAwayWhenStateIsAheadOfTxNums(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(11, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:10]))
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := rawdbv3.TxNums.Truncate(tx, 6); err != nil {
+			return err
+		}
+		return rawdb.TruncateCanonicalHash(tx, 6, false)
+	}))
+	next := chainPack.Blocks[10]
+	_, err = m.InsertBlocks(ctx, []*types.Block{next})
+	require.NoError(t, err)
+
+	validation, err := m.ValidateChain(ctx, next.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, validation.ValidationStatus)
 }
