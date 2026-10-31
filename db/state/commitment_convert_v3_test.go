@@ -480,6 +480,7 @@ func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, mod
 		c, foldErr := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
 		results = append(results, result{filepath.Base(path), fmt.Sprintf("%x", c.Root), fmt.Sprintf("%x", recorded), foldErr})
 
+		agg.CloseFilesNoReopen()
 		base := strings.TrimSuffix(path, ".kv")
 		for _, ext := range []string{".kv", ".bt", ".kvei", ".kvi"} {
 			if rmErr := dir.RemoveFile(base + ext); rmErr != nil {
