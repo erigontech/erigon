@@ -1681,6 +1681,63 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 	}
 }
 
+func TestInvertedIndex_IdxRange_DescFromFilesEnd(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	aggStep := uint64(16)
+	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	ctx := t.Context()
+	require := require.New(t)
+
+	var key [8]byte
+	binary.BigEndian.PutUint64(key[:], 1)
+
+	txNums := []uint64{2, 18, 31, 32, 40}
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.beginForTests()
+		defer ic.Close()
+		writer := ic.NewWriter(db)
+		defer writer.close()
+		for _, txNum := range txNums {
+			if err := writer.Add(key[:], txNum); err != nil {
+				return err
+			}
+		}
+		return writer.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	for step := kv.Step(0); step <= 1; step++ {
+		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+	require.NoError(tx.Commit())
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+	require.Equal(uint64(32), ic.files.EndTxNum())
+
+	it, err := ic.IdxRange(key[:], 32, -1, order.Desc, -1, roTx)
+	require.NoError(err)
+	got, err := stream.ToArrayU64(it)
+	require.NoError(err)
+	require.Equal([]uint64{32, 31, 18, 2}, got)
+
+	it, err = ic.IdxRange(key[:], 32, 17, order.Desc, -1, roTx)
+	require.NoError(err)
+	got, err = stream.ToArrayU64(it)
+	require.NoError(err)
+	require.Equal([]uint64{32, 31, 18}, got)
+}
+
 // TestInvIndexHasTxNumsInDB pins the txNum-indexed existence lookup: it answers
 // from the keys table alone, so it must see exactly the txNums that hold records.
 func TestInvIndexHasTxNumsInDB(t *testing.T) {
