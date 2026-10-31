@@ -23,8 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -36,7 +38,7 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-release
 		return nil, errors.New("builder stopped")
-	}, &Parameters{}, time.Minute, time.Minute)
+	}, &Parameters{}, nil, time.Minute, time.Minute)
 
 	require.Never(t, b.Failed, 50*time.Millisecond, 5*time.Millisecond)
 }
@@ -49,7 +51,7 @@ func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
-	}, &Parameters{}, time.Minute, time.Minute)
+	}, &Parameters{}, nil, time.Minute, time.Minute)
 
 	_, err := b.Stop(t.Context())
 	require.NoError(t, err)
@@ -64,7 +66,7 @@ func TestBlockBuilderHasFailedOnceItErrors(t *testing.T) {
 
 	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("build failed")
-	}, &Parameters{}, time.Minute, time.Minute)
+	}, &Parameters{}, nil, time.Minute, time.Minute)
 
 	require.Eventually(t, b.Failed, time.Second, time.Millisecond)
 }
@@ -76,7 +78,7 @@ func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
 	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		defer close(built)
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
-	}, &Parameters{}, time.Minute, time.Minute)
+	}, &Parameters{}, nil, time.Minute, time.Minute)
 
 	<-built
 	// A builder that ran out of room holds a complete payload, so its id is still worth reusing.
@@ -97,7 +99,7 @@ func TestBlockBuilderReleasesABuildThatIgnoresTheDeadline(t *testing.T) {
 			released <- errors.New("build was never released")
 		}
 		return nil, errors.New("builder stopped")
-	}, &Parameters{}, time.Millisecond, 10*time.Millisecond)
+	}, &Parameters{}, nil, time.Millisecond, 10*time.Millisecond)
 
 	select {
 	case err := <-released:
@@ -118,7 +120,7 @@ func TestBlockBuilderStillHandsOverAPayloadWhenItsBudgetRunsOut(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
-	}, &Parameters{}, time.Millisecond, time.Minute)
+	}, &Parameters{}, nil, time.Millisecond, time.Minute)
 
 	require.Eventually(t, func() bool { return b.Block() != nil }, 5*time.Second, time.Millisecond)
 	require.False(t, b.Failed())
@@ -137,7 +139,7 @@ func TestBlockBuilderKeepsAHealthyBuildThatIsSlowToObserveTheStop(t *testing.T) 
 		case <-time.After(500 * time.Millisecond):
 			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 		}
-	}, &Parameters{}, time.Millisecond, 5*time.Second)
+	}, &Parameters{}, nil, time.Millisecond, 5*time.Second)
 
 	result, err := b.Stop(t.Context())
 	require.NoError(t, err)
@@ -161,7 +163,7 @@ func TestBlockBuilderReleasesABuildThatWedgesAfterObservingTheStop(t *testing.T)
 			released <- errors.New("build was never released")
 		}
 		return nil, errors.New("builder stopped")
-	}, &Parameters{}, time.Millisecond, 50*time.Millisecond)
+	}, &Parameters{}, nil, time.Millisecond, 50*time.Millisecond)
 
 	select {
 	case err := <-released:
@@ -178,7 +180,7 @@ func TestBlockBuilderReplaysPayloadCompletedAfterDiscard(t *testing.T) {
 	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-ctx.Done()
 		return want, nil
-	}, &Parameters{}, time.Minute, time.Minute)
+	}, &Parameters{}, nil, time.Minute, time.Minute)
 
 	b.Discard()
 	select {
@@ -212,7 +214,7 @@ func TestBlockBuilderStopPrefersCompletedOutcomeOverCanceledCaller(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
 				return tc.result, tc.err
-			}, &Parameters{}, time.Minute, time.Minute)
+			}, &Parameters{}, nil, time.Minute, time.Minute)
 			select {
 			case <-b.done:
 			case <-time.After(5 * time.Second):
@@ -244,7 +246,7 @@ func TestBlockBuilderStopPrefersPayloadCompletedDuringSelection(t *testing.T) {
 	// Stop's select evaluates channel operands in source order before choosing a ready case.
 	// Completing the builder from the context's Done method makes both cases ready together.
 	for range 100 {
-		builder := &BlockBuilder{done: make(chan struct{}), stopped: make(chan struct{}), parentBlockWaitStopped: make(chan struct{})}
+		builder := &BlockBuilder{done: make(chan struct{}), stopped: make(chan struct{})}
 		stopCtx := &finishOnDoneContext{
 			Context: callerCtx,
 			finish: func() {
@@ -270,11 +272,131 @@ func TestBlockBuilderStopReturnsImmediatelyAfterDiscard(t *testing.T) {
 	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-release
 		return nil, errors.New("builder stopped")
-	}, &Parameters{}, time.Minute, time.Minute)
+	}, &Parameters{}, nil, time.Minute, time.Minute)
 	b.Discard()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := b.Stop(ctx)
 	require.ErrorIs(t, err, ErrDiscarded)
+}
+
+func TestBlockBuilderResolveAnswersAtOnceDuringABuild(t *testing.T) {
+	t.Parallel()
+
+	fallback := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		close(started)
+		<-release
+		return nil, errors.New("builder stopped")
+	}, &Parameters{}, fallback, time.Minute, time.Minute)
+	<-started
+
+	resolved := make(chan *types.BlockWithReceipts, 1)
+	go func() {
+		got, _ := b.Resolve(t.Context())
+		resolved <- got
+	}()
+	select {
+	case got := <-resolved:
+		require.Same(t, fallback, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Resolve waited for the build in progress")
+	}
+}
+
+func TestBlockBuilderResolveReturnsTheLatestSealedRebuild(t *testing.T) {
+	t.Parallel()
+
+	fallback := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
+	built := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{Extra: []byte{1}}, nil, nil, nil, nil, nil)}
+	var rounds atomic.Int32
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if rounds.Add(1) == 1 {
+			return built, nil
+		}
+		<-release
+		return nil, errors.New("builder stopped")
+	}, &Parameters{}, fallback, time.Minute, time.Minute)
+
+	require.Eventually(t, func() bool { return rounds.Load() >= 2 }, 5*time.Second, time.Millisecond)
+	got, err := b.Resolve(t.Context())
+	require.NoError(t, err)
+	require.Same(t, built, got)
+}
+
+func TestBlockBuilderKeepsTheMostValuableRebuild(t *testing.T) {
+	t.Parallel()
+
+	baseFee := uint256.NewInt(1)
+	txn := types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(2), nil)
+	valuable := &types.BlockWithReceipts{
+		Block:    types.NewBlock(&types.Header{BaseFee: baseFee}, []types.Transaction{txn}, nil, nil, nil, nil),
+		Receipts: types.Receipts{{GasUsed: 21_000}},
+	}
+	worthless := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{BaseFee: baseFee}, nil, nil, nil, nil, nil)}
+	fallback := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{BaseFee: baseFee}, nil, nil, nil, nil, nil)}
+	var rounds atomic.Int32
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		switch rounds.Add(1) {
+		case 1:
+			return valuable, nil
+		case 2:
+			return worthless, nil
+		}
+		<-release
+		return nil, errors.New("builder stopped")
+	}, &Parameters{}, fallback, time.Minute, time.Minute)
+
+	require.Eventually(t, func() bool { return rounds.Load() >= 3 }, 5*time.Second, time.Millisecond)
+	got, err := b.Resolve(t.Context())
+	require.NoError(t, err)
+	require.Same(t, valuable, got)
+	require.Equal(t, uint64(21_000), BlockValue(got).Uint64())
+}
+
+func TestBlockBuilderStopWaitsForTheRebuildInProgress(t *testing.T) {
+	t.Parallel()
+
+	fallback := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
+	first := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{Extra: []byte{1}}, nil, nil, nil, nil, nil)}
+	final := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{Extra: []byte{2}}, nil, nil, nil, nil, nil)}
+	var rounds atomic.Int32
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if rounds.Add(1) == 1 {
+			return first, nil
+		}
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		return final, nil
+	}, &Parameters{}, fallback, time.Minute, time.Minute)
+
+	require.Eventually(t, func() bool { return rounds.Load() >= 2 }, 5*time.Second, time.Millisecond)
+	got, err := b.Stop(t.Context())
+	require.NoError(t, err)
+	require.Same(t, final, got)
+}
+
+func TestBlockBuilderSpacesOutRebuildsThatFinishEarly(t *testing.T) {
+	t.Parallel()
+
+	fallback := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
+	var rounds atomic.Int32
+	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		rounds.Add(1)
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	}, &Parameters{}, fallback, time.Minute, time.Minute)
+	t.Cleanup(b.Discard)
+
+	require.Eventually(t, func() bool { return rounds.Load() >= 2 }, 5*time.Second, time.Millisecond)
+	require.Never(t, func() bool { return rounds.Load() > 3 }, rebuildInterval/2, time.Millisecond)
 }

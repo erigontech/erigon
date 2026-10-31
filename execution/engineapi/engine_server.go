@@ -761,26 +761,9 @@ func (e *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, errors.New("not a proof-of-stake chain")
 	}
 
-	e.logger.Debug("[GetPayload] acquiring lock")
-	e.lock.Lock()
-	defer e.lock.Unlock()
-	e.logger.Debug("[GetPayload] lock acquired")
-	var assembled execmodule.AssembledBlockResult
-	var err error
-
-	execBusy, err := waitForResponse(ctx, time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		assembled, err = e.executionService.GetAssembledBlock(ctx, payloadId)
-		if err != nil {
-			return false, err
-		}
-		return assembled.Busy, nil
-	})
+	assembled, err := e.executionService.GetAssembledBlock(ctx, payloadId)
 	if err != nil {
 		return nil, err
-	}
-	if execBusy {
-		e.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
-		return nil, &engine_helpers.UnknownPayloadErr
 	}
 	if assembled.Block == nil {
 		e.logger.Warn("Payload not stored", "payloadId", payloadId)

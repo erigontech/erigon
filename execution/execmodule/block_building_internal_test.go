@@ -854,3 +854,48 @@ func TestInclusionListWithoutBuilderFails(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, txns)
 }
+
+func TestGetAssembledBlockAnswersAtOnceDuringABuild(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	empty := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
+	building := make(chan struct{}, 1)
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		if params.CustomTxnProvider != nil {
+			return empty, nil
+		}
+		select {
+		case building <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil, errors.New("builder stopped")
+	})
+	module.sealEmptyPayloads = true
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: newTestTimestamp()})
+	require.NoError(t, err)
+	select {
+	case <-building:
+	case <-time.After(5 * time.Second):
+		t.Fatal("builder did not start")
+	}
+
+	type collected struct {
+		result AssembledBlockResult
+		err    error
+	}
+	answered := make(chan collected, 1)
+	go func() {
+		assembled, err := module.GetAssembledBlock(t.Context(), result.PayloadID)
+		answered <- collected{assembled, err}
+	}()
+	select {
+	case got := <-answered:
+		require.NoError(t, got.err)
+		require.False(t, got.result.Unknown)
+		require.Same(t, empty, got.result.Block)
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetAssembledBlock waited for the build in progress")
+	}
+}

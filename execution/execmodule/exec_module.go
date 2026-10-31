@@ -202,7 +202,9 @@ type ExecModule struct {
 	// Block building
 	nextPayloadId       uint64
 	builderFunc         builder.BlockBuilderFunc
+	sealEmptyPayloads   bool
 	inclusionListFunc   builder.InclusionListFunc
+	buildersLock        sync.Mutex
 	builders            map[uint64]*builderEntry
 	buildersByTimestamp map[uint64]uint64
 
@@ -287,6 +289,7 @@ func NewExecModule(
 		builders:                make(map[uint64]*builderEntry),
 		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
+		sealEmptyPayloads:       true,
 		inclusionListFunc:       inclusionListFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),

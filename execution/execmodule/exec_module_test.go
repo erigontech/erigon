@@ -1067,7 +1067,7 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 		ParentBeaconBlockRoot: &beaconRoot,
 		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     emptyTxnProvider{},
-	}, time.Minute, time.Minute)
+	}, nil, time.Minute, time.Minute)
 
 	stopped := make(chan error, 1)
 	stopObserved := make(chan struct{})
@@ -1116,7 +1116,7 @@ func TestStopWakesBuilderWaitingForMoreTransactions(t *testing.T) {
 			ParentBeaconBlockRoot: &beaconRoot,
 			SlotNumber:            syntheticSlotNumber(parent),
 			CustomTxnProvider:     provider,
-		}, time.Minute, time.Minute)
+		}, nil, time.Minute, time.Minute)
 
 		// The provider ran dry, so the build waits before it asks again.
 		<-provider.txnCounts
@@ -1193,7 +1193,7 @@ func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
 			ParentBeaconBlockRoot: &beaconRoot,
 			SlotNumber:            syntheticSlotNumber(parent),
 			CustomTxnProvider:     provider,
-		}, time.Minute, time.Minute)
+		}, nil, time.Minute, time.Minute)
 
 		<-provider.served
 		waited := time.Since(started)
@@ -1424,33 +1424,6 @@ func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result.Block)
 	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
-}
-
-func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
-	m, parent, params, provider := txPoolBehindParentFixture(t)
-	synctest.Test(t, func(t *testing.T) {
-		payloadID, err := m.AssembleBlock(t.Context(), params)
-		require.NoError(t, err)
-		<-provider.ready
-		synctest.Wait()
-
-		type assembled struct {
-			result execmodule.AssembledBlockResult
-			err    error
-		}
-		returned := make(chan assembled, 1)
-		go func() {
-			result, err := m.ExecModule.GetAssembledBlock(t.Context(), payloadID)
-			returned <- assembled{result, err}
-		}()
-		synctest.Wait()
-		require.NoError(t, m.TxPool.OnNewBlock(t.Context(), txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
-
-		got := <-returned
-		require.NoError(t, got.err)
-		require.NotNil(t, got.result.Block)
-		require.Len(t, got.result.Block.Block.Transactions(), 2)
-	})
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
@@ -1936,6 +1909,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		time.Hour,
 	)
 
+	require.NoError(t, m.ExecModule.CompletePayload(ctx, payloadId))
 	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, eth1Block, "Eth1Block should not be nil")

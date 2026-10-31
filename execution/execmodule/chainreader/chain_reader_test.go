@@ -51,10 +51,6 @@ func TestGetAssembledBlockDistinguishesAnUnknownIdFromAnEmptyOne(t *testing.T) {
 	// empty result leaves a caller polling it for the rest of the slot.
 	require.ErrorIs(t, err, ErrUnknownPayload)
 
-	busy := ChainReaderWriterEth1{executionModule: assembledBlockStub{result: execmodule.AssembledBlockResult{Busy: true}}}
-	_, _, _, _, err = busy.GetAssembledBlock(t.Context(), 1)
-	require.ErrorIs(t, err, ErrExecutionBusy)
-
 	// A builder that simply has nothing yet is neither: the caller should keep waiting.
 	building := ChainReaderWriterEth1{executionModule: assembledBlockStub{}}
 	block, _, _, _, err := building.GetAssembledBlock(t.Context(), 1)
