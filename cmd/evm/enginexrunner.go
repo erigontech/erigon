@@ -366,6 +366,19 @@ func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfi
 	var mu sync.Mutex
 	return func(kind, id string) func() {
 		mu.Lock()
+		if memDir := os.Getenv("EVM_ALLOCS_DIR"); memDir != "" {
+			runtime.MemProfileRate = 4096
+			base, _ := os.Create(profileFilename(memDir, kind, id, "allocs.base"))
+			_ = pprof.Lookup("allocs").WriteTo(base, 0)
+			base.Close()
+			return func() {
+				defer mu.Unlock()
+				runtime.GC()
+				f, _ := os.Create(profileFilename(memDir, kind, id, "allocs"))
+				_ = pprof.Lookup("allocs").WriteTo(f, 0)
+				f.Close()
+			}
+		}
 		if traceDir := os.Getenv("EVM_TRACE_DIR"); traceDir != "" {
 			if f, err := os.Create(profileFilename(traceDir, kind, id, "trace")); err == nil && trace.Start(f) == nil {
 				return func() {
