@@ -300,7 +300,7 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 	if len(p.Actions) > 0 {
 		d.logger.Debug("[eez] Sync block built", "event", "eez.deriver.reconcile.sync_block_built", "l2Block", r.To, "txs", len(sb.Txs), "nonce", nonce)
 		if effects := effectsApplied(&b.Settlement); effects < len(p.Actions) {
-			d.logger.Info("[eez] L1 applied part of a batch", "event", "eez.deriver.reconcile.partial_consumption", "tx", b.TxHash, "actions", len(p.Actions), "applied", effects)
+			d.logger.Info("[eez] L1 applied part of a batch", "event", "eez.deriver.reconcile.partial_consumption", "tx", b.TxHash.TerminalString(), "actions", len(p.Actions), "applied", effects)
 		}
 	}
 	parent, err := d.header(ctx, r.From-1)
@@ -322,7 +322,7 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 			return common.Hash{}, err
 		}
 		txs, replay := ResumeTxs(existing.Hash(), b.Settlement.FinalState, existingTxs, sb.Txs)
-		d.logger.Info("[eez] resumed batch appends to a Sync block", "event", "eez.deriver.resumed.placement", "l2Block", r.From, "tx", b.TxHash, "replay", replay)
+		d.logger.Info("[eez] resumed batch appends to a Sync block", "event", "eez.deriver.resumed.placement", "l2Block", r.From, "tx", b.TxHash.TerminalString(), "replay", replay)
 		if replay {
 			d.logger.Info("[eez] rebuilding a Sync block", "event", "eez.deriver.resumed.appended", "l2Block", r.From, "txs", len(txs), "appended", len(sb.Txs))
 			if syncBlock, err = d.extend(ctx, b, parent, DeriveInputs(d.l2, parent, p.Span, last), txs); err != nil {

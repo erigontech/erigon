@@ -474,7 +474,7 @@ func (d *Deriver) reconcileRollupXBlocks(ctx context.Context, b *l1.ScannedBatch
 		if replay {
 			gateFrom = len(txs) - len(suffix)
 		}
-		d.logger.Info("[eez] resumed batch appends to a Sync block", "event", "eez.deriver.resumed.placement", "l2Block", r.From, "tx", b.TxHash, "replay", replay)
+		d.logger.Info("[eez] resumed batch appends to a Sync block", "event", "eez.deriver.resumed.placement", "l2Block", r.From, "tx", b.TxHash.TerminalString(), "replay", replay)
 		if replay {
 			in, err := inputs(parent, last)
 			if err != nil {
