@@ -201,6 +201,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, beginErr
 	}
 	defer tx.Rollback()
+	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
+	tx = rpchelper.PinToOverlay(tx, nil)
 
 	rpcLogs := types.Logs{}
 
