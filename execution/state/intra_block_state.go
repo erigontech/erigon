@@ -1529,28 +1529,26 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 // does not depend on the prior value, so prev is read WITHOUT recording an OCC
 // read. Absent/destroyed accounts still materialize (account creation).
 func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
-	base, _, _, err := ibs.versionedAccountBase(addr, true)
-	if err != nil {
-		return err
-	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		stateObject, err := ibs.GetOrNewStateObject(addr)
+	var prev uint64
+	so, materialized := ibs.stateObjects[addr]
+	// A live materialized object gives the same result as the base record, so a
+	// created account skips the base read.
+	if !materialized || so.deleted {
+		base, _, _, err := ibs.versionedAccountBase(addr, true)
 		if err != nil {
 			return err
 		}
-		// The object is built from the base record and can lag this tx's own
-		// nonce write: seed it so a revert restores the live nonce.
-		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-			stateObject.setNonce(vw.Val)
+		if base == nil {
+			return ibs.setNonceMaterialized(addr, nonce, wasCommited, reason)
 		}
-		stateObject.SetNonce(nonce, wasCommited, reason)
-		ibs.recordWriteNonce(addr, nonce, reason)
-		return nil
+		prev = base.Nonce
 	}
-	prev := base.Nonce
+	if ibs.accountLifecycle(addr) {
+		return ibs.setNonceMaterialized(addr, nonce, wasCommited, reason)
+	}
 	// Keep an already-materialized stateObject's so.data in step so the
 	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
-	if so, ok := ibs.stateObjects[addr]; ok {
+	if materialized {
 		prev = so.data.Nonce
 		so.setNonce(nonce)
 	}
@@ -1567,6 +1565,21 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 			ibs.tracingHooks.OnNonceChange(addr, prev, nonce)
 		}
 	}
+	ibs.recordWriteNonce(addr, nonce, reason)
+	return nil
+}
+
+func (ibs *IntraBlockState) setNonceMaterialized(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
+	stateObject, err := ibs.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
+	// The object is built from the base record and can lag this tx's own
+	// nonce write: seed it so a revert restores the live nonce.
+	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
+		stateObject.setNonce(vw.Val)
+	}
+	stateObject.SetNonce(nonce, wasCommited, reason)
 	ibs.recordWriteNonce(addr, nonce, reason)
 	return nil
 }
