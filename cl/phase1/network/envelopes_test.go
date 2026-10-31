@@ -290,12 +290,6 @@ type bogusThenValidEnvelopeSentinel struct {
 	bogusResponse []byte
 	validResponse []byte
 	calls         atomic.Int32
-	banned        []string
-}
-
-func (s *bogusThenValidEnvelopeSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
-	s.banned = append(s.banned, peer.Pid)
-	return &sentinelproto.EmptyMessage{}, nil
 }
 
 func (s *bogusThenValidEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
