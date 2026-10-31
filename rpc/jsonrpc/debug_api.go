@@ -167,6 +167,9 @@ func (api *DebugAPIImpl) MigrationProgress(ctx context.Context) (*MigrationProgr
 		if err != nil {
 			return nil, err
 		}
+		if provider, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok {
+			stopped = stopped || provider.CommitmentDomainStopped(shadowDomain)
+		}
 		progress.ShadowStopped = stopped
 	}
 	return progress, nil
