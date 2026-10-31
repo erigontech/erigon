@@ -305,6 +305,15 @@ func TestQuietBelow_WriterOutsideLayoutPanics(t *testing.T) {
 	vm.mutEnd(last)
 }
 
+func TestStoreOriginAccount_IgnoresNil(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x0d"))
+	vm.StoreOriginAccount(addr, nil)
+	_, ok := vm.LoadOriginAccount(addr)
+	require.False(t, ok, "a nil origin would turn an absent-account read Invalid without a write stamp")
+}
+
 func TestQuietBelow_StampsSizedForLastIndex(t *testing.T) {
 	t.Parallel()
 	const last = 7

@@ -338,6 +338,9 @@ type originStorageKey struct {
 
 // StoreOriginAccount records the committed base account write-once (idempotent across txs).
 func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Account) {
+	if acc == nil {
+		return
+	}
 	vm.originAccounts.LoadOrStore(addr, acc)
 }
 
