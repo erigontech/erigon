@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"hash/maphash"
 	"sync/atomic"
 	"unsafe"
@@ -161,6 +162,9 @@ func zeroPaddedKey(prefix int) func([]byte) ([]byte, bool) {
 	return func(input []byte) ([]byte, bool) {
 		input = input[:min(len(input), prefix)]
 		end := len(input)
+		for end >= 8 && binary.LittleEndian.Uint64(input[end-8:end]) == 0 {
+			end -= 8
+		}
 		for end > 0 && input[end-1] == 0 {
 			end--
 		}
@@ -169,12 +173,10 @@ func zeroPaddedKey(prefix int) func([]byte) ([]byte, bool) {
 }
 
 // bn254AddKey keeps an addition with a point at infinity out of the cache: it answers faster than a lookup.
+// The key drops trailing zeros, so the second point is at infinity when the key ends within the first.
 func bn254AddKey(input []byte) ([]byte, bool) {
 	in, _ := zeroPaddedKey(128)(input)
-	var points [128]byte
-	copy(points[:], in)
-	var infinity [64]byte
-	return in, [64]byte(points[:64]) != infinity && [64]byte(points[64:]) != infinity
+	return in, len(in) > 64 && [64]byte(in[:64]) != [64]byte{}
 }
 
 const modExpHeaderLength = 96
