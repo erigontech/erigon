@@ -2324,6 +2324,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 - `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
   - Default: `0`
 
+- `--override.genesis value`: Loads the genesis block and chain configuration from this JSON file instead of the `--chain` network's. A fresh datadir is initialized from it on first start, as `erigon init` would. Cannot be combined with `--chain`.
 - `--vmdebug`: Records information for VM and contract debugging.
   - Default: `false`
 
