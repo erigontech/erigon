@@ -1629,7 +1629,6 @@ mainloop:
 				metadata := req.recovery(blockRoot)
 				if sidecar.Version() < clparams.GloasVersion && metadata != nil && sidecar.SignedBlockHeader.Signature != metadata.signature {
 					unverifiedSignatureMismatch = true
-					break
 				}
 				if _, duplicate := seen[key]; duplicate {
 					validResponse = false
@@ -1637,6 +1636,11 @@ mainloop:
 				}
 				seen[key] = struct{}{}
 				resolved[i] = resolvedColumn{slot: slot, blockRoot: blockRoot}
+			}
+			if !validResponse {
+				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
+				continue
 			}
 			if unverifiedSignatureMismatch {
 				// Backfill stores blocks without verifying their signature, so the stored one may be the forged side.
@@ -1646,11 +1650,6 @@ mainloop:
 				} else {
 					d.rpc.BanPeer(result.pid)
 				}
-				continue
-			}
-			if !validResponse {
-				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
-				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
 			}
 			var wg sync.WaitGroup

@@ -475,54 +475,66 @@ func TestRunDownloadBansPeerForInvalidProofBehindSignatureMismatch(t *testing.T)
 	cfg.FuluForkEpoch = 0
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
-	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
-	metadata, err := newBlobRecoveryMetadata(block, root)
-	require.NoError(t, err)
-	mismatchedHeader := *columns[0].SignedBlockHeader
-	mismatchedHeader.Signature[0] ^= 1
-	columns[0].SignedBlockHeader = &mismatchedHeader
-	columns[0].KzgProofs.Get(0)[0] ^= 1
-	require.False(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
-	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0]})
-
-	d := &peerdas{
-		rpc:           rpcClient,
-		beaconConfig:  &cfg,
-		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-		columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
-	}
-	req := &downloadRequest{
-		beaconConfig: &cfg,
-		downloadTable: map[downloadTableEntry]map[uint64]bool{
-			{blockRoot: root, slot: block.GetSlot()}: {0: true},
-		},
-		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
-		validatedBlobCount: map[common.Hash]uint32{root: 0},
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() { defer close(done); d.runDownload(ctx, req, true) }()
-
-	deadline := time.After(30 * time.Second)
-	for {
-		select {
-		case <-sentinel.banned:
-			cancel()
-			<-done
-			require.Zero(t, sentinel.softBans.Load())
-			require.Equal(t, 1, req.remainingEntriesCount())
-			return
-		case <-deadline:
-			cancel()
-			<-done
-			t.Fatal("an invalid KZG proof behind a signature mismatch was not rejected")
-		case <-time.After(10 * time.Millisecond):
-			if sentinel.softBans.Load() != 0 {
-				cancel()
-				<-done
-				t.Fatal("an invalid KZG proof behind a signature mismatch got only a soft ban")
+	for name, duplicate := range map[string]bool{"invalid_kzg_proof": false, "duplicate_column": true} {
+		t.Run(name, func(t *testing.T) {
+			block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+			metadata, err := newBlobRecoveryMetadata(block, root)
+			require.NoError(t, err)
+			mismatchedHeader := *columns[0].SignedBlockHeader
+			mismatchedHeader.Signature[0] ^= 1
+			columns[0].SignedBlockHeader = &mismatchedHeader
+			response := []*cltypes.DataColumnSidecar{columns[0]}
+			requested := map[uint64]bool{0: true}
+			if duplicate {
+				require.True(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
+				response = append(response, columns[0])
+				requested[1] = true
+			} else {
+				columns[0].KzgProofs.Get(0)[0] ^= 1
+				require.False(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
 			}
-		}
+			rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), response)
+
+			d := &peerdas{
+				rpc:           rpcClient,
+				beaconConfig:  &cfg,
+				state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+				columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+			}
+			req := &downloadRequest{
+				beaconConfig: &cfg,
+				downloadTable: map[downloadTableEntry]map[uint64]bool{
+					{blockRoot: root, slot: block.GetSlot()}: requested,
+				},
+				recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+				validatedBlobCount: map[common.Hash]uint32{root: 0},
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() { defer close(done); d.runDownload(ctx, req, true) }()
+
+			deadline := time.After(30 * time.Second)
+			for {
+				select {
+				case <-sentinel.banned:
+					cancel()
+					<-done
+					require.Zero(t, sentinel.softBans.Load())
+					require.Equal(t, 1, req.remainingEntriesCount())
+					return
+				case <-deadline:
+					cancel()
+					<-done
+					t.Fatal("an invalid response behind a signature mismatch was not rejected")
+				case <-time.After(10 * time.Millisecond):
+					if sentinel.softBans.Load() != 0 {
+						cancel()
+						<-done
+						t.Fatal("an invalid response behind a signature mismatch got only a soft ban")
+					}
+				}
+			}
+		})
 	}
 }
 
