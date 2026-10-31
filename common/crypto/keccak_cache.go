@@ -47,12 +47,8 @@ var (
 	keccakCacheBuckets = new([1 << 17]keccakBucket)
 )
 
-// inputWord returns the i-th 8 bytes of data, zero-padded.
-func inputWord(data []byte, i int) uint64 {
-	rest := data[i*8:]
-	if len(rest) >= 8 {
-		return binary.LittleEndian.Uint64(rest)
-	}
+// tailWord returns the last, partial 8 bytes of an input, zero-padded.
+func tailWord(rest []byte) uint64 {
 	var w [8]byte
 	copy(w[:], rest)
 	return binary.LittleEndian.Uint64(w[:])
@@ -69,24 +65,34 @@ func Keccak256Hash(data []byte) common.Hash {
 	b := &keccakCacheBuckets[key&(uint64(len(keccakCacheBuckets))-1)]
 	tag := key&^0xff | uint64(len(data))
 	words := (len(data) + 7) / 8
+	full := len(data) / 8
 	if seq := b.seq.Load(); seq&1 == 0 && b.tag.Load() == tag {
 		hit := true
-		for i := 0; i < words && hit; i++ {
-			hit = b.in[i].Load() == inputWord(data, i)
+		for i := 0; i < full && hit; i++ {
+			hit = b.in[i].Load() == binary.LittleEndian.Uint64(data[i*8:])
 		}
-		var h common.Hash
-		for i := range b.hash {
-			binary.LittleEndian.PutUint64(h[i*8:], b.hash[i].Load())
+		if hit && full < words {
+			hit = b.in[full].Load() == tailWord(data[full*8:])
 		}
-		if hit && b.seq.Load() == seq {
-			return h
+		if hit {
+			var h common.Hash
+			binary.LittleEndian.PutUint64(h[0:], b.hash[0].Load())
+			binary.LittleEndian.PutUint64(h[8:], b.hash[1].Load())
+			binary.LittleEndian.PutUint64(h[16:], b.hash[2].Load())
+			binary.LittleEndian.PutUint64(h[24:], b.hash[3].Load())
+			if b.seq.Load() == seq {
+				return h
+			}
 		}
 	}
 	h := keccak.Sum256(data)
 	if seq := b.seq.Load(); seq&1 == 0 && b.seq.CompareAndSwap(seq, seq+1) {
 		b.tag.Store(tag)
-		for i := range words {
-			b.in[i].Store(inputWord(data, i))
+		for i := range full {
+			b.in[i].Store(binary.LittleEndian.Uint64(data[i*8:]))
+		}
+		if full < words {
+			b.in[full].Store(tailWord(data[full*8:]))
 		}
 		for i := range b.hash {
 			b.hash[i].Store(binary.LittleEndian.Uint64(h[i*8:]))
