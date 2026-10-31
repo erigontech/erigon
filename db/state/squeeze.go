@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -186,14 +186,14 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	}
 
 	var (
-		temporalFiles    []string
-		processedFiles   int
-		sizeDelta        = datasize.B
-		sqExt            = ".squeezed"
-		commitmentDomain = at.d[kv.CommitmentDomain]
-		accounts         = at.d[kv.AccountsDomain]
-		storage          = at.d[kv.StorageDomain]
-		logEvery         = time.NewTicker(30 * time.Second)
+		temporalFiles  []string
+		processedFiles int
+		sizeDelta      = datasize.B
+		sqExt          = ".squeezed"
+		commitment     = at.d[kv.CommitmentDomain]
+		accounts       = at.d[kv.AccountsDomain]
+		storage        = at.d[kv.StorageDomain]
+		logEvery       = time.NewTicker(30 * time.Second)
 	)
 	defer logEvery.Stop()
 
@@ -206,7 +206,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		if err != nil {
 			return err
 		}
-		cf, err := commitmentDomain.lookupVisibleFileByRange(r.from, r.to)
+		cf, err := commitment.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
@@ -217,33 +217,33 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 
 		err = func() error {
 			steps := cf.StepCount(stepSize)
-			compression := commitmentDomain.d.Compression
+			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
 			logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitmentDomain.d.CompressCfg, "compress", compression)
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			// The squeeze re-references the file, so stamp the output with the flag-derived write
 			// version (v2.1) rather than reusing the input name, which may be a plain v2.2 file
 			// written during a flag-off rebuild window.
-			targetPath := commitmentDomain.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
+			targetPath := commitment.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
 			squeezedTmpPath := targetPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
-				commitmentDomain.d.CompressCfg, log.LvlInfo, commitmentDomain.d.logger)
+				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
 			}
 			defer squeezedCompr.Close()
 
-			writer := commitmentDomain.d.dataWriter(squeezedCompr, false)
+			writer := commitment.d.dataWriter(squeezedCompr, false)
 			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitmentDomain.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
@@ -260,7 +260,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !commitment.IsCommitmentStateKey(k) {
+				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
@@ -765,8 +765,22 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				curBlock = blockNum
 			}
-			if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
-				return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
+			if cfg.Variant == commitment.VariantCommitmentV3 {
+				if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
+					return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
+				}
+			} else {
+				var domain kv.Domain
+				switch len(rawKey) {
+				case 20:
+					domain = kv.AccountsDomain
+				case 52:
+					domain = kv.StorageDomain
+				default:
+					return fmt.Errorf("[rebuild_commitment_history] block %d: unexpected rawKey length %d (hex %s)",
+						blockNum, len(rawKey), hex.EncodeToString(rawKey))
+				}
+				domains.GetCommitmentCtx().TouchKey(domain, string(rawKey), nil)
 			}
 			totalKeysProcessed++
 			return nil
@@ -955,7 +969,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 
+	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
+	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
+	rebuildTrieCfg.EnableTrieWarmup = false
 	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
@@ -1061,7 +1078,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if statecfg.ExperimentalParallelCommitment {
+			if rebuildTrieCfg.Variant != commitment.VariantCommitmentV3 {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
@@ -1187,8 +1204,12 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
 		if len(key) != 0 {
-			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
-				return nil, err
+			if sd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
+				if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
+					return nil, err
+				}
+			} else {
+				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 			}
 			processed++
 		}
@@ -1250,6 +1271,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 		coll.Close()
 		return err
 	}
+	defer coll.Close()
 	sf, err := d.buildFiles(ctx, step, coll, background.NewProgressSet())
 	if err != nil {
 		return err

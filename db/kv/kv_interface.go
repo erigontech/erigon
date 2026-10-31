@@ -537,6 +537,13 @@ func UnderlyingTx(tx TemporalTx) TemporalTx {
 	return nil
 }
 
+// UnderlyingTxIsWritable checks the transaction returned by UnderlyingTx, not
+// the wrapper's method set.
+func UnderlyingTxIsWritable(tx TemporalTx) bool {
+	_, writable := UnderlyingTx(tx).(TemporalRwTx)
+	return writable
+}
+
 // AsOfGetter reads state as of a txNum.
 type AsOfGetter interface {
 	// GetAsOf - state as of given `ts`
