@@ -125,33 +125,31 @@ var (
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	// A pinned read view must keep its selected state generation, including an
 	// explicit no-overlay selection, even when a newer generation is published.
-	if overlay, pinned := membatchwithdb.ViewOverlay(tx); pinned {
-		if overlay != nil {
-			sd, ok := overlay.DomainReader.(*execctx.SharedDomains)
-			if !ok {
-				return nil, fmt.Errorf("unsupported selected domain reader %T", overlay.DomainReader)
-			}
-			return &CacheView{context: sd, getter: sd.AsSnapshotGetter(tx)}, nil
+	overlay, pinned := membatchwithdb.ViewOverlay(tx)
+	if pinned && overlay != nil {
+		sd, ok := overlay.DomainReader.(*execctx.SharedDomains)
+		if !ok {
+			return nil, fmt.Errorf("unsupported selected domain reader %T", overlay.DomainReader)
 		}
-		var stateCache *cache.StateCache
-		if c.execModule != nil {
-			stateCache = c.execModule.stateCache
-		}
-		return &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}, nil
+		return &CacheView{context: sd, getter: sd.AsSnapshotGetter(tx)}, nil
 	}
 
-	var sd *execctx.SharedDomains
 	var stateCache *cache.StateCache
 	if c.execModule != nil {
 		stateCache = c.execModule.stateCache
-		c.execModule.lock.RLock()
-		sd = c.execModule.currentContext
-		c.execModule.lock.RUnlock()
 	}
-	// Fall back to the published SD from Events while an FCU commits
-	// (currentContext is nil but the SD is still valid in memory).
-	if sd == nil && c.publishedSD != nil {
-		sd = c.publishedSD()
+	var sd *execctx.SharedDomains
+	if !pinned {
+		if c.execModule != nil {
+			c.execModule.lock.RLock()
+			sd = c.execModule.currentContext
+			c.execModule.lock.RUnlock()
+		}
+		// Fall back to the published SD from Events while an FCU commits
+		// (currentContext is nil but the SD is still valid in memory).
+		if sd == nil && c.publishedSD != nil {
+			sd = c.publishedSD()
+		}
 	}
 
 	if sd != nil {
