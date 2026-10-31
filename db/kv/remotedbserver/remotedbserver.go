@@ -67,7 +67,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.2.0 - Add MaxPrunableStepsBacklog
 // 7.3.0 - Remove HasPrefix from the remote KV service
 // 7.3.1 - Include pinned history-file generations in transaction replies
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 1}
+// 7.3.2 - Add IndexJoin
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 2}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -654,6 +655,54 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 				}
 				break
 			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+func (s *KvServer) IndexJoin(_ context.Context, req *remoteproto.IndexJoinReq) (*remoteproto.IndexRangeReply, error) {
+	q := kv.IndexQuery{Clauses: make([][]kv.IndexKey, len(req.Clauses)), FromTs: int(req.FromTs), ToTs: int(req.ToTs), Asc: order.By(req.OrderAscend)}
+	for i, clause := range req.Clauses {
+		q.Clauses[i] = make([]kv.IndexKey, len(clause.Keys))
+		for j, k := range clause.Keys {
+			ii, err := kv.String2InvertedIdx(k.Table)
+			if err != nil {
+				return nil, err
+			}
+			q.Clauses[i][j] = kv.IndexKey{Idx: ii, Key: k.K}
+		}
+	}
+	if req.PageToken != "" {
+		var pagination remoteproto.IndexPagination
+		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
+			return nil, err
+		}
+		q.FromTs = int(pagination.NextTimeStamp)
+	}
+	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
+		req.PageSize = PageSizeLimit
+	}
+
+	reply := &remoteproto.IndexRangeReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		it, err := tx.IndexJoin(q)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if len(reply.Timestamps) == int(req.PageSize) {
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v)})
+				return err
+			}
+			reply.Timestamps = append(reply.Timestamps, v)
 		}
 		return nil
 	}); err != nil {

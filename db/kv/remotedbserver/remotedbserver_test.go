@@ -19,6 +19,7 @@ package remotedbserver
 import (
 	"errors"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -188,4 +191,69 @@ func TestKVServerSnapshotsReturnsEmptyIfNoBlockSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, reply.BlocksFiles)
 	require.Empty(t, reply.HistoryFiles)
+}
+
+// indexJoinTx joins in-memory inverted indexes with the range semantics of TemporalTx.IndexRange.
+type indexJoinTx struct {
+	kv.TemporalTx
+	index map[kv.InvertedIdx]map[string][]uint64
+}
+
+func (tx *indexJoinTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, _ int) (stream.U64, error) {
+	var res []uint64
+	for _, ts := range tx.index[name][string(k)] {
+		if asc && (fromTs < 0 || ts >= uint64(fromTs)) && (toTs < 0 || ts < uint64(toTs)) ||
+			!asc && (fromTs < 0 || ts <= uint64(fromTs)) && (toTs < 0 || ts > uint64(toTs)) {
+			res = append(res, ts)
+		}
+	}
+	if !asc {
+		slices.Reverse(res)
+	}
+	return stream.Array(res), nil
+}
+
+func (tx *indexJoinTx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return kv.JoinIndexRanges(q, tx.IndexRange)
+}
+
+func TestIndexJoinPaginates(t *testing.T) {
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: &indexJoinTx{index: map[kv.InvertedIdx]map[string][]uint64{
+		kv.LogTopicIdx: {"topic": {1, 3, 4, 5, 7, 8, 9, 11}},
+		kv.LogAddrIdx:  {"a1": {3, 5, 9}, "a2": {4, 7, 8, 11}},
+	}}}
+	clauses := []*remoteproto.IndexJoinClause{
+		{Keys: []*remoteproto.IndexJoinKey{{Table: kv.LogTopicIdx.String(), K: []byte("topic")}}},
+		{Keys: []*remoteproto.IndexJoinKey{{Table: kv.LogAddrIdx.String(), K: []byte("a1")}, {Table: kv.LogAddrIdx.String(), K: []byte("a2")}}},
+	}
+	for _, tc := range []struct {
+		name         string
+		fromTs, toTs int64
+		asc          bool
+		want         []uint64
+	}{
+		{"asc", 2, 11, true, []uint64{3, 4, 5, 7, 8, 9}},
+		{"desc", 11, 3, false, []uint64{11, 9, 8, 7, 5, 4}},
+		{"unbounded", -1, -1, true, []uint64{3, 4, 5, 7, 8, 9, 11}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &remoteproto.IndexJoinReq{TxId: 1, Clauses: clauses, FromTs: tc.fromTs, ToTs: tc.toTs, OrderAscend: tc.asc, PageSize: 2}
+			var got []uint64
+			pages := 0
+			for {
+				reply, err := s.IndexJoin(t.Context(), req)
+				require.NoError(t, err)
+				require.LessOrEqual(t, len(reply.Timestamps), 2)
+				got = append(got, reply.Timestamps...)
+				pages++
+				if reply.NextPageToken == "" {
+					break
+				}
+				req.PageToken = reply.NextPageToken
+			}
+			require.Equal(t, tc.want, got)
+			require.Equal(t, (len(tc.want)+1)/2, pages)
+		})
+	}
 }
