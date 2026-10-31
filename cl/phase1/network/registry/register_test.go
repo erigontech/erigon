@@ -17,8 +17,11 @@
 package registry
 
 import (
+	"fmt"
 	"testing"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
@@ -79,6 +82,36 @@ func TestAggregateAndProofRateLimiterAdmitsSlotBurstFromOnePeer(t *testing.T) {
 			for i := range test.burst {
 				require.True(t, condition(pid, nil, clparams.FuluVersion), "aggregate %d", i)
 			}
+		})
+	}
+}
+
+func syncCommitteeGossipMessage(subnet uint64) *pubsub.Message {
+	topic := fmt.Sprintf("/eth2/00000000/sync_committee_%d/ssz_snappy", subnet)
+	return &pubsub.Message{Message: &pb.Message{Topic: &topic}}
+}
+
+// A peer may relay every message of each subnet it serves in one burst, but no more than a subnet carries in a slot.
+func TestSyncCommitteeMessageRateLimiterAdmitsEachSubnetsSlotFromOnePeer(t *testing.T) {
+	minimal := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&minimal)
+	for _, test := range []struct {
+		name      string
+		cfg       clparams.BeaconChainConfig
+		perSubnet int
+	}{
+		{name: "mainnet", cfg: clparams.MainnetBeaconConfig, perSubnet: 128},
+		{name: "minimal", cfg: minimal, perSubnet: 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			condition := withSyncCommitteeMessageRateLimiter(&test.cfg)
+			pid := peer.ID("sync-committee-peer")
+			for subnet := range test.cfg.SyncCommitteeSubnetCount {
+				for i := range test.perSubnet {
+					require.True(t, condition(pid, syncCommitteeGossipMessage(subnet), clparams.FuluVersion), "subnet %d message %d", subnet, i)
+				}
+			}
+			require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a subnet's next message in the same slot")
 		})
 	}
 }

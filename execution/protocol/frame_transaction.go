@@ -80,7 +80,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	skipFeeCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 	if !skipFeeCheck {
-		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.isFree); err != nil {
 			return nil, err
 		}
 	}
@@ -255,7 +255,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	var burned uint256.Int
 	var burnAddress accounts.Address
-	if !st.msg.IsFree() {
+	if !st.isFree {
 		burnAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 	}
 	if !burnAddress.IsNil() {

@@ -301,13 +301,15 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 		name      string
 		noBaseFee bool
 		free      bool
+		service   bool
 		feeCap    uint64
 		wantError bool
 	}{
 		{name: "normal validation", wantError: true},
 		{name: "unpriced call", noBaseFee: true},
 		{name: "priced call", noBaseFee: true, feeCap: 1, wantError: true},
-		{name: "service transaction", free: true},
+		{name: "free message", free: true},
+		{name: "service transaction", service: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
@@ -321,13 +323,14 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			config.NoBaseFee = test.noBaseFee
 			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
 			burn := common.HexToAddress("0xb000")
-			if test.free {
+			if test.free || test.service {
 				evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
 			}
 			msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 			require.NoError(t, err)
 			msg.SetIsFree(test.free)
-			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, nil)
+			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, &serviceTxEngine{service: test.service})
+			require.Equal(t, test.free, msg.IsFree())
 			if test.wantError {
 				require.ErrorIs(t, err, ErrFeeCapTooLow)
 				return
@@ -335,7 +338,7 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.True(t, msg.GasPrice().IsZero())
-			if test.free {
+			if test.free || test.service {
 				require.True(t, result.BurntContractAddress.IsNil())
 			}
 			balance, err := ibs.GetBalance(sender)

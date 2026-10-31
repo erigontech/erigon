@@ -432,6 +432,7 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	authorities      *atomic.Pointer[RecoveredAuthorities]
 	dynamicFeeArgs   bool
 	frameTransaction *FrameTransaction
 
@@ -481,6 +482,20 @@ func (m *Message) Nonce() uint64                   { return m.nonce }
 func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
+
+// RecoveredAuthorities is the authorization list the block pre-pass recovers for the message's tx, waiting for a
+// list it started, or nil when it has not started.
+func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
+	if m.authorities == nil {
+		return nil
+	}
+	r := m.authorities.Load()
+	if r != nil {
+		<-r.done
+	}
+	return r
+}
+
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }

@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -52,7 +51,6 @@ type PipelineExecutor struct {
 	validationNotifications *shards.Notifications
 	dispatcher              *Dispatcher
 	logger                  log.Logger
-	stateCache              *cache.StateCache
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -252,7 +250,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
 	doms.SetInMemHistoryReads(inMemHistoryReads)
-	doms.SetStateCache(pe.stateCache)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -295,7 +292,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return nil, nil, err
 			}
 			newSD.SetInMemHistoryReads(inMemHistoryReads)
-			newSD.SetStateCache(pe.stateCache)
 			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},

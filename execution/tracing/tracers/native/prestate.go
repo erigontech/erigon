@@ -23,6 +23,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -37,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 func init() {
@@ -57,6 +61,49 @@ type account struct {
 	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
 	// its own storage during the tx don't retroactively make it look non-empty.
 	empty bool
+}
+
+// writeStorage writes the slots in key order, as encoding/json orders map keys.
+func writeStorage(s *jsonstream.Stream, storage map[common.Hash]common.Hash) {
+	s.WriteObjectStart()
+	for _, k := range slices.SortedFunc(maps.Keys(storage), common.Hash.Cmp) {
+		v := storage[k]
+		jsonstream.HexKey(s, k[:])
+		s.WriteHex(v[:])
+	}
+	s.WriteObjectEnd()
+}
+
+// writeAccount writes what encoding/json writes for account; the nonce is a JSON number.
+func writeAccount(s *jsonstream.Stream, a *account) {
+	s.WriteObjectStart()
+	if a.Balance != nil {
+		ethjson.Quantity256(s, "balance", (*uint256.Int)(a.Balance))
+	}
+	if a.Code != nil {
+		ethjson.Data(s, "code", *a.Code)
+	}
+	if a.CodeHash != nil {
+		ethjson.Data(s, "codeHash", a.CodeHash[:])
+	}
+	if a.Nonce != 0 {
+		s.Field("nonce").Uint(a.Nonce)
+	}
+	if len(a.Storage) > 0 {
+		s.Field("storage")
+		writeStorage(s, a.Storage)
+	}
+	s.WriteObjectEnd()
+}
+
+func writeState(s *jsonstream.Stream, st state) {
+	s.WriteObjectStart()
+	for _, addr := range slices.SortedFunc(maps.Keys(st), accounts.Address.Cmp) {
+		key := addr.Value()
+		jsonstream.HexKey(s, key[:])
+		writeAccount(s, st[addr])
+	}
+	s.WriteObjectEnd()
 }
 
 func (a *account) exists() bool {
@@ -112,8 +159,9 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnOpcodeV2:          t.OnOpcodeV2,
 			OnExitV2:            t.OnExitV2,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:         t.GetResult,
+		MarshalFastJSONTo: t.MarshalFastJSONTo,
+		Stop:              t.Stop,
 	}, nil
 }
 
@@ -371,6 +419,23 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 		return json.RawMessage(res), *p
 	}
 	return json.RawMessage(res), nil
+}
+
+func (t *prestateTracer) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if p := t.reason.Load(); p != nil {
+		return *p
+	}
+	if !t.config.DiffMode {
+		writeState(s, t.pre)
+		return nil
+	}
+	s.WriteObjectStart()
+	s.Field("post")
+	writeState(s, t.post)
+	s.Field("pre")
+	writeState(s, t.pre)
+	s.WriteObjectEnd()
+	return nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
